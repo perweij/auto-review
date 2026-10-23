@@ -1,0 +1,4 @@
+shell=bash
+source-path=SCRIPTDIR
+# Modules share globals; single-quoted jq programs intentionally contain $names.
+disable=SC2034,SC2016

@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recommendation", "recommendation_rationale", "blocking_findings", "report_md", "review_body_md", "findings"],
+  "properties": {
+    "recommendation": {"type": "string", "enum": ["COMMENT", "REQUEST_CHANGES", "APPROVE"]},
+    "recommendation_rationale": {"type": "string", "minLength": 1},
+    "blocking_findings": {"type": "integer", "minimum": 0},
+    "report_md": {"type": "string", "minLength": 1},
+    "review_body_md": {"type": "string", "minLength": 1},
+    "findings": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "validity", "evidence", "blocking", "body_md"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "title": {"type": "string", "minLength": 1},
+        "validity": {"type": "string", "enum": ["CONFIRMED", "MODIFIED", "NEW", "UNVERIFIED", "REJECTED"]},
+        "evidence": {"type": "string", "minLength": 1},
+        "blocking": {"type": "boolean"},
+        "body_md": {"type": "string", "minLength": 1}
+      }
+    }}
+  }
+}

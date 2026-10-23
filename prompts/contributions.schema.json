@@ -1,0 +1,27 @@
+{
+  "type":"object", "additionalProperties":false,
+  "required":["contributions","validity_conflicts"],
+  "properties": {
+    "contributions": {"type":"array","items":{
+      "type":"object","additionalProperties":false,
+      "required":["finding_ids","classification","discussion_keys","target_key","explanation","delta","body_md"],
+      "properties":{
+        "finding_ids":{"type":"array","minItems":1,"items":{"type":"string"}},
+        "classification":{"type":"string","enum":["NEW","ADDITION","REVISIT","DUPLICATE","UNCERTAIN"]},
+        "discussion_keys":{"type":"array","items":{"type":"string"}},
+        "target_key":{"type":["string","null"]},
+        "explanation":{"type":"string","minLength":1},
+        "delta":{"type":"string"},
+        "body_md":{"type":"string"}
+      }
+    }},
+    "validity_conflicts":{"type":"array","items":{
+      "type":"object","additionalProperties":false,
+      "required":["finding_id","reason","evidence_keys"],
+      "properties":{
+        "finding_id":{"type":"string"},"reason":{"type":"string","minLength":1},
+        "evidence_keys":{"type":"array","minItems":1,"items":{"type":"string"}}
+      }
+    }}
+  }
+}

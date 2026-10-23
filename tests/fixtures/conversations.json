@@ -1,0 +1,56 @@
+[
+  {
+    "name":"paraphrased_duplicate", "expected":"DUPLICATE", "resolved":false,
+    "root":"Retrying after a timeout generates another idempotency key, so a completed payment may be charged again.",
+    "reply":"Agreed. The key needs to be persisted per order. This is still an open blocker.",
+    "source":"from uuid import uuid4\n\ndef pay(gateway, order, amount):\n    return gateway.charge(amount, key=str(uuid4()))\n",
+    "title":"Repeated requests may debit the customer twice",
+    "evidence":"source.py:4 creates a new UUID on each call. Repeating pay for an order after a timeout can duplicate an already completed charge.",
+    "quality_check":"Suppress the paraphrase; another reviewer's agreement adds no new evidence."
+  },
+  {
+    "name":"contextual_addition", "expected":"ADDITION", "resolved":false,
+    "root":"The retry path can charge twice after a network timeout. Can we reuse the key?",
+    "reply":"We now reuse the key in the pending dictionary for each order. That fixes retries in the same process. Does the change also cover a worker restarting after a crash?",
+    "source":"from uuid import uuid4\npending = {}\n\ndef pay(gateway, order, amount):\n    key = pending.setdefault(order, str(uuid4()))\n    return gateway.charge(amount, key=key)\n",
+    "title":"Restart loses the order idempotency key",
+    "evidence":"source.py:2 stores pending only in memory. After process restart, source.py:5 creates a different key for the same order. A charge completed before the crash may be duplicated.",
+    "quality_check":"Answer the author's restart question explicitly; acknowledge that same-process retries were fixed; propose durable key storage. Do not simply repeat the timeout report."
+  },
+  {
+    "name":"resolved_revisit", "expected":"REVISIT", "resolved":true,
+    "root":"A retry may submit the same payment twice because of a new key.",
+    "reply":"We reuse the key using pending.setdefault now, so duplicate payments are handled. Marking this resolved.",
+    "source":"from uuid import uuid4\npending = {}\n\ndef pay(gateway, order, amount):\n    key = pending.setdefault(order, str(uuid4()))\n    return gateway.charge(amount, key=key)\n",
+    "title":"Restart bypasses the in-memory fix",
+    "evidence":"source.py:2 is process-local memory. A process restart after a successful charge clears the key; source.py:5 then creates a new one and may charge again.",
+    "quality_check":"Explain why the prior fix is insufficient for process restarts, without asking to reopen the thread automatically."
+  },
+  {
+    "name":"same_line_different_bug", "expected":"NEW", "resolved":false,
+    "root":"At source.py:3, negative quantities should be rejected before calculating the total.",
+    "reply":"The public checked_total wrapper already rejects negative quantities before calling total. Let's keep this thread about input validation.",
+    "source":"def total(price, quantity):\n    \"\"\"Return the price for quantity items.\"\"\"\n    return price + quantity\n\ndef checked_total(price, quantity):\n    if quantity < 0:\n        raise ValueError('negative quantity')\n    return total(price, quantity)\n",
+    "title":"Total adds rather than multiplies",
+    "evidence":"source.py:3 returns 13 for total(10,3) instead of the documented total price 30. This affects positive quantities independently of validation.",
+    "quality_check":"Keep this as a new arithmetic issue, not a reply to the unrelated validation discussion merely because the location matches."
+  },
+  {
+    "name":"covered_in_later_reply", "expected":"DUPLICATE", "resolved":false,
+    "root":"Timeout retries can charge twice; please reuse an idempotency key.",
+    "reply":"The dictionary solves same-process retries, but I also checked restarts: pending is lost, a new key is generated, and an already completed payment can be duplicated. We need durable key storage per order. This is still outstanding.",
+    "source":"from uuid import uuid4\npending = {}\n\ndef pay(gateway, order, amount):\n    key = pending.setdefault(order, str(uuid4()))\n    return gateway.charge(amount, key=key)\n",
+    "title":"Restart loses idempotency state",
+    "evidence":"source.py:2 only stores keys in memory, so a restart regenerates a key and risks a second charge. Persisting the per-order key avoids this failure.",
+    "quality_check":"Read the later reply: it already covers both the restart failure and the fix. Suppress the finding."
+  },
+  {
+    "name":"concluded_without_resolution_flag", "expected":"REVISIT", "resolved":false,
+    "root":"Can retrying charge an order twice?",
+    "reply":"We agreed that reusing the key in the dictionary fixes this. Closing the discussion; no further changes are needed.",
+    "source":"from uuid import uuid4\npending = {}\n\ndef pay(gateway, order, amount):\n    key = pending.setdefault(order, str(uuid4()))\n    return gateway.charge(amount, key=key)\n",
+    "title":"Process restarts escape the agreed fix",
+    "evidence":"source.py:2 stores keys only for the process lifetime. After a restart, source.py:5 regenerates the key for the same order and may charge again.",
+    "quality_check":"Recognize the explicit conversational conclusion despite isResolved=false. Explain the new restart evidence and leave the proposal opt-in."
+  }
+]

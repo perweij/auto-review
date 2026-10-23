@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=../lib/core.sh
+source "$ROOT/lib/core.sh"
+# shellcheck source=../lib/repository.sh
+source "$ROOT/lib/repository.sh"
+# shellcheck source=../lib/models.sh
+source "$ROOT/lib/models.sh"
+# shellcheck source=../lib/discussion.sh
+source "$ROOT/lib/discussion.sh"
+# shellcheck source=../lib/contributions.sh
+source "$ROOT/lib/contributions.sh"
+# shellcheck source=../lib/publication.sh
+source "$ROOT/lib/publication.sh"
+
+main() {
+    parse_args "$@"
+    trap on_exit EXIT
+    trap 'on_signal INT 130' INT
+    trap 'on_signal TERM 143' TERM
+    say '[1/7] Checking tools and authentication'
+    check_dependencies
+    resolve_repository
+    check_authentication
+    initialize_run
+    say '[2/7] Preparing worktree and Git snapshot'
+    prepare_worktree
+    check_agent_config_changes
+    say '[3/7] Collecting PR context'
+    collect_pr_context
+    run_reviews
+    prepare_contributions
+    say '[7/7] Human review and optional publication'
+    interactive_publication
+    manifest '.status = "complete"'
+}
+
+main "$@"
