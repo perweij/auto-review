@@ -90,21 +90,35 @@ check_authentication() {
     if [[ $(jq -r .isDraft "$SCRATCH/pr.json") == true ]]; then warn 'PR is a draft'; fi
 }
 discover_existing_run() {
-    local state_root=$1 file head common top
+    local state_root=$1 file head common top session
     local -a matches=()
+    if [[ ! -e $WORKTREE && ! -L $WORKTREE ]]; then
+        for file in "$state_root"/*/manifest.json; do
+            [[ -f $file ]] || continue
+            session=${file%/manifest.json}
+            file=$(selected_run_directory "$session")/manifest.json
+            if jq -e --arg repo "$HOST/$REPO" --arg pr "$PR" --arg common "$COMMON_DIR" --arg worktree "$WORKTREE" '
+                .repository==$repo and (.pr|tostring)==$pr and .git_common_dir==$common and
+                .worktree==$worktree and .snapshot_update!=null' "$file" >/dev/null 2>&1; then matches+=("$session"); fi
+        done
+        ((${#matches[@]} > 0)) || return 0
+    else
     common=$(git -C "$WORKTREE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || die "Existing path is not a Git worktree: $WORKTREE"
     top=$(git -C "$WORKTREE" rev-parse --show-toplevel 2>/dev/null) || die "Cannot inspect existing worktree: $WORKTREE"
     [[ $common == "$COMMON_DIR" && $top == "$WORKTREE" ]] || die "Existing worktree belongs to a different checkout: $WORKTREE"
     head=$(git -C "$WORKTREE" rev-parse HEAD)
     for file in "$state_root"/*/manifest.json; do
         [[ -f $file ]] || continue
+        session=${file%/manifest.json}
+        file=$(selected_run_directory "$session")/manifest.json
         if jq -e --arg repo "$HOST/$REPO" --arg pr "$PR" --arg common "$COMMON_DIR" --arg worktree "$WORKTREE" --arg head "$head" '
             .format_version == 2 and .repository == $repo and (.pr | tostring) == $pr and
             .git_common_dir == $common and .worktree == $worktree and
-            ((.snapshot.head // $head) == $head)' "$file" >/dev/null 2>&1; then
-            matches+=("${file%/manifest.json}")
+            ((.snapshot.head // $head) == $head or .snapshot_update.to.head == $head)' "$file" >/dev/null 2>&1; then
+            matches+=("$session")
         fi
     done
+    fi
     case ${#matches[@]} in
         0) die "Existing worktree has no matching saved run under $state_root. Use --resume with its original run directory: $WORKTREE" ;;
         1) RESUME=${matches[0]}; say "Automatically resuming PR #$PR from $RESUME" ;;
@@ -113,7 +127,7 @@ discover_existing_run() {
     esac
 }
 initialize_run() {
-    local state_root main name
+    local state_root main name file
     mkdir -p -- "$COMMON_DIR/pr-review-locks"
     exec {LOCK_FD}>"$COMMON_DIR/pr-review-locks/$PR.lock"
     flock -n "$LOCK_FD" || die "Another run holds the lock for PR #$PR"
@@ -122,20 +136,36 @@ initialize_run() {
     name=${REPO##*/}
     WORKTREE=$(realpath -m -- "$(dirname -- "$main")/$name-review-pr-$PR")
     state_root=$(realpath -m -- "${XDG_STATE_HOME:-$HOME/.local/state}/pr-review/$HOST/$REPO")
-    if [[ -z $RESUME && ( -e $WORKTREE || -L $WORKTREE ) ]]; then discover_existing_run "$state_root"; fi
+    if [[ -z $RESUME ]]; then discover_existing_run "$state_root"; fi
     if [[ -n $RESUME ]]; then
         RUN_DIR=$(realpath -e -- "$RESUME") || die 'Resume directory does not exist'
         [[ -f $RUN_DIR/manifest.json ]] || die 'Resume manifest missing'
+        SESSION_DIR=$(jq -r '.session_directory // empty' "$RUN_DIR/manifest.json")
+        [[ -n $SESSION_DIR ]] || SESSION_DIR=$RUN_DIR
+        RUN_DIR=$(selected_run_directory "$SESSION_DIR") || die 'Saved review attempt is missing'
+        # A crash after committing the pointer but before removing the pending
+        # link has already installed a complete generation. Finish that cleanup.
+        if [[ -L $SESSION_DIR/.current-review && -L $SESSION_DIR/.pending-review &&
+              $(realpath -e "$SESSION_DIR/.current-review") == "$RUN_DIR" ]]; then
+            rm -f -- "$SESSION_DIR/.pending-review"
+        fi
         [[ $(jq -r .format_version "$RUN_DIR/manifest.json") == 2 ]] || die 'Legacy run remains readable but cannot resume discussion-aware publication; start a new run after moving its worktree.'
         jq -e --arg repo "$HOST/$REPO" --arg pr "$PR" --arg common "$COMMON_DIR" '
           .format_version == 2 and .repository == $repo and (.pr | tostring) == $pr and .git_common_dir == $common' "$RUN_DIR/manifest.json" >/dev/null || die 'Resume repository or PR identity does not match'
         WORKTREE=$(jq -er .worktree "$RUN_DIR/manifest.json")
         RUN_ID=$(jq -er .run_id "$RUN_DIR/manifest.json")
+        if jq -e '.snapshot_update!=null' "$RUN_DIR/manifest.json" >/dev/null; then
+            # An interrupted cleanup can leave these absent. Authentication
+            # still runs first, then prepare_worktree finishes the saved update.
+            mkdir -p -- "$RUN_DIR/logs"
+            if [[ ! -f $RUN_DIR/logs/commands.json ]]; then printf '[]\n' > "$RUN_DIR/logs/commands.json"; fi
+        fi
     else
         case $state_root/ in "$main/"*|"$WORKTREE/"*|"$(git rev-parse --show-toplevel)/"*) die 'Artifacts must be outside the reviewed repository; set XDG_STATE_HOME' ;; esac
         mkdir -p -- "$state_root"
         RUN_DIR=$(mktemp -d "$state_root/pr-$PR-$(date -u +%Y%m%dT%H%M%S)-XXXXXX")
         RUN_ID=${RUN_DIR##*/}
+        SESSION_DIR=$RUN_DIR
         mkdir -p -- "$RUN_DIR"/{context,prompts,reviews,publication,logs,discussion}
         jq -n --arg repository "$HOST/$REPO" --argjson pr "$PR" --arg url "$PR_URL" --arg common "$COMMON_DIR" --arg worktree "$WORKTREE" --arg id "$RUN_ID" --arg time "$(now)" \
             '{format_version:2,repository:$repository,pr:$pr,url:$url,git_common_dir:$common,worktree:$worktree,run_id:$id,created_at:$time,status:"running",phases:{},publication:{status:"not_published"},warnings:[],generated_files:[],removed_environment:{}}' > "$RUN_DIR/manifest.json.tmp"
@@ -143,12 +173,20 @@ initialize_run() {
         printf '[]\n' > "$RUN_DIR/logs/commands.json"
         printf '[]\n' > "$RUN_DIR/publication/actions.json"
     fi
+    # Keep the original provenance before this invocation updates tools/models
+    # or renders prompts. Used only to verify runs predating per-stage inputs.
+    cp -- "$RUN_DIR/manifest.json" "$SCRATCH/resume-manifest.json"
+    mkdir -p -- "$SCRATCH/resume-prompts"
+    for file in "$RUN_DIR"/prompts/*-prompt.txt; do
+        [[ ! -f $file ]] || cp -- "$file" "$SCRATCH/resume-prompts/"
+    done
     manifest '.tools = {git:$git,gh:$gh,codex:$codex,claude:$claude} | .models = {codex:$cm,claude:$am,effort:"high",claude_permission_mode:$mode} | .viewer = $viewer | .viewer_permission = $permission | .status = "running"' \
         --arg git "$GIT_VERSION" --arg gh "$GH_VERSION" --arg codex "$CODEX_VERSION" --arg claude "$CLAUDE_VERSION" --arg cm "$CODEX_MODEL" --arg am "$CLAUDE_MODEL" --arg mode "$PERMISSION_MODE" --arg viewer "$VIEWER" --arg permission "$VIEWER_PERMISSION"
     say "Artifacts: $RUN_DIR"
 }
 prepare_worktree() {
     local attempt fetched_head fetched_base matched=false old_head old_merge
+    if jq -e '.snapshot_update!=null' "$RUN_DIR/manifest.json" >/dev/null; then finish_snapshot_update; fi
     for attempt in 1 2; do
         BASE_BRANCH=$(jq -r .baseRefName "$SCRATCH/pr.json")
         git fetch --no-tags --refmap= --no-write-fetch-head "$REMOTE" "+refs/pull/$PR/head:$HEAD_REF" "+refs/heads/$BASE_BRANCH:$BASE_REF" || die 'Cannot fetch PR and base'
@@ -164,7 +202,9 @@ prepare_worktree() {
     if [[ -n $RESUME ]]; then
         old_head=$(jq -r '.snapshot.head // empty' "$RUN_DIR/manifest.json")
         old_merge=$(jq -r '.snapshot.merge_base // empty' "$RUN_DIR/manifest.json")
-        [[ -z $old_head || ( $old_head == "$HEAD_SHA" && $old_merge == "$MERGE_BASE" ) ]] || die 'Resume snapshot changed; start a new review'
+        if [[ -n $old_head && ( $old_head != "$HEAD_SHA" || $old_merge != "$MERGE_BASE" ) ]]; then
+            update_review_snapshot
+        fi
         if [[ ! -e $WORKTREE && $(jq -r '.phases.setup.status // empty' "$RUN_DIR/manifest.json") != completed ]]; then
             git worktree add --detach "$WORKTREE" "$HEAD_SHA" || die 'Cannot resume worktree preparation'
         fi

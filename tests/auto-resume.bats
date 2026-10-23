@@ -64,16 +64,16 @@ load helpers/fixture
     [ ! -f "$FIXTURE/probes" ]
 }
 
-@test "automatic resume retains changed snapshot and dirty worktree protections" {
+@test "automatic resume updates changed snapshot and retains dirty worktree protections" {
     run_review; assert_success
     echo 'local edit' >> "$FIXTURE/repo-review-pr-7/source.txt"
     run_review; assert_failure
     [[ $output == *'Automatically resuming'* && $output == *'tracked source'* ]]
     git -C "$FIXTURE/repo-review-pr-7" restore source.txt
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force
-    run_review; assert_failure
-    [[ $output == *'Resume snapshot changed'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    run_review; assert_success
+    [[ $output == *'Updating this review'* ]]
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "automatic resume resolves from a secondary caller worktree" {

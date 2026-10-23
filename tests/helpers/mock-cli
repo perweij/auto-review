@@ -152,8 +152,12 @@ printf '%s\n' "$stage" >> "$FIXTURE/stages"
 compgen -e | sort > "$FIXTURE/environment-$stage"
 git rev-parse HEAD >> "$FIXTURE/reviewed-heads"
 if [[ $stage == claude ]]; then
-    for report in "$FIXTURE/state/pr-review/${MOCK_HOST:-github.com}/org/repo/"*/reviews/codex.md; do
-        [[ ! -f $report ]] || exit 8
+    for manifest in "$FIXTURE/state/pr-review/${MOCK_HOST:-github.com}/org/repo/"*/manifest.json; do
+        [[ -f $manifest ]] || continue
+        directory=${manifest%/manifest.json}
+        if [[ -L $directory/.pending-review ]]; then directory=$(realpath -e "$directory/.pending-review")
+        elif [[ -L $directory/.current-review ]]; then directory=$(realpath -e "$directory/.current-review"); fi
+        [[ ! -f $directory/reviews/codex.md ]] || exit 8
     done
 fi
 if [[ $stage == synthesis || $stage == contributions ]]; then cat > "$FIXTURE/$stage-stdin"; else

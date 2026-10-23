@@ -113,6 +113,10 @@ on_exit() {
         elif [[ $(jq -r '.publication.status' "$RUN_DIR/manifest.json") == published ]]; then say Published
         elif [[ $(jq -r '.publication.published_actions // 0' "$RUN_DIR/manifest.json") != 0 ]]; then say 'Partially published (remaining actions not posted)'
         else say 'Not published'; fi
+        if [[ -n ${SESSION_DIR:-} && -L $SESSION_DIR/.pending-review ]]; then
+            printf 'Previous review: %s/reviews/synthesis.md (replacement not installed)\n' "$(current_run_directory)"
+            printf 'Resume session:  %s\n' "$SESSION_DIR"
+        fi
         if [[ -f $RUN_DIR/publication/actions.json ]]; then
             jq -r '.[]|select(.status=="published")|"Posted:    \(.id) \(.kind) \(.result.html_url // "(see saved API response)")"' "$RUN_DIR/publication/actions.json"
         fi

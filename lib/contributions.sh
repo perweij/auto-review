@@ -10,18 +10,18 @@ reconcile_contributions() {
     CONTRIBUTIONS_READY=false
     if [[ -f $RUN_DIR/publication/contributions.json ]]; then previous_hash=$(jq -r .discussion_hash "$RUN_DIR/publication/contributions.json"); fi
     while true; do
-        {
-            cat -- "$ROOT/prompts/contributions.txt"
-            jq -n --arg findings "$RUN_DIR/reviews/synthesis.json" --arg discussion "$DISCUSSION_FILE" --arg head "$HEAD_SHA" --slurpfile manifest "$RUN_DIR/manifest.json" \
-                '{findings:$findings,discussion:$discussion,head:$head,reassessment:$manifest[0].reassessment}'
-        } > "$RUN_DIR/prompts/contributions-prompt.txt"
-        FINGERPRINT=$({ phase_fingerprint contributions; hash_file "$RUN_DIR/reviews/synthesis.json"; printf '%s\n' "$DISCUSSION_HASH"; } | sha256sum | cut -d ' ' -f1)
-        if reusable contributions "$output" "$FINGERPRINT"; then break; fi
+        render_contributions_prompt
+        FINGERPRINT=$(phase_fingerprint contributions)
+        if reusable contributions "$output" "$FINGERPRINT" &&
+            jq -e --slurpfile findings "$RUN_DIR/reviews/synthesis.json" --slurpfile discussion "$DISCUSSION_FILE" -f "$ROOT/prompts/validate-contributions.jq" "$output" >/dev/null; then break; fi
+        protect_completed_review contributions
+        output=$RUN_DIR/reviews/contributions.json
+        render_contributions_prompt
+        FINGERPRINT=$(phase_fingerprint contributions)
         say '[final] Matching findings against the complete discussion'
         ACTIVE_STAGE=contributions
-        claude_common
-        CLAUDE_COMMAND+=(--output-format json --json-schema "$(cat "$ROOT/prompts/contributions.schema.json")" --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/discussion" --add-dir "$RUN_DIR/reviews")
-        run_model claude "$RUN_DIR/prompts/contributions-prompt.txt" "$RUN_DIR/logs/contributions.raw.json" "$RUN_DIR/logs/contributions.stderr.log" "${CLAUDE_COMMAND[@]}"
+        review_command contributions
+        run_model claude "$RUN_DIR/prompts/contributions-prompt.txt" "$RUN_DIR/logs/contributions.raw.json" "$RUN_DIR/logs/contributions.stderr.log" "${REVIEW_COMMAND[@]}"
         claude_result "$RUN_DIR/logs/contributions.raw.json" "$RUN_DIR/logs/contributions-result.json"
         jq -e '.structured_output // (.result | fromjson)' "$RUN_DIR/logs/contributions-result.json" > "$output.tmp" || die 'No structured contribution result'
         jq -e --slurpfile findings "$RUN_DIR/reviews/synthesis.json" --slurpfile discussion "$DISCUSSION_FILE" -f "$ROOT/prompts/validate-contributions.jq" "$output.tmp" >/dev/null || die 'Invalid contribution schema, finding coverage, or discussion destination'
@@ -56,11 +56,19 @@ reconcile_contributions() {
     if [[ -n $previous_hash && $previous_hash != "$DISCUSSION_HASH" ]]; then PROPOSALS_CHANGED=true; fi
     render_main_draft
     render_contribution_report
+    prepare_previous_edits
+    commit_review_attempt
 }
 ledger_update() {
     local filter=$1; shift
     jq "$@" "$filter" "$RUN_DIR/publication/contributions.json" > "$RUN_DIR/publication/contributions.json.tmp"
     mv -- "$RUN_DIR/publication/contributions.json.tmp" "$RUN_DIR/publication/contributions.json"
+}
+write_main_body() {
+    local ledger=$1 head=$2
+    jq -r --arg head "$head" '[.proposals[] | select(.selected and (.published|not) and .destination.kind=="review") |
+       .body_md + (if (.references|length)>0 then "\n\nRelated discussion: " + ([.references[] | "[earlier discussion]("+.url+")"]|join(", ")) else "" end)] | join("\n\n---\n\n")
+       | if test("\\S") then . else "Reviewed commit `"+$head+"`. No additional findings are being posted." end' "$ledger"
 }
 render_main_draft() {
     local signature
@@ -69,14 +77,9 @@ render_main_draft() {
     if [[ -f $RUN_DIR/publication/review-body.md ]]; then
         cp -- "$RUN_DIR/publication/review-body.md" "$(mktemp "$RUN_DIR/publication/review-body-history-XXXXXX.md")"
     fi
-    jq -r '[.proposals[] | select(.selected and (.published|not) and .destination.kind=="review") |
-       .body_md + (if (.references|length)>0 then "\n\nRelated discussion: " + ([.references[] | "[earlier discussion]("+.url+")"]|join(", ")) else "" end)] | join("\n\n---\n\n")' \
-        "$RUN_DIR/publication/contributions.json" > "$RUN_DIR/publication/review-body.md.tmp"
-    if ! grep -q '[^[:space:]]' "$RUN_DIR/publication/review-body.md.tmp"; then
-        printf 'Reviewed commit `%s`. No additional findings are being posted.\n' "$HEAD_SHA" > "$RUN_DIR/publication/review-body.md.tmp"
-    fi
+    write_main_body "$RUN_DIR/publication/contributions.json" "$HEAD_SHA" > "$RUN_DIR/publication/review-body.md.tmp"
     mv -- "$RUN_DIR/publication/review-body.md.tmp" "$RUN_DIR/publication/review-body.md"
-    ledger_update '.main_signature=$signature' --arg signature "$signature"
+    ledger_update '.main_signature=$signature | .main_generated_hash=$hash' --arg signature "$signature" --arg hash "$(hash_file "$RUN_DIR/publication/review-body.md")"
 }
 render_contribution_report() {
     jq -r '"# Proposed contributions\n", (.proposals[] |
@@ -91,4 +94,11 @@ refresh_proposals() {
         reconcile_contributions
         warn 'Discussion changed. Inspect the refreshed proposals before confirming again.'
     fi
+}
+render_contributions_prompt() {
+    {
+        cat -- "$ROOT/prompts/contributions.txt"
+        jq -n --arg findings "$RUN_DIR/reviews/synthesis.json" --arg discussion "$DISCUSSION_FILE" --arg head "$HEAD_SHA" --slurpfile manifest "$RUN_DIR/manifest.json" \
+            '{findings:$findings,discussion:$discussion,head:$head,reassessment:$manifest[0].reassessment}'
+    } > "$RUN_DIR/prompts/contributions-prompt.txt"
 }

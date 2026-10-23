@@ -93,24 +93,103 @@ model_environment() {
     done < <(compgen -e)
     manifest '.removed_environment[$cli] = $names' --arg cli "$cli" --argjson names "$(printf '%s\n' "${removed[@]}" | jq -Rsc 'split("\n") | map(select(length > 0)) | sort')"
 }
+# Use the same command for execution and cache identity. Runtime limits only
+# constrain a new call; changing them does not invalidate a successful result.
+review_command() {
+    local stage=$1
+    if [[ $stage == codex ]]; then
+        REVIEW_COMMAND=(codex exec review -m "$CODEX_MODEL" --strict-config -c model_reasoning_effort=high -c sandbox_mode=read-only -c approval_policy=never --ephemeral --json -o "$RUN_DIR/reviews/codex.md.tmp" --base "$BASE_REF")
+        return
+    fi
+    claude_common
+    case $stage in
+        claude) CLAUDE_COMMAND+=(--output-format stream-json --verbose --append-system-prompt "$(cat "$ROOT/prompts/independent.txt")" --disallowed-tools "${CLAUDE_DENY[@]}" -- "/code-review high --max-findings default $BASE_REF") ;;
+        synthesis)
+            CLAUDE_COMMAND+=(--output-format json --json-schema "$(cat "$ROOT/prompts/synthesis.schema.json")" --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/context" --add-dir "$RUN_DIR/reviews")
+            if [[ -f $RUN_DIR/reviews/reassessment-input.json ]]; then CLAUDE_COMMAND+=(--add-dir "$RUN_DIR/discussion"); fi ;;
+        contributions) CLAUDE_COMMAND+=(--output-format json --json-schema "$(cat "$ROOT/prompts/contributions.schema.json")" --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/discussion" --add-dir "$RUN_DIR/reviews") ;;
+    esac
+    REVIEW_COMMAND=("${CLAUDE_COMMAND[@]}")
+}
+cache_command() {
+    jq -c 'reduce .[] as $arg ({args:[],skip:false};
+        if .skip then .skip=false
+        elif $arg=="--max-budget-usd" then .skip=true
+        else .args+=[$arg] end) | .args'
+}
+review_prompt_hash() {
+    local stage=$1 file=$2 size
+    if [[ $stage == contributions ]]; then
+        # Each discussion fetch has a new archive path. Its content hash already
+        # identifies the actual input; the temporary path must not force a call.
+        size=$(wc -c < "$ROOT/prompts/contributions.txt")
+        { head -c "$size" -- "$file"; tail -c "+$((size+1))" -- "$file" | jq -cS '.discussion="<discussion snapshot>"'; } | sha256sum | cut -d ' ' -f1
+    else hash_file "$file"; fi
+}
+phase_inputs() {
+    local stage=$1 version=$CLAUDE_VERSION artifacts='{}' command
+    [[ $stage != codex ]] || version=$CODEX_VERSION
+    review_command "$stage"
+    command=$(jq -cn --args '$ARGS.positional' -- "${REVIEW_COMMAND[@]}" | cache_command)
+    case $stage in
+        synthesis)
+            artifacts=$(jq -cn --arg context "$(context_hash)" --arg claude "$(hash_file "$RUN_DIR/reviews/claude-independent.md")" --arg codex "$(hash_file "$RUN_DIR/reviews/codex.md")" \
+                --arg prompt "$(hash_file "$RUN_DIR/prompts/synthesis-prompt.txt")" --arg validator "$(hash_file "$ROOT/prompts/validate-synthesis.jq")" \
+                '{context:$context,claude:$claude,codex:$codex,prompt:$prompt,validator:$validator}') ;;
+        contributions)
+            artifacts=$(jq -cn --arg synthesis "$(hash_file "$RUN_DIR/reviews/synthesis.json")" --arg discussion "$DISCUSSION_HASH" \
+                --arg prompt "$(review_prompt_hash contributions "$RUN_DIR/prompts/contributions-prompt.txt")" --arg validator "$(hash_file "$ROOT/prompts/validate-contributions.jq")" \
+                '{synthesis:$synthesis,discussion:$discussion,prompt:$prompt,validator:$validator}') ;;
+    esac
+    jq -cn --arg stage "$stage" --arg head "$HEAD_SHA" --arg merge "$MERGE_BASE" --arg version "$version" --argjson command "$command" --argjson artifacts "$artifacts" \
+        '{version:1,stage:$stage,head:$head,merge_base:$merge,cli_version:$version,command:$command,artifacts:$artifacts}'
+}
 phase_fingerprint() {
-    local stage=$1 model version
-    if [[ $stage == codex ]]; then model=$CODEX_MODEL; version=$CODEX_VERSION; else model=$CLAUDE_MODEL; version=$CLAUDE_VERSION; fi
-    {
-        printf '%s\n' "$stage" "$HEAD_SHA" "$MERGE_BASE" "$model" high "$version" "$PERMISSION_MODE" "${PR_REVIEW_MODEL_TIMEOUT:-}" "${PR_REVIEW_CLAUDE_BUDGET:-}"
-        # Implementation and policy changes invalidate cached phases too.
-        sha256sum "$ROOT/bin/pr-review" "$ROOT"/lib/*.sh "$ROOT"/prompts/*
-        if [[ $stage == synthesis ]]; then
-            printf '%s\n' "$(context_hash)"
-            sha256sum "$RUN_DIR/reviews/codex.md" "$RUN_DIR/reviews/claude-independent.md" "$RUN_DIR/prompts/synthesis-prompt.txt"
-            if [[ -f $RUN_DIR/reviews/reassessment-input.json ]]; then sha256sum "$RUN_DIR/reviews/reassessment-input.json"; fi
-        fi
-    } | sha256sum | cut -d ' ' -f1
+    phase_inputs "$1" | sha256sum | cut -d ' ' -f1
+}
+legacy_inputs_match() {
+    # Older runs hashed the whole installation. Recover identity from recorded
+    # commands and saved inputs instead, without trusting that opaque hash.
+    local stage=$1 inputs=$2 cli=claude prior_command prompt dependency file prior_prompt
+    [[ $stage != codex ]] || cli=codex
+    [[ -f $SCRATCH/resume-manifest.json && -f $RUN_DIR/logs/commands.json ]] || return 1
+    jq -e --arg stage "$stage" --arg cli "$cli" --argjson inputs "$inputs" '
+        .snapshot.head==$inputs.head and .snapshot.merge_base==$inputs.merge_base and
+        .tools[$cli]==$inputs.cli_version and .phases[$stage].status=="completed"' "$SCRATCH/resume-manifest.json" >/dev/null || return 1
+    prior_command=$(jq -c --arg stage "$stage" '[.[] | select(.stage==$stage)] | last | .argv // []' "$RUN_DIR/logs/commands.json" | cache_command)
+    [[ $prior_command == "$(jq -c .command <<< "$inputs")" ]] || return 1
+    case $stage in
+        synthesis|contributions)
+            prompt=$stage-prompt.txt
+            [[ -f $SCRATCH/resume-prompts/$prompt ]] || return 1
+            prior_prompt=$(review_prompt_hash "$stage" "$SCRATCH/resume-prompts/$prompt") || return 1
+            [[ $prior_prompt == "$(review_prompt_hash "$stage" "$RUN_DIR/prompts/$prompt")" ]] || return 1
+            if [[ $stage == synthesis ]]; then
+                [[ $(context_hash) == "$(jq -r '.phases.context.output_hash' "$SCRATCH/resume-manifest.json")" ]] || return 1
+                for dependency in claude codex; do
+                    file=$RUN_DIR/reviews/$dependency.md
+                    [[ $dependency != claude ]] || file=$RUN_DIR/reviews/claude-independent.md
+                    [[ $(hash_file "$file") == "$(jq -r --arg stage "$dependency" '.phases[$stage].output_hash' "$SCRATCH/resume-manifest.json")" ]] || return 1
+                done
+            else
+                [[ -f $RUN_DIR/publication/contributions.json ]] || return 1
+                jq -e --arg findings "$(hash_file "$RUN_DIR/reviews/synthesis.json")" --arg discussion "$DISCUSSION_HASH" \
+                    '.findings_hash==$findings and .discussion_hash==$discussion' "$RUN_DIR/publication/contributions.json" >/dev/null || return 1
+            fi ;;
+    esac
 }
 reusable() {
-    local stage=$1 output=$2 fingerprint=$3
-    [[ -s $output ]] && jq -e --arg stage "$stage" --arg fp "$fingerprint" --arg hash "$(hash_file "$output")" '
-      .phases[$stage].status == "completed" and .phases[$stage].fingerprint == $fp and .phases[$stage].output_hash == $hash' "$RUN_DIR/manifest.json" >/dev/null
+    local stage=$1 output=$2 fingerprint=$3 inputs
+    [[ -s $output ]] && jq -e --arg stage "$stage" --arg hash "$(hash_file "$output")" '
+        .phases[$stage].status=="completed" and .phases[$stage].output_hash==$hash' "$RUN_DIR/manifest.json" >/dev/null || return 1
+    if jq -e --arg stage "$stage" '.phases[$stage].inputs!=null' "$RUN_DIR/manifest.json" >/dev/null; then
+        jq -e --arg stage "$stage" --arg fp "$fingerprint" '.phases[$stage].fingerprint==$fp' "$RUN_DIR/manifest.json" >/dev/null
+    else
+        inputs=$(phase_inputs "$stage")
+        legacy_inputs_match "$stage" "$inputs" || return 1
+        manifest '.phases[$stage].inputs=$inputs | .phases[$stage].fingerprint=$fp' --arg stage "$stage" --argjson inputs "$inputs" --arg fp "$fingerprint"
+        say "Verified saved $stage inputs; upgraded its cache record."
+    fi
 }
 snapshot_files() {
     git -C "$WORKTREE" status --porcelain=v1 --untracked-files=all --ignored > "$RUN_DIR/logs/$ACTIVE_STAGE.files-before.txt"
@@ -208,6 +287,9 @@ run_model() {
     if is_auth_probe; then prefix=(timeout --signal=TERM --kill-after=5s "${PR_REVIEW_MODEL_TIMEOUT}s"); fi
     manifest '.phases[$stage] = {status:"running",fingerprint:$fp,started_at:$time,stdout_log:$stdout,stderr_log:$stderr}' --arg stage "$ACTIVE_STAGE" --arg fp "$FINGERPRINT" --arg time "$(now)" --arg stdout "$events" --arg stderr "$stderr"
     manifest '.phases[$stage].model = $model' --arg stage "$ACTIVE_STAGE" --arg model "$model"
+    if ! is_auth_probe; then
+        manifest '.phases[$stage].inputs=$inputs' --arg stage "$ACTIVE_STAGE" --argjson inputs "$(phase_inputs "$ACTIVE_STAGE")"
+    fi
     jq --arg stage "$ACTIVE_STAGE" --arg time "$(now)" --arg cwd "$cwd" --argjson argv "$(jq -cn --args '$ARGS.positional' -- "${command[@]}")" \
         '. + [{stage:$stage,time:$time,cwd:$cwd,argv:$argv}]' "$RUN_DIR/logs/commands.json" > "$RUN_DIR/logs/commands.json.tmp"
     mv -- "$RUN_DIR/logs/commands.json.tmp" "$RUN_DIR/logs/commands.json"
@@ -276,9 +358,8 @@ run_claude_review() {
     if reusable claude "$output" "$FINGERPRINT"; then say 'Reusing completed Claude review'; return; fi
     [[ ! -e $RUN_DIR/reviews/codex.md ]] || die 'Independent Claude inputs/output changed after Codex ran; start a new run to preserve independence'
     ACTIVE_STAGE=claude
-    claude_common
-    CLAUDE_COMMAND+=(--output-format stream-json --verbose --append-system-prompt "$(cat "$ROOT/prompts/independent.txt")" --disallowed-tools "${CLAUDE_DENY[@]}" -- "/code-review high --max-findings default $BASE_REF")
-    run_model claude /dev/null "$RUN_DIR/reviews/claude-independent.jsonl" "$RUN_DIR/logs/claude-independent.stderr.log" "${CLAUDE_COMMAND[@]}"
+    review_command claude
+    run_model claude /dev/null "$RUN_DIR/reviews/claude-independent.jsonl" "$RUN_DIR/logs/claude-independent.stderr.log" "${REVIEW_COMMAND[@]}"
     claude_result "$RUN_DIR/reviews/claude-independent.jsonl" "$RUN_DIR/logs/claude-result.json"
     jq -er '.result | select(type == "string" and test("\\S"))' "$RUN_DIR/logs/claude-result.json" > "$output.tmp" || die 'Claude returned an empty independent review'
     mv -- "$output.tmp" "$output"
@@ -291,8 +372,8 @@ run_codex_review() {
     if reusable codex "$output" "$FINGERPRINT"; then say 'Reusing completed Codex review'; return; fi
     ACTIVE_STAGE=codex
     rm -f -- "$output.tmp"
-    run_model codex /dev/null "$RUN_DIR/logs/codex.events.jsonl" "$RUN_DIR/logs/codex.stderr.log" \
-        codex exec review -m "$CODEX_MODEL" --strict-config -c model_reasoning_effort=high -c sandbox_mode=read-only -c approval_policy=never --ephemeral --json -o "$output.tmp" --base "$BASE_REF"
+    review_command codex
+    run_model codex /dev/null "$RUN_DIR/logs/codex.events.jsonl" "$RUN_DIR/logs/codex.stderr.log" "${REVIEW_COMMAND[@]}"
     [[ -s $output.tmp ]] || die 'Codex returned an empty review'
     mv -- "$output.tmp" "$output"
     complete_phase "$output"
@@ -315,11 +396,13 @@ run_synthesis() {
     if reusable synthesis "$output" "$FINGERPRINT" && jq -e -f "$ROOT/prompts/validate-synthesis.jq" "$output" >/dev/null; then
         say 'Reusing completed synthesis'
     else
+        protect_completed_review synthesis
+        output=$RUN_DIR/reviews/synthesis.json
+        render_synthesis_prompt
+        FINGERPRINT=$(phase_fingerprint synthesis)
         ACTIVE_STAGE=synthesis
-        claude_common
-        CLAUDE_COMMAND+=(--output-format json --json-schema "$(cat "$ROOT/prompts/synthesis.schema.json")" --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/context" --add-dir "$RUN_DIR/reviews")
-        if [[ -f $RUN_DIR/reviews/reassessment-input.json ]]; then CLAUDE_COMMAND+=(--add-dir "$RUN_DIR/discussion"); fi
-        run_model claude "$RUN_DIR/prompts/synthesis-prompt.txt" "$RUN_DIR/logs/synthesis.raw.json" "$RUN_DIR/logs/synthesis.stderr.log" "${CLAUDE_COMMAND[@]}"
+        review_command synthesis
+        run_model claude "$RUN_DIR/prompts/synthesis-prompt.txt" "$RUN_DIR/logs/synthesis.raw.json" "$RUN_DIR/logs/synthesis.stderr.log" "${REVIEW_COMMAND[@]}"
         claude_result "$RUN_DIR/logs/synthesis.raw.json" "$RUN_DIR/logs/synthesis-result.json"
         jq -e '.structured_output // (.result | fromjson)' "$RUN_DIR/logs/synthesis-result.json" > "$output.tmp" || die 'Synthesis did not return structured output'
         jq -e -f "$ROOT/prompts/validate-synthesis.jq" "$output.tmp" >/dev/null || die 'Synthesis violates the JSON schema; resume to retry'
@@ -343,11 +426,24 @@ run_reviews() {
     run_synthesis
 }
 
-# A changed or damaged independent review invalidates its downstream phases.
-# Keep the archive outside the active run so independent reviewers receive no
-# earlier cross-model reports. Persist the move list before changing any files.
+review_restart_reason() {
+    local stage=$1 output=$RUN_DIR/reviews/$1.md
+    [[ $stage != claude ]] || output=$RUN_DIR/reviews/claude-independent.md
+    if [[ ! -s $output ]]; then printf 'saved report is missing or incomplete'; return; fi
+    jq -r --arg stage "$stage" --arg hash "$(hash_file "$output")" --argjson inputs "$(phase_inputs "$stage")" '
+        .phases[$stage] as $phase |
+        if $phase.status!="completed" then "previous review did not complete"
+        elif $phase.output_hash!=$hash then "saved report was modified"
+        elif $phase.inputs==null then "legacy review inputs could not be verified"
+        elif $phase.inputs.cli_version!=$inputs.cli_version then "model CLI version changed"
+        elif $phase.inputs.command!=$inputs.command then "model, prompt or review command changed"
+        else "saved input fingerprint does not match" end' "$RUN_DIR/manifest.json"
+}
+
+# A changed independent review invalidates downstream phases in the candidate,
+# while the prior generation keeps its reports, drafts and phase records.
 prepare_review_restart() {
-    local from='' archive file
+    local from='' archive file reason staged=false
     local -a files=()
     if ! jq -e '.review_restart != null' "$RUN_DIR/manifest.json" >/dev/null; then
         if ! reusable claude "$RUN_DIR/reviews/claude-independent.md" "$(phase_fingerprint claude)"; then
@@ -357,35 +453,34 @@ prepare_review_restart() {
             if [[ -e $RUN_DIR/reviews/codex.md ]] || jq -e '.phases.codex != null' "$RUN_DIR/manifest.json" >/dev/null; then from=codex; fi
         fi
         [[ -n $from ]] || return 0
-        # Finding IDs belong to the original analysis. Replacing that analysis
-        # after a publication attempt could attach old actions to new findings.
         jq -e 'all(.[]; .status=="draft")' "$RUN_DIR/publication/actions.json" >/dev/null ||
             die 'Review inputs changed after publication was attempted; preserve this run and start a new review to keep publication history associated with its original findings'
-        mkdir -p -- "$RUN_DIR-history"
-        archive=$(mktemp -d "$RUN_DIR-history/restart-XXXXXX")
-        mkdir -p -- "$archive"/{reviews,prompts,logs}
-        cp -- "$RUN_DIR/manifest.json" "$archive/manifest.json"
-        cp -a -- "$RUN_DIR/publication" "$archive/publication"
+        reason=$(review_restart_reason "$from")
+        begin_review_attempt
+        archive=$(jq -er '.attempt.previous' "$RUN_DIR/manifest.json")
         for file in "$RUN_DIR"/reviews/* "$RUN_DIR"/prompts/* \
             "$RUN_DIR"/logs/claude-* "$RUN_DIR"/logs/claude.* "$RUN_DIR"/logs/codex.* \
-            "$RUN_DIR"/logs/synthesis* "$RUN_DIR"/logs/contributions*; do
+            "$RUN_DIR"/logs/synthesis* "$RUN_DIR"/logs/contributions* "$RUN_DIR"/logs/revision*; do
             [[ -f $file ]] || continue
             if [[ $from == codex && ( $file == "$RUN_DIR"/reviews/claude-* || $file == "$RUN_DIR"/logs/claude-* || $file == "$RUN_DIR"/logs/claude.* ) ]]; then continue; fi
             files+=("$file")
         done
-        manifest '.review_restart = {from:$from,archive:$archive,files:$files}' --arg from "$from" --arg archive "$archive" \
+        manifest '.review_restart = {from:$from,archive:$archive,files:$files,reason:$reason,staged:true}' --arg from "$from" --arg archive "$archive" --arg reason "$reason" \
             --argjson files "$(jq -cn --args '$ARGS.positional' -- "${files[@]}")"
     fi
     from=$(jq -er .review_restart.from "$RUN_DIR/manifest.json")
     archive=$(jq -er .review_restart.archive "$RUN_DIR/manifest.json")
-    say "Restarting reviews from $from because saved inputs or outputs are no longer reusable."
+    staged=$(jq -r '.review_restart.staged // false' "$RUN_DIR/manifest.json")
+    reason=$(jq -r '.review_restart.reason // "finishing the previously requested restart"' "$RUN_DIR/manifest.json")
+    say "Restarting reviews from $from: $reason."
     say "Previous reports and drafts are preserved in: $archive"
     while IFS= read -r file; do
         [[ -f $file ]] || continue
-        mv -- "$file" "$archive/${file#"$RUN_DIR/"}"
+        if $staged; then rm -- "$file"
+        else mv -- "$file" "$archive/${file#"$RUN_DIR/"}"; fi
     done < <(jq -r '.review_restart.files[]' "$RUN_DIR/manifest.json")
     manifest 'if $from=="claude" then del(.phases.claude) else . end |
-        del(.phases.codex,.phases.synthesis,.phases.contributions,.reassessment) |
+        del(.phases.codex,.phases.synthesis,.phases.contributions,.phases.revision,.reassessment) |
         .review_history += [{from:$from,archive:$archive,restarted_at:$time}] | del(.review_restart)' \
         --arg from "$from" --arg archive "$archive" --arg time "$(now)"
 }

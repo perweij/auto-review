@@ -293,12 +293,12 @@ load helpers/fixture
     grep -q 'Human edited body' "$(run_directory)/publication/review-body.md"
 }
 
-@test "resume restarts changed independent inputs but refuses a changed head" {
+@test "resume restarts changed independent inputs and updates a changed head" {
     run_review; assert_success
     run_review --resume "$(run_directory)" --claude-model different; assert_success
     [[ $output == *'Restarting reviews from claude'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force
-    run_review --resume "$(run_directory)"; assert_failure
-    [[ $output == *'Resume snapshot changed'* ]]
+    run_review --resume "$(run_directory)"; assert_success
+    [[ $output == *'Updating this review'* ]]
 }

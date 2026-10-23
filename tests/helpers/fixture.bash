@@ -28,7 +28,14 @@ setup() {
     CLI="$PROJECT_ROOT/bin/pr-review"
 }
 run_review() { run "$CLI" 7 --no-publish "$@"; }
-run_directory() { find "$FIXTURE/state" -type d -name '*-history' -prune -o -name manifest.json -printf '%h\n' | head -n1; }
+session_directory() { find "$FIXTURE/state" -type d -name '*-history' -prune -o -name manifest.json -printf '%h\n' | head -n1; }
+run_directory() {
+    local session
+    session=$(session_directory)
+    if [[ -L $session/.pending-review ]]; then realpath -e "$session/.pending-review"
+    elif [[ -L $session/.current-review ]]; then realpath -e "$session/.current-review"
+    else printf '%s\n' "$session"; fi
+}
 manifest_is() { jq -e "$1" "$(run_directory)/manifest.json" >/dev/null; }
 tty_review() { run python3 "$PROJECT_ROOT/tests/helpers/interactive_runner.py" "$1" "$CLI" 7 "${@:2}"; }
 # shellcheck disable=SC2154

@@ -72,20 +72,65 @@ retains the normal snapshot and worktree-integrity checks. Completed phases are
 reused only when their inputs still match. If no run matches or several match,
 it stops with guidance; `--resume` explicitly selects a run, including one stored
 outside the current state directory. Existing worktrees are never overwritten.
-For a new snapshot, first inspect
-and manually remove or move the old review worktree using `git worktree`.
 
-If a script/model change or a damaged report invalidates an independent review,
-resume automatically archives the affected reports, prompts, logs and a copy of
-the publication drafts in `<run-directory>-history/restart-<id>/`. It restarts
-from Claude (both reviewers) or Codex (retaining a valid Claude review), then
-reruns synthesis and discussion matching. An interrupted archive operation is
-completed on resume. Existing publication records and human edits are retained;
-the usual proposal reconciliation preserves edits only for unchanged proposals.
-If publication has already been attempted, replacing the analysis requires a new
-run so earlier actions cannot be mistaken for publications of new findings.
+When the PR head or merge-base changes, rerunning automatically updates the review.
+A separate working attempt is created for the new review. The earlier artifacts
+(including selections, human edits and publication receipts) remain available,
+and its worktree is moved to
+`<repository>-review-pr-<number>-snapshot-<id>`. Untracked and ignored files stay
+with that worktree; tracked modifications stop the update for inspection. The
+usual worktree path is then prepared at the new commit. A saved update journal
+allows an interrupted move/setup to finish on the next invocation, including when
+the usual worktree path is temporarily absent. No manual worktree removal is needed.
 
-Artifacts are private files under
+Both independent reviewers, synthesis and live GitHub discussion matching run
+afresh for an updated snapshot. There is no old-versus-new finding comparison,
+extra comparison model call, or automatic transfer of selections or draft text.
+An unedited earlier review needs no further action.
+
+If earlier drafts contain human edits, the CLI shows a local report at
+`publication/previous-edits.md`. Use `[u]` to view those drafts, then `[e ID]` or `[e]`
+to manually reuse relevant text in the current review. Earlier proposal IDs and
+locations belong to their original commit; check them before copying. The report
+is built locally after the fresh review, and earlier edited text is not given to
+the models. Proposal edits are detected against their generated text; combined
+body edits are detected using the generated-body hash (or reconstruction for
+older runs). All archived drafts remain available whether edited or not.
+
+Matching against actual GitHub discussion still prevents redundant posts and
+provides context for replies. Local unpublished drafts are not treated as GitHub
+discussion. Each updated snapshot gets fresh publication markers, and publication
+still requires confirmation. Ordinary resumes of the same snapshot preserve the
+current selections and edits.
+
+Cache keys cover each stage's Git snapshot, model command, CLI version, prompts,
+schemas and input artifacts. Editing a draft, changing publication UI code, or
+adjusting timeout/budget limits does not rerun completed reviews. Older saved
+runs are upgraded when their recorded commands, inputs and output hashes can be
+verified; no model call is needed for that check. Model or prompt changes still
+invalidate the affected stages.
+
+Replacement reviews are built under `<session-directory>-history/attempt-<id>/`.
+The previous review, edited drafts, and completed review-stage records stay in
+place. A changed independent review restarts that phase and its downstream stages;
+restarting Claude also restarts Codex to preserve independence. The candidate
+contains only the reports appropriate to those stages.
+
+Only after both reviews, synthesis, discussion matching, and draft preparation
+succeed does an atomic `.current-review` symlink update make the replacement
+current. Ctrl-C or a failure leaves the previous review available and the candidate
+pending. Rerunning the same PR or using `--resume` automatically continues that
+candidate, reusing its successful stages. The CLI prints both locations after a
+failure. Interrupted promotion is recoverable without rerunning successful models.
+Normal draft editing and menu actions operate on the current review.
+
+On the same commit, if publication has already been attempted, replacing the
+analysis is stopped so earlier actions cannot be mistaken for publications of new
+findings. Updating to a different snapshot archives those actions and checks the
+actual GitHub discussion again.
+
+The initial session and its replacement attempts contain private artifacts. The CLI
+prints the exact active artifact directory. Initial sessions live under
 `${XDG_STATE_HOME:-~/.local/state}/pr-review/<host>/<owner>/<repo>/pr-<N>-<time>-<id>/`:
 
 - `manifest.json`: identity, snapshot, tools, models, phase fingerprints and status.
@@ -127,7 +172,9 @@ Optional environment settings:
 
 ## Publication and safeguards
 
-The final screen groups findings by what they add to the conversation:
+The final screen shows each finding’s title and assigned destination, including
+the file/line, thread excerpt and link for replies. It classifies findings by what
+they add to the conversation:
 
 | Classification | Default |
 | --- | --- |
@@ -146,12 +193,25 @@ reopens threads. An outdated comment is not automatically a resolved issue.
 Use `t p1` to toggle a proposal, `i p1` to inspect its full discussion, `e p1` to
 edit its draft, `s` to inspect suppressed duplicates, `v` to preview the batch, and
 `f` to display the full local review. The default screen stays compact.
-Plain `e` edits the main review body. `p` publishes selected thread replies only;
-`c` publishes selected contributions with a COMMENT review when needed. Replies
-alone do not generate a redundant summary. Nothing new selected means no COMMENT
-is posted. Explicit APPROVE or REQUEST_CHANGES verdicts remain available.
+Plain `e` edits the main review body. Use `c` to publish all selected items at their
+automatically assigned destinations: thread additions become replies, while new
+items go together in a COMMENT review. The menu counts the replies and main-review
+items that will be posted. Replies alone do not generate a redundant summary.
+Use `v` to preview exact drafts and destinations without posting, or `i p1` to
+inspect an individual proposal, its matching rationale and the full discussion.
+Nothing new selected means no COMMENT is posted. Explicit APPROVE or
+REQUEST_CHANGES verdicts remain available. The legacy `p` replies-only shortcut
+is still accepted, but is omitted from the main menu; toggling individual items
+provides selection control without choosing a separate publication mode.
 
-The menu defaults to not publishing; self-authored PRs offer COMMENT only.
+The model proposes semantic matches; validating a real thread ID cannot prove the
+match is correct. Duplicates stay suppressed, and uncertain matches and follow-ups
+to concluded discussions start unselected. Uncertainty remains visible even when
+a matched thread is resolved. Inspect, edit or deselect proposals before the final
+confirmation. Follow-ups to timeline comments or review bodies appear in the main
+review with source links because they have no inline reply destination.
+
+Pressing Enter chooses `n` and exits the menu with drafts saved. Self-authored PRs offer COMMENT only.
 Approving with blocking
 findings requires an additional confirmation. Closed/merged PRs, `--no-publish`,
 and non-TTY stdin disable publication. Agent-configuration changes still require

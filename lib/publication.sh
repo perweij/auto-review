@@ -4,13 +4,13 @@ revalidate_publication() {
     verify_snapshot
     [[ $(jq -r '.integrity_failed // false' "$RUN_DIR/manifest.json") != true ]] || die 'Earlier worktree integrity failure blocks publication; start a fresh run'
     fetch_pr_metadata "$RUN_DIR/publication/pr-latest.json"
-    [[ $(jq -r .headRefOid "$RUN_DIR/publication/pr-latest.json") == "$HEAD_SHA" ]] || die 'PR head changed; publication blocked. Start a new review.'
+    [[ $(jq -r .headRefOid "$RUN_DIR/publication/pr-latest.json") == "$HEAD_SHA" ]] || die "PR head changed; publication blocked. Rerun pr-review $PR to update this saved review."
     [[ $(jq -r .state "$RUN_DIR/publication/pr-latest.json") == OPEN ]] || die 'PR is no longer open; publication blocked'
     if [[ $EVENT != COMMENT && $(jq -r '.author.login | ascii_downcase' "$RUN_DIR/publication/pr-latest.json") == "${VIEWER,,}" ]]; then die 'GitHub does not allow self-approval or self-request-changes'; fi
     git fetch --no-tags --refmap= --no-write-fetch-head "$REMOTE" "+refs/heads/$(jq -r .baseRefName "$RUN_DIR/publication/pr-latest.json"):$live_ref" || die 'Cannot revalidate base before publication'
     new_base=$(git rev-parse "$live_ref")
     new_merge=$(git merge-base "$HEAD_SHA" "$new_base") || die 'Cannot revalidate merge-base'
-    [[ $new_merge == "$MERGE_BASE" ]] || die 'Merge-base changed; publication blocked. Start a new review.'
+    [[ $new_merge == "$MERGE_BASE" ]] || die "Merge-base changed; publication blocked. Rerun pr-review $PR to update this saved review."
     if [[ $new_base != "$BASE_SHA" ]]; then
         advanced=$(git rev-list --count "$BASE_SHA..$new_base")
         say "Note: base has advanced $advanced commits since review; reviewed snapshot is unchanged."
@@ -155,9 +155,22 @@ publish_batch() {
     publication_status published
 }
 show_proposals() {
-    jq -r '([.proposals[].classification] | group_by(.) | map("\(length) \(.[0])") | join(" · ")),
-      (.proposals[]|select(.classification!="DUPLICATE")|
-       "[\(if .published then "posted" elif .selected then "x" else " " end)] \(.id) \(.classification): \(.basis.explanation | gsub("\\s+";" ") | if length>160 then .[:157]+"..." else . end)\n    → \(.destination.url)\(if .available then "" else " (reply unavailable)" end)")' "$RUN_DIR/publication/contributions.json"
+    # ROOT comes from the entry point; lower-case root is a thread comment ID.
+    # shellcheck disable=SC2153
+    jq -r --slurpfile findings "$RUN_DIR/reviews/synthesis.json" --slurpfile discussion "$DISCUSSION_FILE" \
+        -f "$ROOT/prompts/show-proposals.jq" "$RUN_DIR/publication/contributions.json"
+}
+show_selected_destinations() {
+    jq -r '
+      def counted($n;$one;$many): "\($n) " + (if $n==1 then $one else $many end);
+      [.proposals[] | select(.selected and (.published|not) and .available)] as $selected |
+      ([$selected[] | select(.destination.kind=="reply") | .destination.key] | unique | length) as $threads |
+      ([$selected[] | select(.destination.kind=="review")] | length) as $main |
+      if ($selected|length)==0 then "Selected contributions: none."
+      else "Will post: " + ([
+        (if $threads>0 then counted($threads;"thread reply";"thread replies") else empty end),
+        (if $main>0 then "1 COMMENT review containing " + counted($main;"item";"items") else empty end)
+      ] | join(" + ")) + "." end' "$RUN_DIR/publication/contributions.json"
 }
 edit_draft() {
     local file=$1 editor
@@ -169,7 +182,7 @@ edit_draft() {
 inspect_proposal() {
     local id=$1
     jq -r --arg id "$id" --slurpfile discussion "$DISCUSSION_FILE" '.proposals[]|select(.id==$id)| . as $proposal |
-      "\(.id) — \(.classification)\n\nWhy: \(.basis.explanation)\n\nNew aspect: \(.basis.delta)\n\nDraft:\n\(.body_md)\n\nFull matched discussion:",
+      "\(.id) — \(.classification)\n\nDestination: \(if .destination.kind=="reply" then "Reply to existing thread" else "Main review item" end) → \(.destination.url)\n\nWhy: \(.basis.explanation)\n\nNew aspect: \(.basis.delta)\n\nDraft:\n\(.body_md)\n\nFull matched discussion:",
       ($discussion[0].items[] | select(.key as $key | $proposal.basis.discussion_keys|index($key)) |
         "\n--- \(.url // .comments[0].url)\(if .is_resolved then " (resolved)" else "" end)\(if .is_outdated then " (outdated)" else "" end) ---",
         (.comments[] | "\n@\(.author) · \(.created_at) · \(.url)\n\(.body)"))' \
@@ -181,7 +194,11 @@ interactive_publication() {
     if ! $CONTRIBUTIONS_READY; then say 'Publication paused: complete discussion and valid contribution proposals are required.'; return; fi
     say "Contribution report: $RUN_DIR/reviews/contributions.md"
     say "Main review draft: $RUN_DIR/publication/review-body.md"
+    if [[ -s $RUN_DIR/publication/previous-edits.md ]]; then
+        say "Earlier edited drafts are available for manual reuse: $RUN_DIR/publication/previous-edits.md"
+    fi
     show_proposals
+    say 'Destinations are assigned automatically: replies go to their threads; new items go in the main review.'
     if $NO_PUBLISH; then return; fi
     if [[ $(jq -r '.publication.status' "$RUN_DIR/manifest.json") == published && $(jq '[.proposals[]|select(.selected and (.published|not))]|length' "$RUN_DIR/publication/contributions.json") == 0 ]]; then say 'This run is already published.'; return; fi
     fetch_pr_metadata "$RUN_DIR/publication/pr-latest.json"
@@ -189,13 +206,15 @@ interactive_publication() {
     author=$(jq -r '.author.login|ascii_downcase' "$RUN_DIR/publication/pr-latest.json")
     while true; do
         say "Suggested action: $(jq -r .recommendation "$RUN_DIR/reviews/synthesis.json")"
-        say '[n] Do not publish (default)  [c] Publish selected contributions as COMMENT  [p] Replies only'
-        say '[t ID] Toggle  [i ID] Inspect full discussion  [e ID] Edit proposal  [e] Edit main body  [s] Suppressed  [v] Preview  [f] Full report'
+        show_selected_destinations
+        say '[n] Exit without publishing (default: Enter)  [c] Publish selected items (automatic destinations)'
+        say '[t ID] Toggle  [i ID] Inspect proposal and discussion  [e ID] Edit proposal  [e] Edit main body  [s] Suppressed  [v] Preview selected drafts (no posting)  [f] Full report'
+        if [[ -s $RUN_DIR/publication/previous-edits.md ]]; then say '[u] View earlier edited drafts for manual reuse'; fi
         if [[ $author != "${VIEWER,,}" ]]; then say '[r] Publish REQUEST_CHANGES  [a] Publish APPROVE'; fi
         read -r -p 'Choose action [n]: ' choice || choice=n
         read -r choice id <<< "$choice"
         case $choice in
-            ''|n|N) return ;;
+            ''|n|N) say 'Leaving the review menu; saved reports and drafts are retained.'; return ;;
             t|i|e)
                 if [[ -z $id && $choice == e ]]; then edit_draft "$RUN_DIR/publication/review-body.md"; continue; fi
                 if ! jq -e --arg id "$id" 'any(.proposals[];.id==$id)' "$RUN_DIR/publication/contributions.json" >/dev/null; then warn 'Unknown proposal ID'; continue; fi
@@ -212,8 +231,17 @@ interactive_publication() {
                 render_main_draft; render_contribution_report; show_proposals; continue ;;
             s) jq -r '.proposals[]|select(.classification=="DUPLICATE")|"\(.id): \(.basis.explanation)\n"+([.references[].url]|join("\n"))' "$RUN_DIR/publication/contributions.json"; continue ;;
             f) cat -- "$RUN_DIR/reviews/synthesis.md"; continue ;;
-            v) EVENT=COMMENT; build_batch false; preview_batch; continue ;;
-            c|C|p) EVENT=COMMENT ;;
+            u) if [[ -s $RUN_DIR/publication/previous-edits.md ]]; then cat -- "$RUN_DIR/publication/previous-edits.md"; else say 'No earlier edited drafts were found.'; fi; continue ;;
+            v)
+                EVENT=COMMENT; build_batch false
+                if [[ $(jq length "$RUN_DIR/publication/batch.json") == 0 ]]; then
+                    say 'No selected unpublished drafts to preview. Use [t ID] to select a proposal or [i ID] to inspect one.'
+                else preview_batch; fi
+                continue ;;
+            c|C) EVENT=COMMENT ;;
+            p)
+                say 'Replies-only shortcut: main review items will be skipped. Use [c] to publish all selected items at their assigned destinations.'
+                EVENT=COMMENT ;;
             r|R|a|A)
                 if [[ $author == "${VIEWER,,}" ]]; then warn 'Only COMMENT is available for your own PR'; continue; fi
                 if [[ $choice == a || $choice == A ]]; then EVENT=APPROVE; else EVENT=REQUEST_CHANGES; fi ;;
@@ -230,7 +258,12 @@ interactive_publication() {
         fi
         replies_only=false; [[ $choice != p ]] || replies_only=true
         build_batch "$replies_only"
-        if [[ $(jq length "$RUN_DIR/publication/batch.json") == 0 ]]; then say 'Nothing new is selected; no publication is needed.'; continue; fi
+        if [[ $(jq length "$RUN_DIR/publication/batch.json") == 0 ]]; then
+            if $replies_only; then
+                say 'No selected unpublished thread replies. Use [v] to preview selected drafts or [i ID] to inspect a proposal and its discussion.'
+            else say 'Nothing new is selected; no publication is needed.'; fi
+            continue
+        fi
         preview_batch
         read -r -p 'Publish this exact batch? Type yes: ' answer || answer=
         [[ $answer == yes ]] || return 0

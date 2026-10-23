@@ -39,6 +39,10 @@ load helpers/fixture
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     jq -e '.[0].kind=="reply" and .[1].kind=="review" and all(.[];.status=="published")' "$(run_directory)/publication/actions.json"
     jq -e '(.body|contains("Multiplication became addition")) and (.body|contains("timeout case")|not)' "$FIXTURE/published.json"
+    [[ $output == *'p1 ADDITION: Retry after process restart'* && $output == *'p2 NEW: New arithmetic bug'* ]]
+    [[ $output == *'Reply to existing thread · source.txt:1'* && $output == *'Thread: @colleague: The retry path can charge twice.'* ]]
+    [[ $output == *'New item in main review'* && $output == *'1 thread reply + 1 COMMENT review containing 1 item'* ]]
+    [[ $output == *'Publish selected items (automatic destinations)'* && $output != *'[p] Publish'* ]]
 }
 
 @test "multiple additions to a thread are consolidated into one reply" {
@@ -49,6 +53,7 @@ load helpers/fixture
     tty_review 'c|yes'; assert_success
     [ "$(cat "$FIXTURE/reply-count")" = 1 ]
     jq -e '(.body|contains("timeout case")) and (.body|contains("Multiplication"))' "$FIXTURE/reply-response.json"
+    [[ $output == *'Will post: 1 thread reply.'* && $output != *'Will post: 2 thread replies'* ]]
 }
 
 @test "resolved follow-up is opt-in and never reopens a thread" {
@@ -85,6 +90,7 @@ load helpers/fixture
     tty_review 'c|yes'; assert_success
     [ ! -f "$FIXTURE/reply-count" ]
     jq -e '.body|contains("#issuecomment-10")' "$FIXTURE/published.json"
+    [[ $output == *'Main review item with links to earlier discussion'* && $output == *'Related discussion → https://github.com/org/repo/pull/7#issuecomment-10'* ]]
 }
 
 @test "unknown model destinations are rejected before publication" {

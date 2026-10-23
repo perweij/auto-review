@@ -3,13 +3,13 @@
 $old[0] as $old |
 reduce $model[0].contributions[] as $candidate (
   {format_version:1,discussion_hash:$hash,findings_hash:$findings_hash,
-   next_id:($old.next_id // 1),proposals:[],main_signature:($old.main_signature // null)};
+   next_id:($old.next_id // 1),proposals:[],main_signature:($old.main_signature // null),main_generated_hash:($old.main_generated_hash // null)};
   ($candidate | .finding_ids |= sort | .discussion_keys |= sort) as $basis |
   ([$old.proposals[]? | select(.basis.finding_ids==$basis.finding_ids and .basis.target_key==$basis.target_key)][0]) as $prior |
   ([$discussion[0].items[] | select(.key as $key | $basis.discussion_keys|index($key))]) as $matched |
   (any($matched[]; .is_resolved==true)) as $resolved |
   ([$discussion[0].items[] | select(.key==$basis.target_key)][0]) as $target |
-  (if $basis.classification!="DUPLICATE" and $resolved then "REVISIT" else $basis.classification end) as $class |
+  (if ($basis.classification|IN("DUPLICATE","UNCERTAIN")|not) and $resolved then "REVISIT" else $basis.classification end) as $class |
   (any($actions[0][]; .status=="published" and any(.finding_ids[]?; . as $id | $basis.finding_ids|index($id)))) as $published |
   ($basis.target_key==null or $target.can_reply==true) as $available |
   (if $prior then $prior.id else "p\(.next_id)" end) as $id |

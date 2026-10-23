@@ -15,6 +15,10 @@ source "$ROOT/lib/discussion.sh"
 source "$ROOT/lib/contributions.sh"
 # shellcheck source=../lib/publication.sh
 source "$ROOT/lib/publication.sh"
+# shellcheck source=../lib/revisions.sh
+source "$ROOT/lib/revisions.sh"
+# shellcheck source=../lib/attempts.sh
+source "$ROOT/lib/attempts.sh"
 
 main() {
     parse_args "$@"

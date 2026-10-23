@@ -7,7 +7,7 @@ invalidate_claude() {
     mv "$FIXTURE/manifest.tmp" "$saved/manifest.json"
 }
 
-@test "script update after failed synthesis archives both reviews and restarts automatically" {
+@test "invalid cache record after failed synthesis archives both reviews and restarts automatically" {
     export MOCK_FAIL_STAGE=synthesis
     run_review; assert_failure
     saved=$(run_directory)
@@ -17,7 +17,7 @@ invalidate_claude() {
     run_review; assert_success
     [[ $output == *'Restarting reviews from claude'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nclaude\ncodex\nsynthesis\ncontributions' ]
-    archive=$(jq -r '.review_history[0].archive' "$saved/manifest.json")
+    archive=$(jq -r '.review_history[0].archive' "$(run_directory)/manifest.json")
     [ "$(cat "$archive/reviews/codex.md")" = "$prior" ]
     [ -s "$archive/reviews/claude-independent.md" ]
     [ -f "$archive/logs/synthesis.stderr.log" ]
@@ -35,8 +35,8 @@ invalidate_claude() {
     [[ $output == *'Restarting reviews from codex'* && $output == *'Reusing completed Claude review'* ]]
     [ "$(sha256sum "$saved/reviews/claude-independent.md")" = "$claude_hash" ]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\ncodex\nsynthesis\ncontributions' ]
-    archive=$(jq -r '.review_history[0].archive' "$saved/manifest.json")
-    [ ! -e "$archive/reviews/claude-independent.md" ]
+    archive=$(jq -r '.review_history[0].archive' "$(run_directory)/manifest.json")
+    [ -s "$archive/reviews/claude-independent.md" ]
     [ -s "$archive/reviews/codex.md" ]
     [ -s "$archive/reviews/synthesis.json" ]
 }
@@ -47,7 +47,7 @@ invalidate_claude() {
     echo 'Human edited body' > "$saved/publication/review-body.md"
     echo 'damaged report' > "$saved/reviews/claude-independent.md"
     run_review; assert_success
-    archive=$(jq -r '.review_history[0].archive' "$saved/manifest.json")
+    archive=$(jq -r '.review_history[0].archive' "$(run_directory)/manifest.json")
     [ "$(cat "$archive/reviews/claude-independent.md")" = 'damaged report' ]
     [ "$(cat "$archive/publication/review-body.md")" = 'Human edited body' ]
     [ "$(cat "$saved/publication/review-body.md")" = 'Human edited body' ]

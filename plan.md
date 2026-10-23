@@ -800,11 +800,20 @@ Suggested action: REQUEST_CHANGES
 Choose action:
 
 [n] Do not publish (default)
-[c] Publish as COMMENT
+[c] Publish selected items (automatic destinations)
 [r] Publish as REQUEST_CHANGES
 [a] Publish as APPROVE
 [e] Edit review body
 ```
+
+Show the finding title and actual destination for each proposal. For a thread
+reply, include the file/line, a short thread excerpt and its link. Distinguish
+resolved/concluded follow-ups and uncertain matches. Show the selected thread
+reply count and number of items grouped into the main COMMENT review. One normal
+publish action follows these assignments automatically; the user need not choose
+between new comments and replies. Keep inspection, editing, selection toggles,
+preview and exact-batch confirmation. Model-proposed semantic matches remain
+fallible even after thread IDs and permissions have been validated.
 
 The suggested action must never become the default merely because the model selected it.
 
@@ -826,7 +835,7 @@ Before publishing:
 5. Display the exact review body that will be submitted.
 6. Require an explicit final confirmation.
 
-If the head SHA has changed, block publication and request a new review. Do not publish findings against an outdated snapshot.
+If the head SHA has changed, block publication and instruct the user to rerun to update the saved review, preserving its baseline. Do not publish findings against an outdated snapshot.
 
 Movement of the base branch tip alone does **not** invalidate the snapshot (§4.3). Show it as an informational note ("base has advanced N commits since review"). Otherwise publication would be blocked almost constantly on active repositories.
 
@@ -910,7 +919,19 @@ A failed model invocation should not destroy successful results from earlier pha
 
 For `--resume`, completed phases can be reused only if their recorded inputs and Git snapshot still match.
 
-When an independent phase is no longer reusable on the same snapshot, archive its affected artifacts outside the active run and restart that phase and downstream phases automatically. Restarting Claude also restarts Codex, preserving review independence. Record a pending archive operation before moving files so an interruption can be recovered. Retain publication drafts and history; do not replace an analysis after publication was attempted, because finding IDs belong to that analysis.
+Build a replacement review in a separate working attempt outside the completed
+review's artifact directory. Do not move or overwrite the previous reports or
+edited drafts to start a model. Restarting Claude also restarts Codex, and exclude
+old downstream reports from the candidate to preserve independence. Retain the
+pending candidate on failure or interruption and resume its successful stages.
+
+Once both independent reviews, synthesis, discussion matching and draft preparation
+are complete, atomically switch a session pointer to the replacement. Keep the
+previous generation available. Switching the pointer, rather than copying files
+one by one, must prevent a partially installed current review. Recover interruptions
+on either side of the switch idempotently. Existing runs need no manual migration.
+Do not replace an analysis after publication was attempted on the same snapshot,
+because finding IDs belong to that analysis.
 
 Record an input fingerprint per phase in the manifest, so that "inputs still match" is concrete and testable:
 
@@ -919,9 +940,34 @@ head SHA, merge-base SHA, model, effort, CLI version,
 SHA-256 of the prompt/schema files, SHA-256 of input artifacts
 ```
 
+Store the structured inputs alongside the fingerprint. Use the actual model command
+(including permissions, effort, prompt and schema), excluding runtime budget limits.
+Do not hash unrelated scripts or publication drafts. Discussion snapshot paths vary
+per fetch; compare their content, not those temporary paths. Timeout/budget changes
+must not invalidate successful work. For older records, verify the saved command,
+CLI version, snapshot, input artifacts and output hashes before adopting the new key.
+
 A phase is reusable only if its fingerprint is identical and its output artifact is complete (atomically written, nonempty, valid where structured).
 
 Do not silently reuse a previous review of a different commit.
+
+On resume with a changed head or merge-base, preserve the complete old run outside
+the active inputs and move its worktree to a retained sibling path. Refuse to move
+a worktree with tracked modifications. Save a transition journal before moving or
+clearing anything so a partial transition can resume automatically. Prepare a new
+worktree at the canonical path and run fresh independent reviews and synthesis.
+Archive earlier publication receipts and use new publication markers; recover
+ambiguous prior actions against their original head before transitioning.
+
+Do not reconcile old and new local findings. Review the new snapshot from scratch
+and match only against actual GitHub discussion. Preserve all previous artifacts
+and drafts. Detect human edits locally against generated proposal text and the
+recorded generated main-body hash (reconstruct the old generated body for older
+runs). When edits exist, provide a local read-only report and a menu action to
+view it for manual reuse through the existing editors. Do not feed archived
+edited text to the models or transfer it or old selections automatically. An
+unedited earlier review requires no comparison or extra model call. Keep normal
+publication confirmation and same-snapshot resume behavior.
 
 ## 11. Safety and security
 
