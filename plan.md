@@ -177,7 +177,7 @@ Do not use `claude --bare`. It only reads `ANTHROPIC_API_KEY` and ignores OAuth/
 
 Authentication status does not necessarily guarantee that the requested model is available or that usage limits will permit the run.
 
-Optionally support a small live model probe in a future version, but do not incur unnecessary model charges by default.
+Run a tiny live query with Claude Haiku and Codex GPT-6 Luna before preparing the worktree, including on resume. Require a successful structured response; a local login-status check alone cannot detect an expired remote session. Retain probe logs, bound each probe to 60 seconds by default, and stop before reviews on failure. Allow an explicit Codex probe-model override when account availability differs, without an automatic costly fallback.
 
 ### 3.5 Other checks
 
@@ -261,7 +261,7 @@ Suggested worktree location:
 
 Including the repository name prevents collisions between repositories that share a parent directory.
 
-If that location already exists, do not overwrite it automatically.
+If that location already exists, match it to saved run manifests under the current state directory using the repository, PR number, Git common directory, worktree path and checked-out commit. Automatically resume a unique matching run and display the selected directory. If none or several match, stop with guidance to select the original run using `--resume`. Never overwrite the existing worktree; retain all resume snapshot and integrity checks.
 
 A reusable worktree must be explicitly verified to belong to the intended repository and PR and to be clean.
 
@@ -910,6 +910,8 @@ A failed model invocation should not destroy successful results from earlier pha
 
 For `--resume`, completed phases can be reused only if their recorded inputs and Git snapshot still match.
 
+When an independent phase is no longer reusable on the same snapshot, archive its affected artifacts outside the active run and restart that phase and downstream phases automatically. Restarting Claude also restarts Codex, preserving review independence. Record a pending archive operation before moving files so an interruption can be recovered. Retain publication drafts and history; do not replace an analysis after publication was attempted, because finding IDs belong to that analysis.
+
 Record an input fingerprint per phase in the manifest, so that "inputs still match" is concrete and testable:
 
 ```text
@@ -939,7 +941,7 @@ The reviewing models may need to inspect source code and run read-only Git comma
 
 ### Trust scope
 
-This tool is intended for the organisation's own repositories. Repository-defined agent configuration (`CLAUDE.md`, `AGENTS.md`, `.claude/` settings, hooks, skills and agents, `.mcp.json`, `.codex/`) is therefore treated as trusted and loaded normally, because it typically improves review quality. Do not restrict it with `--setting-sources`, `--strict-mcp-config`, `--safe-mode` or similar.
+This tool is intended for the organisation's own repositories. Repository-defined agent configuration (`CLAUDE.md`, `AGENTS.md`, `.claude/` settings, hooks, skills and agents, `.mcp.json`, `.codex/`) is therefore treated as trusted and loaded normally, because it typically improves review quality. For review invocations, do not restrict it with `--setting-sources`, `--strict-mcp-config`, `--safe-mode` or similar. The tiny authentication probes run separately in a temporary directory, without repository context; Claude tools, skills and MCP servers are disabled for those probes.
 
 The remaining exposure is that the PR's own version of these files is loaded. That is covered by the warning in §4.4.
 

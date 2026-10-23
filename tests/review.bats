@@ -15,7 +15,8 @@ load helpers/fixture
     grep -q 'pr-discussion.json' "$FIXTURE/synthesis-stdin"
     jq -se 'any(.[]; .tool == "claude" and (.args | index("/code-review high --max-findings default refs/pr-review/7/base")))' "$FIXTURE/calls.jsonl"
     jq -se 'any(.[]; .tool == "codex" and (.args | index("sandbox_mode=read-only")) and (.args | index("--ephemeral")) and (.args | index("--strict-config")))' "$FIXTURE/calls.jsonl"
-    run ! grep -E -- '--fix|--comment"|--dangerously|--bare|--setting-sources|--strict-mcp-config|"checks"|check-runs' "$FIXTURE/calls.jsonl"
+    jq -se 'all(.[] | select((.args | join(" ") | contains("PR_REVIEW_AUTH_OK")) | not);
+        .args | all(.[]; test("^--(fix|comment|bare|setting-sources|strict-mcp-config)$|^--dangerously|^checks$|check-runs") | not))' "$FIXTURE/calls.jsonl"
     [ -z "$(git -C "$FIXTURE/repo-review-pr-7" status --porcelain)" ]
     [ -z "$(git for-each-ref --format='%(refname)' refs/remotes/)" ]
     [ "$(stat -c %a "$(run_directory)/manifest.json")" = 600 ]
@@ -65,11 +66,12 @@ load helpers/fixture
     assert_success
 }
 
-@test "existing worktree is never overwritten; existing branch name does not matter" {
+@test "existing worktree automatically resumes its run; existing branch name does not matter" {
     git branch repo-review-pr-7
     run_review; assert_success
-    run_review; assert_failure
-    [[ $output == *'Worktree already exists'* ]]
+    run_review; assert_success
+    [[ $output == *'Automatically resuming PR #7'* ]]
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
     [ "$(git branch --show-current)" = main ]
 }
 
@@ -101,6 +103,33 @@ load helpers/fixture
     run_review --resume "$(run_directory)"; assert_success
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
     manifest_is '.phases.synthesis.status == "completed"'
+}
+
+@test "stdout-only synthesis error points to structured output and retains reviews" {
+    export MOCK_STDOUT_ERROR_STAGE=synthesis
+    run_review; assert_failure
+    [[ $output == *'CLI result subtype: error_during_execution'* ]]
+    [[ $output == *'logs/synthesis.raw.json'* && $output == *'Captured stderr is empty:'* ]]
+    [[ $output == *'model: fable'* && $output != *'fixture-provider-error-do-not-replay'* ]]
+    manifest_is '.phases.synthesis.status=="failed" and .phases.synthesis.exit_status==1 and (.phases.synthesis.stdout_log|endswith("logs/synthesis.raw.json"))'
+    [ -s "$(run_directory)/reviews/codex.md" ]
+    [ -s "$(run_directory)/reviews/claude-independent.md" ]
+    [ ! -s "$(run_directory)/logs/synthesis.stderr.log" ]
+    unset MOCK_STDOUT_ERROR_STAGE
+    run_review --resume "$(run_directory)"; assert_success
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
+}
+
+@test "expired Claude OAuth is diagnosed despite success subtype and empty stderr" {
+    export MOCK_STDOUT_OAUTH_STAGE=synthesis
+    run_review; assert_failure
+    [[ $output == *'CLI result subtype: success'* && $output == *'is_error=true'* ]]
+    [[ $output == *"Claude's OAuth session expired"* && $output == *'claude auth login'* ]]
+    [[ $output == *'Captured stderr is empty:'* ]]
+    manifest_is '.phases.synthesis.failure_reason=="oauth_session_expired" and .phases.synthesis.status=="failed"'
+    unset MOCK_STDOUT_OAUTH_STAGE
+    run_review --resume "$(run_directory)"; assert_success
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
 }
 
 @test "invalid structured synthesis is retained and resumable" {
@@ -186,7 +215,7 @@ load helpers/fixture
     [ ! -e "$FIXTURE/post-count" ]
 }
 
-@test "agent configuration changes stop noninteractive models" {
+@test "agent configuration changes stop noninteractive reviews" {
     mkdir .claude
     echo '{}' > .claude/settings.json
     echo 'trusted instructions' > AGENTS.md
@@ -255,18 +284,20 @@ load helpers/fixture
     exec {test_lock}>&-
 }
 
-@test "completed run resumes without model calls, preserving edited body" {
+@test "completed run resumes without rerunning reviews, preserving edited body" {
     run_review; assert_success
     echo 'Human edited body' > "$(run_directory)/publication/review-body.md"
-    run_review --resume "$(run_directory)"; assert_success
+    run_review; assert_success
+    [[ $output == *'Automatically resuming PR #7'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
     grep -q 'Human edited body' "$(run_directory)/publication/review-body.md"
 }
 
-@test "resume refuses changed head and changed independent inputs" {
+@test "resume restarts changed independent inputs but refuses a changed head" {
     run_review; assert_success
-    run_review --resume "$(run_directory)" --claude-model different; assert_failure
-    [[ $output == *'preserve independence'* ]]
+    run_review --resume "$(run_directory)" --claude-model different; assert_success
+    [[ $output == *'Restarting reviews from claude'* ]]
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force
     run_review --resume "$(run_directory)"; assert_failure
     [[ $output == *'Resume snapshot changed'* ]]

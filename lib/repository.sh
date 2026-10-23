@@ -89,6 +89,29 @@ check_authentication() {
     git ls-remote --exit-code "$REMOTE" "refs/heads/$(jq -r .baseRefName "$SCRATCH/pr.json")" >/dev/null 2>&1 || die 'Cannot read base branch'
     if [[ $(jq -r .isDraft "$SCRATCH/pr.json") == true ]]; then warn 'PR is a draft'; fi
 }
+discover_existing_run() {
+    local state_root=$1 file head common top
+    local -a matches=()
+    common=$(git -C "$WORKTREE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || die "Existing path is not a Git worktree: $WORKTREE"
+    top=$(git -C "$WORKTREE" rev-parse --show-toplevel 2>/dev/null) || die "Cannot inspect existing worktree: $WORKTREE"
+    [[ $common == "$COMMON_DIR" && $top == "$WORKTREE" ]] || die "Existing worktree belongs to a different checkout: $WORKTREE"
+    head=$(git -C "$WORKTREE" rev-parse HEAD)
+    for file in "$state_root"/*/manifest.json; do
+        [[ -f $file ]] || continue
+        if jq -e --arg repo "$HOST/$REPO" --arg pr "$PR" --arg common "$COMMON_DIR" --arg worktree "$WORKTREE" --arg head "$head" '
+            .format_version == 2 and .repository == $repo and (.pr | tostring) == $pr and
+            .git_common_dir == $common and .worktree == $worktree and
+            ((.snapshot.head // $head) == $head)' "$file" >/dev/null 2>&1; then
+            matches+=("${file%/manifest.json}")
+        fi
+    done
+    case ${#matches[@]} in
+        0) die "Existing worktree has no matching saved run under $state_root. Use --resume with its original run directory: $WORKTREE" ;;
+        1) RESUME=${matches[0]}; say "Automatically resuming PR #$PR from $RESUME" ;;
+        *) printf 'Matching saved runs:\n' >&2; printf '  %s\n' "${matches[@]}" >&2
+            die 'Multiple saved runs match this worktree; select one with --resume RUN_DIRECTORY' ;;
+    esac
+}
 initialize_run() {
     local state_root main name
     mkdir -p -- "$COMMON_DIR/pr-review-locks"
@@ -97,6 +120,9 @@ initialize_run() {
     main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
     [[ -n $main ]] || die 'Cannot locate main checkout'
     name=${REPO##*/}
+    WORKTREE=$(realpath -m -- "$(dirname -- "$main")/$name-review-pr-$PR")
+    state_root=$(realpath -m -- "${XDG_STATE_HOME:-$HOME/.local/state}/pr-review/$HOST/$REPO")
+    if [[ -z $RESUME && ( -e $WORKTREE || -L $WORKTREE ) ]]; then discover_existing_run "$state_root"; fi
     if [[ -n $RESUME ]]; then
         RUN_DIR=$(realpath -e -- "$RESUME") || die 'Resume directory does not exist'
         [[ -f $RUN_DIR/manifest.json ]] || die 'Resume manifest missing'
@@ -106,10 +132,6 @@ initialize_run() {
         WORKTREE=$(jq -er .worktree "$RUN_DIR/manifest.json")
         RUN_ID=$(jq -er .run_id "$RUN_DIR/manifest.json")
     else
-        WORKTREE=$(realpath -m -- "$(dirname -- "$main")/$name-review-pr-$PR")
-        [[ ! -e $WORKTREE ]] || die "Worktree already exists: $WORKTREE. Use --resume with its original run directory."
-        state_root=${XDG_STATE_HOME:-$HOME/.local/state}/pr-review/$HOST/$REPO
-        state_root=$(realpath -m -- "$state_root")
         case $state_root/ in "$main/"*|"$WORKTREE/"*|"$(git rev-parse --show-toplevel)/"*) die 'Artifacts must be outside the reviewed repository; set XDG_STATE_HOME' ;; esac
         mkdir -p -- "$state_root"
         RUN_DIR=$(mktemp -d "$state_root/pr-$PR-$(date -u +%Y%m%dT%H%M%S)-XXXXXX")

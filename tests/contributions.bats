@@ -178,7 +178,8 @@ load helpers/fixture
     [ "$(cat "$FIXTURE/reply-count")" = 1 ]
     jq '.[0].status="submitting"|del(.[0].result)' "$(run_directory)/publication/actions.json" > "$FIXTURE/new.json"
     cp "$FIXTURE/new.json" "$(run_directory)/publication/actions.json"
-    tty_review 'c|yes' --resume "$(run_directory)"; assert_success
+    tty_review 'c|yes'; assert_success
+    [[ $output == *'Automatically resuming PR #7'* ]]
     [ "$(cat "$FIXTURE/reply-count")" = 1 ]
 }
 

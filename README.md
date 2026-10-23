@@ -46,12 +46,44 @@ Exactly one Git remote must match the target repository. Fork PRs are fetched
 through the base repository's `refs/pull/<N>/head`, without adding a fork remote.
 The default models are `gpt-6-astra` and `fable`, both at high effort.
 
+Before fetching or creating the review worktree, every run (including `--resume`)
+makes a tiny live request through each CLI: Claude `haiku`, then Codex
+`gpt-6-luna` ([Codex model pricing](https://learn.chatgpt.com/docs/pricing)).
+These requests consume a small amount of usage and catch stale logins that local
+auth-status commands can miss. They run in a temporary directory with a fixed
+diagnostic prompt and no PR content. Failed requests or unsuccessful structured
+responses stop the run before any reviews. Raw results and stderr are saved in
+`logs/{claude,codex}_auth_probe.*`; diagnostics distinguish recognized auth,
+quota, model-access, network and timeout failures without printing raw errors.
+
+Probes have a 60-second timeout each (`PR_REVIEW_AUTH_TIMEOUT` overrides it).
+If your account lacks Luna access, set `PR_REVIEW_CODEX_PROBE_MODEL` to an
+inexpensive model it supports; there is no automatic fallback to a costlier model.
+A successful probe confirms live access to that model at that moment; review-model
+permissions and credentials expiring later can still cause a later failure.
+
 The CLI retains a detached worktree next to the main checkout, named
 `<repository>-review-pr-<number>`. It uses private refs under `refs/pr-review/` and
 does not update caller branches or remote-tracking refs. It holds an exclusive
-repository/PR lock throughout the run. Existing worktrees are never overwritten;
-reuse one with its original `--resume` directory. For a new snapshot, first inspect
+repository/PR lock throughout the run. When the worktree already exists, the CLI
+automatically resumes the unique saved run matching its repository, PR number,
+Git checkout, worktree path and checked-out commit. It prints the selected run and
+retains the normal snapshot and worktree-integrity checks. Completed phases are
+reused only when their inputs still match. If no run matches or several match,
+it stops with guidance; `--resume` explicitly selects a run, including one stored
+outside the current state directory. Existing worktrees are never overwritten.
+For a new snapshot, first inspect
 and manually remove or move the old review worktree using `git worktree`.
+
+If a script/model change or a damaged report invalidates an independent review,
+resume automatically archives the affected reports, prompts, logs and a copy of
+the publication drafts in `<run-directory>-history/restart-<id>/`. It restarts
+from Claude (both reviewers) or Codex (retaining a valid Claude review), then
+reruns synthesis and discussion matching. An interrupted archive operation is
+completed on resume. Existing publication records and human edits are retained;
+the usual proposal reconciliation preserves edits only for unchanged proposals.
+If publication has already been attempted, replacing the analysis requires a new
+run so earlier actions cannot be mistaken for publications of new findings.
 
 Artifacts are private files under
 `${XDG_STATE_HOME:-~/.local/state}/pr-review/<host>/<owner>/<repo>/pr-<N>-<time>-<id>/`:
@@ -65,12 +97,20 @@ Artifacts are private files under
 - `publication/`: contribution proposals, editable drafts, per-action status, exact
   submitted bodies, API responses, and archived drafts.
 
-Slow models are allowed to finish. Heartbeats show elapsed time and time since
-output; there is **no default timeout or budget limit**. Ctrl-C forwards the signal
-to the model process group and records an interrupted stage. Successful phases are
+Slow review models are allowed to finish. Heartbeats say "Process running" and show
+elapsed time and time since stdout or stderr changed; process liveness does not
+prove progress. A warning appears after 60 seconds without output. Recognized
+terminal events (including Codex's "not a git repository" error and `turn.failed`)
+stop the model, escalating from TERM to KILL after five seconds if needed. Other
+error events are flagged while allowing retries. There is **no default timeout or
+budget limit** for a silent review without a terminal event. Before each review
+invocation, Git repository identity is checked in the model's filtered environment;
+diagnostics are retained in `logs/<stage>.git-preflight.log[.stderr]`.
+Ctrl-C forwards the signal to the model process group, escalates to TERM and KILL
+with bounded waits if necessary, and records an interrupted stage. Successful phases are
 reused only when their snapshot, inputs, model, version, policy and output hashes
-still match. A changed Claude independent input after Codex has run requires a new
-run, to preserve independence. Unchanged contribution proposals retain human edits
+still match. Invalidated independent reviews are archived and restarted as described
+above. Unchanged contribution proposals retain human edits
 and selections across refreshes. Changed proposals are rebuilt with safe defaults
 and the old drafts are archived. Legacy version-1 runs remain readable but require
 a new run for discussion-aware publication.
@@ -139,11 +179,14 @@ the small concurrent-comment window between a check and a POST.
 
 Models receive filtered environments: credential-like variable names are removed,
 except each CLI's own authentication variables. Only removed names are recorded.
+Temporary Git config overrides (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`,
+`GIT_CONFIG_VALUE_*` and `GIT_CONFIG_PARAMETERS`) are removed together, avoiding
+both credential leakage and incomplete config entries that break Git discovery.
 On-disk credentials remain accessible to the CLIs. Code and review context are sent
 to the selected model providers. Use this tool only on repositories you trust.
 
 The orchestrator does not run repository tests, builds or hooks. Models may run
-investigative commands under their configured permissions. After every invocation,
+investigative commands under their configured permissions. After each invocation in the review worktree,
 changes to HEAD, tracked files, the index or snapshot refs stop the run and block
 publication. Generated untracked/ignored files are retained and disclosed.
 

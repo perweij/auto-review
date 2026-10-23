@@ -9,6 +9,7 @@ setup() {
     export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$FIXTURE/gitconfig"
     export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
     unset GH_REPO GH_HOST VISUAL EDITOR PR_REVIEW_MODEL_TIMEOUT PR_REVIEW_CLAUDE_BUDGET PR_REVIEW_CLAUDE_PERMISSION_MODE
+    unset PR_REVIEW_AUTH_TIMEOUT PR_REVIEW_CODEX_PROBE_MODEL
     git init -q --bare "$FIXTURE/remote.git"
     git init -q -b main "$FIXTURE/checkout"
     cd "$FIXTURE/checkout" || return 1
@@ -27,7 +28,7 @@ setup() {
     CLI="$PROJECT_ROOT/bin/pr-review"
 }
 run_review() { run "$CLI" 7 --no-publish "$@"; }
-run_directory() { find "$FIXTURE/state" -name manifest.json -printf '%h\n' | head -n1; }
+run_directory() { find "$FIXTURE/state" -type d -name '*-history' -prune -o -name manifest.json -printf '%h\n' | head -n1; }
 manifest_is() { jq -e "$1" "$(run_directory)/manifest.json" >/dev/null; }
 tty_review() { run python3 "$PROJECT_ROOT/tests/helpers/interactive_runner.py" "$1" "$CLI" 7 "${@:2}"; }
 # shellcheck disable=SC2154

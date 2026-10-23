@@ -17,13 +17,14 @@ usage() {
 Usage: pr-review <PR_NUMBER | PR_URL> [options]
   -R, --repo [HOST/]OWNER/REPO   Override repository discovery
   --no-publish                  Never write to GitHub
-  --resume RUN_DIRECTORY        Resume the same commit snapshot
+  --resume RUN_DIRECTORY        Select a saved run explicitly (otherwise auto-match)
   --codex-model MODEL           Default: gpt-6-astra (effort high)
   --claude-model MODEL          Default: fable (effort high)
   -h, --help
 Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan),
   PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET
-  (optional USD), XDG_STATE_HOME, VISUAL/EDITOR.
+  (optional USD), PR_REVIEW_AUTH_TIMEOUT (seconds, default 60),
+  PR_REVIEW_CODEX_PROBE_MODEL (default gpt-6-luna), XDG_STATE_HOME, VISUAL/EDITOR.
 EOF
 }
 parse_args() {
@@ -48,6 +49,7 @@ parse_args() {
     if [[ -t 0 ]]; then INTERACTIVE=true; else NO_PUBLISH=true; fi
     case $PERMISSION_MODE in auto|dontAsk|manual|plan) ;; *) die 'Unsupported Claude permission mode' ;; esac
     [[ -z ${PR_REVIEW_MODEL_TIMEOUT:-} || ${PR_REVIEW_MODEL_TIMEOUT} =~ ^[1-9][0-9]*$ ]] || die 'PR_REVIEW_MODEL_TIMEOUT must be positive integer seconds'
+    [[ ${PR_REVIEW_AUTH_TIMEOUT:-60} =~ ^[1-9][0-9]*$ ]] || die 'PR_REVIEW_AUTH_TIMEOUT must be positive integer seconds'
     [[ -z ${PR_REVIEW_CLAUDE_BUDGET:-} || ${PR_REVIEW_CLAUDE_BUDGET} =~ ^[0-9]+([.][0-9]+)?$ ]] || die 'PR_REVIEW_CLAUDE_BUDGET must be a USD amount'
 }
 manifest() {
@@ -55,16 +57,35 @@ manifest() {
     jq "$@" "$filter | .updated_at = \$updated" --arg updated "$(now)" "$RUN_DIR/manifest.json" > "$RUN_DIR/manifest.json.tmp"
     mv -- "$RUN_DIR/manifest.json.tmp" "$RUN_DIR/manifest.json"
 }
+stop_model_group() {
+    local signal=$1 deadline
+    [[ -n $MODEL_PID ]] || return 0
+    kill -s "$signal" -- "-$MODEL_PID" 2>/dev/null || true
+    deadline=$((SECONDS+2))
+    while kill -0 -- "-$MODEL_PID" 2>/dev/null && ((SECONDS<deadline)); do sleep 0.1; done
+    if kill -0 -- "-$MODEL_PID" 2>/dev/null; then
+        warn 'Model did not stop promptly; sending TERM.'
+        kill -TERM -- "-$MODEL_PID" 2>/dev/null || true
+        deadline=$((SECONDS+2))
+        while kill -0 -- "-$MODEL_PID" 2>/dev/null && ((SECONDS<deadline)); do sleep 0.1; done
+    fi
+    if kill -0 -- "-$MODEL_PID" 2>/dev/null; then
+        warn 'Stopping remaining model processes with KILL.'
+        kill -KILL -- "-$MODEL_PID" 2>/dev/null || true
+    fi
+    deadline=$((SECONDS+1))
+    while kill -0 "$MODEL_PID" 2>/dev/null && ((SECONDS<deadline)); do sleep 0.1; done
+    # Do not re-enter an unbounded wait if a child is stuck in kernel I/O.
+    if ! kill -0 "$MODEL_PID" 2>/dev/null; then wait "$MODEL_PID" 2>/dev/null || true
+    else warn "Model PID $MODEL_PID has not exited after KILL; inspect it from the host."; fi
+    MODEL_PID=
+}
 on_signal() {
     local signal=$1 code=$2
     trap '' INT TERM
     if [[ -n $MODEL_PID ]]; then
-        kill -s "$signal" -- "-$MODEL_PID" 2>/dev/null || true
-        wait "$MODEL_PID" 2>/dev/null || true
-        # Some shell grandchildren ignore SIGINT. The user explicitly stopped
-        # this stage; terminate remaining members after the CLI has shut down.
-        kill -TERM -- "-$MODEL_PID" 2>/dev/null || true
-        MODEL_PID=
+        warn 'Stopping the active model; escalating signals if necessary.'
+        stop_model_group "$signal"
     fi
     if [[ -n $ACTIVE_STAGE && -f $RUN_DIR/manifest.json ]]; then
         check_model_integrity
@@ -111,9 +132,11 @@ check_dependencies() {
     say "$GIT_VERSION; $GH_VERSION; $CODEX_VERSION; $CLAUDE_VERSION"
     help=$(codex exec review --help)
     require_help "$help" --base --output-last-message --json --ephemeral --model --config --strict-config
+    help=$(codex exec --help); require_help "$help" --skip-git-repo-check --output-last-message --json --ephemeral
     help=$(codex login --help); require_help "$help" status
     help=$(claude --help)
     require_help "$help" --print --model --effort --permission-mode --output-format stream-json --verbose --no-session-persistence --disallowed-tools --add-dir --json-schema --append-system-prompt
+    require_help "$help" --tools --disable-slash-commands --strict-mcp-config --system-prompt --setting-sources
     if [[ -n ${PR_REVIEW_CLAUDE_BUDGET:-} ]]; then require_help "$help" --max-budget-usd; fi
     help=$(claude auth --help); require_help "$help" status
     help=$(gh api --help); require_help "$help" --hostname --paginate --slurp --method --field --raw-field
