@@ -28,12 +28,26 @@ actionable issues and accurate file/line references, without the reasoning trans
 blocking_findings counts retained blocking issues. The recommendation is advisory.
 
 Also return a findings array covering the original findings and any new findings.
-Each item has a stable id (F1, F2, ...), title, validity (the classifications above),
+Each item has a stable id (F1, F2, ...), title, severity (exactly Critical, High,
+Medium, or Low), validity (the classifications above),
 evidence (including accurate code locations and failure scenario), blocking boolean,
 and body_md (a self-contained concise finding). Reuse IDs when reassessing existing
 findings. Rejected findings must not be blocking. blocking_findings equals the count
 of blocking entries, even when another reviewer already raised the issue.
 NEW here means discovered by synthesis, NOT new to the GitHub discussion.
+Store severity in the structured field, not only in report prose, and use the
+same rating in both. It measures impact separately from confidence or whether
+the issue blocks approval. For rejected findings retain the original reported
+severity; their REJECTED validity explains that the claimed issue was dismissed.
+Include locations (an array) and primary_location (one location or null) for each
+finding. A location is {path,side,line,start_line}: repository-relative path,
+LEFT for deletions in the merge-base or RIGHT for head additions/context, with
+positive inclusive line numbers on that side. Use the actual reviewed diff;
+the entire primary range must fit one hunk. For renames use the new path and
+the chosen side's line numbers. Additional evidence locations can be outside
+the diff, but never invent a primary location or infer one from vague prose.
+Use null when no valid inline publication anchor can be established. The human
+can then choose a placement explicitly. Do not make rejected findings postable.
 The full local report keeps covered/duplicate findings; a later contribution pass
 decides what is worth posting. Never treat duplicate suppression as bug resolution.
 If a fresh-discussion reassessment is supplied below, reconsider the challenged

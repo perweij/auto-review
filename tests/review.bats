@@ -10,6 +10,7 @@ load helpers/fixture
     [ "$(sort -u "$FIXTURE/reviewed-heads")" = "$HEAD_SHA" ]
     [ ! -e "$FIXTURE/post-count" ]
     manifest_is '.status == "complete" and .phases.synthesis.status == "completed"'
+    jq -e '.findings | all(.[]; .severity == "Medium")' "$(run_directory)/reviews/synthesis.json"
     grep -q 'Codex' "$(run_directory)/reviews/codex.md"
     grep -q 'codex.md' "$FIXTURE/synthesis-stdin"
     grep -q 'pr-discussion.json' "$FIXTURE/synthesis-stdin"

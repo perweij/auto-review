@@ -54,6 +54,33 @@ load helpers/fixture
     [ "$(stream_error "$FIXTURE/events")" = git_repository_unavailable ]
 }
 
+@test "structured Claude phases stream activity and retain reusable buffered-output cache identity" {
+    export MOCK_STREAM_STAGE=synthesis
+    run_review; assert_success
+    [[ $output == *'[synthesis] Process running:'*'0s since last output (stdout/stderr)'* ]]
+    [[ $output != *fixture-model-text-do-not-replay* ]]
+    saved=$(run_directory)
+    jq -se 'any(.[]; .type=="stream_event") and (last | .type=="result" and .is_error==false)' "$saved/logs/synthesis.raw.json"
+    jq -e '[.[] | select(.stage=="synthesis" or .stage=="contributions") | .argv] |
+        length==2 and all(.[]; .[index("--output-format")+1]=="stream-json" and
+          index("--verbose")!=null and index("--include-partial-messages")!=null)' "$saved/logs/commands.json"
+    # The saved command matches earlier buffered-JSON runs byte for byte.
+    manifest_is '[.phases.synthesis.inputs.command,.phases.contributions.inputs.command] |
+        all(.[]; .[index("--output-format")+1]=="json" and index("--verbose")==null and index("--include-partial-messages")==null)'
+    run_review; assert_success
+    [[ $output == *'Reusing completed synthesis'* ]]
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+}
+
+@test "streaming options preserve old structured command identity without hiding model changes" {
+    source "$PROJECT_ROOT/lib/models.sh"
+    prior='["claude","-p","--model","saved-model","--output-format","json","--json-schema","{}"]'
+    current='["claude","-p","--model","saved-model","--output-format","stream-json","--verbose","--include-partial-messages","--json-schema","{}"]'
+    [ "$(cache_command <<< "$prior")" = "$(cache_command <<< "$current")" ]
+    changed=$(jq -c '.[index("--model")+1]="other-model"' <<< "$current")
+    [ "$(cache_command <<< "$prior")" != "$(cache_command <<< "$changed")" ]
+}
+
 @test "Git config environment overrides are removed as a complete group" {
     export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.ignorecase GIT_CONFIG_VALUE_0=true
     export GIT_CONFIG_PARAMETERS="'core.ignorecase'='true'"

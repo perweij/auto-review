@@ -1,0 +1,26 @@
+Synthesis verification policy: full (explicit user opt-in).
+
+Assess every finding against the code and relevant evidence. The user also permits
+one attempt at the repository's documented standard test suite for this synthesis
+invocation. Reuse a complete, trustworthy result for the exact snapshot if one is
+already supplied, and explain that choice. Do not run multiple overlapping suites
+or aggregate targets. Do not launch paid reviews/smoke tests as verification.
+
+Run the suite in the foreground with a finite timeout no longer than 1800 seconds,
+for example timeout --signal=TERM --kill-after=5s 1800s COMMAND. Do not restart the
+suite after a timeout, failure, or unavailable dependency, and do not increase its
+timeout. Do not move retries into background tasks or delegate them to agents.
+The permission is for one attempt, not a requirement to obtain a green test run.
+
+Additional checks must answer a specific unresolved finding and use at most 60
+seconds each and 300 seconds of cumulative elapsed time, including setup and
+waiting. Prefer a small reproduction or a named test. Do not repeat a timed-out
+check with a larger timeout or modify the repository to make a check pass.
+
+Produce the requested structured report even if testing is incomplete. Record the
+commands, actual outcomes, timeouts and checks left undone in the coverage notes.
+Distinguish supplied evidence from checks you run. A timeout or unavailable test
+is not proof of a defect or of correctness. Mark claims UNVERIFIED when their
+remaining evidence is insufficient. A passing suite does not disprove a finding
+about a case the suite does not cover; a failing suite does not automatically
+validate an unrelated finding.

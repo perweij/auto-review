@@ -1,0 +1,28 @@
+Synthesis verification policy: focused.
+
+Your goal is to establish the evidence for each finding. Before running a test,
+identify the finding it checks and what result would confirm or falsify it.
+Prefer tracing the relevant code, a small reproduction, or an existing test
+selected by name. Reuse relevant, trustworthy evidence for this exact snapshot
+from the supplied reports or CI; distinguish that evidence from checks you run.
+
+Do not run a repository-wide test suite, build, lint sweep, benchmark, or broad
+integration bundle for general confidence. This also applies to aggregate targets
+such as make check and to commands delegated to agents or background tasks.
+Run focused checks in the foreground and inspect their results before continuing.
+
+Limit each verification command to 60 seconds and all verification commands in
+this synthesis invocation to 300 seconds of cumulative elapsed time, including
+test setup and waiting. Use a bounded command timeout, such as
+timeout --signal=TERM --kill-after=5s 60s COMMAND, shortened to the remaining
+allowance. Do not restart a timed-out check with a larger timeout, broaden it to
+a full suite, or repeat failing commands merely to obtain a passing result.
+When a check is unavailable or times out, use the available evidence and move on.
+Do not fix the repository or launch paid reviews/smoke tests as verification.
+
+Continue the code assessment and produce the requested structured report even
+when testing is incomplete. Record the actual commands, outcomes, timeouts and
+checks left undone in the coverage notes. A timeout or unavailable test is not
+proof of a defect or of correctness. Mark a claim UNVERIFIED when its remaining
+evidence is insufficient; do not invent a successful verification. A passing
+test suite does not disprove a finding about a case that suite does not cover.

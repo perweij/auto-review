@@ -1,6 +1,12 @@
 # Shared lifecycle and manifest operations. Sourced by bin/pr-review.
 RUN_DIR='' WORKTREE='' ACTIVE_STAGE='' MODEL_PID='' HEARTBEAT_PID='' SCRATCH=''
 NO_PUBLISH=false RESUME='' REPO_ARG='' TARGET='' INTERACTIVE=false
+TRUSTED_SNAPSHOT=''
+SYNTHESIS_TESTS=focused
+REVIEWERS=claude,codex PROCESSING_PROVIDER=claude
+CLAUDE_EFFORT=high CODEX_EFFORT=high
+OPTION_OVERRIDES='{}' RUN_CONFIGURATION='{}'
+CODEX_VERSION=disabled CLAUDE_VERSION=disabled
 CODEX_MODEL=gpt-6-astra CLAUDE_MODEL=fable
 PERMISSION_MODE=${PR_REVIEW_CLAUDE_PERMISSION_MODE:-auto}
 CLAUDE_DENY=(Edit Write NotebookEdit 'Bash(git push:*)' 'Bash(git commit:*)'
@@ -15,11 +21,18 @@ hash_file() { sha256sum -- "$1" | cut -d ' ' -f1; }
 usage() {
     cat <<'EOF'
 Usage: pr-review <PR_NUMBER | PR_URL> [options]
+       pr-review api             Version 1 JSON request on stdin; NDJSON responses
   -R, --repo [HOST/]OWNER/REPO   Override repository discovery
   --no-publish                  Never write to GitHub
   --resume RUN_DIRECTORY        Select a saved run explicitly (otherwise auto-match)
   --codex-model MODEL           Default: gpt-6-astra (effort high)
   --claude-model MODEL          Default: fable (effort high)
+  --reviewers PROVIDERS        claude,codex (default), claude, or codex
+  --processing-provider NAME   claude (default) or codex; fixed in single mode
+  --claude-effort LEVEL         Default: high
+  --codex-effort LEVEL          Default: high
+  --synthesis-tests MODE        focused (default), or full: permit one suite attempt
+  --trust-agent-config HEAD:MERGE_BASE  Explicit trust for this exact snapshot
   -h, --help
 Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan),
   PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET
@@ -32,13 +45,25 @@ parse_args() {
         case $1 in
             -h|--help) usage; exit 0 ;;
             --no-publish) NO_PUBLISH=true; shift ;;
-            -R|--repo|--resume|--codex-model|--claude-model)
+            -R|--repo|--resume|--codex-model|--claude-model|--trust-agent-config|--synthesis-tests|--reviewers|--processing-provider|--claude-effort|--codex-effort)
                 if (($# < 2)) || [[ -z $2 || $2 == -* ]]; then die "Missing value for $1"; fi
                 case $1 in
                     -R|--repo) REPO_ARG=$2 ;;
                     --resume) RESUME=$2 ;;
                     --codex-model) CODEX_MODEL=$2 ;;
                     --claude-model) CLAUDE_MODEL=$2 ;;
+                    --trust-agent-config) TRUSTED_SNAPSHOT=$2 ;;
+                    --synthesis-tests) SYNTHESIS_TESTS=$2 ;;
+                    --reviewers) REVIEWERS=$2 ;;
+                    --processing-provider) PROCESSING_PROVIDER=$2 ;;
+                    --claude-effort) CLAUDE_EFFORT=$2 ;;
+                    --codex-effort) CODEX_EFFORT=$2 ;;
+                esac
+                case $1 in
+                    --reviewers) OPTION_OVERRIDES=$(jq -c --arg v "$2" '.reviewers=($v|split(","))' <<< "$OPTION_OVERRIDES") ;;
+                    --*-model|--*-effort|--processing-provider|--synthesis-tests)
+                        local key=${1#--}; key=${key//-/_}
+                        OPTION_OVERRIDES=$(jq -c --arg k "$key" --arg v "$2" '.[$k]=$v' <<< "$OPTION_OVERRIDES") ;;
                 esac
                 shift 2 ;;
             -*) die "Unknown option: $1" ;;
@@ -48,6 +73,7 @@ parse_args() {
     [[ -n $TARGET ]] || die 'A PR number or URL is required; see --help'
     if [[ -t 0 ]]; then INTERACTIVE=true; else NO_PUBLISH=true; fi
     case $PERMISSION_MODE in auto|dontAsk|manual|plan) ;; *) die 'Unsupported Claude permission mode' ;; esac
+    case $SYNTHESIS_TESTS in focused|full) ;; *) die '--synthesis-tests must be focused or full' ;; esac
     [[ -z ${PR_REVIEW_MODEL_TIMEOUT:-} || ${PR_REVIEW_MODEL_TIMEOUT} =~ ^[1-9][0-9]*$ ]] || die 'PR_REVIEW_MODEL_TIMEOUT must be positive integer seconds'
     [[ ${PR_REVIEW_AUTH_TIMEOUT:-60} =~ ^[1-9][0-9]*$ ]] || die 'PR_REVIEW_AUTH_TIMEOUT must be positive integer seconds'
     [[ -z ${PR_REVIEW_CLAUDE_BUDGET:-} || ${PR_REVIEW_CLAUDE_BUDGET} =~ ^[0-9]+([.][0-9]+)?$ ]] || die 'PR_REVIEW_CLAUDE_BUDGET must be a USD amount'
@@ -130,19 +156,8 @@ require_help() {
 }
 check_dependencies() {
     local tool help
-    for tool in git gh codex claude jq flock timeout sha256sum realpath readlink; do command -v "$tool" >/dev/null || die "Missing required executable: $tool"; done
+    for tool in git gh python3 jq flock timeout sha256sum realpath readlink; do command -v "$tool" >/dev/null || die "Missing required executable: $tool"; done
     GIT_VERSION=$(git --version); GH_VERSION=$(gh --version | head -n1)
-    CODEX_VERSION=$(codex --version); CLAUDE_VERSION=$(claude --version)
-    say "$GIT_VERSION; $GH_VERSION; $CODEX_VERSION; $CLAUDE_VERSION"
-    help=$(codex exec review --help)
-    require_help "$help" --base --output-last-message --json --ephemeral --model --config --strict-config
-    help=$(codex exec --help); require_help "$help" --skip-git-repo-check --output-last-message --json --ephemeral
-    help=$(codex login --help); require_help "$help" status
-    help=$(claude --help)
-    require_help "$help" --print --model --effort --permission-mode --output-format stream-json --verbose --no-session-persistence --disallowed-tools --add-dir --json-schema --append-system-prompt
-    require_help "$help" --tools --disable-slash-commands --strict-mcp-config --system-prompt --setting-sources
-    if [[ -n ${PR_REVIEW_CLAUDE_BUDGET:-} ]]; then require_help "$help" --max-budget-usd; fi
-    help=$(claude auth --help); require_help "$help" status
     help=$(gh api --help); require_help "$help" --hostname --paginate --slurp --method --field --raw-field
     help=$(gh pr view --help); require_help "$help" --json --comments --repo
     help=$(gh auth status --help); require_help "$help" --hostname
@@ -151,4 +166,49 @@ check_dependencies() {
     git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'Run inside a usable Git checkout'
     COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir)
     SCRATCH=$(mktemp -d)
+}
+
+provider_enabled() { [[ ,$REVIEWERS, == *,$1,* ]]; }
+dual_review() { [[ $REVIEWERS == claude,codex ]]; }
+resolve_review_settings() {
+    local request session selected file=''
+    locate_review_session
+    if [[ -n $RESUME ]]; then
+        selected=$(realpath -e -- "$RESUME") || die 'Resume directory does not exist'
+        [[ -f $selected/manifest.json ]] || die 'Resume manifest missing'
+        session=$(jq -r '.session_directory // empty' "$selected/manifest.json")
+        selected=$(selected_run_directory "${session:-$selected}")
+        file=$selected/manifest.json
+    fi
+    request=$(jq -cn --arg file "$file" --argjson overrides "$OPTION_OVERRIDES" '{manifest:$file,overrides:$overrides}')
+    RUN_CONFIGURATION=$(printf '%s\n' "$request" | python3 "$ROOT/lib/review-settings.py") || die 'Cannot resolve review settings'
+    REVIEWERS=$(jq -r '.reviewers|join(",")' <<< "$RUN_CONFIGURATION")
+    PROCESSING_PROVIDER=$(jq -r .processing_provider <<< "$RUN_CONFIGURATION")
+    CLAUDE_MODEL=$(jq -r .claude_model <<< "$RUN_CONFIGURATION")
+    CODEX_MODEL=$(jq -r .codex_model <<< "$RUN_CONFIGURATION")
+    CLAUDE_EFFORT=$(jq -r .claude_effort <<< "$RUN_CONFIGURATION")
+    CODEX_EFFORT=$(jq -r .codex_effort <<< "$RUN_CONFIGURATION")
+    SYNTHESIS_TESTS=$(jq -r .synthesis_tests <<< "$RUN_CONFIGURATION")
+}
+check_model_dependencies() {
+    local help
+    if provider_enabled codex; then
+        command -v codex >/dev/null || die 'Missing required executable: codex'
+        CODEX_VERSION=$(codex --version)
+        help=$(codex exec review --help)
+        require_help "$help" --base --output-last-message --json --ephemeral --model --config --strict-config
+        help=$(codex exec --help); require_help "$help" --skip-git-repo-check --output-last-message --json --ephemeral
+        if [[ $PROCESSING_PROVIDER == codex ]]; then require_help "$help" --output-schema; fi
+        help=$(codex login --help); require_help "$help" status
+    fi
+    if provider_enabled claude; then
+        command -v claude >/dev/null || die 'Missing required executable: claude'
+        CLAUDE_VERSION=$(claude --version)
+        help=$(claude --help)
+        require_help "$help" --print --model --effort --permission-mode --output-format stream-json --verbose --include-partial-messages --no-session-persistence --disallowed-tools --add-dir --json-schema --append-system-prompt
+        require_help "$help" --tools --disable-slash-commands --strict-mcp-config --system-prompt --setting-sources
+        if [[ -n ${PR_REVIEW_CLAUDE_BUDGET:-} ]]; then require_help "$help" --max-budget-usd; fi
+        help=$(claude auth --help); require_help "$help" status
+    fi
+    say "$GIT_VERSION; $GH_VERSION; $CODEX_VERSION; $CLAUDE_VERSION"
 }

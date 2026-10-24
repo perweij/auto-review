@@ -10,15 +10,28 @@
     "review_body_md": {"type": "string", "minLength": 1},
     "findings": {"type": "array", "items": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "title", "validity", "evidence", "blocking", "body_md"],
+      "required": ["id", "title", "severity", "validity", "evidence", "blocking", "body_md", "primary_location", "locations"],
       "properties": {
         "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
         "title": {"type": "string", "minLength": 1},
+        "severity": {"type": "string", "enum": ["Critical", "High", "Medium", "Low"]},
         "validity": {"type": "string", "enum": ["CONFIRMED", "MODIFIED", "NEW", "UNVERIFIED", "REJECTED"]},
         "evidence": {"type": "string", "minLength": 1},
         "blocking": {"type": "boolean"},
-        "body_md": {"type": "string", "minLength": 1}
+        "body_md": {"type": "string", "minLength": 1},
+        "primary_location": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/location"}]},
+        "locations": {"type": "array", "items": {"$ref": "#/$defs/location"}}
       }
     }}
-  }
+  },
+  "$defs": {"location": {
+    "type": "object", "additionalProperties": false,
+    "required": ["path", "side", "line", "start_line"],
+    "properties": {
+      "path": {"type": "string", "minLength": 1},
+      "side": {"type": "string", "enum": ["LEFT", "RIGHT"]},
+      "line": {"type": "integer", "minimum": 1},
+      "start_line": {"type": "integer", "minimum": 1}
+    }
+  }}
 }

@@ -76,8 +76,8 @@ api_pages() {
 }
 check_authentication() {
     gh auth status --hostname "$HOST" >/dev/null 2>&1 || die "GitHub authentication failed for $HOST"
-    codex login status >/dev/null 2>&1 || die 'Codex authentication failed; run codex login'
-    claude auth status >/dev/null 2>&1 || die 'Claude authentication failed; run claude auth login'
+    if provider_enabled codex; then codex login status >/dev/null 2>&1 || die 'Codex authentication failed; run codex login'; fi
+    if provider_enabled claude; then claude auth status >/dev/null 2>&1 || die 'Claude authentication failed; run claude auth login'; fi
     fetch_pr_metadata "$SCRATCH/pr.json"
     VIEWER=$(gh api --hostname "$HOST" user --jq .login) || die 'Cannot identify GitHub viewer'
     [[ -n $VIEWER ]] || die 'GitHub viewer login missing'
@@ -126,17 +126,23 @@ discover_existing_run() {
             die 'Multiple saved runs match this worktree; select one with --resume RUN_DIRECTORY' ;;
     esac
 }
-initialize_run() {
-    local state_root main name file
-    mkdir -p -- "$COMMON_DIR/pr-review-locks"
-    exec {LOCK_FD}>"$COMMON_DIR/pr-review-locks/$PR.lock"
-    flock -n "$LOCK_FD" || die "Another run holds the lock for PR #$PR"
+locate_review_session() {
+    local state_root main name
     main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
     [[ -n $main ]] || die 'Cannot locate main checkout'
     name=${REPO##*/}
     WORKTREE=$(realpath -m -- "$(dirname -- "$main")/$name-review-pr-$PR")
     state_root=$(realpath -m -- "${XDG_STATE_HOME:-$HOME/.local/state}/pr-review/$HOST/$REPO")
     if [[ -z $RESUME ]]; then discover_existing_run "$state_root"; fi
+}
+initialize_run() {
+    local state_root main file publication_dir
+    mkdir -p -- "$COMMON_DIR/pr-review-locks"
+    exec {LOCK_FD}>"$COMMON_DIR/pr-review-locks/$PR.lock"
+    flock -n "$LOCK_FD" || die "Another run holds the lock for PR #$PR"
+    locate_review_session
+    main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+    state_root=$(realpath -m -- "${XDG_STATE_HOME:-$HOME/.local/state}/pr-review/$HOST/$REPO")
     if [[ -n $RESUME ]]; then
         RUN_DIR=$(realpath -e -- "$RESUME") || die 'Resume directory does not exist'
         [[ -f $RUN_DIR/manifest.json ]] || die 'Resume manifest missing'
@@ -154,6 +160,17 @@ initialize_run() {
           .format_version == 2 and .repository == $repo and (.pr | tostring) == $pr and .git_common_dir == $common' "$RUN_DIR/manifest.json" >/dev/null || die 'Resume repository or PR identity does not match'
         WORKTREE=$(jq -er .worktree "$RUN_DIR/manifest.json")
         RUN_ID=$(jq -er .run_id "$RUN_DIR/manifest.json")
+        for publication_dir in "$RUN_DIR" "$(current_run_directory)"; do
+            if [[ -f $publication_dir/publication/drafts.json ]] &&
+                jq -e 'any(.batches[]?.actions[]?; .status=="submitting" or .status=="ambiguous")' "$publication_dir/publication/drafts.json" >/dev/null; then
+                die 'Resolve uncertain publication in the Auto-review publication menu before running or replacing this review'
+            fi
+            if [[ $publication_dir != "$RUN_DIR" && -f $publication_dir/publication/actions.json ]] &&
+                jq -e 'any(.[]; .status!="draft" and .status!="published")' "$publication_dir/publication/actions.json" >/dev/null; then
+                die 'Resolve uncertain publication in the previous review before resuming its replacement; all drafts and receipts are retained'
+            fi
+        done
+        if jq -e '.publication_reset.status=="pending"' "$RUN_DIR/manifest.json" >/dev/null; then finish_publication_reset; fi
         if jq -e '.snapshot_update!=null' "$RUN_DIR/manifest.json" >/dev/null; then
             # An interrupted cleanup can leave these absent. Authentication
             # still runs first, then prepare_worktree finishes the saved update.
@@ -180,8 +197,13 @@ initialize_run() {
     for file in "$RUN_DIR"/prompts/*-prompt.txt; do
         [[ ! -f $file ]] || cp -- "$file" "$SCRATCH/resume-prompts/"
     done
-    manifest '.tools = {git:$git,gh:$gh,codex:$codex,claude:$claude} | .models = {codex:$cm,claude:$am,effort:"high",claude_permission_mode:$mode} | .viewer = $viewer | .viewer_permission = $permission | .status = "running"' \
-        --arg git "$GIT_VERSION" --arg gh "$GH_VERSION" --arg codex "$CODEX_VERSION" --arg claude "$CLAUDE_VERSION" --arg cm "$CODEX_MODEL" --arg am "$CLAUDE_MODEL" --arg mode "$PERMISSION_MODE" --arg viewer "$VIEWER" --arg permission "$VIEWER_PERMISSION"
+    # Configuration belongs to its generation. Fork before recording a change.
+    local saved_configuration
+    saved_configuration=$(python3 "$ROOT/lib/review-settings.py" <<< "$(jq -cn --arg file "$RUN_DIR/manifest.json" '{manifest:$file}')")
+    if [[ $(jq -cS . <<< "$saved_configuration") != "$(jq -cS . <<< "$RUN_CONFIGURATION")" ]] &&
+        jq -e '.phases.synthesis.status=="completed"' "$RUN_DIR/manifest.json" >/dev/null; then begin_review_attempt; fi
+    manifest '.configuration=$configuration | .tools = {git:$git,gh:$gh,codex:$codex,claude:$claude} | .models = {codex:$cm,claude:$am,claude_effort:$ce,codex_effort:$xe,claude_permission_mode:$mode} | .viewer = $viewer | .viewer_permission = $permission | .status = "running"' \
+        --arg git "$GIT_VERSION" --arg gh "$GH_VERSION" --arg codex "$CODEX_VERSION" --arg claude "$CLAUDE_VERSION" --argjson configuration "$RUN_CONFIGURATION" --arg ce "$CLAUDE_EFFORT" --arg xe "$CODEX_EFFORT" --arg cm "$CODEX_MODEL" --arg am "$CLAUDE_MODEL" --arg mode "$PERMISSION_MODE" --arg viewer "$VIEWER" --arg permission "$VIEWER_PERMISSION"
     say "Artifacts: $RUN_DIR"
 }
 prepare_worktree() {
@@ -233,7 +255,7 @@ check_agent_config_changes() {
     : > "$RUN_DIR/context/agent-config-changes.txt.tmp"
     while IFS= read -r -d '' path; do
         case /$path/ in
-            */AGENTS.md/|*/CLAUDE.md/|*/.claude/*|*/.codex/*|*/.mcp.json/)
+            */AGENTS.md/|*/AGENTS.override.md/|*/CLAUDE.md/|*/CLAUDE.local.md/|*/.claude/*|*/.codex/*|*/.mcp.json/)
                 printf '%q\n' "$path" >> "$RUN_DIR/context/agent-config-changes.txt.tmp"; found=true ;;
         esac
     done < <(git -C "$WORKTREE" diff --name-only --no-renames -z "$MERGE_BASE" "$HEAD_SHA")
@@ -242,9 +264,15 @@ check_agent_config_changes() {
         warn 'This PR changes agent configuration loaded by the models:'
         cat -- "$RUN_DIR/context/agent-config-changes.txt"
         if [[ $(jq -r '.agent_config_confirmed // false' "$RUN_DIR/manifest.json") != true ]]; then
-            $INTERACTIVE || die 'Agent configuration changes require interactive confirmation'
-            read -r -p 'Trust these configuration changes and run models? Type yes: ' answer || answer=
-            [[ $answer == yes ]] || die 'Agent configuration was not confirmed'
+            if [[ $TRUSTED_SNAPSHOT != "$HEAD_SHA:$MERGE_BASE" ]]; then
+                if [[ ${PR_REVIEW_API:-} == 1 ]]; then
+                    jq -cn --arg snapshot "$HEAD_SHA:$MERGE_BASE" --rawfile paths "$RUN_DIR/context/agent-config-changes.txt" \
+                        '{confirmation_required:"agent_configuration",snapshot:$snapshot,paths:$paths}'
+                fi
+                $INTERACTIVE || die 'Agent configuration changes require interactive confirmation'
+                read -r -p 'Trust these configuration changes and run models? Type yes: ' answer || answer=
+                [[ $answer == yes ]] || die 'Agent configuration was not confirmed'
+            fi
             manifest '.agent_config_confirmed = true'
         fi
     fi

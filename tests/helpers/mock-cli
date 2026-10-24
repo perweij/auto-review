@@ -7,10 +7,10 @@ if [[ $* == *--version* ]]; then printf '%s test-1.0\n' "$tool"; exit; fi
 if [[ $* == *--help* ]]; then
     cat <<'EOF'
 --base --output-last-message --json --ephemeral --model --config --strict-config
---print --effort --permission-mode --output-format stream-json --verbose
+--print --effort --permission-mode --output-format stream-json --verbose --include-partial-messages
 --no-session-persistence --disallowed-tools --add-dir --json-schema --max-budget-usd
 --append-system-prompt --hostname --paginate --slurp --method --field --raw-field
---repo --comments status
+--repo --comments status --output-schema
 --skip-git-repo-check --tools --disable-slash-commands --strict-mcp-config --system-prompt --setting-sources
 EOF
     exit
@@ -43,6 +43,9 @@ if [[ $tool == gh ]]; then
                 body=@*) body=${arg#body=@} ;;
             esac
         done
+        if $post && [[ $* == *'--input -'* ]]; then
+            exec python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mock-gh-json.py" "$endpoint"
+        fi
         case $endpoint in
             user) echo "${MOCK_VIEWER:-reviewer}" ;;
             graphql)
@@ -56,6 +59,7 @@ if [[ $tool == gh ]]; then
                     touch "$FIXTURE/discussion-changed"
                 fi
                 if [[ -f $FIXTURE/threads.json ]]; then nodes=$(cat "$FIXTURE/threads.json"); else nodes='[]'; fi
+                if [[ -f $FIXTURE/api-threads.json ]]; then nodes=$(jq --slurpfile added "$FIXTURE/api-threads.json" '. + $added[0]' <<< "$nodes"); fi
                 if [[ -f $FIXTURE/published-replies.jsonl ]]; then
                     nodes=$(jq --slurpfile replies "$FIXTURE/published-replies.jsonl" 'map(. as $thread | .comments.totalCount += ([$replies[]|select(.in_reply_to_id==$thread.comments.nodes[0].databaseId)]|length))' <<< "$nodes")
                 fi
@@ -78,6 +82,7 @@ if [[ $tool == gh ]]; then
                     jq -nc --arg head "$commit" --arg event "$event" --arg viewer "${MOCK_VIEWER:-reviewer}" --rawfile body "$body" '{id:99,commit_id:$head,state:$event,body:$body,user:{login:$viewer},html_url:"https://github.com/org/repo/pull/7#pullrequestreview-99",submitted_at:"2026-01-02"}' > "$FIXTURE/published.json"
                     cat "$FIXTURE/published.json"
                     [[ ${MOCK_POST:-} != ambiguous ]] || exit 1
+                elif [[ -s $FIXTURE/api-reviews.json ]]; then jq '[.]' "$FIXTURE/api-reviews.json"
                 elif [[ -s $FIXTURE/published.json ]]; then
                     if [[ ${MOCK_BAD_LOOKUP:-} == 1 ]]; then echo '[[{"id":99,"user":null,"body":"ambiguous"}]]'
                     else jq -s '[.]' "$FIXTURE/published.json"; fi
@@ -100,8 +105,15 @@ if [[ $tool == gh ]]; then
             */pulls/7/comments)
                 [[ ${MOCK_INLINE_FAIL:-} != 1 ]] || exit 1
                 if [[ -f $FIXTURE/inline.json ]]; then cat "$FIXTURE/inline.json"; else echo '[]'; fi > "$FIXTURE/inline-output.json"
+                if [[ -f $FIXTURE/api-inline.json ]]; then
+                    jq --slurpfile added "$FIXTURE/api-inline.json" '. + $added[0]' "$FIXTURE/inline-output.json" > "$FIXTURE/inline-output.tmp"
+                    mv "$FIXTURE/inline-output.tmp" "$FIXTURE/inline-output.json"
+                fi
                 if [[ -f $FIXTURE/published-replies.jsonl ]]; then jq --slurpfile replies "$FIXTURE/published-replies.jsonl" '[. + $replies]' "$FIXTURE/inline-output.json"
                 else jq '[.]' "$FIXTURE/inline-output.json"; fi ;;
+            */pulls/7/reviews/*/comments)
+                review=${endpoint%/comments}; review=${review##*/}
+                jq --argjson review "$review" '[[.[]|select(.pull_request_review_id==$review)]]' "$FIXTURE/api-inline.json" ;;
             */actions/runs*)
                 [[ ${MOCK_ACTIONS_FAIL:-} != 1 ]] || { echo 'HTTP 403' >&2; exit 1; }
                 if [[ ${MOCK_CI:-} == failing ]]; then echo '[{"workflow_runs":[{"status":"completed","conclusion":"failure"},{"status":"in_progress","conclusion":null}]}]'
@@ -143,8 +155,19 @@ if [[ $* == *PR_REVIEW_AUTH_OK* ]]; then
     exit
 fi
 
+if [[ ${MOCK_ADAPT:-} == 1 ]]; then
+    cat > "$FIXTURE/adapt-stdin"
+    if [[ $tool == codex ]]; then
+        echo '{"type":"item.completed","item":{"type":"agent_message","text":"A contextual reply"}}'
+        echo '{"type":"turn.completed"}'
+    else echo '{"type":"result","subtype":"success","is_error":false,"result":"A contextual reply"}'; fi
+    exit
+fi
+
 stage=claude
-if [[ $tool == codex ]]; then stage=codex
+if [[ $tool == codex && $* == *contributions.schema.json* ]]; then stage=contributions
+elif [[ $tool == codex && $* == *synthesis.schema.json* ]]; then stage=synthesis
+elif [[ $tool == codex ]]; then stage=codex
 elif [[ $* == *validity_conflicts* ]]; then stage=contributions
 elif [[ $* == *--json-schema* ]]; then stage=synthesis; fi
 printf '%s\n' "$stage" >> "$FIXTURE/stages"
@@ -163,6 +186,12 @@ fi
 if [[ $stage == synthesis || $stage == contributions ]]; then cat > "$FIXTURE/$stage-stdin"; else
     # Independent invocations must receive EOF, even with interactive parent stdin.
     [[ -z $(cat) ]] || exit 9
+fi
+if [[ $stage == synthesis || $stage == contributions ]] && [[ $* == *'--output-format stream-json'* ]]; then
+    echo '{"type":"system","subtype":"init"}'
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}'
+    echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixture-model-text-do-not-replay"}}}'
+    if [[ ${MOCK_STREAM_STAGE:-} == "$stage" ]]; then sleep 6; fi
 fi
 if [[ ${MOCK_SLEEP_STAGE:-} == "$stage" ]]; then
     if [[ ${MOCK_IGNORE_SIGNALS:-} == 1 ]]; then trap '' INT TERM
@@ -201,6 +230,14 @@ if [[ ${MOCK_STDOUT_OAUTH_STAGE:-} == "$stage" ]]; then
     exit 1
 fi
 if [[ ${MOCK_FAIL_STAGE:-} == "$stage" ]]; then echo 'Requested model unavailable or stage failed' >&2; exit 42; fi
+emit_structured() {
+    if [[ $tool == codex ]]; then
+        local output
+        output=$(jq -r '.[index("-o")+1]' <<< "$args")
+        jq '.structured_output' > "$output"
+        echo '{"type":"turn.completed"}'
+    else cat; fi
+}
 if [[ $stage == codex ]]; then
     if [[ ${MOCK_REWRITE_BASE:-} == 1 ]]; then
         git --git-dir="$FIXTURE/remote.git" update-ref refs/heads/main "$(git rev-parse HEAD)"
@@ -219,15 +256,16 @@ elif [[ $stage == claude ]]; then
     if [[ ${MOCK_CLAUDE_ERROR:-} == 1 ]]; then echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"result":"Budget exceeded"}'
     else echo '{"type":"result","subtype":"success","is_error":false,"result":"Claude independent finding: source.txt:1","permission_denials":[]}'; fi
 elif [[ $stage == synthesis ]]; then
-    if [[ ${MOCK_SCHEMA_INVALID:-} == 1 ]]; then echo '{"type":"result","subtype":"success","structured_output":{"recommendation":"MAYBE"}}'
+    if [[ ${MOCK_SCHEMA_INVALID:-} == 1 ]]; then echo '{"type":"result","subtype":"success","structured_output":{"recommendation":"MAYBE"}}' | emit_structured
     else
         if [[ -f $FIXTURE/findings.json ]]; then findings=$(cat "$FIXTURE/findings.json")
         else findings=$(jq -nc --argjson blockers "${MOCK_BLOCKERS:-0}" '[range(0;([$blockers,1]|max)) | {id:("F"+(.+1|tostring)),title:"Check arithmetic",validity:"CONFIRMED",evidence:"source.txt:1 arithmetic changes",blocking:(.<$blockers),body_md:"Please check source.txt:1."}]'); fi
+        findings=$(jq 'map(.severity //= "Medium")' <<< "$findings")
         if [[ ${MOCK_MATCH_CONFLICT:-} == once ]] && grep -q 'Fresh-discussion reassessment' "$FIXTURE/synthesis-stdin"; then
             findings=$(jq 'map(.validity="REJECTED"|.blocking=false)' <<< "$findings")
         fi
         printf '%s\n' "$findings" > "$FIXTURE/latest-findings.json"
-        jq -nc --argjson findings "$findings" '{type:"result",subtype:"success",is_error:false,structured_output:{recommendation:"COMMENT",recommendation_rationale:"Review is advisory",blocking_findings:([$findings[]|select(.blocking)]|length),report_md:"# Review\n\nValidated findings and coverage. No tests were run.",review_body_md:"Please check source.txt:1.",findings:$findings},permission_denials:[]}'
+        jq -nc --argjson findings "$findings" '{type:"result",subtype:"success",is_error:false,structured_output:{recommendation:"COMMENT",recommendation_rationale:"Review is advisory",blocking_findings:([$findings[]|select(.blocking)]|length),report_md:"# Review\n\nValidated findings and coverage. No tests were run.",review_body_md:"Please check source.txt:1.",findings:$findings},permission_denials:[]}' | emit_structured
     fi
 else
     if [[ -n ${MOCK_REAL_MATCHER:-} ]]; then exec "$MOCK_REAL_MATCHER" "$@" < "$FIXTURE/contributions-stdin"; fi
@@ -240,5 +278,5 @@ else
     if [[ -f $FIXTURE/discussion-changed && ${MOCK_CHANGE_MATCH_TO_DUPLICATE:-} == 1 ]]; then
         result=$(jq '.contributions |= map(.classification="DUPLICATE"|.discussion_keys=["comment:10"]|.target_key=null|.delta=""|.body_md="")' <<< "$result")
     fi
-    jq -nc --argjson result "$result" '{type:"result",subtype:"success",is_error:false,structured_output:$result,permission_denials:[]}'
+    jq -nc --argjson result "$result" '{type:"result",subtype:"success",is_error:false,structured_output:$result,permission_denials:[]}' | emit_structured
 fi

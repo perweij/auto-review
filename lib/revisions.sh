@@ -55,7 +55,7 @@ finish_snapshot_update() {
         .previous_review={archive:.snapshot_update.archive,worktree:.snapshot_update.worktree} |
         .snapshot=.snapshot_update.to | .run_id=.snapshot_update.run_id |
         .phases={} | .publication={status:"not_published"} | .generated_files=[] | .warnings=[] |
-        del(.snapshot_update,.reassessment,.review_restart,.agent_config_confirmed,.integrity_failed)'
+        del(.snapshot_update,.reassessment,.review_restart,.agent_config_confirmed,.integrity_failed,.publication_reset)'
     RUN_ID=$(jq -r .run_id "$RUN_DIR/manifest.json")
     say "Previous review and drafts preserved: $archive"
     say "Previous worktree preserved: $saved_worktree"

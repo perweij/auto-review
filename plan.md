@@ -604,11 +604,24 @@ Do not rely on past conversation/session memory between Stage B and Stage C. Mak
 
 A practical implementation is to render a synthesis prompt to a file and pass it on **standard input**:
 
+Synthesis uses the focused testing policy by default: checks must address a
+specific finding, with instructions to spend no more than 60 seconds per check
+and 300 seconds total on verification. Broad suites/builds/lint sweeps and
+automatic retries after timeouts are excluded. Incomplete verification is
+reported explicitly, with UNVERIFIED used when the remaining evidence is
+insufficient. `--synthesis-tests full` explicitly permits one standard suite
+attempt, instructed to finish within 1800 seconds, without automatic retries.
+These are model instructions, not a replacement for the optional process timeout.
+The selected policy is appended as a system instruction, recorded in the phase,
+and included in its cache identity. Changing it refreshes synthesis and matching;
+unchanged independent reviews and previous completed generations are retained.
+
 ```bash
 claude -p \
     --model "$CLAUDE_MODEL" \
     --effort high \
-    --output-format json \
+    --append-system-prompt "$(cat "$PROMPT_DIR/synthesis-testing-${SYNTHESIS_TESTS:-focused}.txt")" \
+    --output-format stream-json --verbose --include-partial-messages \
     --json-schema "$(cat "$PROMPT_DIR/synthesis.schema.json")" \
     --permission-mode "$CLAUDE_PERMISSION_MODE" \
     --no-session-persistence \
@@ -616,8 +629,13 @@ claude -p \
     --add-dir "$RUN_DIR/context" \
     --add-dir "$RUN_DIR/reviews" \
     < "$RUN_DIR/prompts/synthesis-prompt.txt" \
-    > "$RUN_DIR/reviews/synthesis.json" \
+    > "$RUN_DIR/logs/synthesis.raw.json" \
     2> "$RUN_DIR/logs/synthesis.stderr.log"
+
+jq -s 'map(select(.type=="result")) | last |
+    select(.subtype=="success" and .is_error!=true) |
+    .structured_output // (.result | fromjson)' \
+    "$RUN_DIR/logs/synthesis.raw.json" > "$RUN_DIR/reviews/synthesis.json"
 ```
 
 Do not use `"$(cat file)"` as the prompt argument. Linux limits a single command-line argument to 128 KiB (`MAX_ARG_STRLEN`), regardless of the total `ARG_MAX`.
@@ -1230,3 +1248,63 @@ Avoid overengineering.
 
 **The primary deliverable is a working `pr-review` CLI with tests and a concise README showing installation and usage.**
 
+## 17. Implementation extension: Magit/Forge frontend (protocol 1)
+
+The original CLI specification above is extended by the contextual frontend
+contract in [emacs/README.md](emacs/README.md) and [docs/api.md](docs/api.md).
+The frontend is separately installable from this repository and uses the public
+API rather than private artifacts. Its primary workflow is native sections in
+the order Unstaged, Staged, Suppressed, Published, with inline code/discussion,
+editable comment bodies, exact-comment publication, and explicit history recovery.
+
+New drafts start Unstaged; legacy CLI selection is not explicit staging. Text or
+placement changes unstage the complete draft. Manual placement overrides persist
+within a generation. Staged itself is the contextual publication preview; a
+per-review verdict chooser starts with the model recommendation when GitHub
+permits it (Comment for the PR author), preserving existing saved choices.
+The verdict assesses the PR overall, not individual comments. Publication sends new findings
+inline and additions as individual thread replies, preserving exact saved wording
+and tracking parent/per-comment receipts for partial and ambiguous recovery.
+
+Status groups contain `severity · filename: finding` headings directly. Severity
+is stored explicitly in new synthesis findings; existing reviews recover explicit
+ratings by finding ID from their saved report without rerunning models or rewriting
+drafts. Unknown ratings are Unrated. Grouped comments show the highest known
+severity, flag missing assessments, and expose individual ratings and blocking
+status when expanded. Severity does not change saved or published wording.
+Sections start
+collapsed; moves collapse the moved comments and retain other folds. Inline
+editing uses normal text keys with visible save/cancel instructions. Auxiliary
+windows and Transients support `q`; help offers actions appropriate to the
+selected item's state. Publication reports its outcome and exposes receipt URLs.
+
+Completed reviews and human text remain browsable after replacement, including
+same-commit runs. Generations pin code and discussion; a new completion leaves
+the displayed view intact. Explicit `g` in the main review buffer loads the
+latest completed results; `g` in history stays pinned and `N` opens current.
+No automatic old/new finding reconciliation or human-edit
+carry-forward is used. Browsing, editing, staging, and history never call models.
+The UI freezes structural refresh during an inline edit and retains unsaved text
+on stale-save errors. Emacs runs in the user's sandbox; launcher/auth migration,
+GitLab, TRAMP, and separate-clone operation remain outside this extension.
+
+
+## 18. Implementation extension: selectable review providers and setup
+
+`R` opens a populated Transient with enabled reviewers, provider-backed model
+and effort selectors, a testing-policy selector, and Run/resume/Refresh/Cancel.
+No manual text-entry or defaults commands appear. Fresh CLI metadata supplies
+choices; missing capabilities or discovery failure require correction/retry.
+The UI never silently substitutes models and never invokes inference on opening.
+
+New reviews use Customize/backend defaults; saved reviews retain their complete
+configuration. Both reviewers are enabled by default. With both, one shared
+provider choice handles synthesis, discussion matching, reassessment and adaptation,
+using that provider's selected model and effort. With one, that provider directly
+produces structured findings and matches discussions; there is no cross-review
+synthesis or dependency on the disabled CLI. CLI/API options expose the same settings.
+
+A replacement keeps prior generation settings, drafts and history intact through
+failure or interruption. Processor-only changes reuse compatible independent
+reports. Protocol additions and exact controls are documented in docs/api.md
+and emacs/README.md; metadata discovery and execution have separate lifecycles.

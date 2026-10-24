@@ -1,10 +1,10 @@
 # pr-review
 
-A local GitHub PR review CLI: Claude reviews first, Codex reviews the
-same Git snapshot independently, then a separate Claude invocation challenges and
-consolidates both reports. A final Claude pass compares findings with the latest
-discussion and drafts useful contributions. GitHub publication requires a
-human-selected action and an explicit final confirmation.
+A local GitHub PR review tool with a Magit/Forge interface. Run Claude, Codex,
+or both against the same Git snapshot. With both enabled, a selected provider
+challenges and consolidates the independent reports. That provider also compares
+findings with existing discussions and drafts useful contributions. GitHub
+publication requires human selection and explicit confirmation.
 
 ## Install
 
@@ -15,8 +15,9 @@ mkdir -p ~/.local/bin
 ln -s "$(pwd)/bin/pr-review" ~/.local/bin/pr-review
 ```
 
-Requires Linux, Bash 4.4+, Git, `gh`, `codex`, `claude`, `jq`, `flock`, `timeout`,
-and standard GNU utilities. The CLI checks capabilities through help output before
+Requires Linux, Bash 4.4+, Python 3.9+, Git, `gh`, `jq`, `flock`, `timeout`,
+and standard GNU utilities, plus the model CLIs for enabled reviewers.
+The CLI checks capabilities through help output before
 creating a worktree. Inspected locally: gh 2.103.0, codex-cli 0.164.0, and Claude
 Code 2.1.309. Claude must support its `/code-review` skill and `auto` permission
 mode. Use authenticated CLI installations (`gh auth login`, `codex login`, and
@@ -38,16 +39,29 @@ pr-review https://github.com/org/repository/pull/123 --no-publish
 pr-review 123 --repo org/repository
 pr-review 123 --repo github.example.com/org/repository
 pr-review 123 --codex-model gpt-6-astra --claude-model fable
+pr-review 123 --reviewers codex --codex-model gpt-6-luna --codex-effort medium
+pr-review 123 --processing-provider codex --claude-effort medium
 pr-review 123 --resume /absolute/path/to/run
 ```
 
 Repository discovery uses `gh repo view`; specify `--repo` when it is ambiguous.
 Exactly one Git remote must match the target repository. Fork PRs are fetched
 through the base repository's `refs/pull/<N>/head`, without adding a fork remote.
-The default models are `gpt-6-astra` and `fable`, both at high effort.
+New reviews default to both reviewers, `gpt-6-astra` and `fable`, at high effort,
+with Claude processing. `--reviewers claude` or `--reviewers codex` selects one
+reviewer: it produces structured findings directly and handles discussion matching,
+without an adversarial synthesis phase. `--processing-provider claude|codex`
+chooses synthesis and discussion matching when both reviewers are enabled; its
+model and effort are inherited from that provider's review settings. Thread
+adaptation and fresh-discussion reassessment use the same provider.
+
+Settings are retained per review, including testing policy and effort. Resume uses
+the pending/current generation's settings unless explicitly overridden. Changing
+only the processing provider reuses compatible independent reports. Completed
+reviews and human edits remain available in history if a replacement fails.
 
 Before fetching or creating the review worktree, every run (including `--resume`)
-makes a tiny live request through each CLI: Claude `haiku`, then Codex
+makes a tiny live request through each enabled CLI: Claude `haiku`, then Codex
 `gpt-6-luna` ([Codex model pricing](https://learn.chatgpt.com/docs/pricing)).
 These requests consume a small amount of usage and catch stale logins that local
 auth-status commands can miss. They run in a temporary directory with a fixed
@@ -83,10 +97,25 @@ usual worktree path is then prepared at the new commit. A saved update journal
 allows an interrupted move/setup to finish on the next invocation, including when
 the usual worktree path is temporarily absent. No manual worktree removal is needed.
 
-Both independent reviewers, synthesis and live GitHub discussion matching run
+The selected review pipeline and live GitHub discussion matching run
 afresh for an updated snapshot. There is no old-versus-new finding comparison,
 extra comparison model call, or automatic transfer of selections or draft text.
 An unedited earlier review needs no further action.
+
+Synthesis defaults to **focused verification**: code tracing, small reproductions,
+and tests selected to check a particular finding. Claude is instructed to allow
+60 seconds per check and five minutes of cumulative verification time, avoid
+repository-wide test/build/lint sweeps, and report incomplete checks instead of
+restarting them with longer limits. These are model instructions; they are not
+an enforced process deadline. `PR_REVIEW_MODEL_TIMEOUT` remains the optional hard
+limit for an entire model invocation.
+
+Use `--synthesis-tests full` to permit one standard full-suite attempt during
+synthesis, with an instructed limit of 30 minutes and no automatic retries.
+Focused follow-up checks retain the five-minute allowance. This permission is
+selected per invocation; ordinary runs default to `focused`. Changing the policy
+refreshes synthesis and discussion matching while reusing unchanged independent
+reviews. The previous completed generation and human edits remain in history.
 
 If earlier drafts contain human edits, the CLI shows a local report at
 `publication/previous-edits.md`. Use `[u]` to view those drafts, then `[e ID]` or `[e]`
@@ -116,7 +145,7 @@ place. A changed independent review restarts that phase and its downstream stage
 restarting Claude also restarts Codex to preserve independence. The candidate
 contains only the reports appropriate to those stages.
 
-Only after both reviews, synthesis, discussion matching, and draft preparation
+Only after the selected review pipeline, discussion matching, and draft preparation
 succeed does an atomic `.current-review` symlink update make the replacement
 current. Ctrl-C or a failure leaves the previous review available and the candidate
 pending. Rerunning the same PR or using `--resume` automatically continues that
@@ -124,10 +153,12 @@ candidate, reusing its successful stages. The CLI prints both locations after a
 failure. Interrupted promotion is recoverable without rerunning successful models.
 Normal draft editing and menu actions operate on the current review.
 
-On the same commit, if publication has already been attempted, replacing the
-analysis is stopped so earlier actions cannot be mistaken for publications of new
-findings. Updating to a different snapshot archives those actions and checks the
-actual GitHub discussion again.
+Changing models or processing settings after confirmed publication creates a
+replacement with a fresh publication ledger, even on the same commit. Earlier
+posts, receipts and edited drafts remain in their original review history.
+The new matcher reads those posts as part of the GitHub discussion; reused finding
+IDs cannot mark new issues as already posted. Uncertain publication must be
+resolved in the previous review before replacing its analysis.
 
 The initial session and its replacement attempts contain private artifacts. The CLI
 prints the exact active artifact directory. Initial sessions live under
@@ -144,8 +175,12 @@ prints the exact active artifact directory. Initial sessions live under
 
 Slow review models are allowed to finish. Heartbeats say "Process running" and show
 elapsed time and time since stdout or stderr changed; process liveness does not
-prove progress. A warning appears after 60 seconds without output. Recognized
-terminal events (including Codex's "not a git repository" error and `turn.failed`)
+prove progress. A warning appears after 60 seconds without output.
+Synthesis and discussion matching stream Claude events, including partial messages,
+so activity is visible before the final structured result. Raw events remain in
+their existing `logs/*.raw.json` files as newline-delimited JSON. This logging
+change preserves the cache identity of completed buffered-JSON reviews.
+Recognized terminal events (including Codex's "not a git repository" error and `turn.failed`)
 stop the model, escalating from TERM to KILL after five seconds if needed. Other
 error events are flagged while allowing retries. There is **no default timeout or
 budget limit** for a silent review without a terminal event. Before each review
@@ -289,3 +324,15 @@ different bugs on the same line, coverage in later replies, and conversations
 concluded without a resolution flag. All six matched the expected classifications;
 the contextual reply answered the author's open question and acknowledged the
 earlier fix. These are sample-based checks, not a guarantee of model judgment.
+
+## Magit and Forge frontend
+
+The optional [Emacs package](emacs/README.md) shows review comments directly in
+their code and discussion context. Use native sections to stage, unstage, edit,
+correct placement, browse saved generations, and publish exact inline comments.
+`M-x magit-auto-review` opens a saved review without running models. A versioned
+[JSON API](docs/api.md) keeps the frontend independent of private state files.
+
+The package lives alongside the backend under `emacs/`, with separate checks and
+a [Guix package definition](guix.scm). The ordinary CLI remains independently
+usable. Run `make check-backend`, `make check-emacs`, or `make check-all`.

@@ -190,6 +190,15 @@ inspect_proposal() {
 }
 interactive_publication() {
     local choice id answer author replies_only
+    # After adoption, both interfaces must use the same human draft ledger.
+    # The adapter takes short transactional locks; release this CLI run's lock
+    # before entering it. Models and matching have already completed.
+    if [[ -f $RUN_DIR/publication/drafts.json ]]; then
+        if $NO_PUBLISH; then say 'Saved API drafts are retained; open them in Magit or rerun without --no-publish.'; return; fi
+        exec {LOCK_FD}>&-
+        python3 "$ROOT/lib/api.py" --terminal "${SESSION_DIR:-$RUN_DIR}"
+        return
+    fi
     say "Full local review: $RUN_DIR/reviews/synthesis.md"
     if ! $CONTRIBUTIONS_READY; then say 'Publication paused: complete discussion and valid contribution proposals are required.'; return; fi
     say "Contribution report: $RUN_DIR/reviews/contributions.md"

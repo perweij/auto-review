@@ -43,9 +43,12 @@ collect_discussion() {
     # Only exclude exact, confirmed own post IDs from freshness comparisons.
     # Their full text stays available to the matching model.
     jq -S --slurpfile actions "$RUN_DIR/publication/actions.json" '
-      [$actions[0][] | select(.status=="published" and .kind=="reply") | .result.id] as $replies |
-      [$actions[0][] | select(.status=="published" and .kind=="review") | .result.id] as $reviews |
-      .items |= map(if .kind=="thread" then .comments |= map(select(.id as $id | $replies|index($id)|not))
+      [$actions[0][] | select(.status=="published") |
+        (if .kind=="reply" then .result.id else empty end), (.comment_results[]?.id)] as $replies |
+      [$actions[0][] | select(.status=="published") |
+        (if .kind=="review" then .result.id else .result.pull_request_review_id // empty end)] as $reviews |
+      .items |= map(if .kind=="thread" then .comments |= map(select(.id as $id | $replies|index($id)|not)) |
+          select((.comments|length)>0)
         elif .kind=="review" and (.comments[0].id as $id | $reviews|index($id)) then empty else . end)' \
         "$dir/discussion.json" > "$dir/external.json"
     DISCUSSION_HASH=$(hash_file "$dir/external.json")

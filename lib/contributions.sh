@@ -21,9 +21,7 @@ reconcile_contributions() {
         say '[final] Matching findings against the complete discussion'
         ACTIVE_STAGE=contributions
         review_command contributions
-        run_model claude "$RUN_DIR/prompts/contributions-prompt.txt" "$RUN_DIR/logs/contributions.raw.json" "$RUN_DIR/logs/contributions.stderr.log" "${REVIEW_COMMAND[@]}"
-        claude_result "$RUN_DIR/logs/contributions.raw.json" "$RUN_DIR/logs/contributions-result.json"
-        jq -e '.structured_output // (.result | fromjson)' "$RUN_DIR/logs/contributions-result.json" > "$output.tmp" || die 'No structured contribution result'
+        run_structured contributions "$output.tmp"
         jq -e --slurpfile findings "$RUN_DIR/reviews/synthesis.json" --slurpfile discussion "$DISCUSSION_FILE" -f "$ROOT/prompts/validate-contributions.jq" "$output.tmp" >/dev/null || die 'Invalid contribution schema, finding coverage, or discussion destination'
         mv -- "$output.tmp" "$output"
         if [[ $(jq '.validity_conflicts|length' "$output") == 0 ]]; then complete_phase "$output"; break; fi
@@ -36,7 +34,7 @@ reconcile_contributions() {
         jq -n --slurpfile prior "$RUN_DIR/reviews/synthesis.json" --slurpfile result "$output" --arg discussion "$DISCUSSION_FILE" \
             '{prior_findings:$prior[0].findings,validity_conflicts:$result[0].validity_conflicts,discussion:$discussion}' > "$RUN_DIR/reviews/reassessment-input.json"
         manifest '.reassessment = {discussion_hash:$hash,input:$input,discussion:$discussion}' --arg hash "$DISCUSSION_HASH" --arg input "$RUN_DIR/reviews/reassessment-input.json" --arg discussion "$DISCUSSION_FILE"
-        say 'Fresh discussion challenges validity; refreshing synthesis, retaining independent reviews.'
+        say 'Fresh discussion challenges validity; reassessing with the selected processing provider.'
         run_synthesis
     done
     local ledger=$RUN_DIR/publication/contributions.json old=$RUN_DIR/publication/contributions.previous.json

@@ -3,6 +3,10 @@ set -Eeuo pipefail
 umask 077
 
 ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+if [[ ${1:-} == api ]]; then
+    shift
+    exec python3 "$ROOT/lib/api.py" "$@"
+fi
 # shellcheck source=../lib/core.sh
 source "$ROOT/lib/core.sh"
 # shellcheck source=../lib/repository.sh
@@ -25,20 +29,22 @@ main() {
     trap on_exit EXIT
     trap 'on_signal INT 130' INT
     trap 'on_signal TERM 143' TERM
-    say '[1/7] Checking tools and authentication'
+    say '[setup] Checking tools and authentication'
     check_dependencies
     resolve_repository
+    resolve_review_settings
+    check_model_dependencies
     check_authentication
     initialize_run
     check_live_authentication
-    say '[2/7] Preparing worktree and Git snapshot'
+    say '[snapshot] Preparing worktree and Git snapshot'
     prepare_worktree
     check_agent_config_changes
-    say '[3/7] Collecting PR context'
+    say '[context] Collecting PR context'
     collect_pr_context
     run_reviews
     prepare_contributions
-    say '[7/7] Human review and optional publication'
+    say '[publication] Human review and optional publication'
     interactive_publication
     manifest '.status = "complete"'
 }
