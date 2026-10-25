@@ -19,7 +19,20 @@ Proposed moves:
 
 Leave running a review (`R`), inspecting results, staging comments, and publishing (`P`) in their current sections. Keep context-dependent visibility for the moved commands. Verify that `?` shows the new grouping and that each key still invokes the same command.
 
-## 2. Add proactive repository reviews
+## 2. Consolidate the backend in Python
+
+Implement the [Python backend migration specification](python-migration.md).
+Keep both the CLI and Emacs UI, with one Python application core and a stable
+version-1 JSON API. Replace Bash orchestration and jq application logic in
+stages, consolidate draft/publication behavior, and preserve saved reviews,
+human edits, receipts, cancellation, and verified checkpoint reuse.
+
+Complete this migration before substantially extending the backend for proactive
+repository reviews. The specification defines compatibility requirements,
+delivery stages, validation gates, and packaging changes, including the
+terminal's transition to the shared Unstaged/Staged draft workflow.
+
+## 3. Add proactive repository reviews
 
 Implement the [proactive repository review specification](proactive-review.md):
 review the default branch with an optional natural-language focus, triage findings
@@ -28,7 +41,7 @@ issues. Include CLI, JSON API, and a dedicated Emacs workflow designed to become
 the future Repository review toolkit major mode. The broader mode system and PR
 owner's toolkit are separate work, outside this specification.
 
-## 3. Include improvement proposals in proactive reviews
+## 4. Include improvement proposals in proactive reviews
 
 After proactive repository reviews are available, plan an opt-in extension for
 actionable design, maintainability, and performance improvements even when there
