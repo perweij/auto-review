@@ -108,6 +108,8 @@ total, without broad suites or timeout retries. Full permits one suite attempt
 with a 30-minute limit plus the focused-check allowance. These are model
 instructions, not enforced process timers. The policy applies to synthesis or the
 single-provider structured review, is shown in setup, and is saved for resume.
+Both independent reviewers always use focused checks, even when Full is selected;
+the full-suite permission is reserved for synthesis to avoid repeated suite runs.
 Changing processing settings preserves completed generations and their edits.
 
 Sections start collapsed. Status headings contain `severity · filename: finding` headings

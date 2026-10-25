@@ -102,20 +102,30 @@ afresh for an updated snapshot. There is no old-versus-new finding comparison,
 extra comparison model call, or automatic transfer of selections or draft text.
 An unedited earlier review needs no further action.
 
-Synthesis defaults to **focused verification**: code tracing, small reproductions,
-and tests selected to check a particular finding. Claude is instructed to allow
-60 seconds per check and five minutes of cumulative verification time, avoid
-repository-wide test/build/lint sweeps, and report incomplete checks instead of
-restarting them with longer limits. These are model instructions; they are not
-an enforced process deadline. `PR_REVIEW_MODEL_TIMEOUT` remains the optional hard
+Both independent reviewers use **focused verification**: code tracing, small
+reproductions, and tests selected to check a particular finding. Each reviewer is
+instructed to allow 60 seconds per check and five minutes of cumulative
+verification time, avoid repository-wide test/build/lint sweeps, and report
+incomplete checks instead of
+restarting them with longer limits. This also applies to review skills and
+delegated work. These are model instructions; they are not an enforced process
+deadline. `PR_REVIEW_MODEL_TIMEOUT` remains the optional hard
 limit for an entire model invocation.
 
-Use `--synthesis-tests full` to permit one standard full-suite attempt during
-synthesis, with an instructed limit of 30 minutes and no automatic retries.
-Focused follow-up checks retain the five-minute allowance. This permission is
-selected per invocation; ordinary runs default to `focused`. Changing the policy
+Synthesis (or the structured review in single-provider mode) defaults to the same
+focused limits. Use `--synthesis-tests full` to permit one standard full-suite
+attempt there, with an instructed limit of 30 minutes and no automatic retries.
+The independent reviewers remain focused, so this does not authorize a suite run
+in each stage. Focused follow-up checks retain the five-minute allowance. The
+selected policy is saved for resume; new reviews default to `focused`. Changing it
 refreshes synthesis and discussion matching while reusing unchanged independent
 reviews. The previous completed generation and human edits remain in history.
+
+Claude receives independent-review instructions through its appended system
+prompt; Codex receives them through
+[`developer_instructions`](https://learn.chatgpt.com/docs/config-file/config-reference#developer_instructions),
+while retaining the native `--base` review target. Policy changes are included in
+review cache identities, so changed instructions trigger a replacement review.
 
 If earlier drafts contain human edits, the CLI shows a local report at
 `publication/previous-edits.md`. Use `[u]` to view those drafts, then `[e ID]` or `[e]`

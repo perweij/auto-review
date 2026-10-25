@@ -140,7 +140,9 @@ save it explicitly into a current draft.
   provider handles reassessment and adaptation. Always runs with `--no-publish`.
   An optional `catalogs` object, keyed by provider and containing the `models`
   responses below, validates menu selections before starting work. Testing limits
-  are model instructions, not enforced timers. Freeze the complete settings for
+  are model instructions, not enforced timers. Both independent reviews always
+  use focused checks; `synthesis_tests=full` permits a suite only in synthesis
+  (or the single-provider structured review). Freeze the complete settings for
   confirmation retries; do not re-read global frontend defaults.
 - `cancel`: takes only `operation_id` from a `started` event; verifies process
   identity/start time before signalling the owned operation. The CLI cleans up

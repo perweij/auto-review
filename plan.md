@@ -469,6 +469,7 @@ codex exec review \
     -c model_reasoning_effort=high \
     -c sandbox_mode=read-only \
     -c approval_policy=never \
+    -c "developer_instructions=$(jq -Rs . "$PROMPT_DIR/independent.txt")" \
     --ephemeral \
     --json \
     -o "$RUN_DIR/reviews/codex.md" \
@@ -615,6 +616,16 @@ These are model instructions, not a replacement for the optional process timeout
 The selected policy is appended as a system instruction, recorded in the phase,
 and included in its cache identity. Changing it refreshes synthesis and matching;
 unchanged independent reviews and previous completed generations are retained.
+
+Both independent reviewers always receive the focused verification policy too,
+including its 60-second command limit, 300-second cumulative allowance, and ban
+on broad suite/build/lint runs or delegated retries. Their limits also apply to
+review skills. Full-suite permission is reserved for synthesis (or the structured
+review in single-provider mode), avoiding repeated suite runs across stages.
+Claude receives `prompts/independent.txt` through `--append-system-prompt`; Codex
+receives the same text through the `developer_instructions` config override so
+its native `--base` target is retained. Both command identities include the
+policy text, and their phase records declare focused testing.
 
 ```bash
 claude -p \

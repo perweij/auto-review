@@ -34,6 +34,8 @@ Usage: pr-review <PR_NUMBER | PR_URL> [options]
   --synthesis-tests MODE        focused (default), or full: permit one suite attempt
   --trust-agent-config HEAD:MERGE_BASE  Explicit trust for this exact snapshot
   -h, --help
+Independent reviews always use focused checks; full-suite permission is reserved
+for synthesis (or the structured review when only one provider is enabled).
 Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan),
   PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET
   (optional USD), PR_REVIEW_AUTH_TIMEOUT (seconds, default 60),

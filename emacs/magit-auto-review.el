@@ -30,6 +30,8 @@
 (defcustom magit-auto-review-synthesis-tests "focused"
   "Testing policy for synthesis or a single review.  R shows it before running.
 Focused permits small checks; full permits one full-suite attempt.
+With both providers enabled, their independent reviews always stay focused;
+the full-suite permission applies only to synthesis.
 These are model instructions, not an enforced process timeout."
   :type '(choice (const "focused") (const "full")) :group 'magit-auto-review)
 

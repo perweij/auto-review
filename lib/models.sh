@@ -99,7 +99,11 @@ model_environment() {
 review_command() {
     local stage=$1
     if [[ $stage == codex ]]; then
-        REVIEW_COMMAND=(codex exec review -m "$CODEX_MODEL" --strict-config -c model_reasoning_effort="$CODEX_EFFORT" -c sandbox_mode=read-only -c approval_policy=never --ephemeral --json -o "$RUN_DIR/reviews/codex.md.tmp" --base "$BASE_REF")
+        # Keep the native --base target: a positional custom prompt conflicts
+        # with it. JSON quoting produces a TOML string for the config override.
+        REVIEW_COMMAND=(codex exec review -m "$CODEX_MODEL" --strict-config -c model_reasoning_effort="$CODEX_EFFORT" -c sandbox_mode=read-only -c approval_policy=never
+            -c "developer_instructions=$(jq -Rs . "$ROOT/prompts/independent.txt")"
+            --ephemeral --json -o "$RUN_DIR/reviews/codex.md.tmp" --base "$BASE_REF")
         return
     fi
     if [[ $stage != claude && $PROCESSING_PROVIDER == codex ]]; then
@@ -321,9 +325,18 @@ run_model() {
     if is_auth_probe; then prefix=(timeout --signal=TERM --kill-after=5s "${PR_REVIEW_MODEL_TIMEOUT}s"); fi
     manifest '.phases[$stage] = {status:"running",fingerprint:$fp,started_at:$time,stdout_log:$stdout,stderr_log:$stderr}' --arg stage "$ACTIVE_STAGE" --arg fp "$FINGERPRINT" --arg time "$(now)" --arg stdout "$events" --arg stderr "$stderr"
     manifest '.phases[$stage].model = $model' --arg stage "$ACTIVE_STAGE" --arg model "$model"
-    if [[ $ACTIVE_STAGE == synthesis ]]; then
-        manifest '.phases.synthesis.testing_policy=$policy' --arg policy "$SYNTHESIS_TESTS"
-    fi
+    case $ACTIVE_STAGE in
+        claude|codex)
+            manifest '.phases[$stage].testing_policy="focused"' --arg stage "$ACTIVE_STAGE"
+            say 'Verification: focused checks for this independent review (60s each, 5m total); no full-suite runs.' ;;
+        synthesis)
+            manifest '.phases.synthesis.testing_policy=$policy' --arg policy "$SYNTHESIS_TESTS"
+            if [[ $SYNTHESIS_TESTS == full ]]; then
+                say 'Verification: one full-suite attempt permitted (30m); focused checks limited to 5m total.'
+            else
+                say 'Verification: focused checks (60s each, 5m total); no full-suite runs.'
+            fi ;;
+    esac
     if ! is_auth_probe; then
         manifest '.phases[$stage].inputs=$inputs' --arg stage "$ACTIVE_STAGE" --argjson inputs "$(phase_inputs "$ACTIVE_STAGE")"
     fi
@@ -443,11 +456,6 @@ run_synthesis() {
         render_synthesis_prompt
         FINGERPRINT=$(phase_fingerprint synthesis)
         ACTIVE_STAGE=synthesis
-        if [[ $SYNTHESIS_TESTS == full ]]; then
-            say 'Verification: one full-suite attempt permitted (30m); focused checks limited to 5m total.'
-        else
-            say 'Verification: focused checks (60s each, 5m total); no full-suite runs.'
-        fi
         review_command synthesis
         run_structured synthesis "$output.tmp"
         jq -e --argjson require_severity true -f "$ROOT/prompts/validate-synthesis.jq" "$output.tmp" >/dev/null || die 'Synthesis violates the JSON schema; resume to retry'
