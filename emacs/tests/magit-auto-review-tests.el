@@ -429,6 +429,27 @@
      (with-current-buffer "*Auto-review progress*"
        (should (string-match-p "Review completed. g or N opens the latest results" (buffer-string)))))))
 
+(ert-deftest auto-review/paused-review-does-not-announce-unpromoted-results ()
+  (dolist (first '(nil t))
+    (auto-review-test-buffer
+     (when first
+       (setq magit-auto-review--session nil magit-auto-review--generation nil
+             magit-auto-review--review nil magit-auto-review--target 7)
+       (magit-auto-review--render-placeholder "No saved review"))
+     (let ((text (buffer-string)))
+       (cl-letf (((symbol-function 'magit-auto-review--start)
+                  (lambda (_request callback)
+                    (funcall callback '((session . "/test/session") (generation . "old")
+                                        (sessions . (((session . "/test/session") (generation . "old"))))
+                                        (new_review_ready . :false) (status . "paused")
+                                        (pending_generation . "candidate"))))))
+         (magit-auto-review--launch-review nil))
+       (should (equal text (buffer-string)))
+       (should (equal magit-auto-review--session "/test/session"))
+       (should-not magit-auto-review--new-ready)
+       (should (string-match-p "Review paused" magit-auto-review--notice))
+       (should-not (string-match-p "Review completed" magit-auto-review--notice))))))
+
 (ert-deftest auto-review/group-staging-and-region-are-whole-comments ()
   (auto-review-test-buffer
    (goto-char (oref (car (oref magit-root-section children)) start))

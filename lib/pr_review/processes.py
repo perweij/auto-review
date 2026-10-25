@@ -109,14 +109,18 @@ class Result:
     process_exit_status: int = 0
 
 
-def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=90, stdout_path=None,
+def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
         stderr_path=None, model_events=False, stage="", on_line=None):
     """Run without a shell; log raw bytes while interpreting complete records."""
     cancellation = _cancellation.get() or Cancellation()
     cancellation.check()
     argv = [str(a) for a in argv]
     started = activity = heartbeat = time.monotonic()
-    pending = {"stdout": b"", "stderr": b""}
+    pending = {"stdout": bytearray(), "stderr": bytearray()}
+    limit = os.environ.get('PR_REVIEW_MAX_EVENT_BYTES') or str(64 * 1024 * 1024)
+    if (model_events or on_line) and not re.fullmatch(r'[1-9][0-9]*', limit):
+        raise ApiError('invalid_request', 'PR_REVIEW_MAX_EVENT_BYTES must be positive integer bytes.')
+    record_limit = int(limit) if model_events or on_line else 0
     captured = {"stdout": [], "stderr": []}
     files, events, reason, warned = {}, [], "", False
     child = None
@@ -204,7 +208,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=90, stdout_path=No
                         selector.unregister(key.fileobj)
                         if pending[name]:
                             line_received(name, pending[name])
-                            pending[name] = b""
+                            pending[name].clear()
                         continue
                     activity = time.monotonic()
                     silence_warned = False
@@ -213,13 +217,19 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=90, stdout_path=No
                         files[name].flush()
                     else:
                         captured[name].append(data)
-                    if model_events or on_line:
-                        pending[name] += data
-                        while b"\n" in pending[name]:
-                            raw, pending[name] = pending[name].split(b"\n", 1)
-                            line_received(name, raw)
-                        if len(pending[name]) > 4 * 1024 * 1024:
-                            raise ApiError("output_limit", "Model output exceeded the operation's line limit.")
+                    if on_line or (model_events and name == 'stdout'):
+                        # Append each chunk once; long partial records must not
+                        # cause quadratic copying. Stderr is only raw logging.
+                        parts = data.split(b'\n')
+                        for index, part in enumerate(parts):
+                            if len(pending[name]) + len(part) > record_limit:
+                                raise ApiError('output_limit',
+                                    f'Model event exceeds {record_limit} bytes; raw logs are retained. '
+                                    'PR_REVIEW_MAX_EVENT_BYTES can raise this limit.')
+                            pending[name].extend(part)
+                            if index < len(parts) - 1:
+                                line_received(name, pending[name])
+                                pending[name].clear()
                 if stage and current - heartbeat >= 5:
                     emit("progress", message=f"[{stage}] Process running: {int(current-started)}s elapsed; {max(0, int(current-activity))}s since last output (stdout/stderr)")
                     if current - activity >= 60 and not silence_warned:

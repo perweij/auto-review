@@ -73,6 +73,9 @@ responses stop the run before any reviews. Raw results and stderr are saved in
 quota, model-access, network and timeout failures without printing raw errors.
 
 Probes have a 60-second timeout each (`PR_REVIEW_AUTH_TIMEOUT` overrides it).
+Local authentication checks use that deadline too. Ordinary Git and GitHub
+operations, including fetches, worktree creation, and pagination, have no fixed
+deadline; they remain cancellable. Model discovery retains its separate deadline.
 If your account lacks Luna access, set `PR_REVIEW_CODEX_PROBE_MODEL` to an
 inexpensive model it supports; there is no automatic fallback to a costlier model.
 A successful probe confirms live access to that model at that moment; review-model
@@ -220,6 +223,7 @@ Optional environment settings:
 | `PR_REVIEW_CLAUDE_PERMISSION_MODE` | `auto` (default), `dontAsk`, `manual`, or `plan` |
 | `XDG_STATE_HOME` | Artifact location; must be outside the reviewed repository |
 | `VISUAL`, `EDITOR` | Editor command and simple arguments; default `vi` |
+| `PR_REVIEW_MAX_EVENT_BYTES` | Maximum provider JSON record size in bytes; default 67108864 (64 MiB). Increase for larger valid results. Stderr is logged without this record limit. |
 
 ## Publication and safeguards
 

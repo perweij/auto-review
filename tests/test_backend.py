@@ -82,6 +82,24 @@ class LegacyBytesTest(unittest.TestCase):
 
 
 class SupervisorTest(unittest.TestCase):
+    def test_repository_commands_survive_more_than_ninety_seconds(self):
+        from pr_review.common import command
+        clock = time.monotonic
+        calls = 0
+        def elapsed():
+            nonlocal calls
+            calls += 1
+            return clock() + (120 if calls > 1 else 0)
+        with patch('pr_review.processes.time.monotonic', side_effect=elapsed):
+            result = command([sys.executable, '-c', "import time; time.sleep(.05); print('finished')"])
+        self.assertEqual(result.stdout, 'finished\n')
+
+    def test_explicit_command_deadline_still_applies(self):
+        from pr_review.common import command
+        with self.assertRaises(ApiError) as caught:
+            command([sys.executable, '-c', 'import time; time.sleep(60)'], timeout=.05)
+        self.assertEqual(caught.exception.details['exit_code'], 124)
+
     def test_partial_json_and_final_unterminated_record(self):
         code = "import sys,time; sys.stdout.write('{\\\"type\\\":'); sys.stdout.flush(); time.sleep(.05); sys.stdout.write('\\\"turn.completed\\\"}')"
         result = run([sys.executable, '-c', code], model_events=True)
@@ -135,6 +153,37 @@ class SupervisorTest(unittest.TestCase):
         result = run([sys.executable, '-c', code], input_bytes=b'y'*400000, timeout=5)
         self.assertEqual(result.returncode, 0)
         self.assertTrue(result.stdout.endswith('400000\n'))
+
+    def test_large_model_result_keeps_success_and_error_semantics(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as name:
+                output = Path(name) / 'events.jsonl'
+                code = ("import json; print(json.dumps({'type':'result','is_error':" + repr(failed) +
+                        ",'result':'x'*(5*1024*1024)}))")
+                result = run([sys.executable, '-c', code], model_events=True,
+                             stdout_path=output, timeout=5)
+                self.assertEqual(len(result.events[-1]['result']), 5*1024*1024)
+                self.assertEqual(result.events[-1], json.loads(output.read_bytes()))
+                self.assertEqual(result.reason, 'model_result_error' if failed else '')
+                self.assertEqual(result.returncode != 0, failed)
+
+    def test_long_stderr_is_logged_without_model_record_parsing(self):
+        with tempfile.TemporaryDirectory() as name:
+            output = Path(name) / 'stderr.log'
+            code = "import sys; sys.stderr.write('x'*(5*1024*1024)); print('{\"type\":\"turn.completed\"}')"
+            with patch.dict(os.environ, {'PR_REVIEW_MAX_EVENT_BYTES':'1024'}):
+                result = run([sys.executable, '-c', code], model_events=True,
+                             stderr_path=output, timeout=5)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(output.stat().st_size, 5*1024*1024)
+
+    def test_configured_event_limit_applies_to_complete_and_partial_records(self):
+        for newline in ('', '\n'):
+            with self.subTest(newline=newline), patch.dict(os.environ, {'PR_REVIEW_MAX_EVENT_BYTES':'1024'}):
+                code = 'import sys; sys.stdout.write("x"*2048+' + repr(newline) + ')'
+                with self.assertRaises(ApiError) as caught:
+                    run([sys.executable, '-c', code], model_events=True, timeout=5)
+                self.assertEqual(caught.exception.code, 'output_limit')
 
     def test_environment_is_filtered_as_a_unit_without_mutating_parent(self):
         with patch.dict(os.environ, {'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'key','GIT_CONFIG_VALUE_0':'secret','GH_TOKEN':'secret','OPENAI_API_KEY':'own','ANTHROPIC_API_KEY':'other'}):

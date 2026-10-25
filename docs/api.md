@@ -178,6 +178,11 @@ save it explicitly into a current draft.
   With a `session`, completion returns `{session, generation, new_review_ready}`.
   Store the returned session before reading results; completion does not itself
   replace the displayed generation.
+  Both response forms include `status` and `new_review_ready`. If discussion is
+  incomplete or reassessment remains unresolved, `status` is `paused`, readiness
+  is false, and `pending_generation` identifies the retained unfinished analysis.
+  The ordinary `generation` and discovery descriptors still select the current
+  review; an unpromoted replacement is never advertised as the current result.
 - `cancel`: takes only `operation_id` from a `started` event; verifies process
   identity/start time before signalling the owned operation. The CLI cleans up
   its model process groups and preserves completed checkpoints.

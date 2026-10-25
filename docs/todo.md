@@ -31,6 +31,38 @@ Run the pinned Guix build on a host with Guix before considering the packaging
 acceptance gate complete. Also execute the suite on the declared Python 3.9
 minimum; this workspace verified its syntax but only has Python 3.12 available.
 
+### PR #3 dogfood findings: fixes implemented and verified
+
+The saved review inspected migration commit `c04bbb4`, before the first-run fix
+in `7c73ec4`. Revalidate against the current branch before treating a finding as
+open. Local source artifacts are under
+`/home/vscode/.local/state/pr-review/github.com/perweij/auto-review/pr-3-5sro0we5/`:
+`reviews/synthesis.md` is the complete report, `reviews/synthesis.json` contains
+F1–F10, and `publication/drafts.json` contains the seven proposed comments.
+Keep these original artifacts intact; track dispositions here.
+
+| Finding | Status and evidence | Next action / acceptance |
+| --- | --- | --- |
+| F1, High: first-run response shape | Fixed in `7c73ec4`. Emacs expected `sessions[0].session`, but migration returned top-level `session`. Restored protocol 1 response and local rediscovery from an empty buffer. | Covered by first-run/resumed API tests and real-backend ERT tests for both `g` and `N`; no rerun of the user's completed analysis is needed. |
+| F2, High: blanket 90-second command timeout | Fixed. Ordinary Git/GitHub commands have no implicit deadline and remain cancellable. Local auth checks use the configured auth deadline; version/help probes retain an explicit 90-second deadline. Model and discovery limits remain separate. | A simulated-clock regression failed before the fix and now passes after 120 seconds of simulated elapsed time; an explicit command deadline still fails with exit 124. |
+| F3, Medium: unpromoted replacement reported ready | Fixed. Incomplete discussion or unresolved reassessment records `paused`, reports the current generation plus the pending generation and false readiness, and Emacs announces the pause. First-run `sessions` compatibility is retained. | Two Bats regressions cover initial incomplete discussion, both replacement pause paths, and successful resume without repeating independent reviews. All 63 ERT tests pass, including first-run and replacement pause announcements. |
+| F4, High: publication receipts during replacement | Confirmed a narrower defect and fixed. Receipts are preserved in history; treating old posts as discussion for a new analysis is intentional. However, discussion-only rematching recorded the old own-post-excluding fingerprint, then discarded its copied receipts, causing an unchanged resume to pay for another rematch. | The new end-to-end regression failed before the fix and passes afterward: publish a reply plus inline review, change external discussion, rematch, and resume unchanged. Reset candidate publication state and collect the new baseline before matching. Historical receipts remain byte-identical, new counters are zero, and no duplicate posts or extra matching calls occur. |
+| F5, Medium: 4 MiB model-event line cap | Fixed. Provider records default to a documented 64 MiB limit, configurable through `PR_REVIEW_MAX_EVENT_BYTES`; pending bytearrays avoid repeated whole-record copying. Stderr is logged without JSON line buffering. | Synthetic 5 MiB success/error results and long stderr pass. A configured smaller limit still rejects oversized complete and partial records. No oversized real provider event was observed. |
+| F7, Medium: final draft transaction does not wait | Confirmed a reachable current-review finalization race and fixed, also in cached follow-up adoption. Finalization waits cancellably under the existing PR-before-draft lock order. The report's specific pending-candidate/UI explanation was too broad. | A child process finalizing real saved drafts failed while the parent held a draft transaction. It now waits, succeeds after release, and retains the human text saved during the wait, for both ordinary contributions and follow-up. |
+| F10, Low: extensionless entry point skipped by lint | Fixed: `make lint` explicitly invokes `python3 -m py_compile bin/pr-review`. | A temporary copied checkout with deliberately invalid entry-point syntax fails `make lint` at `py_compile`. Normal lint passes; the real source was unchanged by the fault injection. |
+
+All six remaining findings have fixes and focused evidence. Validation on
+2026-10-25 passed: all 161 Bats acceptance tests, 94 Python tests, 63 ERT tests,
+lint, and `git diff --check`. Production files also parse with Python 3.9 grammar;
+the actual minimum-version interpreter and Guix build remain the environment
+checks listed above. Tests used synthetic providers/GitHub and temporary
+repositories, with no live inference or publication.
+
+The synthesis rejected F6 (claimed reset-publication traceback), F8 (claimed
+silent cancellation solely from the exception hierarchy), and F9 (duplicated
+checks without a demonstrated inconsistency). They are not established defects;
+reopen only with a reachable failing case.
+
 ## 3. Add proactive repository reviews
 
 Implement the [proactive repository review specification](proactive-review.md):

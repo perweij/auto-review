@@ -33,6 +33,41 @@ api_mutate() {
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
 }
 
+@test "incomplete first API run reports paused state and resumes without repeating reviews" {
+    export MOCK_GRAPHQL_FAIL=1
+    run api '{"command":"run","pr":7}' ''; assert_success
+    jq -se 'last.result | .new_review_ready==false and .status=="paused" and (.sessions|length)==1' <<< "$output"
+    saved=$(session_directory)
+    manifest_is '.status=="paused" and .publication.status=="paused"'
+    unset MOCK_GRAPHQL_FAIL
+    run api '{"command":"run"}' "$saved"; assert_success
+    jq -se 'last.result.new_review_ready==true' <<< "$output"
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+}
+
+@test "paused API replacement reports current generation until discussion and matching complete" {
+    run_review; assert_success
+    saved=$(session_directory)
+    api_mutate edit '{"comment":"p1","body":"Retained current draft"}' > /dev/null
+    state=$(api '{"command":"read"}' "$saved")
+    generation=$(jq -r .result.generation <<< "$state")
+    for failure in MOCK_GRAPHQL_FAIL MOCK_MATCH_CONFLICT; do
+        if [[ $failure == MOCK_GRAPHQL_FAIL ]]; then export MOCK_GRAPHQL_FAIL=1
+        else unset MOCK_GRAPHQL_FAIL; export MOCK_MATCH_CONFLICT=always; fi
+        run api '{"command":"run","synthesis_tests":"full"}' "$saved"; assert_success
+        jq -se --arg generation "$generation" 'last.result | .generation==$generation and
+            .new_review_ready==false and .status=="paused" and .pending_generation!=$generation' <<< "$output"
+        manifest_is '.status=="paused"'
+        state=$(api '{"command":"read"}' "$saved")
+        jq -e --arg generation "$generation" '.result.generation==$generation and .result.comments[0].body=="Retained current draft"' <<< "$state"
+    done
+    unset MOCK_MATCH_CONFLICT
+    run api '{"command":"run"}' "$saved"; assert_success
+    jq -se --arg generation "$generation" 'last.result | .new_review_ready==true and .generation!=$generation' <<< "$output"
+    [ "$(grep -c '^claude$' "$FIXTURE/stages")" = 1 ]
+    [ "$(grep -c '^codex$' "$FIXTURE/stages")" = 1 ]
+}
+
 @test "API adopts legacy drafts without model calls and posts separate inline comments" {
     run_review; assert_success
     saved=$(session_directory)
@@ -69,6 +104,38 @@ api_mutate() {
     [ "$(cat "$FIXTURE/reply-count")" = 1 ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+}
+
+@test "rematching after published replies and inline comments establishes a stable new baseline" {
+    discussion_fixture ADDITION
+    add_new_finding
+    run_review; assert_success
+    saved=$(session_directory)
+    api_mutate placement '{"comment":"p2","placement":{"kind":"inline","path":"source.txt","side":"RIGHT","line":2}}' > /dev/null
+    api_mutate stage '{"comments":["p1","p2"]}' > /dev/null
+    state=$(api '{"command":"read"}' "$saved")
+    generation=$(jq -r .result.generation <<< "$state")
+    request=$(jq -c '.result|{command:"prepare",generation,revision}' <<< "$state")
+    run api "$request" "$saved"; assert_success
+    request=$(jq -c '.result|{command:"publish",confirmation,generation:.review.generation,revision:.review.revision}' <<< "$output")
+    run api "$request" "$saved"; assert_success
+    history_hash=$(sha256sum "$saved/publication/drafts.json")
+    jq '.[1].body += " New external context."' "$FIXTURE/inline.json" > "$FIXTURE/new-inline.json"
+    mv "$FIXTURE/new-inline.json" "$FIXTURE/inline.json"
+    run_review; assert_success
+    candidate=$(run_directory)
+    [ "$candidate" != "$saved" ]
+    stages=$(cat "$FIXTURE/stages")
+    run_review; assert_success
+    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(run_directory)" = "$candidate" ]
+    manifest_is '.publication.published_actions==0'
+    [ "$(sha256sum "$saved/publication/drafts.json")" = "$history_hash" ]
+    request=$(jq -cn --arg generation "$generation" '{command:"read",generation:$generation}')
+    state=$(api "$request" "$saved")
+    jq -e '.result.comments | all(.status=="published" and .receipt.id!=null)' <<< "$state"
+    [ "$(cat "$FIXTURE/post-count")" = 1 ]
+    [ "$(cat "$FIXTURE/reply-count")" = 1 ]
 }
 
 @test "API operation IDs cancel the owned model process without losing checkpoints" {

@@ -198,7 +198,22 @@ def contributions(run):
             except ApiError:
                 reused = False
         if not reused:
+            previous = run.path
             protect(run, 'contributions')
+            if run.path != previous:
+                # A rematch creates fresh drafts. Earlier publication belongs
+                # to history and becomes ordinary discussion for this analysis.
+                # Establish that baseline before recording matching inputs.
+                run.reset_publication()
+                try:
+                    discussion.collect(run.repo, run.path)
+                except ApiError as exc:
+                    run.reload()
+                    if exc.code == 'incomplete_discussion':
+                        return False
+                    raise
+                run.reload()
+                conversation = read_json(run.manifest['discussion']['path'])
             render_contributions(run)
             say('[final] Matching findings against the complete discussion')
             value = validation.contributions(structured(run, 'contributions'), findings, conversation)
@@ -240,7 +255,7 @@ def contributions(run):
     body = '# Proposed contributions\n' + ''.join(f"\n## {p['id']}: {p['classification']}\n\n{p['basis']['explanation']}\n\nNew contribution: {p['basis']['delta']}\n\nDestination: {p['destination']['url']}\n\n{p['body_md']}\n" for p in ledger['proposals'])
     atomic_bytes(run.path / 'reviews/contributions.md', body.encode())
     session = run.session()
-    with locked(session.lock):
+    with locked(session.lock, wait=True):
         state = session.load()
         session.save(state)
     run.reload()

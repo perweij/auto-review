@@ -468,6 +468,69 @@ store.promote(['claude', 'codex', 'synthesis', 'contributions'])
         with self.assertRaisesRegex(ApiError, "newer review is current"):
             self.change("edit", comment="p1", body="Stale write")
 
+    def test_generation_finalization_waits_for_an_in_progress_draft_save(self):
+        import selectors
+        self.manifest['publication'] = {'status':'not_published'}
+        atomic_json(self.path / 'manifest.json', self.manifest)
+        self.change('edit', comment='p1', body='Before finalization')
+        ledger = read_json(self.path / 'publication/contributions.json')
+        for proposal in ledger['proposals']:
+            proposal['basis'].update(target_key=None, discussion_keys=[], classification='NEW',
+                                     explanation='Not yet discussed', delta='New evidence')
+        atomic_json(self.path / 'publication/contributions.json', ledger)
+        atomic_json(self.path / 'reviews/contributions.json',
+                    {'contributions':[p['basis'] for p in ledger['proposals']], 'validity_conflicts':[]})
+        script = """import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1] + '/lib')
+from pr_review import pipeline, followup
+from pr_review.common import locked
+from pr_review.state import Session
+from pr_review.reviews import Review
+session = Session({'session':sys.argv[2]})
+def final_session():
+    print('finalizing', flush=True)
+    return session
+with locked(session.pr_lock):
+    if sys.argv[3] == 'followup':
+        followup.adopt(final_session())
+    else:
+        run = Review.__new__(Review)
+        run.root = run.path = session.root
+        run.manifest = session.manifest
+        run.settings = {'reviewers':['claude']}
+        run.repo = SimpleNamespace(url=run.manifest['url'])
+        run.session = final_session
+        with patch.object(pipeline.discussion, 'collect'), patch.object(pipeline.discussion, 'collect_status'), \\
+                patch.object(pipeline, 'render_contributions'), patch.object(pipeline.cache, 'inputs', return_value={}), \\
+                patch.object(pipeline.cache, 'reusable', return_value=True):
+            assert pipeline.contributions(run)
+"""
+        for mode in ('contributions', 'followup'):
+            with locked(self.session.lock):
+                child = subprocess.Popen([sys.executable, '-c', script,
+                    str(Path(__file__).resolve().parents[1]), str(self.path), mode],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(child.stdout, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(5), 'Finalization did not start')
+                    self.assertEqual(child.stdout.readline().strip(), 'finalizing')
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        child.wait(timeout=.2)
+                    state = self.session.load()
+                    state['comments'][0]['body'] = 'Saved during ' + mode
+                    self.session.save(state)
+                except BaseException:
+                    child.terminate()
+                    child.communicate(timeout=3)
+                    raise
+            output, error = child.communicate(timeout=5)
+            self.assertEqual(child.returncode, 0, output + error)
+            self.assertEqual(self.session.load()['comments'][0]['body'], 'Saved during ' + mode)
+
     def test_refresh_unstages_without_rewriting_manual_work(self):
         self.change("placement", comment="p1", placement={"kind": "review"})
         self.change("stage", comment="p1")

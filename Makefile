@@ -11,7 +11,8 @@ check-emacs:
 
 lint:
 	shellcheck -x tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh
-	python3 -m compileall -q lib/pr_review bin/pr-review
+	python3 -m compileall -q lib/pr_review
+	python3 -m py_compile bin/pr-review
 	@for file in tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.sh; do bash -n "$$file" || exit; done
 
 test:

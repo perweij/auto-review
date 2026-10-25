@@ -63,7 +63,8 @@ def locked(path, *, wait=False):
         yield
 
 
-def command(argv, *, cwd=None, input_text=None, check=True, timeout=90):
+def command(argv, *, cwd=None, input_text=None, check=True, timeout=None):
+    """Run a cancellable command; deadlines belong to the calling operation."""
     from .processes import run
     result = run(argv, cwd=cwd, input_bytes=(input_text or "").encode("utf-8"),
                  timeout=timeout, env={**os.environ, "GIT_TERMINAL_PROMPT": "0",

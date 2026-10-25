@@ -32,7 +32,7 @@ def validate(session, result):
 def adopt(session):
     # Cached follow-ups may still be current and editable. Take the same short
     # transaction lock as the frontend before loading and updating its ledger.
-    with locked(session.lock):
+    with locked(session.lock, wait=True):
         state = session.load()
         discussion = session.discussion()
         affected = affected_drafts(state["discussion"], discussion, state["comments"])

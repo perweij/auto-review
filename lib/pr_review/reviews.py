@@ -271,7 +271,7 @@ def capabilities(enabled, processing, runtime, cwd):
     for tool in required:
         if shutil.which(tool) is None:
             raise ApiError('missing_dependency', f'Missing required executable: {tool}')
-    versions = {tool: command([tool, '--version'], cwd=cwd).stdout.strip().splitlines()[0] for tool in required}
+    versions = {tool: command([tool, '--version'], cwd=cwd, timeout=90).stdout.strip().splitlines()[0] for tool in required}
     versions.setdefault('codex', 'disabled')
     versions.setdefault('claude', 'disabled')
     checks = [(['gh', 'api', '--help'], ['--hostname', '--paginate', '--slurp', '--method', '--field', '--raw-field']),
@@ -288,7 +288,7 @@ def capabilities(enabled, processing, runtime, cwd):
                    '--no-session-persistence', '--disallowed-tools', '--add-dir', '--json-schema', '--append-system-prompt', '--tools', '--disable-slash-commands', '--strict-mcp-config', '--system-prompt', '--setting-sources'] + (['--max-budget-usd'] if runtime.budget else [])),
                    (['claude', 'auth', '--help'], ['status'])]
     for argv, flags in checks:
-        result = command(argv, cwd=cwd, check=False)
+        result = command(argv, cwd=cwd, check=False, timeout=90)
         for flag in flags:
             if flag not in result.stdout + result.stderr:
                 raise ApiError('missing_capability', f'Installed CLI lacks required capability: {flag}')
@@ -327,7 +327,7 @@ def execute(request, *, confirm_trust=None):
         if 'claude' in enabled:
             checks.append((['claude', 'auth', 'status'], 'Claude authentication failed; run claude auth login'))
         for argv, error in checks:
-            if command(argv, cwd=repo.cwd, check=False).returncode:
+            if command(argv, cwd=repo.cwd, check=False, timeout=runtime.auth_timeout).returncode:
                 raise ApiError('authentication_failed', error)
         pr = repo.metadata()
         viewer = command(['gh', 'api', '--hostname', repo.host, 'user', '--jq', '.login'], cwd=repo.cwd).stdout.strip()
@@ -352,14 +352,15 @@ def execute(request, *, confirm_trust=None):
                 run.context(pr, issues, reviews)
                 if kind == 'followup':
                     pipeline.focused(run)
+                    ready = True
                 else:
                     if run.dual:
                         pipeline.restart(run)
                         pipeline.independent(run, 'claude')
                         pipeline.independent(run, 'codex')
                     pipeline.synthesis(run)
-                    pipeline.contributions(run)
-                run.manifest['status'] = 'complete'
+                    ready = pipeline.contributions(run)
+                run.manifest['status'] = 'complete' if ready else 'paused'
                 run.save()
         except Cancelled as exc:
             if run.active:

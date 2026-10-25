@@ -116,12 +116,17 @@ def run(request):
     common = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=request.get('cwd', '.')).stdout.strip()
     with operation({'common': common, 'pr': str(request.get('pr', '')).rstrip('/').split('/')[-1], 'kind': 'followup' if request.get('followup_threads') else 'review'}):
         session = execute(request)
+    current = Session({'session': str(session.root)})
+    ready = session.path == current.path and session.manifest.get('status') == 'complete'
+    outcome = {'new_review_ready': ready, 'status': session.manifest.get('status')}
+    if not ready:
+        outcome['pending_generation'] = session.id
     if not request.get('session'):
         # Protocol 1 first-run clients adopt a session from the discovery list.
         # Use resolved identity so URL targets and inferred repositories match.
-        return discover({**request, 'pr': session.manifest['pr'],
-                         'repository': session.manifest['repository']})
-    return {'session': str(session.root), 'generation': session.id, 'new_review_ready': True}
+        return {**discover({**request, 'pr': session.manifest['pr'],
+                            'repository': session.manifest['repository']}), **outcome}
+    return {'session': str(current.root), 'generation': current.id, **outcome}
 
 
 def followup(session, request):
