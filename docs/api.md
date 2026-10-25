@@ -116,6 +116,7 @@ belong to that selected toolkit. Owner selection never depends on PR authorship.
 | Command | Request fields | Result/behavior |
 | --- | --- | --- |
 | `owner-open` | `cwd`, `pr`, optional `repository`, `defaults` | Create or read a local owner session; no network/model |
+| `owner-import` | Reviewer `session`, `generation`, `revision`, distinct ordered `comments`, optional `defaults` | Copy saved comments into the same PR's owner session; return `{owner,items}` |
 | `owner-discover` | `cwd`, optional `repository`, `pr` | `{sessions}` for the Git common directory |
 | `owner-read` | `session` | Saved owner view; available while a fix runs |
 | `owner-refresh` | `session`, `revision` | Fetch complete GitHub discussions and metadata; return owner view |
@@ -135,6 +136,24 @@ before it fails. Opening creates a session idempotently without a revision.
 execution lock, and pins a current tree for inspection against the last saved
 batch checkpoint. It does not adopt that tree or change the real index.
 
+`owner-import` is the exception to owner-session selectors: it takes the source
+reviewer's session/generation/revision and validates them under the shared PR and
+reviewer draft locks, after acquiring the destination's execution lock. The
+destination is derived from the source's Git common directory, repository, and
+PR, so clients cannot redirect findings to a different PR. The source must be the
+current completed generation. The operation snapshots saved wording, findings,
+and code/discussion context, pins the reviewed Git objects, and leaves reviewer
+drafts and staging unchanged. No GitHub or model call occurs.
+
+`items` in the result contains the local keys in selection order. Re-importing
+the same generation/comment is idempotent for unchanged content; changed content
+retains the prior copy in `versions`, replaces the current snapshot, and marks
+dependent batches stale. All selected items are queued at the front of the owner
+view for explicit fixing. Local snapshots are never refreshed implicitly from
+reviewer drafts. CLI equivalent:
+`pr-review owner import --review-session PATH --comment ID [--comment ID…]`;
+optional `--generation` and `--revision` pin the source explicitly.
+
 Owner views contain `session`, `revision`, repository/PR identity, `settings`,
 `checked_at`, `viewer`, `feedback`, `batches`, `replies`, `actions`, and `worktree`.
 After refresh, `metadata` and `push_target` identify the reported PR head and its
@@ -142,12 +161,29 @@ actual repository/branch. `push_target.remotes`, when setup has inspected them,
 is a list: zero or several matches require user configuration. Artifact paths in
 attempts are for opening logs, not for clients to mutate workflow state.
 
-Feedback has stable `key` values (`thread:…`, `comment:…`, `review:…`), full
+Feedback has stable `key` values (`thread:…`, `comment:…`, `review:…`, `local:…`), full
 `comments`, `fingerprint`, `notification`, `triage`, `unread`, `actionable`, and
 `attention`. Thread entries retain resolution/outdated/permission flags and the
 original code hunk. Review entries retain submitted `state` and
 `change_requested`. An empty verdict can require attention without being
 actionable. Local triage does not resolve GitHub threads or clear review verdicts.
+
+Nonempty self-authored GitHub feedback is actionable. `own_only: true` identifies
+feedback with no nonempty message from another user. Its default local triage is
+`available`, with no unread/attention alert; clients can show it in a separate
+section. Existing own-only context entries migrate on refresh. Explicit `restore`
+sets `queued: true`, allowing even a read general comment to be placed in Attention
+needed without pretending that a new incoming message arrived. `handled` and
+`defer` clear that explicit queue flag.
+
+Imported items have `kind: "local_review"`, `source` provenance (reviewer session,
+generation, comment, revision, snapshot, and original findings), `review_context`,
+and `versions`. They survive GitHub refresh and participate in the same fix,
+replan, checkpoint, and association flow as GitHub feedback. They have no reply
+destination: composing/publishing replies fails with `local_only`, and association
+never generates an automatic reply for them. A later publication of the reviewer
+draft does not silently retarget the local copy; select its actual GitHub feedback
+explicitly for any reply or thread action.
 
 Owner mutation operations:
 

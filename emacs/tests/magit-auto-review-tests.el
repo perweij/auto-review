@@ -72,6 +72,41 @@
     (should buffer-read-only)
     (should-not (buffer-modified-p))))
 
+(ert-deftest auto-review/send-selection-to-owner-preserves-reviewer-drafts ()
+  (auto-review-test-buffer
+   (goto-char (oref (oref (cdr (assoc "p1" magit-auto-review--sections)) parent) start))
+   (let ((before (copy-tree magit-auto-review--review)) request shown)
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (r) (setq request r) '((owner . ((session . "/owner"))) (items . ("local:1" "local:2" "local:3")))))
+               ((symbol-function 'magit-auto-review-owner-show-import)
+                (lambda (result directory) (setq shown (list result directory)))))
+       (magit-auto-review-send-to-owner))
+     (should (equal (alist-get 'command request) "owner-import"))
+     (should (equal (alist-get 'comments request) ["p1" "p2" "p3"]))
+     (should (equal (alist-get 'generation request) "old"))
+     (should (equal (alist-get 'revision request) "revision-1"))
+     (should shown)
+     (should (equal magit-auto-review--review before))
+     (should (eq (key-binding "o") #'magit-auto-review-send-to-owner)))))
+
+(ert-deftest auto-review/cancelled-inline-edit-resolution-does-not-handoff ()
+  (auto-review-test-buffer
+   (auto-review-test-goto "p1")
+   (cl-letf (((symbol-function 'magit-auto-review--can-leave) (lambda () nil))
+             ((symbol-function 'magit-auto-review--call) (lambda (_) (ert-fail "Must not send unsaved text"))))
+     (magit-auto-review-send-to-owner))))
+
+(ert-deftest auto-review/stale-owner-handoff-keeps-source-view ()
+  (auto-review-test-buffer
+   (auto-review-test-goto "p1")
+   (let ((before (buffer-string)))
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (_) (signal 'magit-auto-review-api-error '("Stale source revision"))))
+               ((symbol-function 'magit-auto-review-owner-show-import)
+                (lambda (&rest _) (ert-fail "Must not switch after failed import"))))
+       (should-error (magit-auto-review-send-to-owner) :type 'magit-auto-review-api-error))
+     (should (equal before (buffer-string))))))
+
 (ert-deftest auto-review/first-open-with-no-review-supports-native-command-hooks ()
   (save-window-excursion
     (let (opened requests)

@@ -38,6 +38,62 @@
     (goto-char (oref section start))
     section))
 
+(defun owner-test-local-view ()
+  "Return imported findings followed by unrelated incoming feedback."
+  (let ((view (owner-test-view)))
+    (setf (alist-get 'feedback view)
+          (append
+           (cl-loop for key in '("local:first" "local:second") collect
+                    `((key . ,key) (kind . "local_review") (title . ,key) (attention . t) (actionable . t)
+                      (source . ((snapshot . ((head . "reviewed-sha"))) (finding_ids . ("F1"))))
+                      (review_context . ((path . "source.py") (line . 1)
+                                         (rows . (((new . 1) (kind . "+") (text . "saved code context") (highlight . t))))))
+                      (evidence . ("Traced the concern"))
+                      (comments . (((author . "Saved reviewer finding") (body . "Preserved local wording"))))))
+           (list (car (alist-get 'feedback view)))))
+    view))
+
+(ert-deftest owner/import-selects-only-handed-off-items-for-f ()
+  (save-window-excursion
+    (let ((transient-mark-mode t) buffer request)
+      (unwind-protect
+          (progn
+            (magit-auto-review-owner-show-import
+             `((owner . ,(owner-test-local-view)) (items . ("local:first" "local:second"))) temporary-file-directory)
+            (setq buffer (current-buffer))
+            (should (use-region-p))
+            (should (string-match-p "saved code context" (buffer-string)))
+            (should (string-match-p "Preserved local wording" (buffer-string)))
+            (should (string-match-p "No GitHub reply destination" (buffer-string)))
+            (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (r &optional _cb) (setq request r))))
+              (magit-auto-review-owner-fix))
+            (should (equal (alist-get 'items request) ["local:first" "local:second"])))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest owner/own-comments-are-visible-and-fixable-without-an-alert ()
+  (owner-test-buffer
+   (let ((view (owner-test-view)) request)
+     (setf (alist-get 'feedback view)
+           '(((key . "thread:SELF") (kind . "thread") (own_only . t) (triage . "available")
+              (actionable . t) (attention . :false) (unread . :false) (is_resolved . :false)
+              (comments . (((author . "me") (body . "My review feedback")))))))
+     (magit-auto-review-owner--accept view)
+     (should (string-match-p "Your GitHub comments (1)" (buffer-string)))
+     (should-not (string-match-p "NEW" (buffer-string)))
+     (owner-test-goto 'owner-group "own")
+     (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (r &optional _cb) (setq request r))))
+       (magit-auto-review-owner-fix))
+     (should (equal (alist-get 'items request) ["thread:SELF"]))
+     (should (= 1 (cl-count-if (lambda (s) (eq (oref s type) 'owner-feedback)) magit-auto-review-owner--sections))))))
+
+(ert-deftest owner/local-finding-does-not-open-a-github-reply-editor ()
+  (owner-test-buffer
+   (magit-auto-review-owner--accept (owner-test-local-view))
+   (owner-test-goto 'owner-feedback "local:first")
+   (cl-letf (((symbol-function 'magit-auto-review-owner--editor) (lambda (&rest _) (ert-fail "No reply target"))))
+     (should-error (magit-auto-review-owner-compose) :type 'user-error))
+   (should-error (magit-auto-review-owner-resolve) :type 'user-error)))
+
 (ert-deftest owner/separate-keymap-and-complete-context ()
   (owner-test-buffer
    (should-not (derived-mode-p 'magit-auto-review-mode))

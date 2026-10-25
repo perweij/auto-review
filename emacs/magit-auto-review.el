@@ -416,7 +416,7 @@ These are model instructions, not an enforced process timeout."
                                             "none (limited follow-up)" "unavailable"))
                                     (magit-auto-review--verdict-label)) 'face 'shadow))
         (insert "Each item is one draft; its GitHub discussion is context. s stages; k excludes this draft.\n")
-        (insert "a chooses an attachment. P publishes Staged comments and the verdict. ? shows actions.\n")
+        (insert "o sends findings to Owner for fixing. a chooses an attachment. P publishes Staged. ? shows actions.\n")
         (when-let ((reason (alist-get 'reason (cl-find-if (lambda (v) (not (magit-auto-review--true-p (alist-get 'available v))))
                                                          (alist-get 'verdicts magit-auto-review--review)))))
           (insert (propertize (concat reason "\n") 'face 'shadow)))

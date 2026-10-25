@@ -201,25 +201,34 @@ def refresh(session, state):
         if item["kind"] == "thread":
             item["diff_hunk"] = anchors.get(item["root_id"], {}).get("diff_hunk", "")
         incoming = [c for c in item["comments"] if c["author"].lower() != viewer.lower() and c["body"].strip()]
+        actionable = any(c["body"].strip() for c in item["comments"])
+        own_only = bool(actionable and not incoming)
         notification = fingerprint(item, viewer)
         content = fingerprint(item)
         if old.get("fingerprint") != content:
             changed.add(item["key"])
         item.update(fingerprint=content, notification=notification,
-                    triage=old.get("triage", "attention" if incoming else "handled"),
+                    triage=old.get("triage", "attention" if incoming else "available" if own_only else "handled"),
+                    queued=old.get("queued", False), own_only=own_only,
                     unread=old.get("unread", bool(incoming)))
+        # Older sessions kept own-only comments as non-actionable history.
+        if own_only and "own_only" not in old and old.get("triage") == "handled" and not old.get("actionable"):
+            item["triage"] = "available"
         if old and notification != old.get("notification") and incoming:
             item.update(triage="attention", unread=True)
-        item["actionable"] = bool(incoming)
+        item["actionable"] = bool(actionable)
         item["change_requested"] = (item.get("state") == "CHANGES_REQUESTED" and
             latest.get(item["comments"][0]["author"].lower(), (None, None))[1] == item["key"])
         if item["change_requested"] and not old:
             item["triage"] = "attention"
         item["attention"] = item["triage"] == "attention" and bool(
-            item["unread"] or item["change_requested"] or
+            item["queued"] or item["unread"] or item["change_requested"] or
             (item["kind"] == "thread" and not item["is_resolved"]))
         items.append(item)
     for old in previous.values():
+        if old["kind"] == "local_review":
+            items.append(old)
+            continue
         old.update(missing=True, attention=False)
         items.append(old)
         changed.add(old["key"])

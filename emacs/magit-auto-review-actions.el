@@ -12,6 +12,23 @@
 (require 'magit-auto-review-conversations)
 (require 'magit-auto-review-pulls)
 
+(declare-function magit-auto-review-owner-show-import "magit-auto-review-owner" (result directory))
+
+(defun magit-auto-review-send-to-owner ()
+  "Send saved comments at point or selected headings to Owner for fixing."
+  (interactive)
+  (magit-auto-review--require-current-draft)
+  (when (magit-auto-review--can-leave)
+    (magit-auto-review--editable)
+    (let* ((ids (magit-auto-review--selected-ids))
+           (directory default-directory))
+      (unless ids (user-error "Select a finding, status group, or sibling headings"))
+      (let ((result (magit-auto-review--call
+                     (magit-auto-review--request "owner-import" `(comments . ,(vconcat ids))
+                                                `(defaults . ,(magit-auto-review--default-settings))))))
+        (require 'magit-auto-review-owner)
+        (magit-auto-review-owner-show-import result directory)))))
+
 (defun magit-auto-review--start (request callback)
   "Run explicit REQUEST asynchronously and deliver CALLBACK in this buffer."
   (when (process-live-p magit-auto-review--process) (user-error "An operation is already running; use the log or cancel command"))
@@ -574,6 +591,7 @@
   "Inspect, edit, stage, and publish contextual review comments."
   [:class transient-column :setup-children magit-auto-review--context-help]
   [["Comments"
+    ("o" "Send to Owner for fixing" magit-auto-review-send-to-owner :if magit-auto-review--mutable-p)
     ("s" "Move to Staged" magit-auto-review-stage :if (lambda () (magit-auto-review--stage-context-p "unstaged")))
     ("u" "Move to Unstaged" magit-auto-review-unstage :if (lambda () (magit-auto-review--stage-context-p "staged")))
     ("e" "Edit displayed comment" magit-auto-review-edit :if magit-auto-review--draft-p)
@@ -608,6 +626,7 @@
     ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])
 
 (dolist (binding '(("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
+                   ("o" . magit-auto-review-send-to-owner)
                    ("B" . magit-auto-review-pull-requests)
                    ("C" . magit-auto-review-conversations)
                    ("R" . magit-auto-review-run) ("N" . magit-auto-review-switch-current)

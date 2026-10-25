@@ -238,11 +238,26 @@ discussions, unread/changed state, local triage, review verdicts, thread resolut
 and outdated-code status separate. Opening and local reload use saved data;
 refresh explicitly reads GitHub without a model call.
 
+To fix findings from your own local analysis, select a finding, status group, or
+sibling headings in Reviewer and press `o` (**Send to Owner for fixing**). Owner
+opens with exactly those items selected; press `f` to run the fix/review pipeline.
+The handoff copies saved wording, original findings, and code/discussion context
+without changing reviewer staging or publishing anything. Repeating it does not
+duplicate unchanged findings. Explicitly re-importing an edited draft retains the
+previous copy and marks dependent fix assessments stale.
+
+You can also fix GitHub feedback you posted yourself. After `G`, it appears under
+**Your GitHub comments** without an unread alert. Select it and press `f`, or use
+`U` to queue it under Attention needed. Local imported findings have no GitHub
+reply destination: their fixes can be associated with commits, but do not generate
+fixed-in replies. Published feedback retains its normal thread/timeline reply flow.
+
 ```bash
 pr-review owner 123                         # open/read cached owner state
 pr-review owner 123 refresh                 # collect current GitHub feedback
 pr-review owner 123 settings                # inspect independent fix/review settings
 pr-review owner 123 settings --settings-file /tmp/owner-settings.json
+pr-review owner import --review-session /path/to/review --comment p1 --comment p2
 pr-review owner 123 fix --item thread:THREAD_ID
 pr-review owner 123 fix --item thread:FIRST --item thread:SECOND
 pr-review owner 123 fix --item thread:THREAD_ID --verify-only

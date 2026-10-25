@@ -29,6 +29,8 @@ commit interface.
 This work package includes:
 
 - Toolkit selection and an owner inbox independent of reviewer runs.
+- Explicit local handoff of selected saved reviewer findings and fixes on
+  self-authored GitHub feedback.
 - Individual non-interactive `f` fixes and dependency-aware group `f` fixes.
 - Separate fix and automatic-review provider/model/effort settings.
 - One repair attempt after blocking review findings at each review checkpoint.
@@ -97,6 +99,16 @@ Owner mode opens a PR without requiring a saved reviewer run. Existing repositor
 PR discovery is available in either toolkit. Switching toolkits is explicit;
 being the PR author does not silently select a mode or grant GitHub permissions.
 
+The reviewer `o` action sends a selected finding, status group, or sibling headings
+to Owner, where the exact selection is retained for `f`. This is a local snapshot
+of saved wording, original findings, reviewed commit, and code/discussion context.
+It neither changes reviewer staging nor invokes a model. Saved source revisions
+are validated; identical imports reuse the same item, and explicitly re-imported
+edits retain the previous copy and invalidate dependent assessments. GitHub refresh
+preserves these local items without implicitly following later reviewer edits.
+Local findings can have fix outcomes and commit associations, but no GitHub reply
+or resolution destination is fabricated for them.
+
 ### Refresh and layout
 
 Opening uses cached information. `g` reloads saved results; `G` explicitly fetches
@@ -107,6 +119,7 @@ Opening, browsing, and local triage never invoke a model.
 | Owner section | Contents |
 | --- | --- |
 | Attention needed | Unresolved threads, new or edited incoming comments/review summaries, and outstanding change-request reviews |
+| Your GitHub comments | Self-authored nonempty feedback available for explicit fixes without unread alerts |
 | Fixes | Batch plans, task progress, patches, checks, review findings, and commit associations |
 | Replies | Unstaged, Staged, and Published outgoing replies |
 | Deferred / History | Deferred feedback, handled items, previous attempts, and saved drafts |
@@ -114,8 +127,11 @@ Opening, browsing, and local triage never invoke a model.
 Use stable GitHub identities for feedback and preserve local triage across
 refreshes. Initial incoming nonempty feedback is unacknowledged until handled or
 explicitly acknowledged. New or edited discussion returns dependent items to
-attention and invalidates stale assessments. The user's own messages remain
-context without generating self-notifications.
+attention and invalidates stale assessments. The user's own messages are fixable
+without generating self-notifications. They initially appear in Your GitHub
+comments; explicit queueing, deferral, or handling remains local triage. This
+supports a person acting as both owner and reviewer without changing GitHub
+permissions or verdict rules.
 
 Keep these dimensions separate:
 
@@ -589,6 +605,17 @@ preserved. GitHub was not contacted and nothing was published. These smoke tests
 incur model usage; they establish supported invocation behavior on a small
 fixture, not general correctness of model judgments. Codex required the supported
 environment's access to its CLI runtime state outside the restricted workspace.
+
+The PR #4 follow-up on 2026-10-25 added explicit Reviewer `o` handoff and fixing
+self-authored GitHub feedback. Validation passed all 161 Bats tests, 151 Python
+tests (57 owner tests), and 83 ERT tests, plus lint and warning-free byte
+compilation. Added coverage includes saved-wording/context preservation, exact
+group selection, stale revisions and busy locks, idempotent imports and changed
+source versions, local items surviving refresh, mixed local/GitHub fix batches,
+commit associations without invented reply destinations, and replies to the
+original self-authored thread. These checks use temporary repositories and
+mocked providers/GitHub; this follow-up did not run live inference or publish
+anything. The provider invocation contract remains unchanged.
 
 The implementation adds no Guix dependency or package-layout change. The existing
 migration follow-ups for a real Guix build and execution on Python 3.9 remain in

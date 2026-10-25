@@ -100,6 +100,15 @@ Emacs, and recovery usage are documented. Validation on 2026-10-25 passed all
 planner/fixer/reviewer smoke tests for both Claude and Codex. Interactive `F`
 remains separate below.
 
+PR #4 dogfood follow-up: Reviewer `o` now hands selected saved findings to Owner
+for explicit `f` fixes, without requiring publication or changing reviewer drafts.
+Own GitHub comments are also fixable and appear in a separate section without
+self-notifications. Local imports preserve source context and prior versions,
+survive refresh, and never invent GitHub reply destinations. See the
+[updated owner contract](pr-owner-mode.md) and [Emacs workflow](../emacs/README.md#pr-owner-toolkit).
+Follow-up validation on 2026-10-25 passed all 161 Bats, 151 Python, and 83 ERT
+tests, lint, and warning-free byte compilation; GitHub and providers were mocked.
+
 ## 6. Add interactive PR-owner fixes (`F`)
 
 After the non-interactive owner workflow, implement the

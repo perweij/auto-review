@@ -12,12 +12,13 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_review.api import dispatch
-from pr_review.common import ApiError, locked
+from pr_review.common import ApiError, atomic_json, digest, locked
 from pr_review.repository import Repository
 from pr_review.owner_state import OwnerSession
 from pr_review import owner_fixes, owner_git, owner_providers, owner_publication
 from pr_review.providers import Runtime
 from pr_review.owner_cli import main as owner_cli
+from pr_review.state import Session as ReviewSession
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 
@@ -132,6 +133,184 @@ class OwnerTest(unittest.TestCase):
             self.git("update-ref", "refs/pull/7/head", sha)
             self.metadata["headRefOid"] = sha
         return sha
+
+    def saved_review(self):
+        path = self.root / "state/pr-review/github.com/org/repo/pr-7-review"
+        atomic_json(path / "manifest.json", {
+            "format_version": 2, "repository": "github.com/org/repo", "pr": 7, "url": self.metadata["url"],
+            "git_common_dir": str(self.repo / ".git"), "worktree": str(self.repo), "run_id": "review", "status": "complete",
+            "created_at": "2026-01-01T00:00:00Z", "viewer": "author",
+            "snapshot": {"head": self.head, "base": self.base, "merge_base": self.base}})
+        atomic_json(path / "reviews/synthesis.json", {"findings": [
+            {"id": f"F{i}", "title": f"Local concern {i}", "body_md": f"Original finding {i}", "evidence": "Traced source.txt",
+             "primary_location": {"path": "source.txt", "side": "RIGHT", "line": 1}, "locations": []}
+            for i in (1, 2)]})
+        atomic_json(path / "publication/contributions.json", {"proposals": [
+            {"id": f"p{i}", "basis": {"finding_ids": [f"F{i}"], "body_md": f"Original finding {i}"},
+             "body_md": f"Original finding {i}", "classification": "NEW", "destination": {"kind": "review"}}
+            for i in (1, 2)]})
+        return ReviewSession({"session": str(path)})
+
+    def handoff(self, review, keys, **fields):
+        return dispatch({"protocol": 1, "command": "owner-import", "session": str(review.root),
+                         "generation": review.id, "revision": digest(review.load()), "comments": keys, **fields})
+
+    def test_local_handoff_preserves_wording_staging_context_and_order_without_network(self):
+        review = self.saved_review()
+        state = review.load()
+        state["comments"][0].update(body="Exact human wording", status="staged", human_edited=True)
+        review.save(state)
+        before = review.file.read_bytes()
+        with patch.object(Repository, "metadata", side_effect=AssertionError("No network on import")):
+            result = self.handoff(review, ["p2", "p1"])
+        self.assertEqual(review.file.read_bytes(), before)
+        self.assertFalse(self.calls)
+        self.assertEqual([i["source"]["comment"] for i in result["owner"]["feedback"][:2]], ["p2", "p1"])
+        item = result["owner"]["feedback"][1]
+        self.assertEqual(item["comments"][0]["body"], "Exact human wording")
+        self.assertEqual(item["source"]["findings"][0]["body_md"], "Original finding 1")
+        self.assertEqual(item["source"]["snapshot"]["head"], self.head)
+        self.assertTrue(item["review_context"]["rows"])
+        self.assertTrue(item["actionable"])
+        self.assertTrue(item["attention"])
+        self.assertFalse(item["unread"])
+        self.assertEqual(result["owner"]["session"], self.path)
+        self.assertEqual(self.git("rev-parse", f"refs/pr-review/api/{review.id}/head"), self.head)
+
+    def test_handoff_is_idempotent_and_draft_changes_are_explicitly_reimported(self):
+        review = self.saved_review()
+        first = self.handoff(review, ["p1"])
+        key = first["items"][0]
+        state = review.load()
+        state["comments"][1]["body"] = "Unrelated edit"
+        review.save(state)
+        again = self.handoff(review, ["p1"])
+        self.assertEqual(again["items"], [key])
+        self.assertEqual(again["owner"]["feedback"][0]["versions"], [])
+        self.request("owner-fix", items=[key])
+        state = review.load()
+        state["comments"][0]["body"] = "Changed requirement"
+        review.save(state)
+        unchanged = self.request("owner-refresh")
+        local = next(i for i in unchanged["feedback"] if i["key"] == key)
+        self.assertEqual(local["comments"][0]["body"], "Original finding 1")
+        updated = self.handoff(review, ["p1"])["owner"]
+        self.assertEqual(updated["feedback"][0]["comments"][0]["body"], "Changed requirement")
+        self.assertEqual(updated["feedback"][0]["versions"][0]["comments"][0]["body"], "Original finding 1")
+        self.assertTrue(updated["batches"][-1]["discussion_stale"])
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", batch=updated["batches"][-1]["id"])
+        self.assertEqual(caught.exception.code, "stale_discussion")
+
+    def test_handoff_validates_revision_and_all_ids_before_copying(self):
+        review = self.saved_review()
+        before = self.request("owner-read")
+        for fields in ({"comments": ["missing"]}, {"comments": ["p1", "p1"]}, {"revision": "old"}):
+            with self.subTest(fields=fields), self.assertRaises(ApiError):
+                self.handoff(review, ["p1"], **fields)
+        self.assertEqual(self.request("owner-read"), before)
+
+    def test_handoff_busy_locks_do_not_alter_either_workflow(self):
+        review = self.saved_review()
+        before = self.request("owner-read")
+        session = OwnerSession({"session": self.path})
+        for lock in (session.execution_lock, review.pr_lock, review.lock):
+            with self.subTest(lock=str(lock)), locked(lock), self.assertRaises(ApiError) as caught:
+                self.handoff(review, ["p1"])
+            self.assertEqual(caught.exception.code, "busy")
+        self.assertEqual(self.request("owner-read"), before)
+
+    def test_local_and_github_findings_share_fix_pipeline_but_only_github_gets_replies(self):
+        review = self.saved_review()
+        key = self.handoff(review, ["p1"])["items"][0]
+        view = self.request("owner-fix", items=[key, "thread:T1"])
+        self.assertEqual(view["batches"][-1]["status"], "ready")
+        local = next(i for i in view["feedback"] if i["key"] == key)
+        self.assertNotIn("missing", local)
+        self.assertEqual(self.calls[0][1]["feedback"][0]["source"]["finding_ids"], ["F1"])
+        sha = self.commit_fix()
+        view = self.request("owner-associate")
+        self.assertEqual(view["batches"][-1]["associations"][key]["commits"], [sha])
+        self.assertEqual([r["source"] for r in view["replies"]], ["thread:T1"])
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-mutate", operation="reply", item=key, body="No fabricated timeline reply")
+        self.assertEqual(caught.exception.code, "local_only")
+        with self.assertRaises(ApiError):
+            self.request("owner-thread-state", item=key, resolved=True)
+        self.assertFalse(self.posts)
+
+    def test_cli_import_uses_the_saved_reviewer_and_preserves_selection(self):
+        review = self.saved_review()
+        with redirect_stdout(StringIO()) as output:
+            self.assertEqual(owner_cli(["import", "--review-session", str(review.root), "--comment", "p2"]), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["owner"]["feedback"][0]["source"]["comment"], "p2")
+        self.assertEqual(len(result["items"]), 1)
+
+    def test_own_comments_can_be_fixed_without_unread_alerts(self):
+        item = self.item("thread:SELF", 999)
+        item["comments"][0]["author"] = "author"
+        self.feedback = [item]
+        view = self.request("owner-refresh")
+        own = next(i for i in view["feedback"] if i["key"] == item["key"])
+        self.assertTrue(own["actionable"])
+        self.assertTrue(own["own_only"])
+        self.assertEqual(own["triage"], "available")
+        self.assertFalse(own["unread"])
+        self.assertFalse(own["attention"])
+        item["comments"][0]["body"] = "Updated own feedback"
+        own = self.request("owner-refresh")["feedback"][0]
+        self.assertFalse(own["unread"])
+        self.assertFalse(own["attention"])
+        view = self.request("owner-fix", items=[item["key"]])
+        self.assertEqual(view["batches"][-1]["status"], "ready")
+        self.commit_fix()
+        view = self.request("owner-associate")
+        self.assertEqual(view["replies"][0]["target"]["root_id"], 999)
+        preview = self.request("owner-prepare")
+        view = self.request("owner-publish", token=preview["token"])
+        self.assertEqual(view["replies"][0]["status"], "published")
+        self.assertEqual(self.posts[0][1], "comments/999/replies")
+
+    def test_own_general_comment_can_be_queued_without_an_unread_alert(self):
+        item = self.item("comment:999", 999, "comment")
+        item["comments"][0]["author"] = "author"
+        self.feedback = [item]
+        self.request("owner-refresh")
+        self.request("owner-mutate", operation="restore", items=[item["key"]])
+        own = self.request("owner-refresh")["feedback"][0]
+        self.assertTrue(own["attention"])
+        self.assertFalse(own["unread"])
+        self.request("owner-mutate", operation="handled", items=[item["key"]])
+        self.assertFalse(self.request("owner-refresh")["feedback"][0]["attention"])
+
+    def test_incoming_reply_to_own_thread_creates_attention(self):
+        item = self.item("thread:SELF", 999)
+        item["comments"][0]["author"] = "author"
+        self.feedback = [item]
+        self.request("owner-refresh")
+        self.request("owner-mutate", operation="handled", items=[item["key"]])
+        item["comments"].append({**item["comments"][0], "id": 1000, "author": "teammate", "body": "Additional concern"})
+        own = self.request("owner-refresh")["feedback"][0]
+        self.assertFalse(own["own_only"])
+        self.assertTrue(own["attention"])
+        self.assertTrue(own["unread"])
+
+    def test_legacy_own_comment_becomes_available_without_generating_an_alert(self):
+        item = self.item("thread:SELF", 999)
+        item["comments"][0]["author"] = "author"
+        self.feedback = [item]
+        self.request("owner-refresh")
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        own = state["feedback"][0]
+        own.pop("own_only")
+        own.update(actionable=False, triage="handled")
+        session.save(state)
+        own = self.request("owner-refresh")["feedback"][0]
+        self.assertEqual(own["triage"], "available")
+        self.assertTrue(own["actionable"])
+        self.assertFalse(own["unread"])
 
     def test_owner_open_is_local_and_hidden_from_reviewer_discovery(self):
         with patch.object(Repository, "metadata", side_effect=AssertionError("network")):

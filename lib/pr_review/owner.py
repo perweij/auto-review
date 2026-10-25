@@ -8,7 +8,7 @@ from .owner_state import OwnerSession, open_session, discover, toolkit, refresh,
 from . import owner_git, owner_fixes, owner_publication
 
 
-COMMANDS = ["owner-open", "owner-discover", "owner-read", "owner-refresh", "owner-mutate", "owner-fix",
+COMMANDS = ["owner-open", "owner-import", "owner-discover", "owner-read", "owner-refresh", "owner-mutate", "owner-fix",
             "owner-diff", "owner-associate", "owner-prepare", "owner-publish", "owner-recover", "owner-thread-state", "toolkit"]
 
 
@@ -16,6 +16,9 @@ def dispatch(request):
     name = request["command"]
     if name == "owner-open":
         return open_session(request)
+    if name == "owner-import":
+        from .owner_import import from_review
+        return from_review(request)
     if name == "owner-discover":
         return discover(request)
     if name == "toolkit":
@@ -76,7 +79,8 @@ def mutate(session, state, request):
                 item["unread"] = False
             else:
                 item["triage"] = {"defer": "deferred", "restore": "attention", "handled": "handled"}[action]
-            item["attention"] = item["triage"] == "attention" and bool(item["unread"] or item.get("change_requested") or
+                item["queued"] = action == "restore"
+            item["attention"] = item["triage"] == "attention" and bool(item.get("queued") or item["unread"] or item.get("change_requested") or
                 (item["kind"] == "thread" and not item["is_resolved"]))
     elif action == "reply":
         item = session.items(state, [request.get("item")])[0]

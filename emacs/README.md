@@ -63,12 +63,35 @@ Reviewer. Switching leaves the previous buffer, folds, editor, and running
 operation available. `M-x magit-auto-review-owner` opens an owner buffer directly.
 Owner mode does not require a reviewer session and has its own keymap and menus.
 
-The owner buffer groups incoming discussions under **Attention needed**, followed
-by **Fixes**, **Replies**, and **Deferred / History**. Expand an item to read its
+The owner buffer groups incoming discussions and queued local findings under
+**Attention needed**, followed by **Your GitHub comments** when available,
+**Fixes**, **Replies**, and **Deferred / History**. Expand an item to read its
 complete conversation, code hunk, resolution/outdated status, or review verdict.
 An empty Request changes review remains a visible status item without inventing
 a code-fix task. New/edited incoming messages return handled or deferred feedback
 to attention; the user's own messages remain context without unread alerts.
+
+From Reviewer, press `o` on a finding, a status heading (for example Unstaged), or
+a region of sibling finding headings to **Send to Owner for fixing**. The owner
+buffer opens with those items selected, in their displayed order; press `f` to
+plan/fix/review that selection. The handoff itself is local and invokes no model.
+It uses the saved draft text and preserves the original findings, reviewed commit,
+and code/discussion context. Resolve an active inline edit before sending.
+Reviewer wording and staging stay unchanged.
+
+Imported items are labeled **Local review**. `G` preserves them; it does not
+import unpublished reviewer findings. Repeating `o` on unchanged findings selects
+the existing copies. Sending edited wording again saves the prior copy and
+invalidates dependent assessments, requiring replanning. Local copies do not
+silently follow later reviewer edits or generations. Their commit associations
+are retained, but no GitHub reply or resolution target is invented for them.
+
+When you are both author and reviewer, your own published feedback is also
+fixable. `G` exposes it under **Your GitHub comments**, without counting it as new
+incoming feedback. Use `f` there directly, or `U` to queue it under Attention
+needed; `h` and `k` move it to history/deferred. Replies from teammates still
+generate attention normally. These feedback items use the usual commit-linked
+reply workflow because they already have GitHub destinations.
 
 | Key | Owner action |
 | --- | --- |
@@ -144,6 +167,7 @@ recovery rules, and subsequent interactive milestone.
 | `C-c C-r` | Recover an unsaved/stale edit as a new current draft |
 | `C-c C-e` | Return to the active inline editor after scrolling away |
 | `c` / `f` | Choose an attachment and compose a new comment / follow-up |
+| `o` | Send a finding, status group, or sibling headings to Owner; press `f` there to fix |
 | `k` / `r` | Exclude the selected draft from publication (Suppressed) / restore it |
 | `a` | Choose code, an existing thread, overall assessment, or automatic placement |
 | `RET` | Visit the file at the reviewed revision with the actual range highlighted |

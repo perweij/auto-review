@@ -13,7 +13,7 @@ from .repository import repository_name
 
 def main(argv):
     parser = argparse.ArgumentParser(prog="pr-review owner")
-    actions = ["open", "discover", "read", "refresh", "fix", "resume", "diff", "associate", "prepare", "publish", "recover", "triage", "reply", "settings", "resolve", "reopen", "cancel"]
+    actions = ["open", "import", "discover", "read", "refresh", "fix", "resume", "diff", "associate", "prepare", "publish", "recover", "triage", "reply", "settings", "resolve", "reopen", "cancel"]
     parser.add_argument("pr", nargs="?", help="PR number or URL (optional with --session)")
     parser.add_argument("action", nargs="?", default="read", choices=actions)
     parser.add_argument("--session")
@@ -34,6 +34,10 @@ def main(argv):
     parser.add_argument("--reply", dest="reply_id")
     parser.add_argument("--body-file")
     parser.add_argument("--settings-file")
+    parser.add_argument("--review-session", help="source reviewer session for import")
+    parser.add_argument("--comment", dest="comments", action="append", help="saved reviewer comment to import; repeat for a group")
+    parser.add_argument("--generation", help="source reviewer generation for import")
+    parser.add_argument("--revision", help="source reviewer revision for import")
     args = vars(parser.parse_args(argv))
     if args["action"] == "read" and args.get("pr") in actions:
         args["action"], args["pr"] = args["pr"], None
@@ -42,18 +46,29 @@ def main(argv):
             print(fields["message"], file=sys.stderr, flush=True)
         elif kind == "started":
             print("Operation: " + fields["operation_id"], file=sys.stderr, flush=True)
+    def check_target(view):
+        if args["pr"] and args["pr"].rstrip("/").lower() not in (str(view["pr"]), view["url"].lower()):
+            raise ApiError("invalid_request", "The requested PR differs from the selected owner session.")
+        if args["repository"] and repository_name(args["repository"]) != view["repository"]:
+            raise ApiError("invalid_request", "The requested repository differs from the selected owner session.")
     try:
         with event_sink(progress), cancellation_scope():
+            if args["action"] == "import":
+                if not args["review_session"] or args["session"]:
+                    raise ApiError("invalid_request", "Use --review-session for import; its PR determines the owner destination.")
+                source = dispatch({"command": "read", "session": args["review_session"], "generation": args["generation"]})
+                check_target(source)
+                result = dispatch({"command": "owner-import", "session": source["session"], "generation": source["generation"],
+                                   "revision": args["revision"] or source["revision"], "comments": args["comments"]})
+                print(json.dumps(result, indent=2))
+                return 0
             if args["action"] in ("discover", "cancel"):
                 command = "cancel" if args["action"] == "cancel" else "owner-discover"
                 print(json.dumps(dispatch({"command": command, **{k: v for k, v in args.items() if v is not None}}), indent=2))
                 return 0
             if args["session"]:
                 view = dispatch({"command": "owner-read", "session": args["session"]})
-                if args["pr"] and args["pr"].rstrip("/").lower() not in (str(view["pr"]), view["url"].lower()):
-                    raise ApiError("invalid_request", "The requested PR differs from the selected owner session.")
-                if args["repository"] and repository_name(args["repository"]) != view["repository"]:
-                    raise ApiError("invalid_request", "The requested repository differs from the selected owner session.")
+                check_target(view)
             else:
                 view = dispatch({"command": "owner-open", "pr": args["pr"], "repository": args["repository"]})
             action = args.pop("action")

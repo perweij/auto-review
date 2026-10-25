@@ -60,11 +60,13 @@ def associate(session, state, request):
                         associations[key] = {"commits": matches, "method": "exact", "at": now()}
         for key, association in associations.items():
             association["refs"] = [workspace.pin_commit(session, sha) for sha in association["commits"]]
+            item = session.items(state, [key])[0]
+            if item["kind"] == "local_review":
+                continue  # Local findings have provenance, but no GitHub reply destination.
             if not all(workspace.ancestor(session, sha, remote) for sha in association["commits"]):
                 continue
             if not state["push_target"]["repository"]:
                 raise ApiError("missing_head_repository", "GitHub no longer identifies the PR head repository; inspect the destination before generating commit links.")
-            item = session.items(state, [key])[0]
             if item["fingerprint"] != batch["verified_fingerprints"].get(key):
                 continue
             existing = next((r for r in state["replies"] if r.get("batch") == batch["id"] and r["source"] == key), None)
@@ -85,6 +87,8 @@ def associate(session, state, request):
 
 
 def new_reply(item, body, **extra):
+    if item["kind"] == "local_review":
+        raise ApiError("local_only", "This finding is local; choose a GitHub conversation to compose a reply.")
     return {"id": uuid.uuid4().hex, "source": item["key"], "fingerprint": item["fingerprint"],
             "target": {"kind": "reply", "root_id": item["root_id"]} if item["kind"] == "thread" else {"kind": "timeline"},
             "body": body, "status": "unstaged", "versions": [], "created_at": now(), **extra}
@@ -107,6 +111,8 @@ def invalidate(session, state, remote):
 
 def blockers(session, state, reply, remote):
     item = session.items(state, [reply["source"]])[0]
+    if item["kind"] == "local_review":
+        raise ApiError("local_only", "Local findings do not have a GitHub reply destination.")
     if reply.get("needs_attention") or item["fingerprint"] != reply["fingerprint"]:
         raise ApiError("stale_discussion", "Inspect and acknowledge the changed reply context first.")
     require_text(reply["body"], "reply body")
