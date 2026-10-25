@@ -38,17 +38,14 @@
                     '("bin" "lib" "prompts"))
           (let ((program (string-append #$output "/bin/pr-review")))
             (substitute* program
-              (("#!/usr/bin/env bash")
-               (string-append "#!" #$(specification->package "bash") "/bin/bash")))
-            (wrap-program program
-              `("PATH" prefix
-                ,(map (lambda (package) (string-append package "/bin"))
-                      '#$(map specification->package
-                               '("bash" "coreutils" "findutils" "grep" "sed" "jq"
-                                 "git" "gh" "util-linux" "python")))))))))
-    (inputs (map specification->package
-                 '("bash" "coreutils" "findutils" "grep" "sed" "jq"
-                   "git" "gh" "util-linux" "python")))
+              (("#!/usr/bin/env python3")
+               (string-append "#!" #$(specification->package "python") "/bin/python3"))
+              (("^import sys$")
+               (string-append "import sys\nimport os\n"
+                              "os.environ['PATH'] = '"
+                              #$(specification->package "git") "/bin:"
+                              #$(specification->package "gh") "/bin:' + os.environ.get('PATH', '')")))))))
+    (inputs (map specification->package '("git" "gh" "python")))
     (home-page "https://github.com/perweij/auto-review")
     (synopsis "Local GitHub review orchestration and versioned frontend API")
     (description "Run independent review models, retain drafts and historical

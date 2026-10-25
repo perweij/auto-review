@@ -6,9 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import test_api
-from pr_review_api import operations, pulls
-from pr_review_api.common import ApiError, atomic_json, read_json, state_root
-from pr_review_api.main import dispatch
+from pr_review import operations, pulls
+from pr_review.common import ApiError, atomic_json, read_json, state_root
+from pr_review.api import dispatch
 
 
 class PullRequestsTest(unittest.TestCase):
@@ -52,12 +52,13 @@ class PullRequestsTest(unittest.TestCase):
         self.assertFalse(result["pull_requests"][0]["sessions"])
         with patch.object(pulls, "command", side_effect=AssertionError("Cached open is local")):
             self.assertEqual(self.request(), result)
-        with patch.object(operations, "stream") as run:
+        with patch("pr_review.reviews.execute", return_value=self.f.session) as run:
             dispatch({"protocol": 1, "command": "run", "cwd": str(self.f.repo),
                       "pr": 8, "repository": result["repository"]})
-        argv = run.call_args.args[0]
-        self.assertEqual(argv[1:4], ["8", "--repo", "github.com/org/repo"])
-        self.assertNotIn("--resume", argv)
+        request = run.call_args.args[0]
+        self.assertEqual(request["pr"], 8)
+        self.assertEqual(request["repository"], "github.com/org/repo")
+        self.assertNotIn("session", request)
         self.assertEqual(dispatch(self.f.request())["comments"][0]["body"], "Preserve old review")
 
     def test_refresh_removes_closed_unsaved_prs_and_keeps_saved_history(self):

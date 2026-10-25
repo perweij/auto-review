@@ -61,13 +61,16 @@
                (not (equal magit-auto-review--generation (alist-get 'generation result))))
        (let ((session (car (alist-get 'sessions result))))
          (setq magit-auto-review--session (alist-get 'session session)
-               magit-auto-review--new-ready t)))
+               magit-auto-review--new-ready (not (eq (alist-get 'new_review_ready result) :false)))))
      (magit-auto-review--notify
-      (if magit-auto-review--new-ready
+      (cond
+       ((eq (alist-get 'new_review_ready result) :false)
+        "Review paused; saved work is retained. L shows the reason; R resumes the analysis.")
+       (magit-auto-review--new-ready
           (if magit-auto-review--history-view
               "Review completed. N opens the latest results; this history view stays unchanged."
-            "Review completed. g or N opens the latest results; previous drafts remain in h (history).")
-        "Review completed; this saved generation remains current.")))))
+            "Review completed. g or N opens the latest results; previous drafts remain in h (history)."))
+       (t "Review completed; this saved generation remains current."))))))
 
 (defun magit-auto-review-trust-config ()
   "Confirm the exact agent-configuration snapshot reported by the backend."

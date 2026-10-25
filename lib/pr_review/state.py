@@ -6,6 +6,7 @@ from .common import ApiError, artifact_path, atomic_json, digest, git, now, read
 from .context import GitContext, parse_hunks
 from .assessments import comment_assessment, finding_assessments
 from . import workflow
+from .receipts import import_legacy
 
 
 def generation(path, manifest):
@@ -105,6 +106,7 @@ class Session:
                 raise ApiError("unsupported_state", "This draft format requires a newer backend.")
             if not state.get("verdict_requested") and not state.get("verdict_submitted"):
                 state["verdict"] = "COMMENT"
+            state["documents"] = self.documents(read_json(self.path / "publication/contributions.json", {}))
             return state
         followup = self.manifest.get("analysis_kind") == "followup"
         ledger = {} if followup else read_json(self.path / "publication/contributions.json", {})
@@ -144,7 +146,7 @@ class Session:
         return {"format_version": 1, "generation": self.id, "sequence": 0,
                 "created_at": now_from_manifest(self.manifest), "comments": comments,
                 "verdict": "COMMENT",
-                "verdict_submitted": False, "verdict_requested": False, "batches": [],
+                "verdict_submitted": False, "verdict_requested": False, "batches": [] if fresh else import_legacy(self.path, self.git.head),
                 "discussion": self.discussion(), "discussion_hash": self.manifest.get("discussion", {}).get("hash"),
                 "checked": None, "recommendation": recommendation,
                 "blocking_findings": synthesis.get("blocking_findings", 0), "documents": self.documents(ledger)}
@@ -156,7 +158,7 @@ class Session:
             import hashlib
             if hashlib.sha256(main.read_bytes()).hexdigest() != ledger.get("main_generated_hash"):
                 files.append(main)
-        return [{"name": p.name, "text": p.read_text(), "kind": "legacy_combined_body"} for p in files]
+        return [{"name": p.name, "text": p.read_bytes().decode("utf-8"), "kind": "legacy_combined_body"} for p in files]
 
     def check_write(self, request, state):
         if self.path != (self.pointer(".current-review") or self.root):

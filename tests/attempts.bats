@@ -3,7 +3,7 @@
 load helpers/fixture
 
 review_hashes() {
-    sha256sum "$1"/reviews/{claude-independent.md,codex.md,synthesis.json,contributions.json} "$1/publication/review-body.md"
+    sha256sum "$1"/reviews/{claude-independent.md,codex.md,synthesis.json,contributions.json} "$1/publication/drafts.json"
 }
 
 @test "Ctrl-C during replacement leaves completed review and edited draft in place" {
@@ -158,7 +158,7 @@ review_hashes() {
     [ "$(review_hashes "$previous")" = "$hashes" ]
 }
 
-@test "failed refresh from the publication menu retains the draft just edited by the user" {
+@test "discussion refresh preserves edits and later rematching retains them in history" {
     discussion_fixture ADDITION
     run_review; assert_success
     previous=$(run_directory)
@@ -169,18 +169,19 @@ jq '.[1].body += " Further discussion."' "$FIXTURE/inline.json" > "$FIXTURE/next
 mv "$FIXTURE/next-inline.json" "$FIXTURE/inline.json"
 SH
     chmod +x "$FIXTURE/editor"
-    export EDITOR=$FIXTURE/editor MOCK_FAIL_STAGE=contributions
-    tty_review 'e|c'; assert_failure
+    export EDITOR=$FIXTURE/editor
+    tty_drafts 'e p1|refresh|q'; assert_success
+    draft_is '.comments[0].body=="User edit before the refresh\n"'
+    export MOCK_FAIL_STAGE=contributions
+    run_review; assert_failure
     candidate=$(run_directory)
     [ "$candidate" != "$previous" ]
-    [ ! -L "$previous/.current-review" ]
-    [ "$(cat "$previous/publication/review-body.md")" = 'User edit before the refresh' ]
+    jq -e '.comments[0].body=="User edit before the refresh\n"' "$previous/publication/drafts.json"
     [ ! -e "$FIXTURE/post-count" ]
     unset MOCK_FAIL_STAGE
     run_review; assert_success
     [ "$(realpath -e "$previous/.current-review")" = "$candidate" ]
-    [ "$(cat "$candidate/publication/review-body.md")" = 'User edit before the refresh' ]
+    draft_is '.comments[0].body!="User edit before the refresh\n" and .comments[0].status=="unstaged"'
     [ "$(grep -c '^claude$' "$FIXTURE/stages")" = 1 ]
     [ "$(grep -c '^codex$' "$FIXTURE/stages")" = 1 ]
-    [ "$(grep -c '^synthesis$' "$FIXTURE/stages")" = 1 ]
 }

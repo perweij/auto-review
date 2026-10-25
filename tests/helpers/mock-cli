@@ -88,6 +88,7 @@ if [[ $tool == gh ]]; then
                     jq -nc --arg head "$commit" --arg event "$event" --arg viewer "${MOCK_VIEWER:-reviewer}" --rawfile body "$body" '{id:99,commit_id:$head,state:$event,body:$body,user:{login:$viewer},html_url:"https://github.com/org/repo/pull/7#pullrequestreview-99",submitted_at:"2026-01-02"}' > "$FIXTURE/published.json"
                     cat "$FIXTURE/published.json"
                     [[ ${MOCK_POST:-} != ambiguous ]] || exit 1
+                elif [[ ${MOCK_BAD_LOOKUP:-} == 1 ]]; then echo '[[{"id":99,"user":null,"body":"ambiguous"}]]'
                 elif [[ -s $FIXTURE/api-reviews.json ]]; then jq '[.]' "$FIXTURE/api-reviews.json"
                 elif [[ -s $FIXTURE/published.json ]]; then
                     if [[ ${MOCK_BAD_LOOKUP:-} == 1 ]]; then echo '[[{"id":99,"user":null,"body":"ambiguous"}]]'
@@ -198,7 +199,11 @@ if [[ $stage == synthesis || $stage == contributions ]] && [[ $* == *'--output-f
     echo '{"type":"system","subtype":"init"}'
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}'
     echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixture-model-text-do-not-replay"}}}'
-    if [[ ${MOCK_STREAM_STAGE:-} == "$stage" ]]; then sleep 6; fi
+    if [[ ${MOCK_STREAM_STAGE:-} == "$stage" ]]; then
+        sleep 3
+        echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixture-model-text-do-not-replay"}}}'
+        sleep 3
+    fi
 fi
 if [[ ${MOCK_SLEEP_STAGE:-} == "$stage" ]]; then
     if [[ ${MOCK_IGNORE_SIGNALS:-} == 1 ]]; then trap '' INT TERM
@@ -220,8 +225,9 @@ if [[ $stage == codex && -n ${MOCK_CODEX_EVENT:-} ]]; then
     fi
 fi
 if [[ ${MOCK_STDERR_STAGE:-} == "$stage" ]]; then
+    sleep 3
     echo 'fixture-stderr-do-not-replay' >&2
-    sleep 6
+    sleep 3
 fi
 if [[ ${MOCK_MUTATE_STAGE:-} == "$stage" ]]; then echo damage >> source.txt; fi
 if [[ ${MOCK_INDEX_STAGE:-} == "$stage" ]]; then echo damage >> source.txt; git add source.txt; fi

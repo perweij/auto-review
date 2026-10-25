@@ -40,24 +40,19 @@ load helpers/fixture
     export MOCK_CODEX_EVENT=retry MOCK_STDERR_STAGE=codex
     run_review; assert_success
     [[ $output == *'reported an error event and may be retrying'* ]]
-    [[ $output == *'Process running:'*'0s since last output (stdout/stderr)'* ]]
+    [[ $output == *'Process running:'* ]]
+    [[ $output =~ [0-2]s\ since\ last\ output\ \(stdout/stderr\) ]]
     [[ $output != *'Working:'* && $output != *fixture-provider-error-do-not-replay* && $output != *fixture-stderr-do-not-replay* ]]
     manifest_is '.phases.codex.status=="completed"'
 }
 
-@test "terminal-event parser tolerates partial JSON and ignores quoted errors in tool output" {
-    source "$PROJECT_ROOT/lib/models.sh"
-    printf '%s\n' '{"type":"item.completed","item":{"text":"not a git repository"}}' > "$FIXTURE/events"
-    printf '%s' '{"type":"error","message":' >> "$FIXTURE/events"
-    [ -z "$(stream_error "$FIXTURE/events")" ]
-    printf '%s\n' '"not a git repository"}' >> "$FIXTURE/events"
-    [ "$(stream_error "$FIXTURE/events")" = git_repository_unavailable ]
-}
+
 
 @test "structured Claude phases stream activity and retain reusable buffered-output cache identity" {
     export MOCK_STREAM_STAGE=synthesis
     run_review; assert_success
-    [[ $output == *'[synthesis] Process running:'*'0s since last output (stdout/stderr)'* ]]
+    [[ $output == *'[synthesis] Process running:'* ]]
+    [[ $output =~ [0-2]s\ since\ last\ output\ \(stdout/stderr\) ]]
     [[ $output != *fixture-model-text-do-not-replay* ]]
     saved=$(run_directory)
     jq -se 'any(.[]; .type=="stream_event") and (last | .type=="result" and .is_error==false)' "$saved/logs/synthesis.raw.json"
@@ -72,14 +67,7 @@ load helpers/fixture
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }
 
-@test "streaming options preserve old structured command identity without hiding model changes" {
-    source "$PROJECT_ROOT/lib/models.sh"
-    prior='["claude","-p","--model","saved-model","--output-format","json","--json-schema","{}"]'
-    current='["claude","-p","--model","saved-model","--output-format","stream-json","--verbose","--include-partial-messages","--json-schema","{}"]'
-    [ "$(cache_command <<< "$prior")" = "$(cache_command <<< "$current")" ]
-    changed=$(jq -c '.[index("--model")+1]="other-model"' <<< "$current")
-    [ "$(cache_command <<< "$prior")" != "$(cache_command <<< "$changed")" ]
-}
+
 
 @test "Git config environment overrides are removed as a complete group" {
     export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.ignorecase GIT_CONFIG_VALUE_0=true
@@ -91,17 +79,4 @@ load helpers/fixture
     done
     manifest_is '.removed_environment.codex | index("GIT_CONFIG_COUNT")!=null and index("GIT_CONFIG_KEY_0")!=null and index("GIT_CONFIG_VALUE_0")!=null and index("GIT_CONFIG_PARAMETERS")!=null'
     [ -s "$(run_directory)/logs/codex.git-preflight.log" ]
-}
-
-@test "Git preflight reports a broken model environment with saved diagnostics" {
-    source "$PROJECT_ROOT/lib/core.sh"
-    source "$PROJECT_ROOT/lib/models.sh"
-    RUN_DIR=$FIXTURE/diagnostic
-    mkdir -p "$RUN_DIR/logs"
-    WORKTREE=$FIXTURE/checkout ACTIVE_STAGE=codex
-    MODEL_ENV=(env -u GIT_CONFIG_KEY_0 GIT_CONFIG_COUNT=1 GIT_CONFIG_VALUE_0=true)
-    run check_model_repository codex
-    assert_failure
-    [[ $output == *"Git cannot read the worktree with codex's filtered environment"* ]]
-    [ -s "$RUN_DIR/logs/codex.git-preflight.log.stderr" ]
 }

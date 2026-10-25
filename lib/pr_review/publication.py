@@ -3,7 +3,7 @@ import copy
 import json
 import uuid
 
-from .common import ApiError, ROOT, atomic_json, command, digest, git, now, read_json
+from .common import ApiError, atomic_json, command, digest, git, now, read_json
 from . import workflow
 
 
@@ -12,9 +12,14 @@ def checkout(session):
     return result.splitlines()[0].removeprefix("worktree ")
 
 
-def bridge(session, operation, verdict="COMMENT"):
-    return command(["bash", ROOT / "lib/api-bridge.sh", operation, session.path, verdict],
-                   cwd=checkout(session), timeout=180)
+def repository_operation(session, operation, verdict="COMMENT"):
+    from . import discussion
+    from .repository import Repository
+    if operation == "refresh":
+        return discussion.refresh(session)
+    if operation == "validate":
+        return Repository.from_manifest(session.manifest).validate_publication(session.path, verdict)
+    raise ApiError("invalid_request", "Unknown repository operation")
 
 
 def gh(session, endpoint, payload=None, *, pages=False):
@@ -38,7 +43,7 @@ def gh(session, endpoint, payload=None, *, pages=False):
 
 
 def refresh(session, state):
-    bridge(session, "refresh")
+    repository_operation(session, "refresh")
     session.manifest = read_json(session.path / "manifest.json")
     discussion = session.discussion()
     old_hash = state.get("discussion_hash")
@@ -80,8 +85,8 @@ def make_actions(session, state):
                         "finding_ids": c["finding_ids"], "target": copy.deepcopy(c["placement"]), "event": "COMMENT",
                         "marker": marker(session, identity), "viewer": session.manifest["viewer"],
                         "payload": {"body": with_marker(c["body"], marker(session, identity))}})
-    # A model-suggested default accompanies staged inline/overall comments.
-    # Sending a verdict on its own requires an explicit user choice.
+    # Staged comments use COMMENT unless the user explicitly chose a verdict.
+    # Sending a verdict on its own also requires an explicit user choice.
     if review or (state.get("verdict_requested") and not state["verdict_submitted"]):
         identity = "api-" + uuid.uuid4().hex
         comment_markers = {c["id"]: marker(session, identity + "/" + c["id"]) for c in review}
@@ -108,22 +113,11 @@ def make_actions(session, state):
 
 
 def persist_action(session, state, action):
-    # Share receipts/intents with the legacy CLI. A crash between these writes
-    # is safe: either ledger retains the marker, and recovery rechecks GitHub.
-    ledger_file = session.path / "publication/actions.json"
-    ledger = read_json(ledger_file, [])
-    entry = {k: copy.deepcopy(action.get(k)) for k in
-             ("id", "kind", "status", "viewer", "marker", "target", "event", "finding_ids", "result")}
-    entry.update(proposal_ids=action["comment_ids"], content=action["payload"]["body"],
-                 body_md=action["payload"]["body"], api=True,
-                 comment_results=action.get("comment_results", {}))
-    ledger = [a for a in ledger if a.get("id") != entry["id"]] + [entry]
-    statuses = {a["id"]: a["status"] for b in state["batches"] for a in b["actions"]}
-    for item in ledger:
-        if item.get("api") and item["id"] in statuses:
-            item["status"] = statuses[item["id"]]
-    atomic_json(ledger_file, ledger)
+    # The draft ledger owns both intent and receipts. Legacy actions.json is
+    # retained unchanged as an import source, never a competing writable state.
     session.save(state)
+    ledger = [a for batch in state['batches'] for a in batch['actions']]
+    statuses = {a['id']: a['status'] for a in ledger}
     manifest = read_json(session.path / "manifest.json")
     count = sum(a.get("status") == "published" for a in ledger)
     remaining = any(status in ("draft", "failed", "submitting", "ambiguous") for status in statuses.values())
@@ -133,9 +127,12 @@ def persist_action(session, state, action):
 
 
 def valid_receipt(session, action, value):
-    if not isinstance(value, dict) or type(value.get("id")) is not int:
+    if (not isinstance(value, dict) or type(value.get("id")) is not int
+            or not isinstance(value.get('user'), dict)
+            or not isinstance(value['user'].get('login'), str)
+            or not isinstance(value.get('body'), str)):
         return False
-    if str(value.get("user", {}).get("login", "")).lower() != str(action["viewer"]).lower():
+    if str((value.get("user") or {}).get("login", "")).lower() != str(action["viewer"]).lower():
         return False
     if action["marker"] not in (value.get("body") or ""):
         return False
@@ -150,10 +147,13 @@ def mark_published(session, state, action, receipt):
     comment_results = {}
     if action["kind"] == "review" and action["payload"].get("comments"):
         values = gh(session, f"reviews/{receipt['id']}/comments", pages=True)
+        if any(not isinstance(v, dict) or not isinstance(v.get('user'), dict)
+               or not isinstance(v.get('body'), str) for v in values):
+            raise ApiError('incomplete_receipts', 'Review submitted; inline comment receipts are incomplete. Resolve before retrying.')
         for identity, tracking in action.get("comment_markers", {}).items():
             value = next((v for v in values if tracking in (v.get("body") or "") and
                           v.get("pull_request_review_id") == receipt["id"] and
-                          str(v.get("user", {}).get("login", "")).lower() == str(action["viewer"]).lower()), None)
+                          str((v.get("user") or {}).get("login", "")).lower() == str(action["viewer"]).lower()), None)
             if value:
                 comment_results[identity] = value
         expected = [c["id"] for c in state["comments"] if c["id"] in action["comment_ids"] and c["placement"]["kind"] == "inline"]
@@ -181,6 +181,10 @@ def recover(session, state):
             if action["status"] not in ("submitting", "ambiguous", "failed"):
                 continue
             values = gh(session, "comments" if action["kind"] == "reply" else "reviews", pages=True)
+            if any(not isinstance(v, dict) or type(v.get('id')) is not int or
+                   not isinstance(v.get('user'), dict) or not isinstance(v['user'].get('login'), str) or
+                   not isinstance(v.get('body'), str) for v in values):
+                raise ApiError('invalid_response', 'Malformed publication lookup; refusing to risk a duplicate')
             matches = [v for v in values if valid_receipt(session, action, v)]
             if len(matches) > 1:
                 raise ApiError("duplicate_receipts", "Multiple posts match this action; inspect GitHub before continuing.")
@@ -189,7 +193,7 @@ def recover(session, state):
             elif action.get("result"):
                 raise ApiError("incomplete_receipts", "A review was submitted but cannot currently be verified; no retry sent.")
             else:
-                action["status"] = "failed"
+                action["status"] = "superseded" if action.get("legacy") else "failed"
                 persist_action(session, state, action)
 
 
@@ -197,8 +201,10 @@ def prepare(session, state):
     recover(session, state)
     affected = refresh(session, state)
     try:
-        bridge(session, "validate", state["verdict"] if not state["verdict_submitted"] else "COMMENT")
+        repository_operation(session, "validate", state["verdict"] if not state["verdict_submitted"] else "COMMENT")
     except ApiError as exc:
+        if exc.code == "cancelled":
+            raise
         for c in state["comments"]:
             if c["status"] == "staged":
                 c["status"] = "unstaged"
@@ -269,7 +275,7 @@ def publish(session, state, request):
     if batch.get("review_status") != workflow.status_fingerprint(session):
         return {"complete": False, "reason": "GitHub review status changed. Inspect it and prepare publication again.",
                 "review": session.view(state)}
-    bridge(session, "validate", next((a["event"] for a in batch["actions"] if a["kind"] == "review"), "COMMENT"))
+    repository_operation(session, "validate", next((a["event"] for a in batch["actions"] if a["kind"] == "review"), "COMMENT"))
     for previous in (a for b in state["batches"] for a in b["actions"]):
         if previous["status"] in ("draft", "failed"):
             previous["status"] = "superseded"
@@ -283,7 +289,7 @@ def publish(session, state, request):
         if not any(a["status"] == "published" and a["kind"] == "review" for a in batch["actions"]) and batch.get("review_status") != workflow.status_fingerprint(session):
             return {"complete": False, "reason": "GitHub review status changed; prepare the remaining publication again.",
                     "review": session.view(state)}
-        bridge(session, "validate", action["event"])
+        repository_operation(session, "validate", action["event"])
         action["status"] = "submitting"
         persist_action(session, state, action)
         try:
@@ -295,5 +301,7 @@ def publish(session, state, request):
         except ApiError as exc:
             action["status"] = "ambiguous"
             persist_action(session, state, action)
+            if exc.code == "cancelled":
+                raise
             return {"complete": False, "reason": str(exc), "needs_recovery": True, "review": session.view(state)}
     return {"complete": True, "review": session.view(state)}

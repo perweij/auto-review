@@ -10,9 +10,10 @@ check-emacs:
 	bash emacs/tests/run.sh
 
 lint:
-	shellcheck -x bin/pr-review lib/*.sh tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh
-	bash -n bin/pr-review
-	@for file in lib/*.sh tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.sh; do bash -n "$$file" || exit; done
+	shellcheck -x tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh
+	python3 -m compileall -q lib/pr_review
+	python3 -m py_compile bin/pr-review
+	@for file in tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.sh; do bash -n "$$file" || exit; done
 
 test:
 	bats tests/*.bats

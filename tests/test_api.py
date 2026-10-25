@@ -12,10 +12,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from pr_review_api.common import ApiError, atomic_json, digest, locked, read_json
-from pr_review_api.main import dispatch
-from pr_review_api.state import Session
-from pr_review_api import publication
+from pr_review.common import ApiError, atomic_json, digest, locked, read_json
+from pr_review.api import dispatch
+from pr_review.state import Session
+from pr_review import publication
 
 
 class ApiTest(unittest.TestCase):
@@ -72,7 +72,7 @@ class ApiTest(unittest.TestCase):
         return dispatch(self.request("mutate", operation=operation, **fields))
 
     def test_local_reads_are_stable_and_never_run_models(self):
-        with patch.object(publication, "bridge", side_effect=AssertionError("Network forbidden")):
+        with patch.object(publication, "repository_operation", side_effect=AssertionError("Network forbidden")):
             first = dispatch(self.request())
             self.assertEqual(first["revision"], dispatch(self.request())["revision"])
             self.assertTrue(all(c["status"] == "unstaged" for c in first["comments"]))
@@ -104,7 +104,7 @@ class ApiTest(unittest.TestCase):
         state["prepared"] = {"confirmation": "keep-me"}
         self.session.save(state)
         snapshots = {p: p.read_bytes() for p in (synthesis_file, self.session.file, self.path / "manifest.json")}
-        with patch.object(publication, "bridge", side_effect=AssertionError("No network or models")):
+        with patch.object(publication, "repository_operation", side_effect=AssertionError("No network or models")):
             first = dispatch(self.request())
             second = dispatch(self.request())
         self.assertEqual(first["revision"], digest(state))
@@ -121,7 +121,7 @@ class ApiTest(unittest.TestCase):
         self.change("edit", comment="p1", body="Exact human wording")
         self.change("stage", comment="p1")
         github, posts = self.fake_github()
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=github):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=github):
             prepared = dispatch(self.request("prepare"))
             before = self.session.file.read_bytes()
             synthesis_file = self.path / "reviews/synthesis.json"
@@ -182,28 +182,28 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c["status"], "staged")
 
     def test_explicit_resume_keeps_saved_model_choices_unless_overridden(self):
-        from pr_review_api import operations
+        from pr_review import operations
         manifest = read_json(self.path / "manifest.json")
         manifest["models"] = {"claude": "claude-haiku-5-5", "codex": "gpt-6-luna"}
         atomic_json(self.path / "manifest.json", manifest)
-        with patch.object(operations, "stream") as run:
+        with patch("pr_review.reviews.execute", return_value=self.session) as run:
             dispatch(self.request("run"))
-            argv = run.call_args.args[0]
-            self.assertEqual(argv[argv.index("--claude-model")+1], "claude-haiku-5-5")
-            self.assertEqual(argv[argv.index("--codex-model")+1], "gpt-6-luna")
+            configuration = run.call_args.args[0]
+            self.assertEqual(configuration["claude_model"], "claude-haiku-5-5")
+            self.assertEqual(configuration["codex_model"], "gpt-6-luna")
             dispatch(self.request("run", codex_model="explicit-model"))
-            argv = run.call_args.args[0]
-            self.assertEqual(argv[argv.index("--codex-model")+1], "explicit-model")
+            configuration = run.call_args.args[0]
+            self.assertEqual(configuration["codex_model"], "explicit-model")
 
     def test_synthesis_testing_policy_is_explicit_and_validated_before_running(self):
-        from pr_review_api import operations
-        with patch.object(operations, "stream") as run:
+        from pr_review import operations
+        with patch("pr_review.reviews.execute", return_value=self.session) as run:
             dispatch(self.request("run", synthesis_tests="full"))
-            argv = run.call_args.args[0]
-            self.assertEqual(argv[argv.index("--synthesis-tests")+1], "full")
+            configuration = run.call_args.args[0]
+            self.assertEqual(configuration["synthesis_tests"], "full")
             dispatch(self.request("run"))
-            argv = run.call_args.args[0]
-            self.assertEqual(argv[argv.index("--synthesis-tests")+1], "focused")
+            configuration = run.call_args.args[0]
+            self.assertEqual(configuration["synthesis_tests"], "focused")
             run.reset_mock()
             for invalid in ("all", "", None, True, ["full"]):
                 with self.subTest(invalid=invalid), self.assertRaises(ApiError) as caught:
@@ -212,8 +212,8 @@ class ApiTest(unittest.TestCase):
             run.assert_not_called()
 
     def test_setup_resolves_saved_and_pending_configuration_without_mutating_drafts(self):
-        from pr_review_api.settings import DEFAULTS
-        from pr_review_api import operations
+        from pr_review.settings import DEFAULTS
+        from pr_review import operations
         config = {**DEFAULTS, "reviewers": ["codex"], "processing_provider": "codex",
                   "codex_effort": "low", "synthesis_tests": "full"}
         self.manifest["configuration"] = config
@@ -227,12 +227,12 @@ class ApiTest(unittest.TestCase):
         atomic_json(pending / "manifest.json", {**self.manifest, "configuration": pending_config})
         (self.path / ".pending-review").symlink_to(pending)
         self.assertEqual(dispatch(self.request("settings"))["settings"], pending_config)
-        with patch.object(operations, "stream") as run:
+        with patch("pr_review.reviews.execute", return_value=self.session) as run:
             dispatch(self.request("run"))
-            argv = run.call_args.args[0]
-            self.assertEqual(argv[argv.index("--reviewers")+1], "codex")
-            self.assertEqual(argv[argv.index("--codex-effort")+1], "medium")
-            self.assertEqual(argv[argv.index("--synthesis-tests")+1], "full")
+            configuration = run.call_args.args[0]
+            self.assertEqual(configuration["reviewers"], ["codex"])
+            self.assertEqual(configuration["codex_effort"], "medium")
+            self.assertEqual(configuration["synthesis_tests"], "full")
 
     def test_new_review_uses_defaults_without_changing_existing_review(self):
         result = dispatch({"protocol": 1, "command": "settings", "cwd": str(self.repo), "pr": 8,
@@ -244,30 +244,28 @@ class ApiTest(unittest.TestCase):
         self.assertNotIn("configuration", read_json(self.path / "manifest.json"))
 
     def test_cli_settings_reader_keeps_explicit_external_resume_supported(self):
-        from pr_review_api.settings import DEFAULTS
+        from pr_review.settings import DEFAULTS
         external = self.root / "external-review/manifest.json"
         configuration = {**DEFAULTS, "reviewers": ["codex"], "processing_provider": "codex", "codex_effort": "low"}
         atomic_json(external, {**self.manifest, "configuration": configuration})
-        script = Path(__file__).resolve().parents[1] / "lib/review-settings.py"
-        result = subprocess.run([sys.executable, script], input=json.dumps({"manifest": str(external)}),
-                                text=True, capture_output=True, check=True)
-        self.assertEqual(json.loads(result.stdout), configuration)
+        from pr_review.settings import from_manifest, validate
+        self.assertEqual(validate(from_manifest(read_json(external))), configuration)
 
     def test_api_rejects_unsupported_menu_selection_before_starting(self):
-        from pr_review_api import operations
-        with patch.object(operations, "stream") as run, self.assertRaises(ApiError):
+        from pr_review import operations
+        with patch("pr_review.reviews.execute", return_value=self.session) as run, self.assertRaises(ApiError):
             dispatch(self.request("run", reviewers=["codex"], codex_model="fable", catalogs={
                 "codex": {"provider": "codex", "models": [{"value": "gpt-6-luna", "efforts": ["high"]}]}}))
         run.assert_not_called()
 
     def test_adaptation_accepts_codex_events_and_preserves_draft_until_accepted(self):
-        from pr_review_api import operations
+        from pr_review import operations
         state = self.session.load()
         before = copy.deepcopy(state)
         (self.path / "logs").mkdir(exist_ok=True)
         result_events = '{"type":"item.completed","item":{"type":"agent_message","text":"A contextual reply"}}\n'
         with patch.object(self.session, "comment_context", return_value={"thread": {"comments": ["Already fixed"]}}), \
-             patch.object(operations, "stream", return_value=result_events):
+             patch.object(operations, "process", return_value=__import__("types").SimpleNamespace(returncode=0, events=[json.loads(result_events)])):
             result = operations.adapt(self.session, state, self.request("adapt", comment="p1"))
         self.assertEqual(result["body"], "A contextual reply")
         self.assertEqual(state, before)
@@ -291,7 +289,7 @@ class ApiTest(unittest.TestCase):
         self.git("commit", "-qm", "rename")
         manifest = copy.deepcopy(self.manifest)
         manifest["snapshot"]["head"] = self.git("rev-parse", "HEAD")
-        from pr_review_api.context import GitContext
+        from pr_review.context import GitContext
         context = GitContext(manifest)
         self.assertEqual(context.files()[0]["old_path"], "source.txt")
         self.assertIn("old", context.source("renamed.txt", "LEFT")["text"])
@@ -438,9 +436,19 @@ class ApiTest(unittest.TestCase):
         atomic_json(candidate / "manifest.json", manifest)
         (self.path / ".pending-review").symlink_to(candidate)
         project = Path(__file__).resolve().parents[1]
-        script = 'source "$1/lib/core.sh"; source "$1/lib/attempts.sh"; SESSION_DIR=$2; RUN_DIR=$3; CONTRIBUTIONS_READY=true; commit_review_attempt'
+        script = """import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + '/lib')
+from pr_review.sessions import Store
+from pr_review.repository import Repository
+from pr_review.common import read_json
+store = Store.__new__(Store)
+store.root, store.path = map(Path, sys.argv[2:4])
+store.manifest = read_json(store.path / 'manifest.json')
+store.promote(['claude', 'codex', 'synthesis', 'contributions'])
+"""
         with locked(self.session.lock):
-            child = subprocess.Popen(["bash", "-c", script, "promotion-test", str(project), str(self.path), str(candidate)],
+            child = subprocess.Popen([sys.executable, "-c", script, str(project), str(self.path), str(candidate)],
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
                 time.sleep(0.25)
@@ -460,6 +468,69 @@ class ApiTest(unittest.TestCase):
         with self.assertRaisesRegex(ApiError, "newer review is current"):
             self.change("edit", comment="p1", body="Stale write")
 
+    def test_generation_finalization_waits_for_an_in_progress_draft_save(self):
+        import selectors
+        self.manifest['publication'] = {'status':'not_published'}
+        atomic_json(self.path / 'manifest.json', self.manifest)
+        self.change('edit', comment='p1', body='Before finalization')
+        ledger = read_json(self.path / 'publication/contributions.json')
+        for proposal in ledger['proposals']:
+            proposal['basis'].update(target_key=None, discussion_keys=[], classification='NEW',
+                                     explanation='Not yet discussed', delta='New evidence')
+        atomic_json(self.path / 'publication/contributions.json', ledger)
+        atomic_json(self.path / 'reviews/contributions.json',
+                    {'contributions':[p['basis'] for p in ledger['proposals']], 'validity_conflicts':[]})
+        script = """import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1] + '/lib')
+from pr_review import pipeline, followup
+from pr_review.common import locked
+from pr_review.state import Session
+from pr_review.reviews import Review
+session = Session({'session':sys.argv[2]})
+def final_session():
+    print('finalizing', flush=True)
+    return session
+with locked(session.pr_lock):
+    if sys.argv[3] == 'followup':
+        followup.adopt(final_session())
+    else:
+        run = Review.__new__(Review)
+        run.root = run.path = session.root
+        run.manifest = session.manifest
+        run.settings = {'reviewers':['claude']}
+        run.repo = SimpleNamespace(url=run.manifest['url'])
+        run.session = final_session
+        with patch.object(pipeline.discussion, 'collect'), patch.object(pipeline.discussion, 'collect_status'), \\
+                patch.object(pipeline, 'render_contributions'), patch.object(pipeline.cache, 'inputs', return_value={}), \\
+                patch.object(pipeline.cache, 'reusable', return_value=True):
+            assert pipeline.contributions(run)
+"""
+        for mode in ('contributions', 'followup'):
+            with locked(self.session.lock):
+                child = subprocess.Popen([sys.executable, '-c', script,
+                    str(Path(__file__).resolve().parents[1]), str(self.path), mode],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(child.stdout, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(5), 'Finalization did not start')
+                    self.assertEqual(child.stdout.readline().strip(), 'finalizing')
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        child.wait(timeout=.2)
+                    state = self.session.load()
+                    state['comments'][0]['body'] = 'Saved during ' + mode
+                    self.session.save(state)
+                except BaseException:
+                    child.terminate()
+                    child.communicate(timeout=3)
+                    raise
+            output, error = child.communicate(timeout=5)
+            self.assertEqual(child.returncode, 0, output + error)
+            self.assertEqual(self.session.load()['comments'][0]['body'], 'Saved during ' + mode)
+
     def test_refresh_unstages_without_rewriting_manual_work(self):
         self.change("placement", comment="p1", placement={"kind": "review"})
         self.change("stage", comment="p1")
@@ -468,7 +539,7 @@ class ApiTest(unittest.TestCase):
         atomic_json(self.path / "manifest.json", manifest)
         atomic_json(self.path / "discussion/snapshot-a/discussion.json",
                     {"items": [{"key": "comment:9", "kind": "comment", "comments": [{"id": 9, "body": "New evidence"}]}]})
-        with patch.object(publication, "bridge"):
+        with patch.object(publication, "repository_operation"):
             result = dispatch(self.request("refresh"))
         c = result["review"]["comments"][0]
         self.assertEqual(c["placement"], {"kind": "review"})
@@ -506,7 +577,7 @@ class ApiTest(unittest.TestCase):
         self.change("edit", comment="p1", body="Precisely this wording\n\nNo rewritten summary")
         self.change("stage", comments=["p1", "p2"])
         github, posts = self.fake_github()
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=github):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=github):
             prepared = dispatch(self.request("prepare"))
             self.assertTrue(prepared["ready"])
             published = dispatch(self.request("publish", confirmation=prepared["confirmation"]))
@@ -522,7 +593,7 @@ class ApiTest(unittest.TestCase):
         self.change("verdict", verdict="REQUEST_CHANGES")
         self.change("stage", comment="p1")
         github, posts = self.fake_github(ambiguous_review=True)
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=github):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=github):
             prepared = dispatch(self.request("prepare"))
             result = dispatch(self.request("publish", confirmation=prepared["confirmation"]))
             self.assertFalse(result["complete"])
@@ -537,7 +608,7 @@ class ApiTest(unittest.TestCase):
     def test_verdict_only_and_expired_confirmation(self):
         self.change("verdict", verdict="APPROVE")
         github, posts = self.fake_github()
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=github):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=github):
             prepared = dispatch(self.request("prepare"))
             self.assertEqual(prepared["counts"]["inline"], 0)
             self.change("verdict", verdict="COMMENT")
@@ -548,7 +619,7 @@ class ApiTest(unittest.TestCase):
     def test_explicit_comment_verdict_without_findings_or_assessment(self):
         self.change("verdict", verdict="COMMENT")
         github, posts = self.fake_github()
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=github):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=github):
             prepared = dispatch(self.request("prepare"))
             self.assertTrue(prepared["ready"])
             result = dispatch(self.request("publish", confirmation=prepared["confirmation"]))
@@ -572,7 +643,7 @@ class ApiTest(unittest.TestCase):
                 failures.append(True)
                 raise ApiError("network", "Rejected before acceptance")
             return github(*args, **kwargs)
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=flaky):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=flaky):
             prepared = dispatch(self.request("prepare"))
             result = dispatch(self.request("publish", confirmation=prepared["confirmation"]))
             self.assertFalse(result["complete"])
@@ -582,7 +653,7 @@ class ApiTest(unittest.TestCase):
             result = dispatch(self.request("publish", confirmation=prepared["confirmation"]))
             self.assertTrue(result["complete"])
         self.assertEqual(len(posts), 2)
-        self.assertEqual(len([a for a in read_json(self.path / "publication/actions.json") if a["status"] == "published"]), 2)
+        self.assertEqual(len([a for b in self.session.load()["batches"] for a in b["actions"] if a["status"] == "published"]), 2)
 
     def test_late_recovered_review_invalidates_an_already_prepared_retry(self):
         self.change("verdict", verdict="REQUEST_CHANGES")
@@ -594,7 +665,7 @@ class ApiTest(unittest.TestCase):
             if args[1] == "reviews" and len(args) == 2 and hidden[0]:
                 return []
             return values
-        with patch.object(publication, "bridge"), patch.object(publication, "gh", side_effect=delayed):
+        with patch.object(publication, "repository_operation"), patch.object(publication, "gh", side_effect=delayed):
             prepared = dispatch(self.request("prepare"))
             dispatch(self.request("publish", confirmation=prepared["confirmation"]))
             retry = dispatch(self.request("prepare"))
@@ -624,38 +695,34 @@ class OperationTest(unittest.TestCase):
         self.addCleanup(self.env.stop)
 
     def test_startup_failure_retains_reason_and_private_log_without_a_review(self):
-        from pr_review_api import operations
-        for trailing in ("", "\nStatus: Failed\n"):
-            with self.subTest(trailing=trailing), patch.object(operations, "emit") as emit:
-                script = "import sys; print('[1/7] Checking authentication'); sys.stderr.write(" + repr(
-                    "Error: GitHub authentication failed; run gh auth login" + trailing) + "); sys.exit(1)"
-                with self.assertRaises(ApiError) as caught:
-                    operations.stream([sys.executable, "-c", script], self.root)
-                error = caught.exception
-                self.assertEqual(error.code, "operation_failed")
-                self.assertEqual(str(error), "GitHub authentication failed; run gh auth login")
-                log = Path(error.details["log_path"])
-                self.assertIn("[1/7] Checking authentication", log.read_text())
-                self.assertIn("GitHub authentication failed", log.read_text())
-                self.assertEqual(log.stat().st_mode & 0o777, 0o600)
-                record = read_json(log.with_suffix(".json"))
-                self.assertEqual(record["exit_code"], 1)
-                self.assertEqual(record["status"], "failed")
-                started = next(c for c in emit.call_args_list if c.args[0] == "started")
-                self.assertEqual(started.kwargs["log_path"], str(log))
-                self.assertEqual(started.kwargs["operation_id"], error.details["operation_id"])
-
-    def test_captured_response_is_returned_without_becoming_progress(self):
-        from pr_review_api import operations
+        from pr_review import operations
+        from pr_review.events import emit as progress
         with patch.object(operations, "emit") as emit:
-            result = operations.stream([sys.executable, "-c",
-                                        "import sys; sys.stdout.write('Private draft'); sys.stderr.write('Diagnostic')"],
-                                       self.root, capture=True)
-        self.assertEqual(result, "Private draft")
-        log = next((self.root / "pr-review/operations").glob("*.log"))
-        self.assertEqual(log.read_text(), "[stderr] Diagnostic\n")
-        self.assertEqual(read_json(log.with_suffix(".json"))["exit_code"], 0)
-        self.assertFalse(any("Private draft" in str(c) for c in emit.call_args_list))
+            with self.assertRaises(ApiError) as caught:
+                with operations.operation():
+                    progress('progress', message='Checking authentication')
+                    raise ApiError('operation_failed', 'GitHub authentication failed; run gh auth login', exit_code=1)
+        error = caught.exception
+        self.assertEqual(str(error), 'GitHub authentication failed; run gh auth login')
+        log = Path(error.details['log_path'])
+        self.assertIn('Checking authentication', log.read_text())
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(read_json(log.with_suffix('.json'))['status'], 'failed')
+        started = next(c for c in emit.call_args_list if c.args[0] == 'started')
+        self.assertEqual(started.kwargs['operation_id'], error.details['operation_id'])
+
+    def test_captured_provider_text_does_not_become_progress(self):
+        from pr_review import operations
+        from pr_review.processes import run
+        with patch.object(operations, 'emit') as emit:
+            with operations.operation():
+                result = run([sys.executable, '-c', "import sys; sys.stdout.write('Private draft'); sys.stderr.write('Diagnostic')"])
+        self.assertEqual(result.stdout, 'Private draft')
+        self.assertEqual(result.stderr, 'Diagnostic')
+        log = next((self.root / 'pr-review/operations').glob('*.log'))
+        self.assertEqual(read_json(log.with_suffix('.json'))['exit_code'], 0)
+        self.assertNotIn('Private draft', log.read_text())
+        self.assertFalse(any('Private draft' in str(c) for c in emit.call_args_list))
 
 
 if __name__ == "__main__":

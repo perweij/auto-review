@@ -2,13 +2,14 @@
 import json
 import os
 import selectors
-import signal
 import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
 
 from .common import ApiError
+from .processes import cancellation_scope, stop_group, Cancelled
+from .providers import environment
 
 
 @contextmanager
@@ -18,15 +19,13 @@ def connection(provider, timeout=30):
                 "--no-session-persistence", "--permission-mode", "dontAsk", "--tools", "",
                 "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "user",
                 "--settings", '{"disableAllHooks":true}', "--disable-slash-commands"])
-    with tempfile.TemporaryDirectory(prefix="pr-review-models-") as cwd:
+    with tempfile.TemporaryDirectory(prefix="pr-review-models-") as cwd, cancellation_scope() as cancellation:
+        cancellation.check()
         try:
             child = subprocess.Popen(command, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, start_new_session=True)
+                                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True, env=environment(provider)[0])
         except FileNotFoundError as exc:
             raise ApiError("discovery_failed", f"{provider} is not installed. Install it or disable this reviewer.") from exc
-        previous = {}
-        def cancelled(_sig, _frame):
-            raise ApiError("discovery_cancelled", "Model discovery cancelled.")
         selector = selectors.DefaultSelector()
         selector.register(child.stdout, selectors.EVENT_READ)
         deadline, pending = time.monotonic() + timeout, b""
@@ -36,6 +35,10 @@ def connection(provider, timeout=30):
         def receive():
             nonlocal pending
             while True:
+                try:
+                    cancellation.check()
+                except Cancelled as exc:
+                    raise ApiError("discovery_cancelled", "Model discovery cancelled.") from exc
                 if b"\n" in pending:
                     line, pending = pending.split(b"\n", 1)
                     try:
@@ -46,8 +49,10 @@ def connection(provider, timeout=30):
                         return value
                 else:
                     remaining = deadline - time.monotonic()
-                    if remaining <= 0 or not selector.select(remaining):
+                    if remaining <= 0:
                         raise ApiError("discovery_timeout", f"{provider} model discovery timed out; refresh choices to retry.")
+                    if not selector.select(min(remaining, 0.1)):
+                        continue
                     data = os.read(child.stdout.fileno(), 65536)
                     if not data:
                         raise ApiError("discovery_failed", f"{provider} stopped before returning model choices. Check CLI login and version, then retry.")
@@ -55,31 +60,12 @@ def connection(provider, timeout=30):
                     if len(pending) > 4 * 1024 * 1024:
                         raise ApiError("discovery_failed", f"{provider} returned oversized model metadata.")
         try:
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                previous[sig] = signal.signal(sig, cancelled)
             yield send, receive
         finally:
-            # Stop descendants too, even when the CLI already exited.
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                signal.signal(sig, signal.SIG_IGN)
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                child.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                pass
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            child.wait()
+            stop_group(child, grace=1)
             selector.close()
             child.stdin.close()
             child.stdout.close()
-            for sig, handler in previous.items():
-                signal.signal(sig, handler)
 
 
 def discover(request):

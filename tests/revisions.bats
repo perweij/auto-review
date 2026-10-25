@@ -31,38 +31,31 @@ advance_head() {
     [ "$(git -C "$FIXTURE/repo-review-pr-7" rev-parse HEAD)" = "$UPDATED_HEAD" ]
     [ -s "$archive/reviews/synthesis.json" ]
     [ "$(jq -r .run_id "$saved/manifest.json")" != "$old_id" ]
-    jq -e '.proposals[0].selected==true and .proposals[0].revision==null' "$saved/publication/contributions.json"
+    jq -e '.proposals[0].selected==false and .proposals[0].revision==null' "$saved/publication/contributions.json"
     [ ! -f "$saved/publication/previous-edits.md" ]
     [ ! -f "$saved/reviews/revision.json" ]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
     [ ! -e "$FIXTURE/post-count" ]
 }
 
-@test "earlier human edits can be viewed but are never inserted into the fresh draft" {
+@test "earlier human edits are recoverable from history without automatic transfer" {
     cat > "$FIXTURE/editor" <<'SH'
 #!/usr/bin/env bash
 printf 'Human-written text for the old commit.\n' > "$1"
 SH
     chmod +x "$FIXTURE/editor"
     export EDITOR=$FIXTURE/editor
-    tty_review 'e p1|e|n'; assert_success
+    tty_review 'e p1|q'; assert_success
     saved=$(run_directory)
-    # Exercise old runs without explicit generated-body tracking, too.
-    jq 'del(.main_generated_hash)' "$saved/publication/contributions.json" > "$FIXTURE/ledger"
-    cp "$FIXTURE/ledger" "$saved/publication/contributions.json"
+    generation=$(jq -r .generation "$saved/publication/drafts.json")
     advance_head
     jq 'map(.body_md="Fresh finding body")' "$FIXTURE/latest-findings.json" > "$FIXTURE/findings.json"
     run_review; assert_success
-    saved=$(run_directory)
-    [[ $output == *'Earlier edited drafts are available'* ]]
-    grep -q 'Edited proposals' "$saved/publication/previous-edits.md"
-    grep -q 'Edited main draft' "$saved/publication/previous-edits.md"
-    grep -q 'Human-written text' "$saved/publication/previous-edits.md"
-    [ "$(cat "$saved/publication/review-body.md")" = 'Fresh finding body' ]
-    jq -e '.proposals[0].body_md=="Fresh finding body"' "$saved/publication/contributions.json"
+    draft_is '.comments[0].body=="Fresh finding body" and .comments[0].status=="unstaged"'
     stages=$(cat "$FIXTURE/stages")
-    tty_review 'u|n'; assert_success
-    [[ $output == *'Human-written text'* && $output == *'No text has been copied automatically'* ]]
+    tty_drafts "history|show $generation|i p1|current|recover $generation p1|q"; assert_success
+    [[ $output == *'Human-written text'* ]]
+    draft_is '.comments|length==2 and .[1].body=="Human-written text for the old commit.\n" and .[1].status=="unstaged" and .[1].placement.kind=="unplaced"'
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
     [ ! -e "$FIXTURE/post-count" ]
 }
@@ -76,19 +69,17 @@ SH
     [ ! -f "$(run_directory)/publication/previous-edits.md" ]
 }
 
-@test "the combined-body edit hash survives ordinary resume before the PR updates" {
+@test "a legacy combined body remains a recoverable document after resume and replacement" {
     run_review; assert_success
     saved=$(run_directory)
-    original_hash=$(jq -r .main_generated_hash "$saved/publication/contributions.json")
+    generation=$(jq -r .generation "$saved/publication/drafts.json")
     echo 'Manual main review edit' > "$saved/publication/review-body.md"
     run_review; assert_success
-    saved=$(run_directory)
-    [ "$(jq -r .main_generated_hash "$saved/publication/contributions.json")" = "$original_hash" ]
     advance_head
     run_review; assert_success
-    saved=$(run_directory)
-    grep -q 'Manual main review edit' "$saved/publication/previous-edits.md"
-    [ "$(cat "$saved/publication/review-body.md")" != 'Manual main review edit' ]
+    tty_drafts "show $generation|docs|current|recover-doc $generation review-body.md|q"; assert_success
+    [[ $output == *'Manual main review edit'* ]]
+    draft_is 'any(.comments[];.body=="Manual main review edit\n" and .status=="unstaged" and .placement.kind=="unplaced")'
 }
 
 @test "a run stopped at the removed comparison stage can resume to publication preparation" {
@@ -110,13 +101,13 @@ SH
 @test "dirty old worktree blocks update without losing old review or files" {
     run_review; assert_success
     saved=$(run_directory)
-    before=$(sha256sum "$saved/publication/review-body.md" "$saved/reviews/synthesis.json")
+    before=$(sha256sum "$saved/publication/drafts.json" "$saved/reviews/synthesis.json")
     echo 'unsaved change' >> "$FIXTURE/repo-review-pr-7/source.txt"
     advance_head
     run_review; assert_failure
     saved=$(run_directory)
     [[ $output == *'tracked changes'* ]]
-    [ "$(sha256sum "$saved/publication/review-body.md" "$saved/reviews/synthesis.json")" = "$before" ]
+    [ "$(sha256sum "$saved/publication/drafts.json" "$saved/reviews/synthesis.json")" = "$before" ]
     [ "$(git -C "$FIXTURE/repo-review-pr-7" rev-parse HEAD)" = "$HEAD_SHA" ]
     manifest_is '.snapshot_update==null and .snapshot_history==null'
 }
@@ -162,14 +153,14 @@ SH
 }
 
 @test "published history is archived and actual discussion controls duplicates after update" {
-    tty_review 'c|yes'; assert_success
+    tty_review 'a p1|overall|s p1|p|yes|q'; assert_success
     saved=$(run_directory)
     advance_head
-    jq '{contributions:[.[]|{finding_ids:[.id],classification:"DUPLICATE",discussion_keys:["review:99"],target_key:null,explanation:"Posted on GitHub",delta:"",body_md:""}],validity_conflicts:[]}' "$FIXTURE/latest-findings.json" > "$FIXTURE/contribution-model.json"
+    jq '{contributions:[.[]|{finding_ids:[.id],classification:"DUPLICATE",discussion_keys:["review:3001"],target_key:null,explanation:"Posted on GitHub",delta:"",body_md:""}],validity_conflicts:[]}' "$FIXTURE/latest-findings.json" > "$FIXTURE/contribution-model.json"
     run_review; assert_success
     saved=$(run_directory)
     archive=$(jq -r '.previous_review.archive' "$saved/manifest.json")
-    jq -e '.[0].status=="published"' "$archive/publication/actions.json"
+    jq -e '.batches[0].actions[0].status=="published"' "$archive/publication/drafts.json"
     jq -e 'length==0' "$saved/publication/actions.json"
     jq -e '.proposals[0].classification=="DUPLICATE" and .proposals[0].selected==false' "$saved/publication/contributions.json"
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
@@ -211,6 +202,6 @@ SH
     unset MOCK_FAIL_STAGE
     run_review; assert_success
     saved=$(run_directory)
-    jq -e '.proposals[0].selected==true' "$saved/publication/contributions.json"
+    jq -e '.proposals[0].selected==false' "$saved/publication/contributions.json"
     manifest_is '.phases.revision==null'
 }

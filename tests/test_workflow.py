@@ -5,9 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import test_api
-from pr_review_api import workflow, publication, followup
-from pr_review_api.common import ApiError, atomic_json, digest, read_json
-from pr_review_api.main import dispatch
+from pr_review import workflow, publication, followup
+from pr_review.common import ApiError, atomic_json, digest, read_json
+from pr_review.api import dispatch
 
 
 class WorkflowTest(unittest.TestCase):
@@ -38,7 +38,7 @@ class WorkflowTest(unittest.TestCase):
         atomic_json(self.f.path / "manifest.json", manifest)
 
     def refresh(self):
-        with patch.object(publication, "bridge"):
+        with patch.object(publication, "repository_operation"):
             return dispatch(self.f.request("refresh"))["review"]
 
     def request_state(self, **fields):
@@ -94,7 +94,7 @@ class WorkflowTest(unittest.TestCase):
 
     def test_status_changes_invalidate_confirmation_without_unstaging(self):
         self.f.change("stage", comment="p1")
-        with patch.object(publication, "bridge"):
+        with patch.object(publication, "repository_operation"):
             prepared = dispatch(self.f.request("prepare"))
             atomic_json(self.f.path / "discussion/review-status.json", {"available": True, "decision": "CHANGES_REQUESTED"})
             with patch.object(publication, "gh") as posts:
@@ -127,7 +127,7 @@ class WorkflowTest(unittest.TestCase):
                     if scenario == "body": changed[0]["comments"][0]["body"] += " Edited"
                     else: changed[0]["can_resolve"] = False
                     self.remote(changed)
-                with patch.object(publication, "bridge"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql") as mutation:
+                with patch.object(publication, "repository_operation"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql") as mutation:
                     result = dispatch(request)
                 self.assertFalse(result["changed"])
                 mutation.assert_not_called()
@@ -139,7 +139,7 @@ class WorkflowTest(unittest.TestCase):
             self.threads[0]["is_resolved"] = True
             self.remote(self.threads)
             raise ApiError("network", "Lost response")
-        with patch.object(publication, "bridge"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql", side_effect=mutate) as mutation:
+        with patch.object(publication, "repository_operation"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql", side_effect=mutate) as mutation:
             result = dispatch(self.request_state())
             self.assertTrue(result["changed"])
             self.assertFalse(result["uncertain"])
@@ -149,7 +149,7 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(mutation.call_count, 1)
 
     def test_unconfirmed_mutation_is_not_retried(self):
-        with patch.object(publication, "bridge"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql", side_effect=ApiError("network", "Lost response")) as mutation:
+        with patch.object(publication, "repository_operation"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql", side_effect=ApiError("network", "Lost response")) as mutation:
             result = dispatch(self.request_state())
         self.assertTrue(result["uncertain"])
         self.assertFalse(result["changed"])
@@ -192,7 +192,7 @@ class WorkflowTest(unittest.TestCase):
         atomic_json(self.f.path / "manifest.json", manifest)
         atomic_json(self.f.path / "reviews/followup.json", {"assessments": []})
         self.f.change("verdict", verdict="APPROVE")
-        with patch.object(publication, "bridge"):
+        with patch.object(publication, "repository_operation"):
             result = dispatch(self.f.request("prepare"))
         self.assertTrue(result["ready"])
         self.assertEqual(result["verdict"], "APPROVE")

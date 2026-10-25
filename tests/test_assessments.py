@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from pr_review_api.assessments import comment_assessment, finding_assessments, report_severities
+from pr_review.assessments import comment_assessment, finding_assessments, report_severities
 
 
 class AssessmentTest(unittest.TestCase):
@@ -89,11 +89,14 @@ Severity: High
                               "evidence": "Observed", "blocking": False, "body_md": "Exact text"}]}
 
         def valid(strict):
-            args = ["jq", "-e", "--argjson", "require_severity", json.dumps(strict),
-                    "-f", str(ROOT / "prompts/validate-synthesis.jq")]
-            result = subprocess.run(args, input=json.dumps(data), text=True, capture_output=True)
-            self.assertIn(result.returncode, (0, 1), result.stderr)
-            return result.returncode == 0
+            from pr_review.validation import synthesis
+            from pr_review.common import ApiError
+            try:
+                synthesis(data, new=strict)
+                return True
+            except ApiError:
+                return False
+
 
         self.assertTrue(valid(False))
         self.assertFalse(valid(True))

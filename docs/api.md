@@ -173,6 +173,16 @@ save it explicitly into a current draft.
   use focused checks; `synthesis_tests=full` permits a suite only in synthesis
   (or the single-provider structured review). Freeze the complete settings for
   confirmation retries; do not re-read global frontend defaults.
+  Without a `session` in the request, completion returns `{sessions: [...]}` with
+  the same descriptors as `discover`, scoped to the resolved repository and PR.
+  With a `session`, completion returns `{session, generation, new_review_ready}`.
+  Store the returned session before reading results; completion does not itself
+  replace the displayed generation.
+  Both response forms include `status` and `new_review_ready`. If discussion is
+  incomplete or reassessment remains unresolved, `status` is `paused`, readiness
+  is false, and `pending_generation` identifies the retained unfinished analysis.
+  The ordinary `generation` and discovery descriptors still select the current
+  review; an unpromoted replacement is never advertised as the current result.
 - `cancel`: takes only `operation_id` from a `started` event; verifies process
   identity/start time before signalling the owned operation. The CLI cleans up
   its model process groups and preserves completed checkpoints.
@@ -280,8 +290,10 @@ yet available remains unresolved and is never reposted. Confirmed own replies,
 their implicit COMMENTED review wrappers, and own inline comments are excluded
 from external-discussion freshness comparisons.
 
-The API and terminal share publication receipts. After API draft adoption,
-the terminal uses the API draft ledger rather than an obsolete aggregate body.
+The API and terminal call the shared Python application services directly.
+Protocol 1 remains the Emacs boundary; internal services do not serialize API
+requests or invoke the CLI recursively. Both interfaces always use the same
+draft and publication ledger. Legacy action ledgers are read-only import sources.
 All model-generated staging, grouping, or wording changes happen before user
 staging, never as a side effect of sending an approved batch.
 
@@ -296,3 +308,11 @@ and offer refresh/recovery. Never retry a write blindly after an unknown outcome
 Unknown protocol versions fail explicitly. Existing CLI review artifacts remain
 readable without migration or paid calls. New model outputs include location
 fields (an empty list and null anchor when unknown); legacy outputs may omit them.
+
+Implementation: `lib/pr_review/api.py` frames NDJSON; `application.py` dispatches
+shared operations; `reviews.py` and `pipeline.py` own generation; `processes.py`
+owns subprocess groups and cancellation. Local draft operations acquire only their
+generation lock. Operations needing both locks acquire the PR lock first, then the
+draft lock. Promotion waits for an in-progress save before switching the pointer.
+CLI explicit external resume is an internal capability and is never accepted from
+an API request field; protocol sessions remain restricted to the state directory.

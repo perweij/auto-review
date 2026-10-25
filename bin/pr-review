@@ -1,58 +1,10 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
+#!/usr/bin/env python3
+"""Installed entry point; resolve resources relative to the real program path."""
+from pathlib import Path
+import sys
 
-ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
-if [[ ${1:-} == api ]]; then
-    shift
-    exec python3 "$ROOT/lib/api.py" "$@"
-fi
-# shellcheck source=../lib/core.sh
-source "$ROOT/lib/core.sh"
-# shellcheck source=../lib/repository.sh
-source "$ROOT/lib/repository.sh"
-# shellcheck source=../lib/models.sh
-source "$ROOT/lib/models.sh"
-# shellcheck source=../lib/discussion.sh
-source "$ROOT/lib/discussion.sh"
-# shellcheck source=../lib/contributions.sh
-source "$ROOT/lib/contributions.sh"
-# shellcheck source=../lib/publication.sh
-source "$ROOT/lib/publication.sh"
-# shellcheck source=../lib/revisions.sh
-source "$ROOT/lib/revisions.sh"
-# shellcheck source=../lib/attempts.sh
-source "$ROOT/lib/attempts.sh"
-# shellcheck source=../lib/followup.sh
-source "$ROOT/lib/followup.sh"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+from pr_review.cli import main
 
-main() {
-    parse_args "$@"
-    trap on_exit EXIT
-    trap 'on_signal INT 130' INT
-    trap 'on_signal TERM 143' TERM
-    say '[setup] Checking tools and authentication'
-    check_dependencies
-    resolve_repository
-    resolve_review_settings
-    check_model_dependencies
-    check_authentication
-    initialize_run
-    check_live_authentication
-    say '[snapshot] Preparing worktree and Git snapshot'
-    prepare_worktree
-    check_agent_config_changes
-    say '[context] Collecting PR context'
-    collect_pr_context
-    if [[ $ANALYSIS_KIND == followup ]]; then
-        run_followup
-    else
-        run_reviews
-        prepare_contributions
-    fi
-    say '[publication] Human review and optional publication'
-    interactive_publication
-    manifest '.status = "complete"'
-}
-
-main "$@"
+if __name__ == '__main__':
+    sys.exit(main())

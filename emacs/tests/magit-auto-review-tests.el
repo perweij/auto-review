@@ -429,6 +429,27 @@
      (with-current-buffer "*Auto-review progress*"
        (should (string-match-p "Review completed. g or N opens the latest results" (buffer-string)))))))
 
+(ert-deftest auto-review/paused-review-does-not-announce-unpromoted-results ()
+  (dolist (first '(nil t))
+    (auto-review-test-buffer
+     (when first
+       (setq magit-auto-review--session nil magit-auto-review--generation nil
+             magit-auto-review--review nil magit-auto-review--target 7)
+       (magit-auto-review--render-placeholder "No saved review"))
+     (let ((text (buffer-string)))
+       (cl-letf (((symbol-function 'magit-auto-review--start)
+                  (lambda (_request callback)
+                    (funcall callback '((session . "/test/session") (generation . "old")
+                                        (sessions . (((session . "/test/session") (generation . "old"))))
+                                        (new_review_ready . :false) (status . "paused")
+                                        (pending_generation . "candidate"))))))
+         (magit-auto-review--launch-review nil))
+       (should (equal text (buffer-string)))
+       (should (equal magit-auto-review--session "/test/session"))
+       (should-not magit-auto-review--new-ready)
+       (should (string-match-p "Review paused" magit-auto-review--notice))
+       (should-not (string-match-p "Review completed" magit-auto-review--notice))))))
+
 (ert-deftest auto-review/group-staging-and-region-are-whole-comments ()
   (auto-review-test-buffer
    (goto-char (oref (car (oref magit-root-section children)) start))
@@ -555,6 +576,86 @@
        (let ((status (copy-tree magit-auto-review--setup-status)))
          (funcall (nth 1 (assoc "claude" callbacks)) (auto-review-test-models "claude"))
          (should (equal status magit-auto-review--setup-status)))))))
+
+(ert-deftest auto-review/first-run-completion-opens-results-with-refresh-or-next ()
+  (let* ((fixture (with-temp-buffer
+                    (should (zerop (call-process "python3" nil t nil
+                                                  (expand-file-name "tests/helpers/api-fixture.py" auto-review-test-root)
+                                                  "--run-result")))
+                    (magit-auto-review--json (buffer-string))))
+         (process-environment (copy-sequence process-environment))
+         (magit-auto-review-executable (expand-file-name "bin/pr-review" auto-review-test-root)))
+    (unwind-protect
+        (progn
+          (setenv "XDG_STATE_HOME" (expand-file-name "state" (alist-get 'root fixture)))
+          (save-window-excursion
+            (dolist (key '("g" "N"))
+              (with-temp-buffer
+                (switch-to-buffer (current-buffer))
+                (magit-auto-review-mode)
+                (setq default-directory (file-name-as-directory (alist-get 'repo fixture))
+                      magit-auto-review--target 7
+                      magit-auto-review--repository "github.com/org/repo")
+                (let ((text (buffer-string)))
+                  (cl-letf (((symbol-function 'magit-auto-review--start)
+                             (lambda (request callback)
+                               (should-not (alist-get 'session request))
+                               (funcall callback (alist-get 'run_result fixture)))))
+                    (magit-auto-review--launch-review nil))
+                  (should (equal magit-auto-review--session (alist-get 'session fixture)))
+                  (should magit-auto-review--new-ready)
+                  (should-not magit-auto-review--generation)
+                  (should-not magit-auto-review--review)
+                  (should (equal text (buffer-string))))
+                (execute-kbd-macro key)
+                (should (equal magit-auto-review--session (alist-get 'session fixture)))
+                (should (equal (alist-get 'body (magit-auto-review--comment "p1")) "Comment 1"))
+                (should magit-auto-review--generation)
+                (should-not magit-auto-review--new-ready)))))
+      (delete-directory (alist-get 'root fixture) t))))
+
+(ert-deftest auto-review/refresh-rediscovers-completed-review-without-rerunning ()
+  (let* ((fixture (with-temp-buffer
+                    (should (zerop (call-process "python3" nil t nil
+                                                  (expand-file-name "tests/helpers/api-fixture.py" auto-review-test-root))))
+                    (magit-auto-review--json (buffer-string))))
+         (process-environment (copy-sequence process-environment))
+         (magit-auto-review-executable (expand-file-name "bin/pr-review" auto-review-test-root)))
+    (unwind-protect
+        (progn
+          (setenv "XDG_STATE_HOME" (expand-file-name "state" (alist-get 'root fixture)))
+          (save-window-excursion
+            (dolist (key '("g" "N"))
+              (with-temp-buffer
+                (switch-to-buffer (current-buffer))
+                (magit-auto-review-mode)
+                ;; Reproduce an already-open buffer left without a session by
+                ;; the broken completion response; the saved result is intact.
+                (setq default-directory (file-name-as-directory (alist-get 'repo fixture))
+                      magit-auto-review--target 7
+                      magit-auto-review--repository "github.com/org/repo"
+                      magit-auto-review--new-ready t)
+                (execute-kbd-macro key)
+                (should (equal magit-auto-review--session (alist-get 'session fixture)))
+                (should (equal (alist-get 'body (magit-auto-review--comment "p1")) "Comment 1"))
+                (should-not magit-auto-review--new-ready)))))
+      (delete-directory (alist-get 'root fixture) t))))
+
+(ert-deftest auto-review/refresh-with-no-saved-review-does-not-send-an-empty-session ()
+  (with-temp-buffer
+    (magit-auto-review-mode)
+    (setq magit-auto-review--target 7 magit-auto-review--repository "github.com/org/repo")
+    (let ((text (buffer-string)) requests)
+      (cl-letf (((symbol-function 'magit-auto-review--call)
+                 (lambda (request)
+                   (push request requests)
+                   '((sessions . nil)))))
+        (should-error (magit-auto-review-refresh) :type 'user-error))
+      (should (equal (mapcar (lambda (request) (alist-get 'command request)) requests) '("discover")))
+      (should (equal (alist-get 'pr (car requests)) 7))
+      (should (equal (alist-get 'repository (car requests)) "github.com/org/repo"))
+      (should-not magit-auto-review--session)
+      (should (equal text (buffer-string))))))
 
 (ert-deftest auto-review/backend-integration-edit-stage-and-reopen ()
   (let* ((fixture (with-temp-buffer
