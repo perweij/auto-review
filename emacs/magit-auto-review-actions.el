@@ -10,6 +10,7 @@
 (require 'magit-auto-review)
 (require 'magit-auto-review-setup)
 (require 'magit-auto-review-conversations)
+(require 'magit-auto-review-pulls)
 
 (defun magit-auto-review--start (request callback)
   "Run explicit REQUEST asynchronously and deliver CALLBACK in this buffer."
@@ -49,7 +50,8 @@
   (setq magit-auto-review--run-settings (copy-tree settings))
   (magit-auto-review--start
    (append (if magit-auto-review--session (magit-auto-review--request "run")
-             `((command . "run") (pr . ,magit-auto-review--target) (cwd . ,default-directory)))
+             `((command . "run") (pr . ,magit-auto-review--target) (cwd . ,default-directory)
+               (repository . ,magit-auto-review--repository)))
            settings
            (when catalogs `((catalogs . ,catalogs)))
            (when trusted-snapshot `((trusted_snapshot . ,trusted-snapshot))))
@@ -514,6 +516,7 @@
     ("i" "Mark changed discussion as inspected" magit-auto-review-acknowledge :if magit-auto-review--attention-p)
     ("b" "Open comment / PR on GitHub" magit-auto-review-browse)]
    ["Review"
+    ("B" "Repository pull requests" magit-auto-review-pull-requests)
     ("g" "Refresh results (history stays pinned)" magit-auto-review-refresh :if (lambda () magit-auto-review--review))
     ("R" "Configure and run/resume…" magit-auto-review-run)
     ("N" "Open current completed review" magit-auto-review-switch-current :if (lambda () (or magit-auto-review--new-ready magit-auto-review--history-view)))
@@ -528,6 +531,7 @@
     ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])
 
 (dolist (binding '(("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
+                   ("B" . magit-auto-review-pull-requests)
                    ("C" . magit-auto-review-conversations)
                    ("R" . magit-auto-review-run) ("N" . magit-auto-review-switch-current)
                    ("G" . magit-auto-review-refresh-github) ("L" . magit-auto-review-log)

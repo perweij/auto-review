@@ -87,6 +87,10 @@ reused only when their inputs still match. If no run matches or several match,
 it stops with guidance; `--resume` explicitly selects a run, including one stored
 outside the current state directory. Existing worktrees are never overwritten.
 
+Open PRs are checked against the current base branch. Closed or merged PRs use
+the base commit recorded in GitHub's PR metadata, so later changes to the base
+branch do not prevent a historical review. Publication remains disabled for them.
+
 When the PR head or merge-base changes, rerunning automatically updates the review.
 A separate working attempt is created for the new review. The earlier artifacts
 (including selections, human edits and publication receipts) remain available,
@@ -341,7 +345,10 @@ earlier fix. These are sample-based checks, not a guarantee of model judgment.
 The optional [Emacs package](emacs/README.md) shows review comments directly in
 their code and discussion context. Use native sections to stage, unstage, edit,
 correct placement, browse saved generations, and publish exact inline comments.
-`M-x magit-auto-review` opens a saved review without running models. A versioned
+`M-x magit-auto-review` opens a repository PR list using saved local data. Press
+`g` there to discover open PRs on GitHub, then `RET` to open one or `R r` to
+configure and run it. `B` returns from a review to the list. Opening from a Forge
+PR goes directly to that PR. Opening the list or a review never runs models. A versioned
 [JSON API](docs/api.md) keeps the frontend independent of private state files.
 
 The package lives alongside the backend under `emacs/`, with separate checks and

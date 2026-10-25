@@ -18,10 +18,10 @@
 (require 'button)
 (require 'magit-auto-review-api)
 
-(declare-function forge-current-topic "forge-topic" (&optional demand))
-(declare-function forge-get-repository "forge-repo" (&optional demand))
+(defvar forge-buffer-topic)
 (declare-function magit-auto-review--render-conversations "magit-auto-review-conversations" ())
 (declare-function magit-auto-review--insert-review-status "magit-auto-review-conversations" ())
+(declare-function magit-auto-review-pull-requests "magit-auto-review-pulls" (&optional directory))
 
 (defcustom magit-auto-review-claude-model nil
   "Default Claude model for new reviews; R validates it against CLI choices."
@@ -53,6 +53,7 @@ These are model instructions, not an enforced process timeout."
 (defvar-local magit-auto-review--progress nil)
 (defvar-local magit-auto-review--new-ready nil)
 (defvar-local magit-auto-review--target nil)
+(defvar-local magit-auto-review--repository nil)
 (defvar-local magit-auto-review--sections nil)
 (defvar-local magit-auto-review--history-origin nil)
 (defvar-local magit-auto-review--history-view nil)
@@ -427,31 +428,42 @@ These are model instructions, not an enforced process timeout."
 
 ;;;###autoload
 (defun magit-auto-review (&optional pr)
-  "Open saved auto-review comments for PR, or offer an explicit first run."
-  (interactive)
+  "Open PR from Forge or a prefix argument; otherwise list repository PRs."
+  (interactive (list (and current-prefix-arg (read-number "Pull request number: "))))
   (let* ((directory (or (magit-toplevel) default-directory))
-         (topic (and (fboundp 'forge-current-topic) (ignore-errors (forge-current-topic))))
-         (number (or pr (and topic (object-of-class-p topic 'forge-pullreq) (oref topic number))))
-         (default-directory directory)
-         (sessions (alist-get 'sessions (magit-auto-review--call `((command . "discover") (cwd . ,directory) (pr . ,number)))))
+         ;; Forge's current-topic helper also falls back to cached branch
+         ;; metadata. Only an explicitly selected/visited PR bypasses the list.
+         (topic (or (magit-section-value-if 'pullreq)
+                    (and (boundp 'forge-buffer-topic) forge-buffer-topic)))
+         (number (or pr (and topic (object-of-class-p topic 'forge-pullreq) (oref topic number)))))
+    (if number (magit-auto-review--open-pr directory number)
+      (magit-auto-review-pull-requests directory))))
+
+(defun magit-auto-review--open-pr (directory number &optional repository)
+  "Open NUMBER in DIRECTORY, optionally scoped to REPOSITORY."
+  (let* ((default-directory directory)
+         (sessions (alist-get 'sessions
+                             (magit-auto-review--call `((command . "discover") (cwd . ,directory)
+                                                       (pr . ,number) (repository . ,repository)))))
          (selected (if (= (length sessions) 1) (car sessions)
                      (when sessions
                        (let* ((choices (mapcar (lambda (s) (cons (format "#%s · %s · %s" (alist-get 'pr s) (alist-get 'repository s) (alist-get 'created_at s)) s)) sessions))
                               (name (completing-read "Saved review: " choices nil t)))
                          (cdr (assoc name choices)))))))
-    (unless selected
-      (setq number (or number (read-number "Pull request number: "))))
-    (pop-to-buffer (get-buffer-create (format "*Auto-review %s #%s*" (file-name-nondirectory (directory-file-name directory))
-                                               (or (alist-get 'pr selected) number))))
+    (pop-to-buffer (get-buffer-create (format "*Auto-review %s #%s (%s)*"
+                                               (or repository (alist-get 'repository selected)
+                                                   (file-name-nondirectory (directory-file-name directory)))
+                                               number (abbreviate-file-name directory))))
     ;; Re-entering from Forge must not reset a live editor or jump generations.
     (unless (derived-mode-p 'magit-auto-review-mode)
       (magit-auto-review-mode)
       (setq default-directory directory magit-auto-review--target number
+            magit-auto-review--repository (or repository (alist-get 'repository selected))
             magit-auto-review--session (alist-get 'session selected)
             magit-auto-review--generation (alist-get 'generation selected))
       (if selected (magit-auto-review-refresh)
         (magit-auto-review--render-placeholder
-         "No saved review found here. Use R to run the reviewers explicitly.")))))
+         "No saved review found here. Use R to run the reviewers explicitly; B lists pull requests.")))))
 
 (defun magit-auto-review-refresh (&optional current)
   "Load the latest completed review locally, leaving an inline edit intact.

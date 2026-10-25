@@ -21,6 +21,7 @@ opaque identities, not paths clients should interpret.
 | --- | --- | --- |
 | `capabilities` | none | Protocol version, features, command names |
 | `discover` | `cwd`, optional `pr`, `repository` | Matching saved sessions in this Git common directory |
+| `pull-requests` | `cwd`, optional `repository` | Repository choices, cached PR list, last-check time, and matching saved sessions |
 | `read` | `session`, optional `generation` | Saved review, comments, contextual rows/threads, staging, last check, operations |
 | `history` | `session` | Generations, commits, times, status, saved edits/document counts |
 | `diff` | `session`, `generation`, optional `path` | Reviewed changed files, hunks, and patches |
@@ -33,6 +34,22 @@ and verified running operations. Explicit `g` in the main UI selects current;
 history buffers keep reading their pinned generation until the user chooses
 `N` to open current. Background completion never replaces the displayed text,
 and an open inline editor prevents structural refresh.
+
+Repository discovery is separate from saved review discovery. `pull-requests`
+returns `{repositories,repository,checked_at,pull_requests}`; each PR has `pr`,
+`repository`, `url`, `title`, `state`, and `sessions`. Cached GitHub rows also have
+`draft` and `head_branch`. An unrefreshed saved PR has state `UNKNOWN`. Multiple
+repository remotes require an explicit `repository` selection before refresh;
+PR numbers and saved sessions are scoped to that repository.
+
+With `refresh: true`, `pull-requests` explicitly contacts GitHub without model
+calls. It lists every page of open PRs and fetches the current state of saved PRs
+missing from that list. Only a complete successful refresh replaces the cache;
+errors preserve the prior list and all review drafts. This uses GitHub's
+[pull request endpoints](https://docs.github.com/en/rest/pulls/pulls) and
+[`gh api` pagination](https://cli.github.com/manual/gh_api). Opening the repository
+list remains local; `g` in that list refreshes GitHub. In an individual review,
+`g` retains its existing local-results behavior.
 
 Rows have `old`, `new`, `kind`, `text`, and `highlight`. Comments carry their
 actual primary context and full saved thread. `thread_contexts` exposes choices

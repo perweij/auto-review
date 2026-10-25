@@ -5,7 +5,7 @@ import sys
 from .common import ApiError, PROTOCOL, emit, locked
 from .commands import mutate
 from .state import Session, discover
-from . import operations, publication, settings, models, workflow
+from . import operations, publication, settings, models, workflow, pulls
 
 
 def dispatch(request):
@@ -13,14 +13,16 @@ def dispatch(request):
         raise ApiError("protocol_mismatch", "Use protocol version 1.", supported=[PROTOCOL])
     operation = request.get("command")
     if operation == "capabilities":
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status"],
-                "commands": ["discover", "settings", "models", "read", "history", "diff", "file", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup"]}
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests"],
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "history", "diff", "file", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup"]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":
         return models.discover(request)
     if operation == "discover":
         return discover(request)
+    if operation == "pull-requests":
+        return pulls.list_pulls(request)
     if operation == "cancel":
         return operations.cancel(request)
     if operation == "run":

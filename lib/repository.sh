@@ -208,11 +208,17 @@ initialize_run() {
     say "Artifacts: $RUN_DIR"
 }
 prepare_worktree() {
-    local attempt fetched_head fetched_base matched=false old_head old_merge
+    local attempt fetched_head fetched_base base_source matched=false old_head old_merge
     if jq -e '.snapshot_update!=null' "$RUN_DIR/manifest.json" >/dev/null; then finish_snapshot_update; fi
     for attempt in 1 2; do
         BASE_BRANCH=$(jq -r .baseRefName "$SCRATCH/pr.json")
-        git fetch --no-tags --refmap= --no-write-fetch-head "$REMOTE" "+refs/pull/$PR/head:$HEAD_REF" "+refs/heads/$BASE_BRANCH:$BASE_REF" || die 'Cannot fetch PR and base'
+        base_source=refs/heads/$BASE_BRANCH
+        # Closed PR metadata can retain a historical base while the branch moves
+        # on. Fetch that recorded commit, preserving historical review support.
+        if [[ $(jq -r .state "$SCRATCH/pr.json") != OPEN ]]; then
+            base_source=$(jq -r .baseRefOid "$SCRATCH/pr.json")
+        fi
+        git fetch --no-tags --refmap= --no-write-fetch-head "$REMOTE" "+refs/pull/$PR/head:$HEAD_REF" "+$base_source:$BASE_REF" || die 'Cannot fetch PR and base'
         # Metadata after fetch closes normal setup races without assuming base is stationary.
         fetch_pr_metadata "$SCRATCH/pr.json"
         fetched_head=$(git rev-parse "$HEAD_REF"); fetched_base=$(git rev-parse "$BASE_REF")

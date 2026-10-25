@@ -21,9 +21,17 @@ For a source checkout:
 
 Open a Git repository or a Forge pull request and run `M-x magit-auto-review`.
 Forge dispatch/topic menus use `V`; Magit dispatch uses `C-c r`, leaving its
-native `V` (Revert) binding intact. Existing reviews are discovered locally.
-If none exists, `R` opens review setup. Merely opening a buffer never invokes
-a model or contacts GitHub.
+native `V` (Revert) binding intact. From a repository, Auto-review opens a PR list
+using saved local data. Press `g` there to fetch open PRs from GitHub, including
+ones with no saved review. Saved closed/merged reviews remain in a separate group.
+Select a PR with `RET`, or use `R` to open its setup and `r` to run it. The setup
+menu shows the target PR. A sole old saved review is never selected automatically.
+
+If there are several repository remotes, choose which repository to list. Use `o`
+in the list (or `C-u M-x magit-auto-review`) to open a known PR number directly.
+Opening from a Forge PR still opens that PR directly. Merely opening a buffer
+never invokes a model or contacts GitHub; the list shows when it was last checked.
+A failed GitHub refresh retains the saved list and reports the error.
 
 For the adjacent stable-emacs checkout, use its `manifest-auto-review.scm`
 overlay. The frontend and backend are copied into the Guix store from this
@@ -63,6 +71,7 @@ Model CLI programs are required only for an explicit model operation.
 | `RET` | Visit the file at the reviewed revision with the actual range highlighted |
 | `d` / `l` | Full PR diff / secondary evidence locations |
 | `C` | Open Conversations, including unmatched and outdated unresolved threads |
+| `B` | Return to the repository PR list; `g` there discovers PRs on GitHub |
 | `g` | Open the latest completed results locally; history buffers stay pinned |
 | `G` | Explicitly refresh GitHub discussion and last-checked source information |
 | `R` / `N` | Configure and run/resume / open the current completed review from an older or history view |
@@ -80,6 +89,11 @@ new reviews use `magit-auto-review-reviewers`, `magit-auto-review-claude-model`,
 `magit-auto-review-codex-model`, the corresponding `*-effort` variables,
 `magit-auto-review-processing-provider`, and `magit-auto-review-synthesis-tests`.
 Menu changes do not alter these defaults.
+
+Inside an individual review, `g` reloads that PR's saved results and `R r`
+reruns that same PR. To review another PR, use `B`, refresh the list with `g`,
+and select it. Switching PR buffers preserves saved history and any inline edit
+in the previous buffer.
 
 | Setup key | Setting |
 | --- | --- |

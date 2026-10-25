@@ -29,6 +29,7 @@ if [[ $tool == gh ]]; then
             [[ ${MOCK_PR_INACCESSIBLE:-} != 1 ]] || exit 1
             head=$(git --git-dir="$FIXTURE/remote.git" rev-parse refs/pull/7/head)
             base=$(git --git-dir="$FIXTURE/remote.git" rev-parse refs/heads/main)
+            base=${MOCK_PR_BASE_SHA:-$base}
             jq -nc --arg head "$head" --arg base "$base" --arg author "${MOCK_AUTHOR:-author}" --arg state "${MOCK_PR_STATE:-OPEN}" --arg host "${MOCK_HOST:-github.com}" \
                 '{number:7,title:"A useful change",body:"PR description",url:("https://"+$host+"/org/repo/pull/7"),state:$state,isDraft:false,baseRefName:"main",baseRefOid:$base,headRefName:"feature",headRefOid:$head,isCrossRepository:true,author:{login:$author}}'
         else echo 'Rendered discussion'; fi
