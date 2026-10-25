@@ -100,7 +100,113 @@ or `discovery_timeout` codes. Send TERM to its API process to cancel; the backen
 terminates the provider process group and reaps its child. Discovery has its own
 process lifecycle and does not occupy the review-operation slot.
 
-## Local mutations
+## Owner toolkit
+
+Protocol 1 advertises additive `toolkits` and `owner` capabilities. Reviewer
+commands retain their existing contracts. Owner sessions use separate storage
+and revisions, do not have reviewer generations, and are never returned by
+reviewer `discover`.
+
+`toolkit` accepts `cwd`, optional `repository`, and optional
+`toolkit: "reviewer"|"owner"`. Omit the selection to read the remembered choice
+(Reviewer by default); include it to save a repository preference. The shared
+`pull-requests` result includes `toolkit`, and its saved session descriptors
+belong to that selected toolkit. Owner selection never depends on PR authorship.
+
+| Command | Request fields | Result/behavior |
+| --- | --- | --- |
+| `owner-open` | `cwd`, `pr`, optional `repository`, `defaults` | Create or read a local owner session; no network/model |
+| `owner-discover` | `cwd`, optional `repository`, `pr` | `{sessions}` for the Git common directory |
+| `owner-read` | `session` | Saved owner view; available while a fix runs |
+| `owner-refresh` | `session`, `revision` | Fetch complete GitHub discussions and metadata; return owner view |
+| `owner-mutate` | `session`, `revision`, `operation`, operation-specific fields below | Local atomic change; return owner view |
+| `owner-fix` | `session`, `revision`, `items` or `batch`, optional controls below | Plan/fix/review or resume; return owner view |
+| `owner-diff` | `session`, `batch`, optional `task` | `{diff,before,after}` for a retained task/batch |
+| `owner-associate` | `session`, `revision`, optional `batch`, `items`, `commits` | Associate verified fixes and generate reachable fixed-in replies |
+| `owner-prepare` | `session`, `revision` | Fresh `{owner,token,replies}` publication preview |
+| `owner-publish` | `session`, `revision`, `token` | Send the explicitly confirmed preview; return owner view |
+| `owner-recover` | `session`, `revision` | Read back uncertain submissions; return owner view |
+| `owner-thread-state` | `session`, `revision`, `item`, boolean `resolved` | Explicit permission-checked resolve/reopen; return owner view |
+
+All owner mutations require the last displayed revision. Store returned revisions
+and use `owner-read` after an error: a long operation can have saved partial work
+before it fails. Opening creates a session idempotently without a revision.
+`owner-diff` with `current: true` additionally requires `revision`, takes the
+execution lock, and pins a current tree for inspection against the last saved
+batch checkpoint. It does not adopt that tree or change the real index.
+
+Owner views contain `session`, `revision`, repository/PR identity, `settings`,
+`checked_at`, `viewer`, `feedback`, `batches`, `replies`, `actions`, and `worktree`.
+After refresh, `metadata` and `push_target` identify the reported PR head and its
+actual repository/branch. `push_target.remotes`, when setup has inspected them,
+is a list: zero or several matches require user configuration. Artifact paths in
+attempts are for opening logs, not for clients to mutate workflow state.
+
+Feedback has stable `key` values (`thread:…`, `comment:…`, `review:…`), full
+`comments`, `fingerprint`, `notification`, `triage`, `unread`, `actionable`, and
+`attention`. Thread entries retain resolution/outdated/permission flags and the
+original code hunk. Review entries retain submitted `state` and
+`change_requested`. An empty verdict can require attention without being
+actionable. Local triage does not resolve GitHub threads or clear review verdicts.
+
+Owner mutation operations:
+
+| Operation | Fields |
+| --- | --- |
+| `settings` | `settings: {fix: {provider,model,effort}, review: {provider,model,effort}, verification: "focused"}` |
+| `acknowledge`, `defer`, `restore`, `handled` | Distinct `items` array |
+| `reply` | Original feedback `item`, nonempty `body` |
+| `edit` | `reply` or `replies`, nonempty `body` |
+| `stage`, `unstage`, `acknowledge-reply` | `reply` or distinct `replies` array |
+
+Only new owner sessions use `defaults`, whose fields match reviewer setup
+defaults; the resolved processing triplet initializes both owner roles. Settings
+are subsequently independent and validated against fresh CLI metadata before
+execution. Metadata selection uses the existing `models` command.
+
+For a new `owner-fix`, `items` is a nonempty ordered snapshot of feedback keys.
+Optional `verify_only: true` performs planning and review without fixing or
+repairing. Plans cover every item exactly once, can combine items, and include
+per-item expected outcomes and an acyclic dependency graph. Tasks run sequentially
+in topological order with selection order breaking ties. Each task and the final
+combined patch receive review; a checkpoint permits at most one automatic repair.
+Each result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
+`complete`, and `blocking`. Outcome statuses are `fixed`, `already_addressed`,
+`clarify`, and `no_change`; readiness requires complete, nonblocking verification.
+
+To resume, provide `batch` instead of `items`. Optional controls are `adopt: true`
+for explicitly inspected manual/partial changes, `replan: true` for unfinished
+or changed discussion, `skip: [TASK_ID,…]`, and `trusted_snapshot` from an exact
+`trust_required` error. That error also carries `paths` and `diff` for inspection.
+Resume keeps the original baseline and provider settings; changed HEAD requires
+reconciliation and a new batch. Unstaging code is a human operation. Integrity
+failures persist across retries until explicit adoption; records are retained.
+
+`owner-fix` emits standard `started`/`progress` events. Use shared `cancel` with
+the `operation_id` from `started`. Both adapters share process-group cancellation,
+owned operation records, model limits, and retained artifacts. Execution uses
+the owner lock; publication/thread mutations then take the shared PR lock before
+short state transactions. Conflicts return `busy`. Human confirmation is outside
+all locks.
+
+Without explicit commits, `owner-associate` checks ready batches for a sole-parent,
+exact-tree commit. Explicit associations require `batch` and nonempty `commits`
+(SHAs or commit revisions); optional `items` limits verified fixed outcomes.
+No filename heuristic or fixed-in claim is inferred for other outcomes. Drafts
+are generated only after associated commits are reachable from the freshly
+fetched PR head. Each original destination receives its own editable draft:
+inline thread reply, or source-linked issue/timeline comment for general feedback.
+
+Publication tokens cover exact reply bodies, destinations, commit associations,
+viewer, and PR head. Preparation and sending revalidate context/reachability;
+every send records durable intent first. Only confirmed receipts become Published.
+`owner-recover` looks up markers through complete paginated read-back and never
+blindly resends. A proven unsent remainder becomes Unstaged. Edits or changed
+dependencies unstage replies; human wording and prior receipts remain intact.
+Publishing never resolves threads. The CLI equivalent is `pr-review owner`; see
+the [usage examples](../README.md#pr-owner-workflow).
+
+## Reviewer local mutations
 
 `preview-comment` validates an explicit attachment against the current generation
 and revision. It returns `{review,comment}` with one temporary comment marked

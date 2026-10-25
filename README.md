@@ -6,6 +6,12 @@ challenges and consolidates the independent reports. That provider also compares
 findings with existing discussions and drafts useful contributions. GitHub
 publication requires human selection and explicit confirmation.
 
+Choose the **Reviewer** toolkit for analysis and outgoing review comments, or the
+**Owner** toolkit to process incoming feedback, prepare fixes, and draft replies.
+In Emacs, `M` switches toolkits and remembers the choice per repository. The
+terminal's existing review commands retain their behavior; owner commands use
+`pr-review owner`.
+
 ## Install
 
 Keep this directory intact and put `bin/pr-review` on your PATH, for example:
@@ -225,7 +231,85 @@ Optional environment settings:
 | `VISUAL`, `EDITOR` | Editor command and simple arguments; default `vi` |
 | `PR_REVIEW_MAX_EVENT_BYTES` | Maximum provider JSON record size in bytes; default 67108864 (64 MiB). Increase for larger valid results. Stderr is logged without this record limit. |
 
-## Publication and safeguards
+## PR owner workflow
+
+Owner mode opens independently of saved reviewer runs. It keeps complete incoming
+discussions, unread/changed state, local triage, review verdicts, thread resolution,
+and outdated-code status separate. Opening and local reload use saved data;
+refresh explicitly reads GitHub without a model call.
+
+```bash
+pr-review owner 123                         # open/read cached owner state
+pr-review owner 123 refresh                 # collect current GitHub feedback
+pr-review owner 123 settings                # inspect independent fix/review settings
+pr-review owner 123 settings --settings-file /tmp/owner-settings.json
+pr-review owner 123 fix --item thread:THREAD_ID
+pr-review owner 123 fix --item thread:FIRST --item thread:SECOND
+pr-review owner 123 fix --item thread:THREAD_ID --verify-only
+pr-review owner 123 resume --batch BATCH_ID
+pr-review owner 123 diff --batch BATCH_ID --current
+pr-review owner 123 resume --batch BATCH_ID --adopt
+pr-review owner 123 associate               # after human commits and pushes
+pr-review owner 123 prepare                 # inspect exact staged replies and token
+pr-review owner 123 publish --confirm TOKEN
+pr-review owner 123 recover                 # read back uncertain submissions
+pr-review owner discover                    # saved owner sessions in this checkout
+pr-review owner cancel --operation-id OPERATION_ID
+```
+
+Use item and batch IDs from the JSON responses. `--session PATH` accepts an opaque
+session returned by open/discovery in place of the PR number. `--repo` selects
+among repository remotes. `pr-review owner --help` lists the remaining local
+triage, reply, and explicit resolve/reopen operations.
+
+Settings have `fix` and `review` objects, each with `provider`, `model`, and
+`effort`, plus `verification: "focused"`. Both initially use the default
+processing provider; thereafter they are independent. Every fix operation
+validates fresh model metadata and performs the live authentication probes.
+Opening or editing settings does not invoke inference.
+
+The planner can combine related concerns and order tasks by dependency. Tasks run
+sequentially in a dedicated `pr-owner/...` branch and linked worktree, preserving
+every original feedback destination. The fixer may edit source; the planner and
+reviewer are read-only. Each task and the combined patch get an independent
+review, with at most one automatic repair at each checkpoint. Incomplete checks,
+clarification, or remaining blocking findings pause the batch. Owner checks use
+the focused 60-second-per-check/five-minute cumulative instruction limits.
+
+Use native Magit, or ordinary Git in the displayed owner worktree, to inspect,
+stage, commit, and push. The view shows the actual head repository and branch,
+including forks. A unique existing matching remote is configured on initial
+setup; missing/ambiguous remotes need explicit configuration in Magit. Check the
+displayed PR destination when pushing the differently named owner branch.
+The application never commits, pushes, or resolves threads as part of fixing.
+
+Owner sessions live under the state root's separate `owners-v1` subtree. Private
+tree checkpoints preserve tracked and nonignored untracked files without touching
+the real index or stash; ignored files are listed separately. Failed attempts,
+plans, prompts, checks, and reports remain available. For partial/manual changes,
+inspect `diff --current` and Magit before `resume --adopt`. Unstage any staged
+changes first. `--replan` replans unfinished/changed feedback against accumulated
+changes; `--skip TASK_ID` leaves dependent tasks blocked. Changed local or remote
+HEAD requires reconciliation and a new batch. Agent-configuration changes return
+the exact diff and a token for explicit `--trust-agent-config TOKEN`.
+
+An exact commit can be associated automatically only when its sole parent is the
+batch baseline and its tree equals the final verified patch. Split/partial commits
+and other changes require explicit `associate --batch ID --item KEY --commit SHA`
+(repeat items/commits as needed). Only verified code-fix outcomes get generated
+fixed-in replies, and only after the SHAs are reachable from the freshly fetched
+PR head. These replies enter Staged, remain editable, and still require explicit
+publication. Ordinary composed replies start Unstaged. Changed discussion or
+unreachable commits unstage affected replies without replacing human wording.
+Uncertain writes require `recover` before another send; confirmed receipts remain
+historical after later amendments or force-pushes.
+
+See the [Emacs owner keys](emacs/README.md#pr-owner-toolkit),
+[API contract](docs/api.md#owner-toolkit), and
+[design and milestones](docs/pr-owner-mode.md). Interactive owner `F` remains a
+separate future work package.
+
+## Reviewer publication and safeguards
 
 The terminal and Emacs use the same drafts, optimistic revisions, and publisher.
 All fresh proposals start **Unstaged**; duplicates start **Suppressed**. A valid
@@ -317,6 +401,10 @@ make check
 # Optional: actual authenticated model CLIs, tiny synthetic repository, mocked
 # GitHub. Incurs model usage, never publishes, and retains artifacts under /tmp.
 tests/smoke.sh
+
+# Optional owner planner/fixer/reviewer smoke, with real model usage and no GitHub.
+python3 tests/smoke-owner.py --provider claude --model haiku --effort low
+python3 tests/smoke-owner.py --provider codex --model gpt-6-luna --effort low
 
 # Optional semantic evaluation: real Claude matching against curated conversations.
 # Other model stages and GitHub are mocked. Incurs model usage; never publishes.

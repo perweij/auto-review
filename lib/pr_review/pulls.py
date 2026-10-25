@@ -49,8 +49,10 @@ def list_pulls(request):
     cwd = request.get("cwd", ".")
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd).stdout.strip()
     sessions = discover({"cwd": cwd})["sessions"]
+    from .owner_state import discover as owner_discover, toolkit
+    owner_sessions = owner_discover({"cwd": cwd})["sessions"]
     remotes = git(["config", "--get-regexp", r"^remote\..*\.url$"], cwd=cwd, check=False)
-    repositories = {s["repository"] for s in sessions}
+    repositories = {s["repository"] for s in sessions + owner_sessions}
     for line in remotes.stdout.splitlines():
         fields = line.split(None, 1)
         name = repository_name(fields[1]) if len(fields) == 2 else None
@@ -68,7 +70,8 @@ def list_pulls(request):
         if request.get("refresh"):
             raise ApiError("invalid_request", "Choose a repository before refreshing pull requests.", repositories=repositories)
         return {"repositories": repositories, "repository": None, "checked_at": None, "pull_requests": []}
-    sessions = [s for s in sessions if s["repository"] == repository]
+    selected_toolkit = toolkit({"cwd": cwd, "repository": repository})["toolkit"]
+    sessions = [s for s in (owner_sessions if selected_toolkit == "owner" else sessions) if s["repository"] == repository]
     cache_file = state_root() / "repositories" / (digest([common, repository]) + ".json")
     cache = read_json(cache_file, {})
     if request.get("refresh"):
@@ -93,8 +96,8 @@ def list_pulls(request):
     for session in sessions:
         number = session["pr"]
         pulls.setdefault(number, {"pr": number, "repository": repository,
-                                  "url": session.get("url"), "title": "Saved review", "state": "UNKNOWN"})
+                                  "url": session.get("url"), "title": "Saved owner session" if selected_toolkit == "owner" else "Saved review", "state": "UNKNOWN"})
     for pull in pulls.values():
         pull["sessions"] = [s for s in sessions if s["pr"] == pull["pr"]]
-    return {"repositories": repositories, "repository": repository, "checked_at": cache.get("checked_at"),
+    return {"repositories": repositories, "repository": repository, "toolkit": selected_toolkit, "checked_at": cache.get("checked_at"),
             "pull_requests": sorted(pulls.values(), key=lambda p: (p["state"] != "OPEN", -p["pr"]))}

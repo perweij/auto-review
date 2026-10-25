@@ -10,6 +10,7 @@
 (require 'magit-auto-review)
 
 (declare-function magit-auto-review-run "magit-auto-review-setup" ())
+(declare-function magit-auto-review-owner-setup "magit-auto-review-owner" ())
 
 (defvar-local magit-auto-review--pulls nil)
 (defvar-local magit-auto-review--pulls-process nil)
@@ -21,6 +22,7 @@
                        ("RET" . magit-auto-review-pulls-open)
                        ("R" . magit-auto-review-pulls-run)
                        ("o" . magit-auto-review-pulls-number)
+                       ("M" . magit-auto-review-select-toolkit)
                        ("q" . quit-window)))
       (define-key map (kbd (car binding)) (cdr binding)))
     map))
@@ -45,9 +47,10 @@
          (inhibit-read-only t) first current)
     (erase-buffer)
     (magit-insert-section (pull-requests)
-      (magit-insert-heading (format "Pull requests · %s"
-                                   (or magit-auto-review--repository "Choose a repository with g")))
-      (insert "g refresh from GitHub · RET open · R configure/run · o open by number\n")
+      (magit-insert-heading (format "Pull requests · %s · %s"
+                                   (or magit-auto-review--repository "Choose a repository with g")
+                                   (capitalize (or (alist-get 'toolkit magit-auto-review--pulls) "reviewer"))))
+      (insert "g refresh from GitHub · RET open · R configure · M toolkit · o open by number\n")
       (insert (if checked (format "GitHub list last checked %s; showing saved data.\n\n" checked)
                 "GitHub list not checked. Press g to discover open pull requests.\n\n"))
       (dolist (open '(t nil))
@@ -124,7 +127,9 @@
   "Open setup for the selected PR; no model runs until Run/resume is chosen."
   (interactive)
   (magit-auto-review-pulls-open)
-  (magit-auto-review-run))
+  (if (derived-mode-p 'magit-auto-review-owner-mode)
+      (magit-auto-review-owner-setup)
+    (magit-auto-review-run)))
 
 (defun magit-auto-review-pulls-number (number)
   "Open NUMBER explicitly, even before fetching a PR list."

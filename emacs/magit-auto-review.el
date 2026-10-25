@@ -23,6 +23,7 @@
 (declare-function magit-auto-review--insert-review-status "magit-auto-review-conversations" ())
 (declare-function magit-auto-review-pull-requests "magit-auto-review-pulls" (&optional directory))
 (declare-function magit-auto-review-edit-menu "magit-auto-review-actions" ())
+(declare-function magit-auto-review-owner-open "magit-auto-review-owner" (directory number &optional repository))
 
 (defcustom magit-auto-review-claude-model nil
   "Default Claude model for new reviews; R validates it against CLI choices."
@@ -503,6 +504,28 @@ Ask which session to open when more than one matches.  Discovery is local."
           (cdr (assoc name choices)))))))
 
 (defun magit-auto-review--open-pr (directory number &optional repository)
+  "Open NUMBER using the remembered toolkit for DIRECTORY and REPOSITORY."
+  (let ((choice (magit-auto-review--call `((command . "toolkit") (cwd . ,directory) (repository . ,repository)))))
+    (if (equal (alist-get 'toolkit choice) "owner")
+        (progn (require 'magit-auto-review-owner)
+               (magit-auto-review-owner-open directory number repository))
+      (magit-auto-review--open-review-pr directory number repository))))
+
+(defun magit-auto-review-select-toolkit ()
+  "Select and remember a toolkit, retaining existing workflow buffers."
+  (interactive)
+  (let* ((directory (or (magit-toplevel) default-directory))
+         (number magit-auto-review--target)
+         (repository magit-auto-review--repository)
+         (choice (completing-read "Toolkit: " '("Reviewer" "Owner") nil t)))
+    (magit-auto-review--call `((command . "toolkit") (cwd . ,directory)
+                              (repository . ,repository) (toolkit . ,(downcase choice))))
+    (if number (magit-auto-review--open-pr directory number repository)
+      (magit-auto-review-pull-requests directory))))
+
+(define-key magit-auto-review-mode-map (kbd "M") #'magit-auto-review-select-toolkit)
+
+(defun magit-auto-review--open-review-pr (directory number &optional repository)
   "Open NUMBER in DIRECTORY, optionally scoped to REPOSITORY."
   (let ((selected (magit-auto-review--find-session directory number repository)))
     (pop-to-buffer (get-buffer-create (format "*Auto-review %s #%s (%s)*"

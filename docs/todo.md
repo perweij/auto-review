@@ -81,24 +81,24 @@ risks, establish their evidence and usefulness criteria, and reuse the local
 triage and issue-publication workflow. This extension is intentionally excluded
 from the [first-version specification](proactive-review.md).
 
-## 5. Add toolkit selection and the PR owner's toolkit
+## 5. Completed: toolkit selection and the PR owner's toolkit
 
-Implement the [PR-owner mode specification](pr-owner-mode.md) after the earlier
-scheduled work. This is planned, not started; create its feature branch only
-when implementation begins and reconcile the plan with the completed Python
-backend migration and other intervening changes.
+Implemented the [PR-owner mode specification](pr-owner-mode.md) on
+`feat/pr-owner-toolkit`, created from Python-migrated `main` at `f7f0f2e`.
 
-Add explicit toolkit selection and an owner inbox independent of reviewer runs.
-Support non-interactive `f` fixes in a dedicated owner worktree, with separate
+Explicit toolkit selection and an owner inbox work independently of reviewer runs.
+Non-interactive `f` fixes use a dedicated owner worktree, with separate
 fix/review provider settings, dependency-aware batch planning that can combine
-related feedback, and durable checkpoints. Use native Magit for human staging,
-committing, and pushing, then prepare verified commit-linked replies for explicit
-publication.
+related feedback, per-task and combined verification, and durable checkpoints.
+Native Magit handles human staging, committing, and pushing; verified commit-linked
+replies are staged for explicit publication with recovery for uncertain writes.
 
-The specification documents all delivery milestones: preparation; toolkit shell
-and inbox; individual fixes and recovery; dependency-aware batches; commit-linked
-replies; and integration/documentation. The first increments are reviewable
-separately, but group fixes and per-task review remain part of this package.
+The specification retains every delivery milestone, implementation boundaries,
+validation evidence, and the subsequent interactive milestone. Terminal, API,
+Emacs, and recovery usage are documented. Validation on 2026-10-25 passed all
+161 Bats, 141 Python, and 77 ERT tests, lint/byte compilation, and live
+planner/fixer/reviewer smoke tests for both Claude and Codex. Interactive `F`
+remains separate below.
 
 ## 6. Add interactive PR-owner fixes (`F`)
 

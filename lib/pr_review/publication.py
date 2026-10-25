@@ -22,14 +22,16 @@ def repository_operation(session, operation, verdict="COMMENT"):
     raise ApiError("invalid_request", "Unknown repository operation")
 
 
-def gh(session, endpoint, payload=None, *, pages=False):
+def gh(session, endpoint, payload=None, *, pages=False, resource="pulls"):
     host, repo = session.manifest["repository"].split("/", 1)
     args = ["gh", "api", "--hostname", host]
     if pages:
         args += ["--paginate", "--slurp"]
     if payload is not None:
         args += ["-X", "POST", "--input", "-"]
-    result = command([*args, f"repos/{repo}/pulls/{session.manifest['pr']}/{endpoint}"],
+    if resource not in ("pulls", "issues"):
+        raise ApiError("invalid_request", "Invalid GitHub comment resource.")
+    result = command([*args, f"repos/{repo}/{resource}/{session.manifest['pr']}/{endpoint}"],
                      input_text=json.dumps(payload) if payload is not None else None)
     try:
         value = json.loads(result.stdout)
@@ -136,6 +138,10 @@ def valid_receipt(session, action, value):
         return False
     if action["marker"] not in (value.get("body") or ""):
         return False
+    if action["kind"] == "timeline":
+        url = value.get("html_url")
+        expected = f"https://{session.manifest['repository']}/pull/{session.manifest['pr']}#issuecomment-{value['id']}"
+        return isinstance(url, str) and url.lower() == expected.lower()
     if action["kind"] == "reply":
         return value.get("in_reply_to_id") == action["target"]["root_id"]
     expected = {"COMMENT": "COMMENTED", "REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED"}[action["event"]]

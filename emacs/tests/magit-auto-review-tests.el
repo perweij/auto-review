@@ -94,7 +94,7 @@
               (magit-auto-review 98761)
               (should (eq opened (current-buffer)))
               (magit-section-post-command-hook)
-              (should (equal requests '("discover" "discover"))))
+              (should (equal requests '("discover" "toolkit" "discover" "toolkit"))))
           (when (buffer-live-p opened) (kill-buffer opened)))))))
 
 (ert-deftest auto-review/failed-initial-read-keeps-a-usable-section ()
@@ -103,10 +103,11 @@
       (cl-letf (((symbol-function 'magit-toplevel) (lambda () auto-review-test-root))
                 ((symbol-function 'magit-auto-review--call)
                  (lambda (request)
-                   (if (equal (alist-get 'command request) "discover")
-                       '((sessions . (((pr . 98762) (session . "/test/missing") (generation . "old")))))
-                     (setq opened (current-buffer))
-                     (signal 'magit-auto-review-api-error '("Saved review unavailable"))))))
+                   (pcase (alist-get 'command request)
+                     ("toolkit" '((toolkit . "reviewer")))
+                     ("discover" '((sessions . (((pr . 98762) (session . "/test/missing") (generation . "old"))))))
+                     (_ (setq opened (current-buffer))
+                        (signal 'magit-auto-review-api-error '("Saved review unavailable")))))))
         (unwind-protect
             (progn
               (should-error (magit-auto-review 98762) :type 'magit-auto-review-api-error)
@@ -155,6 +156,7 @@
                  (lambda (request)
                    (push request requests)
                    (pcase (alist-get 'command request)
+                     ("toolkit" '((toolkit . "reviewer")))
                      ("pull-requests"
                       (should-not (alist-get 'refresh request))
                       (auto-review-test-pulls nil))
@@ -190,7 +192,7 @@
               (should (equal (alist-get 'repository run-request) "github.com/org/repo"))
               (should-not (alist-get 'session run-request))
               (should (equal (mapcar (lambda (r) (alist-get 'command r)) (reverse requests))
-                             '("pull-requests" "discover"))))
+                             '("pull-requests" "toolkit" "discover"))))
           (dolist (buffer (list listing review))
             (when (buffer-live-p buffer) (kill-buffer buffer))))))))
 

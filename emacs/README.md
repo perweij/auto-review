@@ -55,6 +55,83 @@ does not copy tokens into authinfo or change credential storage. Existing `gh`,
 Claude, and Codex credentials/environment remain under the caller's control.
 Model CLI programs are required only for an explicit model operation.
 
+## PR owner toolkit
+
+Press `M` in the PR list or a toolkit buffer to select **Reviewer** or **Owner**.
+The choice is remembered per repository. Existing installations default to
+Reviewer. Switching leaves the previous buffer, folds, editor, and running
+operation available. `M-x magit-auto-review-owner` opens an owner buffer directly.
+Owner mode does not require a reviewer session and has its own keymap and menus.
+
+The owner buffer groups incoming discussions under **Attention needed**, followed
+by **Fixes**, **Replies**, and **Deferred / History**. Expand an item to read its
+complete conversation, code hunk, resolution/outdated status, or review verdict.
+An empty Request changes review remains a visible status item without inventing
+a code-fix task. New/edited incoming messages return handled or deferred feedback
+to attention; the user's own messages remain context without unread alerts.
+
+| Key | Owner action |
+| --- | --- |
+| `g` / `G` | Reload saved results / explicitly fetch GitHub |
+| `f` | Plan, fix, and review the item, group, or selected sibling headings |
+| `V` | Verify selected concerns without a fixer invocation |
+| `R f` / `R r` | Choose fix / automatic-review provider, model, and effort |
+| `i` / `h` | Acknowledge inspected feedback/context / mark handled locally |
+| `k` / `U` | Defer / restore feedback locally |
+| `r` / `A` | Resume a batch / explicitly adopt manual changes and reverify |
+| `p` / `? S` | Replan unfinished work / skip the selected task and resume |
+| `d` / `C-u d` | Saved task/batch diff / current partial changes since its checkpoint |
+| `m` | Open native Magit in the owner worktree |
+| `a` / `C-u a` | Detect exact commits / explicitly associate selected feedback and commits |
+| `c` / `e` | Compose a reply / edit an unpublished reply |
+| `s` / `u` | Stage / unstage replies, a reply group, or sibling headings |
+| `P` / `O` | Preview and explicitly publish staged replies / recover uncertain publication |
+| `x` / `X` | Explicitly resolve / reopen a GitHub thread |
+| `T` | Inspect changed agent-configuration diff and authorize its exact contents |
+| `L` | Progress, or the selected provider attempt's event log |
+| `K` | Cancel the owned operation; retain partial work and saved reports |
+| `b` / `B` / `M` | Open on GitHub / PR list / toolkit chooser |
+| `?` | Owner commands |
+
+Owner `F` is unbound; interactive provider handoff is deferred. Reviewer `F`
+continues to check existing conversations against pushed code.
+
+A group fix snapshots the selected items in displayed order. The planner may
+combine overlapping concerns and add prerequisites; independent tasks use display
+order as the tie-breaker. Tasks run sequentially in one owner worktree, with a
+review after each task and a final review of the combined patch. Inspect task
+expectations, per-item outcomes, performed checks, blocking findings, retained
+attempts, and commit associations in **Fixes**. Settings default from the
+customized processing-provider defaults when a session is first opened and then
+remain independent of reviewer settings. Model/effort choices come from fresh
+provider metadata. Owner verification uses focused checks.
+
+After a pause, inspect the saved patch with `d`, current partial changes with
+`C-u d`, and the full worktree/index with `m`. `A` accepts inspected edits for
+reverification without moving the original batch baseline. Unstage code before
+resuming; source is preserved. `p` replans changed or unfinished feedback against
+accumulated edits. Skipped prerequisites block dependent tasks. Changed HEAD
+requires manual reconciliation and a new batch. A running buffer can be left
+with `q` or by switching toolkits; cancel with `K` before killing it.
+
+Stage code, commit, and push in native Magit. Check the displayed destination:
+the local owner branch has a unique name, and the PR may target a fork. Missing
+or ambiguous remotes are shown explicitly. `a` creates staged fixed-in replies
+only when exact verified commits have reached the fresh PR head. `C-u a` supports
+explicit associations for split commits or extra changes. Inspect/edit those
+replies before `P`; publishing does not resolve threads or change review verdicts.
+
+The owner reply editor uses `C-c C-c` to save locally and `C-c C-k` to cancel.
+If saving fails because the session changed, its text remains intact. `C-c C-r`
+explicitly refreshes the save revision after you inspect the newer draft.
+An edited draft becomes Unstaged. For changed conversation or association context,
+inspect it and press `i` on the reply before staging again. `O` reads back uncertain
+submissions; only confirmed replies become Published, and an unsent remainder
+requires another staging/preview cycle.
+
+The [owner design](../docs/pr-owner-mode.md) records the implementation scope,
+recovery rules, and subsequent interactive milestone.
+
 ## Review flow
 
 | Key | Action |
@@ -73,6 +150,7 @@ Model CLI programs are required only for an explicit model operation.
 | `d` / `l` | Full PR diff / secondary evidence locations |
 | `C` | Open Conversations, including unmatched and outdated unresolved threads |
 | `B` | Return to the repository PR list; `g` there discovers PRs on GitHub |
+| `M` | Select Reviewer or Owner toolkit |
 | `g` | Open the latest completed results locally; history buffers stay pinned |
 | `G` | Explicitly refresh GitHub discussion and last-checked source information |
 | `R` / `N` | Configure and run/resume / open the current completed review from an older or history view |

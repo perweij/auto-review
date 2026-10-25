@@ -592,6 +592,7 @@
     ("i" "Mark changed discussion as inspected" magit-auto-review-acknowledge :if magit-auto-review--attention-p)
     ("b" "Open comment / PR on GitHub" magit-auto-review-browse)]
    ["Review"
+    ("M" "Select toolkit" magit-auto-review-select-toolkit)
     ("B" "Repository pull requests" magit-auto-review-pull-requests)
     ("g" "Refresh results (history stays pinned)" magit-auto-review-refresh :if (lambda () magit-auto-review--review))
     ("R" "Configure and run/resume…" magit-auto-review-run)

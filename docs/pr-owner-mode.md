@@ -1,9 +1,13 @@
 # Reviewer and PR-owner toolkits
 
-Status: planned and deferred. This document specifies future work; it does not
-describe implemented behavior. Another feature will be completed before this
-work begins. Saving this plan does not start implementation or create its feature
-branch.
+Status: non-interactive owner mode implemented and validated on
+`feat/pr-owner-toolkit`, created from Python-migrated `main` at `f7f0f2e`.
+This document records the implementation contract and subsequent milestones.
+Interactive owner `F` remains deferred to its separate work package.
+
+Usage: [terminal workflow](../README.md#pr-owner-workflow),
+[Emacs keys and recovery](../emacs/README.md#pr-owner-toolkit), and
+[protocol-1 owner operations](api.md#owner-toolkit).
 
 ## Summary and scope
 
@@ -44,12 +48,10 @@ The [TODO list](todo.md) tracks this package and the subsequent interactive work
 
 ## Preparation and relationship to earlier work
 
-Before implementation, inspect the then-current `main` and the completed earlier
-feature. Reconcile this specification with the actual shared services without
-reintroducing retired infrastructure. Create `feat/pr-owner-toolkit` from that
-baseline when owner-mode implementation starts. The current development checkout
-is sufficient; a separate development worktree is optional. This is distinct
-from the dedicated owner worktrees created by the product.
+Implementation began after the Python migration and its dogfood fixes merged.
+`feat/pr-owner-toolkit` was created from `f7f0f2e`; development uses the existing
+checkout. This is distinct from the dedicated owner worktrees created by the
+product. The baseline passed 161 Bats tests, 94 Python tests, and 63 ERT tests.
 
 Follow the architectural contracts in the
 [Python backend migration plan](python-migration.md): one Python application
@@ -58,10 +60,17 @@ rules. Owner orchestration belongs in Python. Reuse the migrated Git, GitHub,
 provider, process, storage, draft, and publication services; do not introduce new
 Bash orchestration or fabricate reviewer manifests to access those services.
 
-The initial repository inspection found reviewer-only assumptions in session
-discovery, provider integrity checks, settings, and publication endpoints. These
-are integration concerns to verify against the eventual implementation, not
-requirements to retain the old module names or Python-to-Bash bridges.
+The shared discussion collector now exposes a session-independent fetch, and the
+shared GitHub publisher/receipt validator supports PR timeline comments through
+issue endpoints. Repository discovery and toolkit preferences are additive;
+reviewer discovery and integrity rules retain their behavior.
+
+Owner use cases are in `owner.py`, with separate `owner_state.py`, `owner_git.py`,
+`owner_providers.py`, `owner_fixes.py`, and `owner_publication.py` services. Both
+`owner_cli.py` and the protocol dispatch call these services directly. The Emacs
+workflow is in `magit-auto-review-owner.el`. The existing Guix package copies all
+these Python/Emacs modules and prompts; no new runtime or terminal dependency is
+introduced.
 
 Keep this document current as milestones land, recording validation and remaining
 work. No implementation milestone below is complete merely because its plan has
@@ -424,10 +433,18 @@ separate permission-checked action and does not change review verdicts.
 
 ## Delivery milestones
 
-The milestones below are ordered implementation increments. Milestones 1 and 2
-are independently reviewable but do not replace completion of this package.
-Group planning and per-task review remain committed scope. All implementation
-milestones are not started.
+The milestones below define the non-interactive package and its exit criteria.
+Milestones 0–5 are complete in this branch. Group planning and per-task review
+are included in the implementation; the validation record is below.
+
+| Milestone | Implementation evidence |
+| --- | --- |
+| 0. Preparation | Python migration baseline inspected; feature branch and baseline checks recorded above |
+| 1. Toolkit/inbox | Explicit repository preference, isolated owner sessions, complete discussion/triage, CLI/API, separate Emacs buffers and settings |
+| 2. Individual fixes/recovery | Real owner branch/worktree, role-specific providers, source/index/admin checks, pinned trees, cancellation, adoption, partial diff, native Magit |
+| 3. Dependency-aware batches | Exact item coverage and per-item expectations, acyclic planning, stable order, combined tasks, task/final review with bounded repairs, accumulated-change replanning |
+| 4. Commit-linked replies | Exact/explicit associations, fork targets, fresh reachability, per-destination drafts, durable intents/receipts, partial and uncertain publication recovery |
+| 5. Integration/docs | Usage/API/TODO updated; full backend and Emacs checks plus live Claude and Codex planner/fixer/reviewer smoke tests passed |
 
 ### Milestone 0: rebase the plan and prepare implementation
 
@@ -537,6 +554,46 @@ the new provider write invocations through focused smoke tests in the supported
 environment; automated mocks do not establish actual CLI permission behavior or
 semantic model accuracy. Live terminal acceptance belongs exclusively to the
 later interactive package.
+
+### Implementation validation record
+
+Validation on 2026-10-25 passed:
+
+- `make check-backend`: lint, all 161 Bats acceptance tests, and all 141 Python
+  tests (including 47 owner tests).
+- `make check-emacs` with Emacs 30.2 and the supported Magit/Transient load file:
+  warning-free byte compilation and all 77 ERT tests (including 14 owner tests).
+- `git diff --check`, local documentation links, and Python 3.9 grammar parsing
+  for the production modules, entry point, and owner smoke script.
+- The live provider smoke checks described below, using disposable repositories.
+
+Owner tests use real temporary repositories/worktrees and mocked GitHub/model
+responses. They cover combined plans, invalid dependency/coverage/expectation
+output, focused verification failures, bounded task/final repairs, interrupted
+attempts, adoption/replanning, private trees and real-index isolation, changed
+configuration trust, Git administrative changes, fork mappings, exact/extra/split
+commits, amendments, force-push invalidation, account changes, stale edits,
+thread actions, partial publication, and marker read-back. Existing collection,
+pagination, process cancellation, and reviewer regression suites exercise the
+shared services. ERT covers isolated keys, display-order group selection, settings,
+fold retention, editor recovery, partial diffs, trust inspection, explicit
+publication, and native Magit handoff.
+
+Real provider acceptance on 2026-10-25 used
+`python3 tests/smoke-owner.py --provider claude --model haiku --effort low` and
+`python3 tests/smoke-owner.py --provider codex --model gpt-6-luna --effort low`.
+Each performed live authentication, structured read-only planning, a source edit
+and focused assertion, and structured read-only review in a disposable linked
+worktree. Both passed; HEAD, index, branch, and Git administrative state were
+preserved. GitHub was not contacted and nothing was published. These smoke tests
+incur model usage; they establish supported invocation behavior on a small
+fixture, not general correctness of model judgments. Codex required the supported
+environment's access to its CLI runtime state outside the restricted workspace.
+
+The implementation adds no Guix dependency or package-layout change. The existing
+migration follow-ups for a real Guix build and execution on Python 3.9 remain in
+the [TODO list](todo.md); this workspace has Python 3.12 and verified Python 3.9
+syntax. Interactive terminal acceptance remains exclusively a later milestone.
 
 Completion means milestones 0-5 satisfy their exit criteria, accepted fixes and
 replies remain inspectable and recoverable, no existing reviewer behavior has
