@@ -15,7 +15,7 @@ from pr_review.api import dispatch
 from pr_review.common import ApiError, atomic_json, digest, locked
 from pr_review.repository import Repository
 from pr_review.owner_state import OwnerSession
-from pr_review import owner_fixes, owner_git, owner_providers, owner_publication
+from pr_review import owner_commit, owner_fixes, owner_git, owner_providers, owner_publication
 from pr_review.providers import Runtime
 from pr_review.owner_cli import main as owner_cli
 from pr_review.state import Session as ReviewSession
@@ -790,13 +790,258 @@ class OwnerTest(unittest.TestCase):
         with patch("pr_review.pulls.github_json", side_effect=fork):
             view = self.fix()
             self.assertEqual(self.git("config", f"branch.{view['branch']}.merge"), "refs/heads/feature")
-            self.assertEqual(self.git("config", f"branch.{view['branch']}.pushRemote"), "author")
+            self.assertEqual(self.git("config", f"branch.{view['branch']}.remote"), "author")
+            self.assertNotIn("pushremote", self.git("config", "--local", "--list").lower())
             self.assertEqual(view["push_target"]["remotes"], ["author"])
             self.git("config", f"branch.{view['branch']}.merge", "refs/heads/manually-chosen")
             with self.assertRaises(ApiError) as caught:
                 self.request("owner-fix", batch=view["batches"][-1]["id"])
             self.assertEqual(caught.exception.code, "integrity_failed")
             self.assertEqual(self.git("config", f"branch.{view['branch']}.merge"), "refs/heads/manually-chosen")
+
+    def test_commit_preparation_stages_verified_blobs_and_preserves_other_work(self):
+        view = self.fix()
+        worktree = Path(view["worktree"])
+        (worktree / "source.txt").write_text("fixed\nmy later edit\n")
+        (worktree / "unrelated.txt").write_text("do not stage\n")
+        calls = len(self.calls)
+        result = self.request("owner-prepare-commit")
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["paths"], ["new.txt", "source.txt"])
+        self.assertEqual(self.git("write-tree", cwd=worktree), view["batches"][-1]["final_tree"])
+        self.assertEqual(self.git("show", ":source.txt", cwd=worktree), "fixed")
+        self.assertIn("my later edit", (worktree / "source.txt").read_text())
+        self.assertIn("unrelated.txt", self.git("ls-files", "--others", "--exclude-standard", cwd=worktree))
+        self.assertIn("my later edit", self.git("diff", cwd=worktree))
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), self.head)
+        self.assertIn("Verified fix", result["message"])
+        self.assertIn(self.metadata["url"], result["message"])
+        self.assertEqual(len(self.calls), calls)
+        self.assertFalse(self.posts)
+
+    def test_commit_preparation_accepts_exact_staging_and_can_be_repeated(self):
+        view = self.fix()
+        self.git("add", "source.txt", cwd=view["worktree"])
+        for _ in range(2):
+            result = self.request("owner-prepare-commit", batch=view["batches"][-1]["id"])
+            self.assertTrue(result["ready"])
+            self.assertEqual(self.git("write-tree", cwd=view["worktree"]), view["batches"][-1]["final_tree"])
+
+    def test_commit_preparation_keeps_conflicting_staging_byte_for_byte(self):
+        view = self.fix()
+        worktree = Path(view["worktree"])
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=worktree))
+        for name in ("unrelated.txt", "source.txt"):
+            with self.subTest(name=name):
+                self.git("reset", "-q", "HEAD", cwd=worktree)
+                (worktree / name).write_text("my staged change\n")
+                self.git("add", name, cwd=worktree)
+                before = index.read_bytes()
+                result = self.request("owner-prepare-commit")
+                self.assertFalse(result["ready"])
+                self.assertIn("already staged", result["reason"])
+                self.assertEqual(index.read_bytes(), before)
+                self.assertFalse(index.with_name("index.lock").exists())
+
+    def test_commit_preparation_keeps_busy_index_and_failed_updates_intact(self):
+        view = self.fix()
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=view["worktree"]))
+        lock = index.with_name("index.lock")
+        before = index.read_bytes()
+        lock.write_text("another Git operation")
+        result = self.request("owner-prepare-commit")
+        self.assertFalse(result["ready"])
+        self.assertEqual(lock.read_text(), "another Git operation")
+        lock.unlink()
+        real = owner_commit.run
+        def fail_update(argv, **kwargs):
+            if "update-index" in argv:
+                raise ApiError("cancelled", "Cancelled before staging")
+            return real(argv, **kwargs)
+        with patch.object(owner_commit, "run", side_effect=fail_update), self.assertRaises(ApiError):
+            self.request("owner-prepare-commit")
+        self.assertEqual(index.read_bytes(), before)
+        self.assertFalse(lock.exists())
+
+    def test_commit_preparation_checks_revision_and_execution_lock(self):
+        view = self.fix()
+        session = OwnerSession({"session": self.path})
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=view["worktree"]))
+        before = index.read_bytes()
+        with self.assertRaises(ApiError) as caught:
+            dispatch({"protocol": 1, "command": "owner-prepare-commit", "session": self.path, "revision": -1})
+        self.assertEqual(caught.exception.code, "stale_revision")
+        with locked(session.execution_lock), self.assertRaises(ApiError) as caught:
+            self.request("owner-prepare-commit")
+        self.assertEqual(caught.exception.code, "busy")
+        self.assertEqual(index.read_bytes(), before)
+
+    def test_commit_preparation_refuses_changed_context_and_in_progress_git(self):
+        view = self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        state["batches"][-1]["discussion_stale"] = True
+        session.save(state)
+        self.assertFalse(self.request("owner-prepare-commit")["ready"])
+        state = session.load()
+        state["batches"][-1]["discussion_stale"] = False
+        session.save(state)
+        marker = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD", cwd=view["worktree"]))
+        marker.write_text(self.base + "\n")
+        result = self.request("owner-prepare-commit")
+        self.assertFalse(result["ready"])
+        self.assertIn("Git operation", result["reason"])
+        self.assertEqual(self.git("diff", "--cached", cwd=view["worktree"]), "")
+
+    def test_commit_preparation_does_not_restage_already_committed_fix(self):
+        view = self.fix()
+        sha = self.commit_fix()
+        for associate in (False, True):
+            if associate:
+                self.request("owner-associate")
+            result = self.request("owner-prepare-commit", batch=view["batches"][-1]["id"])
+            self.assertFalse(result["ready"])
+            self.assertTrue(result["committed"])
+            self.assertEqual(result["commits"], [sha])
+            self.assertIn("already committed", result["reason"])
+            self.assertNotIn("associate", result["reason"])
+        self.assertTrue(self.request("owner-prepare-commit")["committed"])
+        self.assertEqual(self.git("diff", "--cached", cwd=view["worktree"]), "")
+
+    def test_commit_preparation_recognizes_committed_fix_beneath_later_commits(self):
+        view = self.fix()
+        sha = self.commit_fix()
+        worktree = Path(view["worktree"])
+        (worktree / "later.txt").write_text("later change\n")
+        self.git("add", "later.txt", cwd=worktree)
+        self.git("commit", "-qm", "Later work", cwd=worktree)
+        (worktree / "staged.txt").write_text("keep staged\n")
+        self.git("add", "staged.txt", cwd=worktree)
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=worktree))
+        before = index.read_bytes()
+        result = self.request("owner-prepare-commit")
+        self.assertEqual(result["commits"], [sha])
+        self.assertEqual(index.read_bytes(), before)
+
+    def test_changed_head_does_not_imply_fix_committed_or_require_repeated_association(self):
+        view = self.fix()
+        worktree = Path(view["worktree"])
+        self.git("add", "new.txt", cwd=worktree)
+        self.git("commit", "-qm", "Partial fix", cwd=worktree)
+        sha = self.git("rev-parse", "HEAD", cwd=worktree)
+        result = self.request("owner-prepare-commit")
+        self.assertFalse(result["ready"])
+        self.assertNotIn("committed", result)
+        self.assertIn("HEAD changed", result["reason"])
+        self.request("owner-associate", batch=view["batches"][-1]["id"], commits=[sha], items=["thread:T1"])
+        result = self.request("owner-prepare-commit")
+        self.assertFalse(result["ready"])
+        self.assertNotIn("committed", result)
+        self.assertIn("Associated commits: " + sha[:12], result["reason"])
+        self.assertNotIn("inspect or associate", result["reason"])
+
+    def test_commit_preparation_handles_deletions_binary_modes_and_literal_names(self):
+        original = self.model
+        def model(session, state, batch, role, context):
+            value = original(session, state, batch, role, context)
+            if role == "fix":
+                worktree = Path(state["worktree"])
+                (worktree / "source.txt").unlink()
+                unusual = worktree / ":(glob)*\tline\n.bin"
+                unusual.write_bytes(b"\0binary\xff")
+                unusual.chmod(0o755)
+                (worktree / "link").symlink_to("new.txt")
+                batch["checkpoint"] = owner_git.checkpoint(session, state, "literal paths")
+            return value
+        with patch.object(owner_providers, "invoke", side_effect=model):
+            view = self.fix()
+        result = self.request("owner-prepare-commit")
+        self.assertTrue(result["ready"])
+        self.assertEqual(self.git("write-tree", cwd=view["worktree"]), view["batches"][-1]["final_tree"])
+        self.assertIn(":(glob)*\tline\n.bin", result["paths"])
+
+    def test_prepared_commit_still_associates_exactly(self):
+        view = self.fix()
+        result = self.request("owner-prepare-commit")
+        body = self.root / "message.txt"
+        body.write_text(result["message"])
+        self.git("commit", "-q", "-F", str(body), cwd=view["worktree"])
+        sha = self.git("rev-parse", "HEAD", cwd=view["worktree"])
+        self.metadata["headRefOid"] = sha
+        self.git("update-ref", "refs/pull/7/head", sha)
+        associated = self.request("owner-associate")
+        self.assertEqual(associated["batches"][-1]["associations"]["thread:T1"]["commits"], [sha])
+
+    def test_legacy_pushremote_migration_only_changes_the_generated_mapping(self):
+        self.git("config", "remote.origin.pushurl", "git@github.com:org/repo.git")
+        view = self.fix()
+        session = OwnerSession({"session": self.path})
+        for merge, removed in (("feature", True), ("manually-chosen", False)):
+            with self.subTest(merge=merge):
+                state = session.load()
+                state["configured_target"].pop("method", None)
+                session.save(state)
+                self.git("config", f"branch.{view['branch']}.merge", "refs/heads/" + merge)
+                self.git("config", f"branch.{view['branch']}.pushRemote", "origin")
+                state = session.load()
+                state["batches"][-1]["git_admin"] = owner_git.admin(session, state)
+                session.save(state)
+                self.request("owner-prepare-commit")
+                entries = self.git("config", "--local", "--list").lower()
+                self.assertEqual("pushremote=origin" not in entries, removed)
+                self.assertEqual(self.git("config", f"branch.{view['branch']}.merge"), "refs/heads/" + merge)
+
+    def test_commit_preparation_defaults_to_latest_batch_and_omits_skipped_feedback(self):
+        view = self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        later = copy.deepcopy(batch)
+        later.update(id="later", status="paused")
+        state["batches"].append(later)
+        session.save(state)
+        self.assertFalse(self.request("owner-prepare-commit")["ready"])
+        self.assertTrue(self.request("owner-prepare-commit", batch=batch["id"])["ready"])
+        state = session.load()
+        state["feedback"][0]["title"] = "Completed concern"
+        state["feedback"][1]["title"] = "Skipped concern"
+        batch["verified_items"] = ["thread:T1"]
+        body = owner_commit.message(state, batch)
+        self.assertIn("Completed concern", body)
+        self.assertNotIn("Skipped concern", body)
+
+    def test_commit_preparation_detects_an_index_writer_ignoring_git_lock(self):
+        view = self.fix()
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=view["worktree"]))
+        real = owner_commit.run
+        def change_index(argv, **kwargs):
+            value = real(argv, **kwargs)
+            if "update-index" in argv:
+                index.write_bytes(b"external writer's index")
+            return value
+        with patch.object(owner_commit, "run", side_effect=change_index):
+            result = self.request("owner-prepare-commit")
+        self.assertFalse(result["ready"])
+        self.assertIn("index changed", result["reason"])
+        self.assertEqual(index.read_bytes(), b"external writer's index")
+
+    def test_cli_can_prepare_a_fix_without_committing(self):
+        view = self.fix()
+        output = StringIO()
+        with redirect_stdout(output), redirect_stderr(StringIO()):
+            code = owner_cli(["prepare-commit", "--session", self.path])
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(output.getvalue())["ready"])
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), self.head)
+
+    def test_new_push_mapping_preserves_preexisting_manual_configuration(self):
+        view = self.fix()
+        self.git("config", "remote.origin.pushurl", "git@github.com:org/repo.git")
+        self.git("config", f"branch.{view['branch']}.remote", "origin")
+        self.git("config", f"branch.{view['branch']}.merge", "refs/heads/manually-chosen")
+        self.request("owner-prepare-commit")
+        self.assertEqual(self.git("config", f"branch.{view['branch']}.merge"), "refs/heads/manually-chosen")
+        self.assertNotIn("configured_target", self.view)
 
     def test_thread_resolution_is_explicit_and_uncertain_response_is_read_back(self):
         def resolve(*args, **kwargs):

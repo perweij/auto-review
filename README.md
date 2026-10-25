@@ -252,6 +252,19 @@ You can also fix GitHub feedback you posted yourself. After `G`, it appears unde
 reply destination: their fixes can be associated with commits, but do not generate
 fixed-in replies. Published feedback retains its normal thread/timeline reply flow.
 
+After a fix finishes, press `m` to stage its saved, verified changes and open a
+Magit commit editor with a suggested message. Finish with `C-c C-c`, then push
+to the displayed **Push PR** destination with `P u`. Later edits stay unstaged,
+including edits to the same files. Conflicting or unrelated existing staging is
+preserved and requires manual inspection. Use `C-u m` for status only. Automatic
+committing remains a later milestone.
+
+After committing and pushing, `a` links the commit to the fix. For a local finding,
+press `h` on the finding or verified fix to finish: the feedback moves to History
+and the fix reads **Done locally**. No GitHub reply is needed. Fix results show
+their next step, with verification details and earlier attempts folded separately.
+`?` shows actions for the current selection; `+` opens the complete command list.
+
 ```bash
 pr-review owner 123                         # open/read cached owner state
 pr-review owner 123 refresh                 # collect current GitHub feedback
@@ -264,6 +277,7 @@ pr-review owner 123 fix --item thread:THREAD_ID --verify-only
 pr-review owner 123 resume --batch BATCH_ID
 pr-review owner 123 diff --batch BATCH_ID --current
 pr-review owner 123 resume --batch BATCH_ID --adopt
+pr-review owner 123 prepare-commit --batch BATCH_ID  # stage verified snapshot; return suggested message
 pr-review owner 123 associate               # after human commits and pushes
 pr-review owner 123 prepare                 # inspect exact staged replies and token
 pr-review owner 123 publish --confirm TOKEN

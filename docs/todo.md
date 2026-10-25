@@ -90,7 +90,9 @@ Explicit toolkit selection and an owner inbox work independently of reviewer run
 Non-interactive `f` fixes use a dedicated owner worktree, with separate
 fix/review provider settings, dependency-aware batch planning that can combine
 related feedback, per-task and combined verification, and durable checkpoints.
-Native Magit handles human staging, committing, and pushing; verified commit-linked
+Owner `m` prepares exact verified staging and a suggested native Magit commit
+message; `C-u m` opens status only. Human confirmation creates the commit, and
+Magit `P u` pushes to the actual PR upstream. Verified commit-linked
 replies are staged for explicit publication with recovery for uncertain writes.
 
 The specification retains every delivery milestone, implementation boundaries,
@@ -109,6 +111,29 @@ survive refresh, and never invent GitHub reply destinations. See the
 Follow-up validation on 2026-10-25 passed all 161 Bats, 151 Python, and 83 ERT
 tests, lint, and warning-free byte compilation; GitHub and providers were mocked.
 
+The next dogfood adjustment adds explicit timestamped progress conclusions,
+corrects generated push-remote configuration, and makes `m` prepare a verified
+commit. Later or unrelated edits stay unstaged; conflicting existing staging is
+preserved for manual inspection. The owner Magit buffer identifies the actual PR
+destination and `P u` action.
+Validation passed 161 Bats, 165 Python, and 89 ERT tests, lint/byte compilation,
+and a native Magit handoff check in a disposable repository.
+Subsequent dogfood clarification: `a` now visibly reports saved associations and
+shows linked hashes on folded findings/batches. `m` recognizes an exact fix commit
+already in branch history and opens inspection without repeating the changed-HEAD
+association advice. This follow-up passed 167 Python and 92 ERT tests plus lint
+and warning-free byte compilation.
+
+The completion workflow now labels successful fixes **Verified**, shows their
+next step, and folds verification details separately from attempt history.
+`h` works from a verified fix/task as well as feedback, moves only its verified
+items to History, and labels fully handled fixes **Done locally**. `?` shows
+selection-specific actions; `+` retains the complete command reference. Local
+findings finish without a GitHub reply, and selected feedback targets its own
+related batch for diff/commit/recovery actions.
+Validation passed all 100 ERT tests, warning-free byte compilation, and a read-only
+render of the saved PR #4 session; no live feedback or worktree was changed.
+
 ## 6. Add interactive PR-owner fixes (`F`)
 
 After the non-interactive owner workflow, implement the
@@ -122,3 +147,12 @@ Choose the terminal integration only after that experiment. Then add individual
 and sequential-group `F` sessions using the existing owner worktree, plans,
 checkpoints, settings, and review flow. Terminal dependencies and this experiment
 are excluded from the initial owner-mode package.
+
+## 7. Optional automatic owner commits
+
+After the human-confirmed commit handoff is established, add an opt-in automatic
+commit step to continue the fix pipeline without opening an editor. Reuse exact
+verified staging, suggested messages, and commit associations. Define behavior
+for hooks/signing failures, changed HEAD/index, cancellation, retry/crash recovery,
+and retaining human edits. Committing must not imply pushing, publishing replies,
+or resolving threads. This milestone is separate from interactive `F`.

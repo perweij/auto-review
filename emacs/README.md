@@ -99,12 +99,12 @@ reply workflow because they already have GitHub destinations.
 | `f` | Plan, fix, and review the item, group, or selected sibling headings |
 | `V` | Verify selected concerns without a fixer invocation |
 | `R f` / `R r` | Choose fix / automatic-review provider, model, and effort |
-| `i` / `h` | Acknowledge inspected feedback/context / mark handled locally |
+| `i` / `h` | Acknowledge inspected feedback/context / finish feedback or a verified fix locally |
 | `k` / `U` | Defer / restore feedback locally |
 | `r` / `A` | Resume a batch / explicitly adopt manual changes and reverify |
 | `p` / `? S` | Replan unfinished work / skip the selected task and resume |
 | `d` / `C-u d` | Saved task/batch diff / current partial changes since its checkpoint |
-| `m` | Open native Magit in the owner worktree |
+| `m` / `C-u m` | Stage the verified fix and open its commit editor / inspect Magit without staging |
 | `a` / `C-u a` | Detect exact commits / explicitly associate selected feedback and commits |
 | `c` / `e` | Compose a reply / edit an unpublished reply |
 | `s` / `u` | Stage / unstage replies, a reply group, or sibling headings |
@@ -114,7 +114,11 @@ reply workflow because they already have GitHub destinations.
 | `L` | Progress, or the selected provider attempt's event log |
 | `K` | Cancel the owned operation; retain partial work and saved reports |
 | `b` / `B` / `M` | Open on GitHub / PR list / toolkit chooser |
-| `?` | Owner commands |
+| `?` / `? +` | Actions for the current selection / complete owner command reference |
+
+The progress log includes timestamps and PR identities, with explicit start,
+completion, and stopped/error messages. A finished operation ends with its
+conclusion rather than the last provider heartbeat.
 
 Owner `F` is unbound; interactive provider handoff is deferred. Reviewer `F`
 continues to check existing conversations against pushed code.
@@ -124,7 +128,11 @@ combine overlapping concerns and add prerequisites; independent tasks use displa
 order as the tie-breaker. Tasks run sequentially in one owner worktree, with a
 review after each task and a final review of the combined patch. Inspect task
 expectations, per-item outcomes, performed checks, blocking findings, retained
-attempts, and commit associations in **Fixes**. Settings default from the
+attempts, and commit associations in **Fixes**. Each fix expands to a next step
+and short result. **Verification and task details** and **Attempt history** start
+folded; older failed reviews remain in history without obscuring the final result.
+`?` offers actions for the selected feedback, fix, or reply, with its next step
+above the menu. `+` opens the complete command reference. Settings default from the
 customized processing-provider defaults when a session is first opened and then
 remain independent of reviewer settings. Model/effort choices come from fresh
 provider metadata. Owner verification uses focused checks.
@@ -137,12 +145,46 @@ accumulated edits. Skipped prerequisites block dependent tasks. Changed HEAD
 requires manual reconciliation and a new batch. A running buffer can be left
 with `q` or by switching toolkits; cancel with `K` before killing it.
 
-Stage code, commit, and push in native Magit. Check the displayed destination:
-the local owner branch has a unique name, and the PR may target a fork. Missing
-or ambiguous remotes are shown explicitly. `a` creates staged fixed-in replies
+After a successful fix, `m` stages the saved, verified batch and opens a native
+Magit commit editor with a suggested message from its findings and fix summaries.
+Edit it if needed, then press `C-c C-c` to commit. On a batch/task heading, `m`
+uses that batch; on feedback it uses the latest batch containing that item;
+elsewhere it uses the most recent batch. It prepares the entire
+verified batch, including combined fixes, rather than guessing per-item files.
+Later unstaged edits, including edits to the same files, remain unstaged. Existing
+staging is accepted only when it contains exact versions from this fix; unrelated
+or conflicting staging opens status with an explanation and remains untouched.
+Paused, stale, empty, or already committed fixes also open status without preparing
+a commit. An existing commit editor keeps its human wording. `C-u m` always opens
+status only, including when inspecting partial work or staging manual changes.
+When the saved fix already exists as an exact commit in the current branch,
+`m` names that commit and opens status without asking for another association or
+restaging it. This also works after later commits have advanced HEAD.
+
+The owner Magit buffer shows **Push PR** with the intended destination. Use `P u`
+to push to that upstream after committing. The local owner branch has a unique
+name, and the PR may target a fork. New owner branches configure that upstream
+without a same-name push-remote; old generated mappings migrate on the next fix
+or commit preparation, preserving manual configuration. Missing or ambiguous
+remotes require manual upstream configuration. `a` creates staged fixed-in replies
 only when exact verified commits have reached the fresh PR head. `C-u a` supports
 explicit associations for split commits or extra changes. Inspect/edit those
 replies before `P`; publishing does not resolve threads or change review verdicts.
+
+`a` reports the saved commit associations, or explicitly says when none matched.
+Linked hashes appear on the finding and batch headings even when folded. These
+are provenance links; local findings still have no GitHub reply destination, and
+association does not mark feedback handled or resolve a thread.
+
+To finish a committed local finding, press `h` on its feedback heading or its
+verified fix result. The feedback leaves Attention needed for **Deferred / History**,
+and a fully handled fix reads **Done locally**. No reply is required for local
+findings. Until then, **Verified** means the automatic review passed, not that
+your handling is complete. The fix's saved reports and commit links stay available.
+On a batch or task, `h` handles only its verified feedback; skipped and unrelated
+items stay as they were. Paused or stale fix results must be inspected before
+using this shortcut. Direct feedback triage remains available independently.
+GitHub replies, thread resolution, and review verdicts remain separate actions.
 
 The owner reply editor uses `C-c C-c` to save locally and `C-c C-k` to cancel.
 If saving fails because the session changed, its text remains intact. `C-c C-r`

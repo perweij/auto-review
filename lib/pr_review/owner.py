@@ -5,11 +5,11 @@ from contextlib import nullcontext
 
 from .common import ApiError, locked, require_text
 from .owner_state import OwnerSession, open_session, discover, toolkit, refresh, validate_settings
-from . import owner_git, owner_fixes, owner_publication
+from . import owner_git, owner_fixes, owner_publication, owner_commit
 
 
 COMMANDS = ["owner-open", "owner-import", "owner-discover", "owner-read", "owner-refresh", "owner-mutate", "owner-fix",
-            "owner-diff", "owner-associate", "owner-prepare", "owner-publish", "owner-recover", "owner-thread-state", "toolkit"]
+            "owner-diff", "owner-prepare-commit", "owner-associate", "owner-prepare", "owner-publish", "owner-recover", "owner-thread-state", "toolkit"]
 
 
 def dispatch(request):
@@ -57,6 +57,8 @@ def dispatch(request):
             return mutate(session, state, request)
         if name == "owner-associate":
             return owner_publication.associate(session, state, request)
+        if name == "owner-prepare-commit":
+            return owner_commit.prepare(session, state, request)
         with locked(session.repo.lock):
             if name == "owner-thread-state":
                 return thread_state(session, state, request)

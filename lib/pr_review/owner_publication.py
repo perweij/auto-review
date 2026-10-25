@@ -46,13 +46,7 @@ def associate(session, state, request):
             for key in keys:
                 associations[key] = {"commits": commits, "method": "explicit", "at": now()}
         else:
-            candidates = session.repo.git("rev-list", batch["baseline"] + ".." + local).stdout.splitlines()
-            matches = []
-            for sha in candidates:
-                parents = session.repo.git("rev-list", "--parents", "-n", "1", sha).stdout.split()
-                tree = session.repo.git("rev-parse", sha + "^{tree}").stdout.strip()
-                if parents[1:] == [batch["baseline"]] and tree == batch["final_tree"]:
-                    matches.append(sha)
+            matches = workspace.exact_commits(session, batch, local)
             if len(matches) == 1:
                 for key in (k for k in batch["items"] if k in fixed_items(batch)):
                     # A newly amended exact commit can replace an obsolete automatic association.

@@ -70,11 +70,30 @@ def configure_push(session, state):
         if urls and all(normalize_remote(url) == target["repository"] for url in urls):
             matches.append(remote)
     target["remotes"] = matches
-    if len(matches) == 1 and not state.get("configured_target"):
+    if (len(matches) == 1 and not state.get("configured_target")
+            and not any(session.repo.git("config", "--get", f"branch.{state['branch']}.{key}", check=False).returncode == 0
+                        for key in ("remote", "merge", "pushRemote"))):
         session.repo.git("config", f"branch.{state['branch']}.remote", matches[0])
         session.repo.git("config", f"branch.{state['branch']}.merge", "refs/heads/" + target["branch"])
-        session.repo.git("config", f"branch.{state['branch']}.pushRemote", matches[0])
-        state["configured_target"] = {"repository": target["repository"], "branch": target["branch"], "remote": matches[0]}
+        state["configured_target"] = {"repository": target["repository"], "branch": target["branch"], "remote": matches[0],
+                                      "method": "upstream"}
+    configured = state.get("configured_target", {})
+    if configured and "method" not in configured:
+        # Migrate only the exact legacy mapping we installed. Magit's push-remote
+        # action always uses the local branch name, not branch.<name>.merge.
+        expected = {"remote": configured["remote"], "merge": "refs/heads/" + configured["branch"],
+                    "pushRemote": configured["remote"]}
+        if (configured["repository"] == target["repository"] and configured["branch"] == target["branch"]
+                and configured["remote"] in matches
+                and all(session.repo.git("config", "--get", f"branch.{state['branch']}.{key}", check=False).stdout.strip() == value
+                        for key, value in expected.items())):
+            before = admin(session, state)
+            session.repo.git("config", "--unset-all", f"branch.{state['branch']}.pushRemote")
+            after = admin(session, state)
+            for batch in state["batches"]:
+                if batch.get("git_admin") == before:
+                    batch["git_admin"] = after
+        configured["method"] = "upstream"
     session.save(state)
 
 
@@ -136,6 +155,16 @@ def ancestor(session, older, newer):
     if code not in (0, 1):
         raise ApiError("invalid_commit", "Cannot check commit ancestry.")
     return code == 0
+
+
+def exact_commits(session, batch, head):
+    """Find reachable commits with the verified tree and sole baseline parent."""
+    matches = []
+    for sha in session.repo.git("rev-list", batch["baseline"] + ".." + head).stdout.splitlines():
+        parents = session.repo.git("rev-list", "--parents", "-n", "1", sha).stdout.split()
+        if parents[1:] == [batch["baseline"]] and session.repo.git("rev-parse", sha + "^{tree}").stdout.strip() == batch["final_tree"]:
+            matches.append(sha)
+    return matches
 
 
 def diff(session, before, after):

@@ -123,6 +123,7 @@ belong to that selected toolkit. Owner selection never depends on PR authorship.
 | `owner-mutate` | `session`, `revision`, `operation`, operation-specific fields below | Local atomic change; return owner view |
 | `owner-fix` | `session`, `revision`, `items` or `batch`, optional controls below | Plan/fix/review or resume; return owner view |
 | `owner-diff` | `session`, `batch`, optional `task` | `{diff,before,after}` for a retained task/batch |
+| `owner-prepare-commit` | `session`, `revision`, optional `batch` | Stage an exact verified snapshot; return `{owner,ready,worktree,batch,paths,message}` or `{owner,ready:false,worktree,reason}` |
 | `owner-associate` | `session`, `revision`, optional `batch`, `items`, `commits` | Associate verified fixes and generate reachable fixed-in replies |
 | `owner-prepare` | `session`, `revision` | Fresh `{owner,token,replies}` publication preview |
 | `owner-publish` | `session`, `revision`, `token` | Send the explicitly confirmed preview; return owner view |
@@ -135,6 +136,28 @@ before it fails. Opening creates a session idempotently without a revision.
 `owner-diff` with `current: true` additionally requires `revision`, takes the
 execution lock, and pins a current tree for inspection against the last saved
 batch checkpoint. It does not adopt that tree or change the real index.
+
+`owner-prepare-commit` takes the owner execution lock and Git's index lock. It
+uses the explicitly selected batch or the most recent batch. A ready batch must
+still match HEAD and its saved feedback; paused, stale, empty, or committed batches
+return `ready:false` for manual inspection. Merge/rebase/cherry-pick state also
+prevents preparation. Existing staged paths must be exact versions from this fix;
+unrelated staging and partial/manual variants are retained without alteration.
+Preparation installs only the changed paths' saved blobs through a temporary
+index, verifies its complete tree equals the final reviewed tree, and atomically
+replaces the index. Working files stay untouched, including later edits to fix
+files. A busy index is never stolen; errors retain the previous index.
+The operation records `batch.commit_preparation` with time, HEAD, tree, and paths.
+It performs no model/GitHub calls and creates no commit. Clients open the returned
+message in a human commit editor. Repeated preparation is safe, and completed
+exact-tree commits retain the existing association behavior. CLI equivalent:
+`pr-review owner prepare-commit --session PATH [--batch ID]`.
+If HEAD has advanced, a reachable commit with the sole baseline parent and exact
+verified tree returns `ready:false, committed:true, commits:[SHA]` and an
+"already committed" reason. This detection needs no prior association and does
+not create one. Existing explicit associations are acknowledged separately without
+claiming that a partial/split commit is an exact match; unmatched HEAD changes
+still require inspection. No index changes occur in these cases.
 
 `owner-import` is the exception to owner-session selectors: it takes the source
 reviewer's session/generation/revision and validates them under the shared PR and
@@ -160,6 +183,12 @@ After refresh, `metadata` and `push_target` identify the reported PR head and it
 actual repository/branch. `push_target.remotes`, when setup has inspected them,
 is a list: zero or several matches require user configuration. Artifact paths in
 attempts are for opening logs, not for clients to mutate workflow state.
+
+Owner setup configures the actual PR upstream (`branch.remote`/`branch.merge`).
+It does not set `branch.pushRemote`, which makes Magit's `P p` push to the local
+branch's name. Use `P u` for the PR upstream. Legacy generated push-remote settings
+are removed only when the stored mapping, current remote/merge/push-remote values,
+and target identity still agree. Manual mappings remain unchanged.
 
 Feedback has stable `key` values (`thread:…`, `comment:…`, `review:…`, `local:…`), full
 `comments`, `fingerprint`, `notification`, `triage`, `unread`, `actionable`, and
