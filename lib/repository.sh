@@ -198,10 +198,11 @@ initialize_run() {
         [[ ! -f $file ]] || cp -- "$file" "$SCRATCH/resume-prompts/"
     done
     # Configuration belongs to its generation. Fork before recording a change.
+    prepare_analysis_kind
     local saved_configuration
     saved_configuration=$(python3 "$ROOT/lib/review-settings.py" <<< "$(jq -cn --arg file "$RUN_DIR/manifest.json" '{manifest:$file}')")
     if [[ $(jq -cS . <<< "$saved_configuration") != "$(jq -cS . <<< "$RUN_CONFIGURATION")" ]] &&
-        jq -e '.phases.synthesis.status=="completed"' "$RUN_DIR/manifest.json" >/dev/null; then begin_review_attempt; fi
+        jq -e '.phases.synthesis.status=="completed" or .phases.followup.status=="completed"' "$RUN_DIR/manifest.json" >/dev/null; then begin_review_attempt; fi
     manifest '.configuration=$configuration | .tools = {git:$git,gh:$gh,codex:$codex,claude:$claude} | .models = {codex:$cm,claude:$am,claude_effort:$ce,codex_effort:$xe,claude_permission_mode:$mode} | .viewer = $viewer | .viewer_permission = $permission | .status = "running"' \
         --arg git "$GIT_VERSION" --arg gh "$GH_VERSION" --arg codex "$CODEX_VERSION" --arg claude "$CLAUDE_VERSION" --argjson configuration "$RUN_CONFIGURATION" --arg ce "$CLAUDE_EFFORT" --arg xe "$CODEX_EFFORT" --arg cm "$CODEX_MODEL" --arg am "$CLAUDE_MODEL" --arg mode "$PERMISSION_MODE" --arg viewer "$VIEWER" --arg permission "$VIEWER_PERMISSION"
     say "Artifacts: $RUN_DIR"

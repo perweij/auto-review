@@ -23,6 +23,8 @@ source "$ROOT/lib/publication.sh"
 source "$ROOT/lib/revisions.sh"
 # shellcheck source=../lib/attempts.sh
 source "$ROOT/lib/attempts.sh"
+# shellcheck source=../lib/followup.sh
+source "$ROOT/lib/followup.sh"
 
 main() {
     parse_args "$@"
@@ -42,8 +44,12 @@ main() {
     check_agent_config_changes
     say '[context] Collecting PR context'
     collect_pr_context
-    run_reviews
-    prepare_contributions
+    if [[ $ANALYSIS_KIND == followup ]]; then
+        run_followup
+    else
+        run_reviews
+        prepare_contributions
+    fi
     say '[publication] Human review and optional publication'
     interactive_publication
     manifest '.status = "complete"'

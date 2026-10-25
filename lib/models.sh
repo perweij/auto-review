@@ -120,6 +120,9 @@ review_command() {
             CLAUDE_COMMAND+=(--output-format stream-json --verbose --include-partial-messages --json-schema "$(cat "$ROOT/prompts/synthesis.schema.json")" --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/context" --add-dir "$RUN_DIR/reviews")
             if [[ -f $RUN_DIR/reviews/reassessment-input.json ]]; then CLAUDE_COMMAND+=(--add-dir "$RUN_DIR/discussion"); fi ;;
         contributions) CLAUDE_COMMAND+=(--output-format stream-json --verbose --include-partial-messages --json-schema "$(cat "$ROOT/prompts/contributions.schema.json")" --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/discussion" --add-dir "$RUN_DIR/reviews") ;;
+        followup) CLAUDE_COMMAND+=(--append-system-prompt "$(cat "$ROOT/prompts/synthesis-testing-focused.txt")"
+            --output-format stream-json --verbose --include-partial-messages --json-schema "$(cat "$ROOT/prompts/followup.schema.json")"
+            --disallowed-tools "${CLAUDE_DENY[@]}" --add-dir "$RUN_DIR/discussion" --add-dir "$RUN_DIR/reviews" --add-dir "$RUN_DIR/context") ;;
     esac
     REVIEW_COMMAND=("${CLAUDE_COMMAND[@]}")
 }
@@ -150,6 +153,12 @@ phase_inputs() {
     review_command "$stage"
     command=$(jq -cn --args '$ARGS.positional' -- "${REVIEW_COMMAND[@]}" | cache_command)
     case $stage in
+        followup)
+            artifacts=$(jq -cn --arg input "$(hash_file "${FOLLOWUP_INPUT:-$RUN_DIR/reviews/followup-input.json}")" \
+                --arg prompt "$(review_prompt_hash followup "${FOLLOWUP_PROMPT:-$RUN_DIR/prompts/followup-prompt.txt}")" \
+                --arg schema "$(hash_file "$ROOT/prompts/followup.schema.json")" \
+                --arg validator "$(hash_file "$ROOT/lib/pr_review_api/followup.py")" \
+                '{input:$input,prompt:$prompt,schema:$schema,validator:$validator}') ;;
         synthesis)
             local claude='' codex=''
             if dual_review; then
@@ -326,6 +335,9 @@ run_model() {
     manifest '.phases[$stage] = {status:"running",fingerprint:$fp,started_at:$time,stdout_log:$stdout,stderr_log:$stderr}' --arg stage "$ACTIVE_STAGE" --arg fp "$FINGERPRINT" --arg time "$(now)" --arg stdout "$events" --arg stderr "$stderr"
     manifest '.phases[$stage].model = $model' --arg stage "$ACTIVE_STAGE" --arg model "$model"
     case $ACTIVE_STAGE in
+        followup)
+            manifest '.phases.followup.testing_policy="focused"'
+            say 'Verification: focused checks for selected conversations (60s each, 5m total).' ;;
         claude|codex)
             manifest '.phases[$stage].testing_policy="focused"' --arg stage "$ACTIVE_STAGE"
             say 'Verification: focused checks for this independent review (60s each, 5m total); no full-suite runs.' ;;

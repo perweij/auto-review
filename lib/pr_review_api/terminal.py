@@ -22,7 +22,9 @@ def terminal(path):
             for c in review["comments"]:
                 if c["status"] == status:
                     print(f"  {c['id']}: {c['title']}" + (" (needs attention)" if c["blockers"] else ""))
-        print(f"\nVerdict: {review['verdict']}. Model suggestion: {review['recommendation']}")
+        print(f"\nNext verdict: {review['verdict']}. Model suggestion: {review['recommendation'] or 'none (limited follow-up)'}")
+        if review.get("coverage", {}).get("kind") == "followup":
+            print(f"Limited coverage: {len(review['coverage']['threads'])} selected conversations; not a full PR review.")
         print("s ID stage · u ID unstage · k ID suppress · r ID restore · e ID edit · i ID inspect")
         print("a ID place · v VERDICT · p publish staged · q quit. Full context is available in Magit.")
         try:

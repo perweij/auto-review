@@ -136,16 +136,17 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(published["complete"])
         self.assertEqual(posts[0][1]["comments"][0]["body"].split("\n\n<!--")[0], "Exact human wording")
 
-    def test_initial_verdict_uses_model_suggestion_without_overwriting_saved_choice(self):
+    def test_initial_verdict_requires_explicit_choice_and_preserves_it(self):
         synthesis = read_json(self.path / "reviews/synthesis.json")
         synthesis["recommendation"] = "REQUEST_CHANGES"
         atomic_json(self.path / "reviews/synthesis.json", synthesis)
-        self.assertEqual(dispatch(self.request())["verdict"], "REQUEST_CHANGES")
+        self.assertEqual(dispatch(self.request())["verdict"], "COMMENT")
         self.assertEqual(publication.make_actions(self.session, self.session.load()), [])
         self.change("stage", comment="p1")
+        self.assertEqual(publication.make_actions(self.session, self.session.load())[0]["event"], "COMMENT")
+        self.change("verdict", verdict="REQUEST_CHANGES")
+        self.assertEqual(dispatch(self.request())["verdict"], "REQUEST_CHANGES")
         self.assertEqual(publication.make_actions(self.session, self.session.load())[0]["event"], "REQUEST_CHANGES")
-        self.change("verdict", verdict="COMMENT")
-        self.assertEqual(dispatch(self.request())["verdict"], "COMMENT")
 
     def test_own_pr_defaults_to_comment_and_explains_unavailable_verdicts(self):
         synthesis = read_json(self.path / "reviews/synthesis.json")
@@ -390,6 +391,8 @@ class ApiTest(unittest.TestCase):
         manifest = read_json(self.path / "manifest.json")
         manifest["discussion"]["hash"] = "different"
         atomic_json(self.path / "manifest.json", manifest)
+        atomic_json(self.path / "discussion/snapshot-a/discussion.json",
+                    {"items": [{"key": "comment:9", "kind": "comment", "comments": [{"id": 9, "body": "New evidence"}]}]})
         with patch.object(publication, "bridge"):
             result = dispatch(self.request("refresh"))
         c = result["review"]["comments"][0]

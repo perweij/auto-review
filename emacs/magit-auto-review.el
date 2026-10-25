@@ -20,6 +20,8 @@
 
 (declare-function forge-current-topic "forge-topic" (&optional demand))
 (declare-function forge-get-repository "forge-repo" (&optional demand))
+(declare-function magit-auto-review--render-conversations "magit-auto-review-conversations" ())
+(declare-function magit-auto-review--insert-review-status "magit-auto-review-conversations" ())
 
 (defcustom magit-auto-review-claude-model nil
   "Default Claude model for new reviews; R validates it against CLI choices."
@@ -336,6 +338,12 @@ These are model instructions, not an enforced process timeout."
       (goto-char (oref target start)))))
 
 (defun magit-auto-review--render (&optional target)
+  "Render the active view, optionally visiting draft TARGET."
+  (if (derived-mode-p 'magit-auto-review-conversations-mode)
+      (magit-auto-review--render-conversations)
+    (magit-auto-review--render-drafts target)))
+
+(defun magit-auto-review--render-drafts (&optional target)
   "Render the saved review, retaining folds and moving to TARGET if present."
   (unless magit-auto-review--editor
     (let ((inhibit-read-only t)
@@ -350,8 +358,11 @@ These are model instructions, not an enforced process timeout."
         (when-let ((url (alist-get 'url magit-auto-review--review)))
           (insert-text-button url 'follow-link t 'action (lambda (_) (browse-url url)))
           (insert "\n\n"))
-        (insert (propertize (format "Model suggestion: %s. Overall review verdict: %s (v to choose).\n"
-                                    (or (alist-get 'recommendation magit-auto-review--review) "COMMENT")
+        (magit-auto-review--insert-review-status)
+        (insert (propertize (format "Model suggestion: %s. Next review verdict: %s (v to choose).\n"
+                                    (or (alist-get 'recommendation magit-auto-review--review)
+                                        (if (equal (alist-get 'kind (alist-get 'coverage magit-auto-review--review)) "followup")
+                                            "none (limited follow-up)" "unavailable"))
                                     (magit-auto-review--verdict-label)) 'face 'shadow))
         (insert "P publishes Staged comments and the overall verdict. TAB expands context.\n")
         (when-let ((reason (alist-get 'reason (cl-find-if (lambda (v) (not (magit-auto-review--true-p (alist-get 'available v))))

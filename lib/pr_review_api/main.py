@@ -5,7 +5,7 @@ import sys
 from .common import ApiError, PROTOCOL, emit, locked
 from .commands import mutate
 from .state import Session, discover
-from . import operations, publication, settings, models
+from . import operations, publication, settings, models, workflow
 
 
 def dispatch(request):
@@ -13,8 +13,8 @@ def dispatch(request):
         raise ApiError("protocol_mismatch", "Use protocol version 1.", supported=[PROTOCOL])
     operation = request.get("command")
     if operation == "capabilities":
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations"],
-                "commands": ["discover", "settings", "models", "read", "history", "diff", "file", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt"]}
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status"],
+                "commands": ["discover", "settings", "models", "read", "history", "diff", "file", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup"]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":
@@ -26,6 +26,10 @@ def dispatch(request):
     if operation == "run":
         return operations.run(request)
     session = Session(request)
+    if operation == "followup":
+        with locked(session.lock):
+            session.check_write(request, session.load())
+        return operations.followup(session, request)
     if operation == "history":
         return session.history()
     if operation == "read":
@@ -48,6 +52,8 @@ def dispatch(request):
             return mutate(session, state, request)
         # Never interleave CLI Git/network state mutations with publication.
         with locked(session.pr_lock):
+            if operation == "thread-state":
+                return workflow.thread_state(session, state, request)
             if operation == "refresh":
                 affected = publication.refresh(session, state)
                 return {"review": session.view(state), "affected": affected}

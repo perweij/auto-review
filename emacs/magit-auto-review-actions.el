@@ -9,6 +9,7 @@
 ;;; Code:
 (require 'magit-auto-review)
 (require 'magit-auto-review-setup)
+(require 'magit-auto-review-conversations)
 
 (defun magit-auto-review--start (request callback)
   "Run explicit REQUEST asynchronously and deliver CALLBACK in this buffer."
@@ -44,6 +45,7 @@
 
 (defun magit-auto-review--launch-review (settings &optional trusted-snapshot catalogs)
   "Start using frozen SETTINGS, optional TRUSTED-SNAPSHOT and CATALOGS."
+  (setq magit-auto-review--followup-request nil)
   (setq magit-auto-review--run-settings (copy-tree settings))
   (magit-auto-review--start
    (append (if magit-auto-review--session (magit-auto-review--request "run")
@@ -77,8 +79,12 @@
             (setq data (magit-auto-review--json (match-string-no-properties 0)))))))
     (unless data (user-error "No agent-configuration confirmation is pending; inspect L for the actual failure"))
     (when (yes-or-no-p (format "Trust agent configuration at %s?\n%s" (alist-get 'snapshot data) (alist-get 'paths data)))
-      (unless magit-auto-review--run-settings (user-error "Open R and configure the review first"))
-      (magit-auto-review--launch-review magit-auto-review--run-settings (alist-get 'snapshot data)))))
+      (if magit-auto-review--followup-request
+          (let ((request (copy-tree magit-auto-review--followup-request)))
+            (setf (alist-get 'trusted_snapshot request) (alist-get 'snapshot data))
+            (magit-auto-review--launch-followup request))
+        (unless magit-auto-review--run-settings (user-error "Open R and configure the review first"))
+        (magit-auto-review--launch-review magit-auto-review--run-settings (alist-get 'snapshot data))))))
 
 (defun magit-auto-review-cancel-operation ()
   "Cancel only this buffer's owned backend operation, preserving saved work."
@@ -343,10 +349,12 @@
         (dolist (generation (alist-get 'generations history))
           (magit-insert-section (review-generation (alist-get 'generation generation))
             (magit-insert-heading
-              (format "%s  %s  %-10s  %d human edits · %d saved versions%s"
+              (format "%s  %s  %-10s  %s · %d human edits · %d saved versions%s"
                       (substring (or (alist-get 'head generation) "unknown") 0 (min 12 (length (or (alist-get 'head generation) "unknown"))))
                       (or (alist-get 'updated_at generation) (alist-get 'created_at generation))
-                      (alist-get 'status generation) (alist-get 'human_edits generation)
+                      (alist-get 'status generation)
+                      (if (equal (alist-get 'analysis_kind generation) "followup") "Limited follow-up" "Full review")
+                      (alist-get 'human_edits generation)
                       (alist-get 'saved_versions generation)
                       (if (magit-auto-review--true-p (alist-get 'current generation)) " · current" "")))))))
     (use-local-map (copy-keymap magit-section-mode-map))
@@ -497,27 +505,30 @@
     ("c" "New comment at code cursor" magit-auto-review-new-comment :if magit-auto-review--mutable-p)
     ("f" "New follow-up draft" magit-auto-review-follow-up :if (lambda () (and (magit-auto-review--mutable-p) (magit-auto-review--status-p "published"))))]
    ["Context and history"
+    ("C" "Conversations and follow-up" magit-auto-review-conversations :if (lambda () magit-auto-review--review))
     ("RET" "Reviewed file" magit-auto-review-visit :if magit-auto-review--code-context-p)
     ("d" "Full PR diff" magit-auto-review-diff :if (lambda () magit-auto-review--review))
     ("l" "Other evidence" magit-auto-review-evidence :if magit-auto-review--evidence-p)
     ("h" "Saved generations" magit-auto-review-history :if (lambda () magit-auto-review--review))
-    ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)
     ("A" "Suggest reply using full discussion (model)" magit-auto-review-adapt :if magit-auto-review--reply-draft-p)
     ("i" "Mark changed discussion as inspected" magit-auto-review-acknowledge :if magit-auto-review--attention-p)
     ("b" "Open comment / PR on GitHub" magit-auto-review-browse)]
    ["Review"
     ("g" "Refresh results (history stays pinned)" magit-auto-review-refresh :if (lambda () magit-auto-review--review))
-    ("G" "Refresh GitHub context" magit-auto-review-refresh-github :if magit-auto-review--mutable-p)
     ("R" "Configure and run/resume…" magit-auto-review-run)
     ("N" "Open current completed review" magit-auto-review-switch-current :if (lambda () (or magit-auto-review--new-ready magit-auto-review--history-view)))
-    ("K" "Cancel model operation" magit-auto-review-cancel-operation :if (lambda () magit-auto-review--operation))
     ("L" "Progress and receipt URLs" magit-auto-review-log)
     ("v" "Choose overall PR verdict" magit-auto-review-set-verdict :if magit-auto-review--mutable-p)
-    ("T" "Confirm agent configuration" magit-auto-review-trust-config)
     ("P" "Publish Staged…" magit-auto-review-publish-menu :if magit-auto-review--mutable-p)
-    ("q" "Close menu" transient-quit-one)]])
+    ("q" "Close menu" transient-quit-one)]
+   ["Advanced"
+    ("G" "Refresh GitHub context" magit-auto-review-refresh-github :if magit-auto-review--mutable-p)
+    ("K" "Cancel model operation" magit-auto-review-cancel-operation :if (lambda () magit-auto-review--operation))
+    ("T" "Confirm agent configuration" magit-auto-review-trust-config)
+    ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])
 
 (dolist (binding '(("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
+                   ("C" . magit-auto-review-conversations)
                    ("R" . magit-auto-review-run) ("N" . magit-auto-review-switch-current)
                    ("G" . magit-auto-review-refresh-github) ("L" . magit-auto-review-log)
                    ("l" . magit-auto-review-evidence) ("y" . magit-auto-review-recover)

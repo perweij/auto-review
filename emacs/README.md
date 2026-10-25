@@ -62,6 +62,7 @@ Model CLI programs are required only for an explicit model operation.
 | `a` | Choose code, an existing thread, overall assessment, or automatic placement |
 | `RET` | Visit the file at the reviewed revision with the actual range highlighted |
 | `d` / `l` | Full PR diff / secondary evidence locations |
+| `C` | Open Conversations, including unmatched and outdated unresolved threads |
 | `g` | Open the latest completed results locally; history buffers stay pinned |
 | `G` | Explicitly refresh GitHub discussion and last-checked source information |
 | `R` / `N` | Configure and run/resume / open the current completed review from an older or history view |
@@ -167,13 +168,14 @@ Expand Staged to inspect the exact wording in code/conversation context. The
 heading shows **your** verdict; the model suggestion is separate. `v` (also in
 `P`) opens a chooser for Comment, Request changes, or Approve. This is one overall
 assessment of the PR, submitted with the staged batch, not a per-comment label.
-New drafts default to the model suggestion if GitHub allows it; existing saved
-choices are retained. On your own PR, GitHub permits Comment only, which still
+New drafts default to Comment; Approve and Request changes require your explicit
+choice. The model suggestion remains separate, and existing explicit choices are
+retained. On your own PR, GitHub permits Comment only, which still
 supports inline discussions. The choice belongs to this review, not global
 Transient defaults.
 
 `P p` refreshes and validates the source snapshot, complete discussion, account,
-and attachments. Changes that require inspection return affected comments to
+and attachments. Changed discussions return dependent comments to
 Unstaged. After reading a changed discussion, `i` marks it inspected; this does
 not stage, rewrite, or publish the draft. That action is offered only when
 inspection is required. Then stage again. The
@@ -197,6 +199,43 @@ review URL also appears above the status sections.
 After drafts have been saved through the API, the terminal CLI uses the same
 draft ledger through a terminal adapter. Switching interfaces cannot publish
 an obsolete generated aggregate body.
+
+## Conversations and follow-up
+
+`C` opens a separate Conversations buffer using the saved snapshot. All unresolved
+threads are listed, including outdated ones; resolved threads are available in a
+collapsed group. Each conversation contains its complete discussion, saved code
+context, participation marker, and any follow-up assessment. `g` loads saved
+results and `G` explicitly refreshes GitHub. `q` returns to the preceding view.
+
+| Key | Conversation action |
+| --- | --- |
+| `c` | Create an attached Unstaged reply and edit it in the drafts buffer |
+| `F` | Check the thread at point or selected sibling thread headings |
+| `x` / `X` | Resolve / reopen the thread after fresh permission and context checks |
+| `RET` / `b` | Visit saved code / open the conversation on GitHub |
+
+Resolve/Reopen are direct commands, separate from staged publication. If the
+source or discussion changed since display, the refreshed view asks you to inspect
+it and invoke the command again. An uncertain response is read back; no automatic
+retry is sent. Resolution does not change your submitted review verdict.
+
+`F` uses the saved processing provider and focused verification limits at the
+latest pinned commit. Its new generation assesses only selected conversations;
+it does not scan the whole PR or produce an overall model verdict. Each outcome
+includes evidence and limitations. Assessments become stale when their source or
+conversation changes. `c` can seed a reply from a fresh saved suggestion, but no
+draft, publication, or resolution happens automatically. The publication preview
+discloses limited coverage if you explicitly submit a verdict from this generation.
+
+The status summary separates GitHub's review status, your submitted decision,
+later Comment activity, and your next publication verdict. GitHub review status
+does not establish overall merge eligibility. Unrelated resolution metadata leaves
+drafts staged; changes to their discussion dependencies require inspection. New
+inline and overall comments retain conservative review-wide discussion dependencies.
+
+Recovery, cancellation, agent-configuration trust, and manual GitHub refresh are
+grouped under Advanced in the main help menu, with their existing keys.
 
 ## Generations and history
 

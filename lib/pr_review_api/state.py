@@ -5,6 +5,7 @@ from pathlib import Path
 from .common import ApiError, artifact_path, atomic_json, digest, git, now, read_json, state_root
 from .context import GitContext, parse_hunks
 from .assessments import comment_assessment, finding_assessments
+from . import workflow
 
 
 def generation(path, manifest):
@@ -102,9 +103,12 @@ class Session:
         if state and state.get("generation") == self.id:
             if state.get("format_version") != 1:
                 raise ApiError("unsupported_state", "This draft format requires a newer backend.")
+            if not state.get("verdict_requested") and not state.get("verdict_submitted"):
+                state["verdict"] = "COMMENT"
             return state
-        ledger = read_json(self.path / "publication/contributions.json", {})
-        synthesis = read_json(self.path / "reviews/synthesis.json", {})
+        followup = self.manifest.get("analysis_kind") == "followup"
+        ledger = {} if followup else read_json(self.path / "publication/contributions.json", {})
+        synthesis = {} if followup else read_json(self.path / "reviews/synthesis.json", {})
         findings = {f["id"]: f for f in synthesis.get("findings", [])}
         # A copied API ledger is a different generation. Never auto-carry its human work.
         fresh = bool(state)
@@ -133,13 +137,13 @@ class Session:
                              "finding_ids": ids, "evidence": [f.get("evidence", "") for f in fs],
                              "locations": [loc for f in fs for loc in f.get("locations", [])],
                              "explanation": basis.get("explanation", ""),
+                             "discussion_keys": basis.get("discussion_keys", []),
                              "partial_coverage": any(i in covered for i in ids) and not all_posted,
                              "human_edited": body != basis.get("body_md", body), "versions": [], "receipt": None})
-        recommendation = synthesis.get("recommendation", "COMMENT")
-        allowed = {v["value"] for v in self.verdicts({}) if v["available"]}
+        recommendation = synthesis.get("recommendation") if self.manifest.get("analysis_kind") == "followup" else synthesis.get("recommendation", "COMMENT")
         return {"format_version": 1, "generation": self.id, "sequence": 0,
                 "created_at": now_from_manifest(self.manifest), "comments": comments,
-                "verdict": recommendation if recommendation in allowed else "COMMENT",
+                "verdict": "COMMENT",
                 "verdict_submitted": False, "verdict_requested": False, "batches": [],
                 "discussion": self.discussion(), "discussion_hash": self.manifest.get("discussion", {}).get("hash"),
                 "checked": None, "recommendation": recommendation,
@@ -160,7 +164,11 @@ class Session:
         if request.get("generation") != self.id or request.get("revision") != digest(state):
             raise ApiError("stale_revision", "The saved draft changed. Your unsaved text has not been applied; refresh or recover it.",
                            generation=self.id, revision=digest(state))
-        if not self.manifest.get("snapshot") or not (self.path / "publication/contributions.json").is_file():
+        ready = ((self.path / "reviews/followup.json").is_file()
+                 and self.manifest.get("phases", {}).get("followup", {}).get("status") == "completed"
+                 if self.manifest.get("analysis_kind") == "followup"
+                 else (self.path / "publication/contributions.json").is_file())
+        if not self.manifest.get("snapshot") or not ready:
             raise ApiError("not_ready", "This review has not produced drafts yet.")
 
     def save(self, state):
@@ -201,7 +209,8 @@ class Session:
     def view(self, state):
         from .operations import process_start
         comments = copy.deepcopy(state["comments"])
-        assessments = finding_assessments(read_json(self.path / "reviews/synthesis.json", {}))
+        assessments = finding_assessments({} if self.manifest.get("analysis_kind") == "followup"
+                                         else read_json(self.path / "reviews/synthesis.json", {}))
         for c in comments:
             # Display metadata does not affect the draft revision, staging,
             # prepared publication, or any saved human wording.
@@ -220,7 +229,17 @@ class Session:
                 active.append({"operation_id": file.stem, "kind": op["kind"]})
         thread_contexts = {t["key"]: self.comment_context({"placement": {"kind": "reply", "key": t["key"]}}, state)
                            for t in state["discussion"].get("items", []) if t.get("kind") == "thread"}
+        threads_by_key = {t["key"]: t for t in state["discussion"].get("items", []) if t.get("kind") == "thread"}
+        for key, context in thread_contexts.items():
+            thread = threads_by_key[key]
+            context.setdefault("thread", thread)
+            context["expected"] = workflow.expected_context(self, state, thread)
+            context["participated"] = any(c.get("author", "").lower() == self.manifest.get("viewer", "").lower()
+                                          for c in thread.get("comments", []))
         return {**state, "comments": comments, "thread_contexts": thread_contexts, "operations": active,
+                "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
+                             "threads": self.manifest.get("followup_threads", [])},
+                "review_status": workflow.status(self), "followup_assessments": workflow.assessments(self, state),
                 "session": str(self.root), "revision": digest(state),
                 "historical": self.path != current, "current_generation": generation(current, read_json(current / "manifest.json", {})),
                 "pending_generation": generation(pending, read_json(pending / "manifest.json", {})) if pending else None,
@@ -283,6 +302,7 @@ class Session:
             s = Session({"session": str(self.root), "generation": generation(path, m)})
             state = s.load()
             result.append({"generation": s.id, "head": m.get("snapshot", {}).get("head"),
+                           "analysis_kind": m.get("analysis_kind", "full"),
                            "created_at": m.get("created_at"), "updated_at": state.get("updated_at"),
                            "status": m.get("attempt", {}).get("status", m.get("status")),
                            "human_edits": sum(bool(c.get("human_edited") or c.get("versions")) for c in state["comments"]),

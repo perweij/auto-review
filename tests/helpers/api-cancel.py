@@ -8,10 +8,12 @@ import time
 
 cli = sys.argv[1]
 fixture = Path(os.environ["FIXTURE"])
+request = (json.loads(Path(sys.argv[2]).read_text()) if len(sys.argv) > 2 else
+           {"protocol": 1, "command": "run", "pr": 7, "cwd": str(fixture / "checkout")})
 with (fixture / "api-operation.log").open("w+") as log:
     child = subprocess.Popen([cli, "api"], stdin=subprocess.PIPE, stdout=log, stderr=log, text=True)
     try:
-        child.stdin.write(json.dumps({"protocol": 1, "command": "run", "pr": 7, "cwd": str(fixture / "checkout")}) + "\n")
+        child.stdin.write(json.dumps(request) + "\n")
         child.stdin.close()
         deadline = time.monotonic() + 25
         while not (fixture / "model-started").exists():

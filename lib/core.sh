@@ -6,6 +6,7 @@ SYNTHESIS_TESTS=focused
 REVIEWERS=claude,codex PROCESSING_PROVIDER=claude
 CLAUDE_EFFORT=high CODEX_EFFORT=high
 OPTION_OVERRIDES='{}' RUN_CONFIGURATION='{}'
+ANALYSIS_KIND=full FOLLOWUP_THREADS='[]'
 CODEX_VERSION=disabled CLAUDE_VERSION=disabled
 CODEX_MODEL=gpt-6-astra CLAUDE_MODEL=fable
 PERMISSION_MODE=${PR_REVIEW_CLAUDE_PERMISSION_MODE:-auto}
@@ -25,6 +26,7 @@ Usage: pr-review <PR_NUMBER | PR_URL> [options]
   -R, --repo [HOST/]OWNER/REPO   Override repository discovery
   --no-publish                  Never write to GitHub
   --resume RUN_DIRECTORY        Select a saved run explicitly (otherwise auto-match)
+  --followup-thread KEY         Check this conversation only; repeat for more threads
   --codex-model MODEL           Default: gpt-6-astra (effort high)
   --claude-model MODEL          Default: fable (effort high)
   --reviewers PROVIDERS        claude,codex (default), claude, or codex
@@ -47,11 +49,15 @@ parse_args() {
         case $1 in
             -h|--help) usage; exit 0 ;;
             --no-publish) NO_PUBLISH=true; shift ;;
-            -R|--repo|--resume|--codex-model|--claude-model|--trust-agent-config|--synthesis-tests|--reviewers|--processing-provider|--claude-effort|--codex-effort)
+            -R|--repo|--resume|--codex-model|--claude-model|--trust-agent-config|--synthesis-tests|--reviewers|--processing-provider|--claude-effort|--codex-effort|--followup-thread)
                 if (($# < 2)) || [[ -z $2 || $2 == -* ]]; then die "Missing value for $1"; fi
                 case $1 in
                     -R|--repo) REPO_ARG=$2 ;;
                     --resume) RESUME=$2 ;;
+                    --followup-thread)
+                        [[ $2 == thread:* && ${#2} -gt 7 ]] || die 'Use an actual thread: key for follow-up'
+                        ANALYSIS_KIND=followup
+                        FOLLOWUP_THREADS=$(jq -c --arg key "$2" '. + [$key] | unique' <<< "$FOLLOWUP_THREADS") ;;
                     --codex-model) CODEX_MODEL=$2 ;;
                     --claude-model) CLAUDE_MODEL=$2 ;;
                     --trust-agent-config) TRUSTED_SNAPSHOT=$2 ;;
@@ -134,7 +140,7 @@ on_exit() {
             fi
             manifest '.status = "failed"' || true
         fi
-        printf '\nPR:        %s\nWorktree:  %s\nArtifacts: %s\nReview:    %s/reviews/synthesis.md\nStatus:    ' "${PR_URL:-unknown}" "$WORKTREE" "$RUN_DIR" "$RUN_DIR"
+        printf '\nPR:        %s\nWorktree:  %s\nArtifacts: %s\nReview:    %s\nStatus:    ' "${PR_URL:-unknown}" "$WORKTREE" "$RUN_DIR" "$(review_report_path "$RUN_DIR")"
         if ((rc != 0)) && [[ $(jq -r '.publication.published_actions // 0' "$RUN_DIR/manifest.json") != 0 ]]; then say 'Partially published (remaining work stopped)'
         elif ((rc != 0)); then say Failed
         elif [[ $(jq -r '.publication.status' "$RUN_DIR/manifest.json") == paused ]]; then say 'Publication paused'
@@ -142,7 +148,7 @@ on_exit() {
         elif [[ $(jq -r '.publication.published_actions // 0' "$RUN_DIR/manifest.json") != 0 ]]; then say 'Partially published (remaining actions not posted)'
         else say 'Not published'; fi
         if [[ -n ${SESSION_DIR:-} && -L $SESSION_DIR/.pending-review ]]; then
-            printf 'Previous review: %s/reviews/synthesis.md (replacement not installed)\n' "$(current_run_directory)"
+            printf 'Previous review: %s (replacement not installed)\n' "$(review_report_path "$(current_run_directory)")"
             printf 'Resume session:  %s\n' "$SESSION_DIR"
         fi
         if [[ -f $RUN_DIR/publication/actions.json ]]; then
@@ -150,6 +156,11 @@ on_exit() {
         fi
     fi
     exit "$rc"
+}
+review_report_path() {
+    if [[ $(jq -r '.analysis_kind // "full"' "$1/manifest.json") == followup ]]; then
+        printf '%s/reviews/followup.json' "$1"
+    else printf '%s/reviews/synthesis.md' "$1"; fi
 }
 require_help() {
     local help=$1; shift
@@ -170,7 +181,10 @@ check_dependencies() {
     SCRATCH=$(mktemp -d)
 }
 
-provider_enabled() { [[ ,$REVIEWERS, == *,$1,* ]]; }
+provider_enabled() {
+    if [[ $ANALYSIS_KIND == followup ]]; then [[ $PROCESSING_PROVIDER == "$1" ]]
+    else [[ ,$REVIEWERS, == *,$1,* ]]; fi
+}
 dual_review() { [[ $REVIEWERS == claude,codex ]]; }
 resolve_review_settings() {
     local request session selected file=''
