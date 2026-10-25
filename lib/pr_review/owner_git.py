@@ -1,6 +1,9 @@
 """Writable owner worktrees and immutable trees without touching the real index."""
+import base64
+import difflib
 import os
 from pathlib import Path
+import stat
 import tempfile
 import uuid
 
@@ -139,18 +142,101 @@ def diff(session, before, after):
     return session.repo.git("diff", "--no-ext-diff", "--no-textconv", "--binary", before, after, "--").stdout
 
 
-def trust(session, state, tree):
+def agent_configuration(path):
+    path = Path(path)
+    return (path.name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md", ".mcp.json")
+            or any(part in (".claude", ".codex") for part in path.parts))
+
+
+def configuration_snapshot(worktree):
+    """Capture configuration independently of Git's index and ignore rules."""
+    root = Path(worktree)
+    result = {}
+
+    def visit(directory, ancestors):
+        info = directory.stat()
+        identity = (info.st_dev, info.st_ino)
+        if identity in ancestors:
+            if agent_configuration(directory.relative_to(root)):
+                raise OSError(f"Directory cycle at {directory}")
+            # This ancestor is already being scanned. Unrelated symlink cycles
+            # add no configuration; configuration paths must still fail closed.
+            return
+        for path in sorted(directory.iterdir()):
+            if path.name == ".git":
+                continue
+            if path.is_dir():
+                visit(path, ancestors | {identity})
+                continue
+            name = path.relative_to(root).as_posix()
+            if not agent_configuration(name):
+                continue
+            if not path.is_file():
+                raise OSError(f"Configuration is not a readable regular file: {path}")
+            result[name] = {"content": base64.b64encode(path.read_bytes()).decode("ascii"),
+                            "mode": stat.S_IMODE(path.stat().st_mode),
+                            "link": os.readlink(path) if path.is_symlink() else None}
+
+    try:
+        visit(root, set())
+    except OSError as exc:
+        raise ApiError("configuration_unreadable", f"Cannot inspect agent configuration: {exc}") from exc
+    return result
+
+
+def configuration_diff(before, after, paths):
+    patches = []
+    for path in paths:
+        old, new = before.get(path), after.get(path)
+        patches.append(f"diff --agent-config a/{path} b/{path}\n")
+        if old is None or new is None:
+            patches.append("Configuration added\n" if old is None else "Configuration deleted\n")
+        for key in ("mode", "link"):
+            if (old or {}).get(key) != (new or {}).get(key):
+                patches.append(f"{key}: {(old or {}).get(key)!r} -> {(new or {}).get(key)!r}\n")
+        contents = [base64.b64decode(value["content"]) if value else b"" for value in (old, new)]
+        try:
+            texts = [content.decode("utf-8") for content in contents]
+            if any("\0" in text for text in texts):
+                raise ValueError("Binary configuration")
+        except (UnicodeError, ValueError):
+            patches.append(f"Binary content (base64): {(old or {}).get('content', '')} -> {(new or {}).get('content', '')}\n")
+        else:
+            lines = difflib.unified_diff(texts[0].splitlines(keepends=True), texts[1].splitlines(keepends=True),
+                                         fromfile=f"a/{path}" if old else "/dev/null",
+                                         tofile=f"b/{path}" if new else "/dev/null")
+            for line in lines:
+                patches.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
+    return "".join(patches)
+
+
+def trust(session, state, tree, approval=None):
     base = session.repo.git("merge-base", state["metadata"]["baseRefOid"], state["metadata"]["headRefOid"], check=False)
     # Fetch the recorded base object without moving a caller's tracking refs.
     if base.returncode:
         session.repo.git("fetch", "--no-tags", "--no-write-fetch-head", "--refmap=", session.repo.remote, state["metadata"]["baseRefOid"])
         base = session.repo.git("merge-base", state["metadata"]["baseRefOid"], state["metadata"]["headRefOid"])
     changed = session.repo.git("diff", "--name-only", "--no-renames", "-z", base.stdout.strip(), tree, "--").stdout.split("\0")
-    paths = [p for p in changed if p and (Path(p).name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md", ".mcp.json")
-             or any(part in (".claude", ".codex") for part in Path(p).parts))]
+    paths = sorted(p for p in changed if p and agent_configuration(p))
+    configuration = configuration_snapshot(state["worktree"])
+    previous = state.get("trusted_configuration")
     # Source edits do not revoke trust in unchanged configuration content.
-    token = digest([(p, session.repo.git("ls-tree", tree, "--", p).stdout) for p in paths])
-    if paths and state.get("trusted_snapshot") != token:
-        patch = session.repo.git("diff", "--no-ext-diff", "--no-textconv", base.stdout.strip(), tree, "--", *paths).stdout
+    token = digest({"version": 2, "configuration": configuration,
+                    "tree_entries": [(p, session.repo.git("ls-tree", tree, "--", p).stdout) for p in paths]})
+    if approval == token:
+        state.update(trusted_snapshot=token, trusted_configuration=configuration)
+        session.save(state)
+        return
+    if previous == configuration and state.get("trusted_snapshot") == token and not approval:
+        return
+    config_paths = sorted(p for p in set(previous or {}) | set(configuration)
+                          if (previous or {}).get(p) != configuration.get(p))
+    # Legacy tree-only approvals cannot authorize a configuration snapshot.
+    if paths or config_paths or state.get("trusted_snapshot") or approval:
+        patch = (session.repo.git("diff", "--no-ext-diff", "--no-textconv", base.stdout.strip(), tree, "--", *paths).stdout
+                 if paths else "")
+        patch += configuration_diff(previous or {}, configuration, config_paths)
         raise ApiError("trust_required", "Inspect changed agent configuration before continuing.",
-                       trusted_snapshot=token, paths=paths, diff=patch)
+                       trusted_snapshot=token, paths=sorted(set(paths) | set(config_paths)), diff=patch)
+    state.update(trusted_snapshot=token, trusted_configuration=configuration)
+    session.save(state)

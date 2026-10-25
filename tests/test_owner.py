@@ -731,7 +731,7 @@ class OwnerTest(unittest.TestCase):
             owner_git.trust(session, state, snapshot["tree"])
         self.assertEqual(caught.exception.code, "trust_required")
         self.assertIn("+New repository instructions", caught.exception.details["diff"])
-        state["trusted_snapshot"] = caught.exception.details["trusted_snapshot"]
+        owner_git.trust(session, state, snapshot["tree"], approval=caught.exception.details["trusted_snapshot"])
         Path(state["worktree"], "unrelated.txt").write_text("source change\n")
         owner_git.trust(session, state, owner_git.checkpoint(session, state, "source change")["tree"])
         config.write_text("Different instructions\n")

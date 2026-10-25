@@ -173,8 +173,6 @@ def execute(session, state, request):
         try:
             # Refresh before creating a worktree; failure leaves existing source untouched.
             refresh(session, state)
-            if request.get("trusted_snapshot"):
-                state["trusted_snapshot"] = request["trusted_snapshot"]
             remote = workspace.prepare(session, state)
             if request.get("batch"):
                 batch = next((b for b in state["batches"] if b["id"] == request["batch"]), None)
@@ -243,7 +241,7 @@ def execute(session, state, request):
                          "plans": [], "attempts": [], "repairs": 0, "status": "planning"}
                 state["batches"].append(batch)
                 session.save(state)
-            workspace.trust(session, state, batch["checkpoint"]["tree"])
+            workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
             models.preflight(session, state)
             if not batch["tasks"] or request.get("replan"):
                 completed = [t for t in batch["tasks"] if t["status"] == "complete"]
