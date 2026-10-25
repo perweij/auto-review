@@ -67,6 +67,6 @@ assert_focused_independent_reviews() {
     [ ! -e "$FIXTURE/calls.jsonl" ]
     run_review --synthesis-tests
     assert_failure
-    [[ $output == *'Missing value for --synthesis-tests'* ]]
+    [[ $output == *'expected one argument'* ]]
     [ ! -e "$FIXTURE/calls.jsonl" ]
 }

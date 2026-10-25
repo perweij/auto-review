@@ -74,19 +74,19 @@ invalidate_claude() {
 }
 
 @test "restart retains published history and gives replacement findings a fresh ledger" {
-    tty_review 'c|yes'; assert_success
+    tty_review 'a p1|overall|s p1|p|yes|q'; assert_success
     saved=$(run_directory)
-    actions=$(sha256sum "$saved/publication/actions.json")
+    actions=$(sha256sum "$saved/publication/drafts.json")
     old_id=$(jq -r .run_id "$saved/manifest.json")
     invalidate_claude
     printf '%s\n' '[{"id":"F1","title":"A different finding","validity":"CONFIRMED","evidence":"source.txt:2 changed behavior","blocking":false,"body_md":"A different issue with the reused ID."}]' > "$FIXTURE/findings.json"
     run_review; assert_success
     candidate=$(run_directory)
     [ "$candidate" != "$saved" ]
-    [ "$(sha256sum "$saved/publication/actions.json")" = "$actions" ]
+    [ "$(sha256sum "$saved/publication/drafts.json")" = "$actions" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
-    jq -e 'length==0' "$candidate/publication/actions.json"
-    jq -e '.proposals[0].published==false and .proposals[0].selected==true' "$candidate/publication/contributions.json"
+    jq -e '.batches==[]' "$candidate/publication/drafts.json"
+    jq -e '.proposals[0].published==false and .proposals[0].selected==false' "$candidate/publication/contributions.json"
     manifest_is '.publication.status=="not_published" and .publication.published_actions==0 and .publication_reset.status=="complete"'
     [ "$(jq -r .run_id "$candidate/manifest.json")" != "$old_id" ]
     [[ $output != *'Partially published'* ]]
@@ -94,37 +94,37 @@ invalidate_claude() {
 }
 
 @test "restart keeps uncertain publication records and refuses to discard them" {
-    tty_review 'c|yes'; assert_success
+    tty_review 'a p1|overall|s p1|p|yes|q'; assert_success
     saved=$(run_directory)
-    jq '.[0].status="submitting"' "$saved/publication/actions.json" > "$FIXTURE/actions.tmp"
-    mv "$FIXTURE/actions.tmp" "$saved/publication/actions.json"
-    actions=$(sha256sum "$saved/publication/actions.json")
+    jq '.batches[0].actions[0].status="submitting"' "$saved/publication/drafts.json" > "$FIXTURE/actions.tmp"
+    mv "$FIXTURE/actions.tmp" "$saved/publication/drafts.json"
+    actions=$(sha256sum "$saved/publication/drafts.json")
     invalidate_claude
     run_review; assert_failure
     [[ $output == *'Resolve uncertain publication'* ]]
-    [ "$(sha256sum "$saved/publication/actions.json")" = "$actions" ]
+    [ "$(sha256sum "$saved/publication/drafts.json")" = "$actions" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     manifest_is '.review_restart==null and .publication_reset==null'
 }
 
 @test "processor-only replacement after publication retains independent reports" {
-    tty_review 'c|yes'; assert_success
+    tty_review 'a p1|overall|s p1|p|yes|q'; assert_success
     saved=$(run_directory)
-    actions=$(sha256sum "$saved/publication/actions.json")
+    actions=$(sha256sum "$saved/publication/drafts.json")
     run_review --processing-provider codex; assert_success
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
-    [ "$(sha256sum "$saved/publication/actions.json")" = "$actions" ]
+    [ "$(sha256sum "$saved/publication/drafts.json")" = "$actions" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     manifest_is '.configuration.processing_provider=="codex" and .publication.published_actions==0'
-    jq -e 'length==0' "$(run_directory)/publication/actions.json"
-    tty_review 'c|yes'; assert_success
+    jq -e '.batches==[]' "$(run_directory)/publication/drafts.json"
+    tty_review 'a p1|overall|s p1|p|yes|q'; assert_success
     previous=$(run_directory)
-    receipt=$(sha256sum "$previous/publication/actions.json")
-    [ "$(jq -r '.[0].marker' "$previous/publication/actions.json")" != "$(jq -r '.[0].marker' "$saved/publication/actions.json")" ]
+    receipt=$(sha256sum "$previous/publication/drafts.json")
+    [ "$(jq -r '.batches[0].actions[0].marker' "$previous/publication/drafts.json")" != "$(jq -r '.batches[0].actions[0].marker' "$saved/publication/drafts.json")" ]
     export MOCK_FAIL_STAGE=claude
     run_review --claude-model haiku; assert_failure
     [[ $output != *'Partially published'* ]]
-    jq -e 'length==0' "$(run_directory)/publication/actions.json"
-    [ "$(sha256sum "$previous/publication/actions.json")" = "$receipt" ]
+    [ ! -f "$(run_directory)/publication/drafts.json" ]
+    [ "$(sha256sum "$previous/publication/drafts.json")" = "$receipt" ]
     [ "$(cat "$FIXTURE/post-count")" = 2 ]
 }

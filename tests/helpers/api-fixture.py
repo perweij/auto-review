@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_api import ApiTest
-from pr_review_api.common import atomic_json
+from pr_review.common import atomic_json
 
 fixture = ApiTest()
 fixture.setUp()

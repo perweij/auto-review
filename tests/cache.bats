@@ -19,7 +19,7 @@ legacy_cache_records() {
     saved=$(run_directory)
     stages=$(cat "$FIXTURE/stages")
     printf 'My edited main review\n' > "$saved/publication/review-body.md"
-    printf '\n# A publication UI change\n' >> "$FIXTURE/tool/lib/publication.sh"
+    printf '\n# A publication UI change\n' >> "$FIXTURE/tool/lib/pr_review/terminal.py"
     printf '\n# An unrelated entry point change\n' >> "$FIXTURE/tool/bin/pr-review"
     export PR_REVIEW_MODEL_TIMEOUT=120 PR_REVIEW_CLAUDE_BUDGET=5
     run_review --claude-model claude-haiku-5-5 --codex-model gpt-6-luna; assert_success

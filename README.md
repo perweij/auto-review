@@ -15,8 +15,9 @@ mkdir -p ~/.local/bin
 ln -s "$(pwd)/bin/pr-review" ~/.local/bin/pr-review
 ```
 
-Requires Linux, Bash 4.4+, Python 3.9+, Git, `gh`, `jq`, `flock`, `timeout`,
-and standard GNU utilities, plus the model CLIs for enabled reviewers.
+Requires Linux, Python 3.9+, Git, `gh`, and the model CLIs for enabled reviewers.
+The backend uses the Python standard library; no pip installation, Bash, jq,
+external `flock`, or external `timeout` is needed at runtime.
 The CLI checks capabilities through help output before
 creating a worktree. Inspected locally: gh 2.103.0, codex-cli 0.164.0, and Claude
 Code 2.1.309. Claude must support its `/code-review` skill and `auto` permission
@@ -42,6 +43,7 @@ pr-review 123 --codex-model gpt-6-astra --claude-model fable
 pr-review 123 --reviewers codex --codex-model gpt-6-luna --codex-effort medium
 pr-review 123 --processing-provider codex --claude-effort medium
 pr-review 123 --resume /absolute/path/to/run
+pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model calls
 ```
 
 Repository discovery uses `gh repo view`; specify `--repo` when it is ambiguous.
@@ -79,7 +81,9 @@ permissions and credentials expiring later can still cause a later failure.
 The CLI retains a detached worktree next to the main checkout, named
 `<repository>-review-pr-<number>`. It uses private refs under `refs/pr-review/` and
 does not update caller branches or remote-tracking refs. It holds an exclusive
-repository/PR lock throughout the run. When the worktree already exists, the CLI
+repository/PR lock during generation. The lock is released before the terminal
+menu, editor, or publication confirmation; mutations use short transactions.
+When the worktree already exists, the CLI
 automatically resumes the unique saved run matching its repository, PR number,
 Git checkout, worktree path and checked-out commit. It prints the selected run and
 retains the normal snapshot and worktree-integrity checks. Completed phases are
@@ -131,14 +135,12 @@ prompt; Codex receives them through
 while retaining the native `--base` review target. Policy changes are included in
 review cache identities, so changed instructions trigger a replacement review.
 
-If earlier drafts contain human edits, the CLI shows a local report at
-`publication/previous-edits.md`. Use `[u]` to view those drafts, then `[e ID]` or `[e]`
-to manually reuse relevant text in the current review. Earlier proposal IDs and
-locations belong to their original commit; check them before copying. The report
-is built locally after the fresh review, and earlier edited text is not given to
-the models. Proposal edits are detected against their generated text; combined
-body edits are detected using the generated-body hash (or reconstruction for
-older runs). All archived drafts remain available whether edited or not.
+Use `history`, `show GENERATION`, and `i ID` in the terminal to inspect earlier
+human edits. `current` returns to the active generation, and `recover GENERATION ID`
+creates a new Unstaged draft with the exact saved text and provenance. Its location
+must be selected again. `docs` shows retained legacy combined bodies;
+`recover-doc GENERATION NAME` recovers one as a separate Unstaged draft. Earlier
+text is never automatically inserted into new drafts or given to models.
 
 Matching against actual GitHub discussion still prevents redundant posts and
 provides context for replies. Local unpublished drafts are not treated as GitHub
@@ -195,7 +197,7 @@ so activity is visible before the final structured result. Raw events remain in
 their existing `logs/*.raw.json` files as newline-delimited JSON. This logging
 change preserves the cache identity of completed buffered-JSON reviews.
 Recognized terminal events (including Codex's "not a git repository" error and `turn.failed`)
-stop the model, escalating from TERM to KILL after five seconds if needed. Other
+stop the model, escalating from TERM to KILL with bounded waits if needed. Other
 error events are flagged while allowing retries. There is **no default timeout or
 budget limit** for a silent review without a terminal event. Before each review
 invocation, Git repository identity is checked in the model's filtered environment;
@@ -204,9 +206,9 @@ Ctrl-C forwards the signal to the model process group, escalates to TERM and KIL
 with bounded waits if necessary, and records an interrupted stage. Successful phases are
 reused only when their snapshot, inputs, model, version, policy and output hashes
 still match. Invalidated independent reviews are archived and restarted as described
-above. Unchanged contribution proposals retain human edits
-and selections across refreshes. Changed proposals are rebuilt with safe defaults
-and the old drafts are archived. Legacy version-1 runs remain readable but require
+above. Local discussion refresh preserves human wording and unstages affected
+comments for inspection. Running a new analysis or rematch creates a new generation
+with fresh Unstaged drafts; earlier edits and staging remain in history. Legacy version-1 runs remain readable but require
 a new run for discussion-aware publication.
 
 Optional environment settings:
@@ -221,71 +223,65 @@ Optional environment settings:
 
 ## Publication and safeguards
 
-The final screen shows each finding’s title and assigned destination, including
-the file/line, thread excerpt and link for replies. It classifies findings by what
-they add to the conversation:
+The terminal and Emacs use the same drafts, optimistic revisions, and publisher.
+All fresh proposals start **Unstaged**; duplicates start **Suppressed**. A valid
+structured location becomes an inline placement. Matches to an existing thread
+become replies. A finding without a usable location stays unplaced until you
+choose code, a thread, or an explicit overall assessment.
 
-| Classification | Default |
+| Terminal command | Action |
 | --- | --- |
-| New issue | Selected for the main review |
-| Useful addition | Selected as a reply to the existing inline thread |
-| Revisit a resolved or explicitly concluded discussion | Unselected; inspect the new evidence first |
-| Duplicate with no material addition | Suppressed, but inspectable locally |
-| Uncertain relationship or evidence | Unselected |
+| `i ID` / `e ID` | Inspect full context / edit exact draft text |
+| `a ID` | Choose code, a thread, `overall`, or restore `auto` placement |
+| `s ID` / `u ID` | Stage / unstage one draft |
+| `k ID` / `r ID` | Suppress / restore a draft |
+| `ack ID` | Acknowledge changed discussion after inspection |
+| `new` | Compose a separate overall assessment |
+| `v COMMENT`, `v APPROVE`, `v REQUEST_CHANGES` | Explicitly select a verdict |
+| `p` | Refresh, validate, preview, and ask to publish the staged batch |
+| `refresh` / `resolve` | Refresh discussion / reconcile uncertain submissions |
+| `history`, `show GENERATION`, `current`, `docs` | Inspect saved generations and documents |
+| `recover GENERATION ID`, `recover-doc GENERATION NAME` | Copy saved text into a new Unstaged draft |
+| `q` or Enter | Exit with saved drafts retained |
 
-Replies consider the complete conversation, including later corrections, questions,
-and conclusions. They explain what is new instead of repeating the opening comment.
-Selected additions to one thread become one reply. Follow-ups to timeline comments
-or review bodies go in the main review with links. Models never resolve or reopen
-threads. The Emacs Conversations view supports explicit reviewer resolution and
-reopening. An outdated comment is not automatically a resolved issue.
+Reply drafts consider the complete conversation, including later corrections and
+conclusions. Separate drafts stay separate when published; inline comments are
+submitted together in one review, and one explicit overall assessment may supply
+its body. Models never resolve or reopen threads. The Emacs Conversations view
+supports explicit reviewer resolution and reopening. Outdated is not the same as
+resolved.
 
-Use `t p1` to toggle a proposal, `i p1` to inspect its full discussion, `e p1` to
-edit its draft, `s` to inspect suppressed duplicates, `v` to preview the batch, and
-`f` to display the full local review. The default screen stays compact.
-Plain `e` edits the main review body. Use `c` to publish all selected items at their
-automatically assigned destinations: thread additions become replies, while new
-items go together in a COMMENT review. The menu counts the replies and main-review
-items that will be posted. Replies alone do not generate a redundant summary.
-Use `v` to preview exact drafts and destinations without posting, or `i p1` to
-inspect an individual proposal, its matching rationale and the full discussion.
-Nothing new selected means no COMMENT is posted. Explicit APPROVE or
-REQUEST_CHANGES verdicts remain available. The legacy `p` replies-only shortcut
-is still accepted, but is omitted from the main menu; toggling individual items
-provides selection control without choosing a separate publication mode.
+`p` shows the exact staged text and destinations. Only a final `yes` publishes.
+Replies alone create no redundant summary. An otherwise empty review requires an
+explicit verdict choice; model recommendations never select one automatically.
+Approval previews disclose retained blocking findings. Self-authored PRs permit
+Comment only. Closed/merged PRs remain inspectable, but cannot be published.
+`--no-publish` and non-TTY review invocation do not enter the menu. Agent config
+changes still require explicit trust for the snapshot.
 
-The model proposes semantic matches; validating a real thread ID cannot prove the
-match is correct. Duplicates stay suppressed, and uncertain matches and follow-ups
-to concluded discussions start unselected. Uncertainty remains visible even when
-a matched thread is resolved. Inspect, edit or deselect proposals before the final
-confirmation. Follow-ups to timeline comments or review bodies appear in the main
-review with source links because they have no inline reply destination.
+Before confirmation and each write, the backend checks discussion completeness,
+account, head, open state, merge-base, and destination permissions. Changed
+conversations unstage affected drafts and require inspection and renewed staging;
+publication never runs a model or rewrites approved text. Validity reassessment
+happens only during an explicit review run. Unresolved conflicts pause publication.
 
-Pressing Enter chooses `n` and exits the menu with drafts saved. Self-authored PRs offer COMMENT only.
-Approving with blocking
-findings requires an additional confirmation. Closed/merged PRs, `--no-publish`,
-and non-TTY stdin disable publication. Agent-configuration changes still require
-interactive trust confirmation, even with `--no-publish`.
+The shared `publication/drafts.json` owns draft versions, intent, exact payloads,
+and receipts. Intent is saved before a network write. Hidden markers identify the
+reviewed head, generation, and action. `resolve` reconciles lost responses without
+blindly reposting; a known parent review with missing inline receipts is never
+resubmitted. Successful actions survive partial failures, and remaining actions
+require another preview and confirmation. Ordinary base advancement is informational.
 
-Duplicate suppression does not erase a valid blocker or make approval safe. Fresh
-discussion that challenges validity triggers synthesis reassessment without rerunning
-the independent reviewers. If the conflict remains unresolved, publication pauses.
+GitHub has no atomic batch transaction. Freshness checks reduce but cannot eliminate
+the small window between the last check and each POST. The editor keeps a private
+recovery file if saving fails or the generation/revision changes while editing.
 
-Before confirming and before each write, the CLI refreshes discussion and checks the
-PR identity, head, open state, merge-base and destination permissions. Changed
-discussion triggers rematching and a return to the selection screen. Incomplete
-discussion, thread state or pagination pauses publication; local reports survive.
-
-One final `yes` confirms the exact bodies and destinations in the displayed batch.
-Replies are posted sequentially, followed by the main review. The main review is
-pinned to the reviewed head; replies identify that commit in their text. Normal
-base advancement is informational. Per-action hidden markers prevent duplicate
-posts after ambiguous responses or interrupted submissions. Resume skips successful
-actions and requires confirmation of the remaining actions.
-
-GitHub has no atomic transaction for this batch: failures preserve already-published
-posts and report partial completion. Freshness checks reduce but cannot eliminate
-the small concurrent-comment window between a check and a POST.
+The migration reads old Bash ledgers and retains legacy combined bodies as
+recoverable documents. Old automatic selections do not become staged comments.
+Use the Python backend for a session once it has been adopted: an older Bash
+binary does not understand the canonical draft ledger. Restoring local files does
+not undo GitHub posts; retain intents and receipts and reconcile them before retrying.
+See the [migration specification and validation record](docs/python-migration.md).
 
 Models receive filtered environments: credential-like variable names are removed,
 except each CLI's own authentication variables. Only removed names are recorded.
@@ -311,7 +307,7 @@ permission; GitHub may reject the chosen review operation.
 
 ```bash
 # Deterministic: mocked gh/codex/claude, real local bare Git remote and worktrees.
-# Requires bats 1.5+, shellcheck, and Python 3 (PTY/signal test harnesses only).
+# Requires Python 3.9+, Bash, bats 1.5+, shellcheck, jq, and Git for fixtures.
 make check
 
 # Optional: actual authenticated model CLIs, tiny synthetic repository, mocked
@@ -328,7 +324,7 @@ credential filtering, partial context, resume, interrupts, locks and publication
 through a real pseudo-terminal. Re-run the live smoke test after upgrading model
 CLIs: help checks verify syntax, while model/skill availability is server-dependent.
 
-Live smoke verified on 2026-10-23 with Codex 0.164.0 and Claude 2.1.309: independent
+The pre-migration Bash backend was live-smoke verified on 2026-10-23 with Codex 0.164.0 and Claude 2.1.309: independent
 Claude review in `auto` mode, Codex review, and synthesis with `--json-schema` and
 `--add-dir` all completed. Tracked source was unchanged; a generated Python cache
 was retained and disclosed. GitHub was mocked; no review was published.
@@ -378,7 +374,7 @@ existing review. Follow-up always uses focused checks, regardless of the full
 review's synthesis testing setting. Earlier reports, edits and receipts remain
 in history. Follow-up does not transfer old drafts or imply whole-PR approval.
 
-New API/Emacs draft generations default to Comment. Approve and Request changes
+New draft generations in both interfaces default to Comment. Approve and Request changes
 require an explicit reviewer choice, separate from the model recommendation and
 the last submitted GitHub review. GitHub review status is not overall merge
 eligibility. See the [workflow overview](docs/github-review-process-overview.md)

@@ -3,6 +3,7 @@
 load helpers/fixture
 
 @test "Codex alone needs no Claude calls and resumes its structured review" {
+    discussion_fixture
     export MOCK_AUTH_FAIL=claude
     run_review --reviewers codex --codex-model gpt-6-luna --codex-effort medium
     assert_success
@@ -15,11 +16,17 @@ load helpers/fixture
     run_review; assert_success
     [[ $(wc -l < "$FIXTURE/stages") == 2 ]]
     export MOCK_ADAPT=1
-    printf 'Full thread context and new aspect\n' > "$FIXTURE/adapt-input"
-    run bash "$PROJECT_ROOT/lib/api-bridge.sh" adapt "$(run_directory)" COMMENT "$FIXTURE/adapt-input"
+    saved=$(run_directory)
+    request=$(jq -nc --arg session "$saved" '{protocol:1,command:"read",session:$session}')
+    state=$(printf '%s\n' "$request" | "$CLI" api)
+    request=$(jq -c '.result | {protocol:1,command:"adapt",session,generation,revision,comment:"p1"}' <<< "$state")
+    adapt_request() { printf '%s\n' "$request" | "$CLI" api; }
+    run adapt_request
     assert_success
     jq -se 'last | .tool=="codex" and (.args|index("gpt-6-luna")) and (.args|index("model_reasoning_effort=medium"))' "$FIXTURE/calls.jsonl"
-    cmp "$FIXTURE/adapt-input" "$FIXTURE/adapt-stdin"
+    grep -q 'reuses the same key' "$FIXTURE/adapt-stdin"
+    [[ $output == *'A contextual reply'* ]]
+
 }
 
 @test "Claude alone needs no Codex calls and inherits model and effort everywhere" {

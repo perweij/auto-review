@@ -19,18 +19,17 @@ Proposed moves:
 
 Leave running a review (`R`), inspecting results, staging comments, and publishing (`P`) in their current sections. Keep context-dependent visibility for the moved commands. Verify that `?` shows the new grouping and that each key still invokes the same command.
 
-## 2. Consolidate the backend in Python
+## 2. Python backend migration: implemented; final environment checks pending
 
-Implement the [Python backend migration specification](python-migration.md).
-Keep both the CLI and Emacs UI, with one Python application core and a stable
-version-1 JSON API. Replace Bash orchestration and jq application logic in
-stages, consolidate draft/publication behavior, and preserve saved reviews,
-human edits, receipts, cancellation, and verified checkpoint reuse.
+The CLI and Emacs UI now share the Python application core and protocol-1 API.
+Bash orchestration and jq application logic are retired. Both interfaces use
+explicit staging and one draft/publication ledger. Saved reviews, human edits,
+receipts, and verified checkpoints remain recoverable.
 
-Complete this migration before substantially extending the backend for proactive
-repository reviews. The specification defines compatibility requirements,
-delivery stages, validation gates, and packaging changes, including the
-terminal's transition to the shared Unstaged/Staged draft workflow.
+See the [migration specification and validation record](python-migration.md).
+Run the pinned Guix build on a host with Guix before considering the packaging
+acceptance gate complete. Also execute the suite on the declared Python 3.9
+minimum; this workspace verified its syntax but only has Python 3.12 available.
 
 ## 3. Add proactive repository reviews
 

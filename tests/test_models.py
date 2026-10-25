@@ -10,8 +10,8 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from pr_review_api import models, settings
-from pr_review_api.common import ApiError
+from pr_review import models, settings
+from pr_review.common import ApiError
 
 
 class DiscoveryTest(unittest.TestCase):

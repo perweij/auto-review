@@ -281,7 +281,7 @@ load helpers/fixture
     exec {test_lock}>.git/pr-review-locks/7.lock
     flock "$test_lock"
     run_review; assert_failure
-    [[ $output == *'Another run holds the lock'* ]]
+    [[ $output == *'Another operation is using this review'* ]]
     exec {test_lock}>&-
 }
 

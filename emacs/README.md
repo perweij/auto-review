@@ -237,9 +237,10 @@ persistent success message and receipt URLs in `L`. Expanded Published items
 show their GitHub URLs; `b` opens the selected comment directly. The parent
 review URL also appears above the status sections.
 
-After drafts have been saved through the API, the terminal CLI uses the same
-draft ledger through a terminal adapter. Switching interfaces cannot publish
-an obsolete generated aggregate body.
+The Python backend and terminal CLI always use the same draft ledger and
+publisher as Emacs. `pr-review drafts DIRECTORY` opens saved drafts locally
+without authentication or model calls. Fresh drafts start Unstaged in both
+interfaces; switching interfaces preserves exact edits, staging, and receipts.
 
 ## Conversations and follow-up
 
@@ -311,7 +312,7 @@ combined Markdown edits are retained as documents for explicit recovery only.
 ## Development and validation
 
 ```sh
-make check-backend              # Shell/Bats and Python API contracts
+make check-backend              # Python backend and Bats integration contracts
 make check-emacs                # Byte compilation and ERT, including real API use
 make check-all                  # Both
 ```

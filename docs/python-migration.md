@@ -1,7 +1,58 @@
 # Python backend migration
 
-Status: planned. This document specifies the migration; it does not describe
-completed implementation.
+Status: implemented on `feat/python-backend-migration`; acceptance validation is
+recorded below. The sections that follow retain the original specification.
+
+## Implementation and validation record
+
+- `lib/pr_review/` is the shared standard-library Python core. CLI and protocol 1
+  call its services directly; the Emacs transport is unchanged.
+- Python owns repository/context collection, provider commands and supervision,
+  cache verification, journals, generation promotion, follow-up, and publication.
+  Retired Bash libraries, jq application programs, bridge, and import shims are removed.
+- Terminal drafts now use explicit staging, exact per-comment publication,
+  history recovery, placement, explicit verdicts, and retained editor recovery files.
+  `pr-review drafts DIRECTORY` performs local draft work without generation.
+- `publication/drafts.json` is authoritative. Legacy `actions.json` and combined
+  bodies remain read-only import/recovery sources. Do not use the old Bash publisher
+  against adopted sessions. Remote writes are not undone by local rollback.
+- Known legacy validator hashes map to semantic validator identities. The checked-in
+  `tests/fixtures/bash-v2-session.json` was generated from commit `cf38128` with mocked
+  providers/GitHub and real Git fixtures; tests compare original bytes, discussion
+  hashes, and reuse of all stages, including older records without explicit inputs.
+- Existing shell-function tests were ported to Python. Terminal tests were updated
+  for intentional Unstaged defaults and separate exact replies; lifecycle, recovery,
+  integrity, generation, publication, and provider behavior remain covered.
+- Guix now installs a Python shebang and a Python PATH prefix for Git/gh without a
+  Bash wrapper. A real Guix build remains outstanding: Guix is unavailable in this
+  workspace. This limitation must not be counted as a passed packaging check.
+
+Validation on 2026-10-25:
+
+- Original Bash baseline: all 158 Bats acceptance cases passed before retirement.
+- Python backend: all 157 Bats acceptance cases passed across all 16 test files.
+  Three tests that sourced shell functions moved to Python; two new cases cover
+  external CLI resume and alternating terminal/API editing and publication.
+- `make lint test-api`: lint/compilation and all 88 Python tests passed on Python
+  3.12.14. Coverage includes legacy artifact bytes, cache adoption, process cleanup,
+  cancellation ownership, exact editor recovery, and canonical publication state.
+- The unchanged Emacs frontend passed all 59 ERT tests using Emacs 30.2 with its
+  Magit/Forge dependencies, through the real Python API transport.
+- A copied installation and symlink entry point work from an unrelated directory
+  with only Python on PATH for local operations. All 30 production Python files
+  parse with Python 3.9 grammar. An actual Python 3.9 interpreter is unavailable,
+  so execution on that minimum version remains unverified.
+- Repository checks found no remaining production caller of the retired shell,
+  jq, bridge, or compatibility entry points. `git diff --check` passed.
+
+The final automated tests use mocked providers and GitHub. During early test
+porting, one stale adaptation mock reached the installed provider with synthetic
+fixture content; that test now mocks the direct Python process boundary. No live
+GitHub publication was performed. A deliberate live provider smoke run is separate
+and remains opt-in; the earlier Bash smoke results do not certify this backend.
+
+Outstanding environment checks are the pinned Guix build and execution on Python
+3.9. Keep these distinct from the passing local installation and syntax checks.
 
 ## Decision and intended outcome
 

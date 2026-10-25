@@ -33,7 +33,7 @@ try:
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
         pending += data
-        if pending.endswith((b"Type yes: ", b"Choose action [n]: ")):
+        if pending.endswith((b"Type yes: ", b"Choose action [n]: ", b"> ", b"END': ")):
             os.write(master, (next(answers, "n") + "\n").encode())
             pending = b""
     sys.exit(child.wait(timeout=5))

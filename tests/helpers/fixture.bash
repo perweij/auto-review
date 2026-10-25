@@ -58,3 +58,7 @@ add_new_finding() {
     jq '.contributions += [{finding_ids:["F2"],classification:"NEW",discussion_keys:[],target_key:null,explanation:"A separate issue not in the discussion",delta:"Wrong arithmetic",body_md:"Multiplication became addition."}]' "$FIXTURE/contribution-model.json" > "$FIXTURE/contributions.tmp"
     mv "$FIXTURE/contributions.tmp" "$FIXTURE/contribution-model.json"
 }
+
+# Shared Python drafts: local UI entry bypasses model execution on saved runs.
+tty_drafts() { run python3 "$PROJECT_ROOT/tests/helpers/interactive_runner.py" "$1" "$CLI" drafts "${2:-$(session_directory)}"; }
+draft_is() { jq -e "$1" "$(run_directory)/publication/drafts.json" >/dev/null; }

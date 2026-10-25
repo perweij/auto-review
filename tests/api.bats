@@ -76,7 +76,7 @@ api_mutate() {
     run api "$request" "$saved"; assert_success
     request=$(jq -c '.result|{command:"publish",confirmation,generation:.review.generation,revision:.review.revision}' <<< "$output")
     run api "$request" "$saved"; assert_success
-    hashes=$(sha256sum "$saved/publication/actions.json" "$saved/publication/drafts.json")
+    hashes=$(sha256sum "$saved/publication/drafts.json")
     # Recreate the attempt left by the old guard, including copied API receipts.
     candidate=$saved-history/attempt-blocked
     mkdir -p "$candidate"
@@ -90,7 +90,7 @@ api_mutate() {
     [[ $output != *'Review inputs changed after publication'* && $output != *'Partially published'* ]]
     [ "$(run_directory)" = "$candidate" ]
     [ ! -L "$saved/.current-review" ]
-    [ "$(sha256sum "$saved/publication/actions.json" "$saved/publication/drafts.json")" = "$hashes" ]
+    [ "$(sha256sum "$saved/publication/drafts.json")" = "$hashes" ]
     jq -e 'length==0' "$candidate/publication/actions.json"
     manifest_is '.publication.published_actions==0 and .publication_reset.status=="complete"'
     # Resume also completes an interrupted ledger reset, without changing its ID.
@@ -121,7 +121,7 @@ api_mutate() {
         .result.comments[0].status=="published" and (.result.comments[0].receipt.html_url|length>0)' <<< "$state"
     discussion=$(jq -r .discussion.path "$candidate/manifest.json")
     jq -e 'any(.items[].comments[]; .body|contains("Carefully edited and posted wording"))' "$discussion"
-    [ "$(sha256sum "$saved/publication/actions.json" "$saved/publication/drafts.json")" = "$hashes" ]
+    [ "$(sha256sum "$saved/publication/drafts.json")" = "$hashes" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     stages=$(cat "$FIXTURE/stages")
     run_review; assert_success

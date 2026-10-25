@@ -1,6 +1,8 @@
 """Realistic review-array/reply API fixture; never contacts GitHub."""
 import json
 import os
+import signal
+import subprocess
 from pathlib import Path
 import sys
 
@@ -49,9 +51,20 @@ if endpoint.endswith("/replies"):
                     "html_url": f"https://github.com/org/repo/pull/7#pullrequestreview-{2000+number}",
                     "submitted_at": "2026-01-03"})
     write("api-reviews.json", reviews)
+    write("reply-response.json", result)
+    if os.environ.get("MOCK_MOVE_HEAD_AFTER_REPLY") == "1":
+        git = ["git", "--git-dir=" + str(root / "remote.git")]
+        parent = subprocess.check_output([*git, "rev-parse", "refs/pull/7/head"], text=True).strip()
+        head = subprocess.check_output([*git, "commit-tree", parent + "^{tree}", "-p", parent], input="new head\n", text=True).strip()
+        subprocess.run([*git, "update-ref", "refs/pull/7/head", head], check=True)
+    if os.environ.get("MOCK_INTERRUPT_AFTER_REPLY") == "1":
+        os.kill(os.getppid(), signal.SIGINT)
 else:
     number = count("post-count")
     if os.environ.get("MOCK_POST") == "reject":
+        print("HTTP 403 policy denied", file=sys.stderr)
+        sys.exit(1)
+    if os.environ.get("MOCK_POST") == "absent" and number == 1:
         sys.exit(1)
     identity = 3000 + number
     result = {"id": identity, "body": payload["body"], "commit_id": payload["commit_id"], "user": user,
@@ -74,5 +87,5 @@ else:
     write("api-threads.json", threads)
     write("api-payload.json", payload)
 print(json.dumps(result))
-if os.environ.get("MOCK_POST") == "ambiguous":
+if os.environ.get("MOCK_POST") == "ambiguous" or (endpoint.endswith("/replies") and os.environ.get("MOCK_REPLY_AMBIGUOUS") == "1"):
     sys.exit(1)

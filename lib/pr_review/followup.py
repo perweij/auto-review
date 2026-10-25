@@ -1,6 +1,5 @@
 """Validated, limited-scope analysis artifacts; never a fabricated full review."""
-from .common import ApiError, atomic_json, locked, now, read_json
-from .state import Session, generation
+from .common import ApiError, locked, now, read_json
 from .workflow import thread_fingerprint, affected_drafts
 
 
@@ -46,18 +45,3 @@ def adopt(session):
         state["checked"] = {"at": now(), "head": pr.get("headRefOid"), "pr": pr}
         state.pop("prepared", None)
         session.save(state)
-
-
-def cli(args):
-    from pathlib import Path
-    action, directory, *rest = args
-    path = Path(directory)
-    session = Session({"session": directory, "generation": generation(path, read_json(path / "manifest.json"))})
-    if action == "prepare":
-        atomic_json(Path(rest[0]), prepare(session))
-    elif action == "validate":
-        validate(session, read_json(Path(rest[0])))
-    elif action == "adopt":
-        adopt(session)
-    else:
-        raise ApiError("invalid_request", "Unknown follow-up artifact operation.")
