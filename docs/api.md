@@ -239,6 +239,14 @@ Each result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
 `complete`, and `blocking`. Outcome statuses are `fixed`, `already_addressed`,
 `clarify`, and `no_change`; readiness requires complete, nonblocking verification.
 
+Before recording a new batch, a clean owner branch behind the fetched PR head
+fast-forwards to that commit and emits progress messages. The saved baseline and
+provider context use the updated HEAD; earlier batch artifacts stay unchanged.
+Local commits ahead of GitHub are retained. Local changes, Git operations in
+progress, or an unfinished batch at the current HEAD block automatic updating;
+different commits on both branches still return `diverged`. The update disables
+autostash/squashing and refuses to overwrite ignored files.
+
 To resume, provide `batch` instead of `items`. Optional controls are `adopt: true`
 for explicitly inspected manual/partial changes, `replan: true` for unfinished
 or changed discussion, `skip: [TASK_ID,…]`, and `trusted_snapshot` from an exact

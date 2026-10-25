@@ -134,6 +134,22 @@ class OwnerTest(unittest.TestCase):
             self.metadata["headRefOid"] = sha
         return sha
 
+    def prepare_owner(self):
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        owner_git.prepare(session, state)
+        self.view = session.view(state)
+        return Path(state["worktree"])
+
+    def advance_pr(self, name="upstream.txt", content="new PR commit\n"):
+        (self.repo / name).write_text(content)
+        self.git("add", "--", name)
+        self.git("commit", "-qm", "Advance PR")
+        sha = self.git("rev-parse", "HEAD")
+        self.git("update-ref", "refs/pull/7/head", sha)
+        self.metadata["headRefOid"] = sha
+        return sha
+
     def saved_review(self):
         path = self.root / "state/pr-review/github.com/org/repo/pr-7-review"
         atomic_json(path / "manifest.json", {
@@ -393,6 +409,162 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", batch["checkpoint"]["ref"]), batch["checkpoint"]["tree"])
         self.assertTrue(Path(view["worktree"], "new.txt").exists())
         self.assertFalse(self.posts)
+
+    def test_new_fix_fast_forwards_after_previous_fix_and_pr_advance(self):
+        self.request("owner-fix", items=["thread:T1"])
+        committed = self.commit_fix()
+        previous = copy.deepcopy(self.request("owner-associate")["batches"][0])
+        self.git("merge", "--ff-only", committed)
+        remote = self.advance_pr()
+        self.calls.clear()
+        with patch.object(owner_git, "emit") as progress:
+            view = self.request("owner-fix", items=["thread:T2"])
+        batch = view["batches"][-1]
+        self.assertEqual(batch["status"], "ready")
+        self.assertEqual(batch["baseline"], remote)
+        self.assertEqual(batch["remote_head"], remote)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), remote)
+        self.assertEqual(self.git("rev-parse", batch["baseline_ref"]), remote)
+        self.assertEqual(Path(view["worktree"], "upstream.txt").read_text(), "new PR commit\n")
+        self.assertEqual(self.calls[0][1]["baseline"], remote)
+        self.assertEqual(view["batches"][0], previous)
+        self.assertEqual(self.git("rev-parse", "HEAD"), remote)
+        messages = [call.kwargs["message"] for call in progress.call_args_list]
+        self.assertTrue(any("fast-forwarding" in message for message in messages))
+        self.assertTrue(any("updated to " + remote[:12] in message for message in messages))
+
+    def test_new_fix_retains_unpushed_owner_commits(self):
+        self.fix()
+        local = self.commit_fix(push=False)
+        view = self.fix(verify_only=True)
+        self.assertEqual(view["batches"][-1]["baseline"], local)
+        self.assertEqual(view["batches"][-1]["remote_head"], self.head)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), local)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+
+    def test_behind_owner_worktree_preserves_unstaged_staged_and_untracked_changes(self):
+        worktree = self.prepare_owner()
+        remote = self.advance_pr()
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=worktree))
+        for kind in ("unstaged", "staged", "untracked"):
+            with self.subTest(kind=kind):
+                path = worktree / ("extra.txt" if kind == "untracked" else "source.txt")
+                path.write_text("keep my work\n")
+                if kind == "staged":
+                    self.git("add", "source.txt", cwd=worktree)
+                before = index.read_bytes()
+                with self.assertRaises(ApiError) as caught:
+                    self.fix()
+                self.assertEqual(caught.exception.code, "dirty_worktree")
+                self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), self.head)
+                self.assertEqual(path.read_text(), "keep my work\n")
+                self.assertEqual(index.read_bytes(), before)
+                self.assertFalse(self.calls)
+                self.assertEqual(self.request("owner-read")["batches"], [])
+                if kind == "untracked":
+                    path.unlink()
+                else:
+                    self.git("restore", "--staged", "--worktree", "source.txt", cwd=worktree)
+        self.assertEqual(self.git("rev-parse", "refs/pull/7/head"), remote)
+
+    def test_genuine_owner_divergence_still_requires_manual_reconciliation(self):
+        worktree = self.prepare_owner()
+        (worktree / "local.txt").write_text("local commit\n")
+        self.git("add", "local.txt", cwd=worktree)
+        self.git("commit", "-qm", "Local work", cwd=worktree)
+        local = self.git("rev-parse", "HEAD", cwd=worktree)
+        remote = self.advance_pr()
+        with self.assertRaises(ApiError) as caught:
+            self.fix()
+        self.assertEqual(caught.exception.code, "diverged")
+        self.assertIn("C-u m", str(caught.exception))
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), local)
+        self.assertEqual(self.git("rev-parse", "refs/pull/7/head"), remote)
+        self.assertFalse((worktree / "upstream.txt").exists())
+        self.assertFalse(self.calls)
+
+    def test_resume_never_fast_forwards_an_existing_batch(self):
+        view = self.fix(verify_only=True)
+        batch = copy.deepcopy(view["batches"][-1])
+        self.advance_pr()
+        self.calls.clear()
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", batch=batch["id"])
+        self.assertEqual(caught.exception.code, "stale_source")
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), self.head)
+        self.assertEqual(self.request("owner-read")["batches"][-1], batch)
+        self.assertFalse(self.calls)
+
+    def test_new_fix_does_not_move_an_unfinished_batches_clean_baseline(self):
+        original = self.model
+        def model(*args):
+            value = original(*args)
+            if args[3] == "review":
+                value["blocking"] = ["Needs further work"]
+            return value
+        with patch.object(owner_providers, "invoke", side_effect=model):
+            view = self.fix(verify_only=True)
+        batch = copy.deepcopy(view["batches"][-1])
+        self.advance_pr()
+        self.calls.clear()
+        with self.assertRaises(ApiError) as caught:
+            self.fix()
+        self.assertEqual(caught.exception.code, "worktree_behind")
+        self.assertIn("unfinished batch", str(caught.exception))
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), self.head)
+        self.assertEqual(self.request("owner-read")["batches"][-1], batch)
+        self.assertFalse(self.calls)
+
+    def test_fast_forward_preserves_ignored_files_and_disables_merge_overrides(self):
+        worktree = self.prepare_owner()
+        self.git("config", "merge.autostash", "true")
+        self.git("config", f"branch.{self.view['branch']}.mergeOptions", "--squash")
+        (self.repo / ".git/info/exclude").write_text("ignored.txt\n")
+        (worktree / "ignored.txt").write_text("keep ignored data\n")
+        remote = self.advance_pr()
+        view = self.fix(verify_only=True)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), remote)
+        self.assertEqual((worktree / "ignored.txt").read_text(), "keep ignored data\n")
+        self.assertEqual(self.git("status", "--porcelain", cwd=worktree), "")
+        self.assertEqual(self.git("stash", "list"), "")
+        self.assertEqual(view["batches"][-1]["baseline"], remote)
+
+    def test_fast_forward_refuses_to_overwrite_ignored_files(self):
+        worktree = self.prepare_owner()
+        (self.repo / ".git/info/exclude").write_text("collision.txt\n")
+        (worktree / "collision.txt").write_text("keep ignored data\n")
+        (self.repo / "collision.txt").write_text("incoming tracked data\n")
+        self.git("add", "-f", "collision.txt")
+        self.git("commit", "-qm", "Track formerly ignored file")
+        self.metadata["headRefOid"] = self.git("rev-parse", "HEAD")
+        self.git("update-ref", "refs/pull/7/head", self.metadata["headRefOid"])
+        with self.assertRaises(ApiError):
+            self.fix()
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), self.head)
+        self.assertEqual((worktree / "collision.txt").read_text(), "keep ignored data\n")
+        self.assertFalse(self.calls)
+        self.assertEqual(self.request("owner-read")["batches"], [])
+
+    def test_new_fix_refuses_in_progress_git_and_invalid_feedback_before_sync(self):
+        worktree = self.prepare_owner()
+        self.advance_pr()
+        for name in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"):
+            with self.subTest(name=name):
+                marker = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", name, cwd=worktree))
+                if name in ("rebase-merge", "rebase-apply", "sequencer"):
+                    marker.mkdir()
+                else:
+                    marker.write_text(self.base + "\n")
+                with self.assertRaises(ApiError) as caught:
+                    self.fix()
+                self.assertEqual(caught.exception.code, "git_in_progress")
+                self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), self.head)
+                marker.rmdir() if marker.is_dir() else marker.unlink()
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", items=["missing"])
+        self.assertEqual(caught.exception.code, "invalid_target")
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), self.head)
+        self.assertFalse(self.calls)
 
     def test_verify_only_never_calls_fixer_even_for_blocking_findings(self):
         original = self.model

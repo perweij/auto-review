@@ -319,7 +319,12 @@ plans, prompts, checks, and reports remain available. For partial/manual changes
 inspect `diff --current` and Magit before `resume --adopt`. Unstage any staged
 changes first. `--replan` replans unfinished/changed feedback against accumulated
 changes; `--skip TASK_ID` leaves dependent tasks blocked. Changed local or remote
-HEAD requires reconciliation and a new batch. Agent-configuration changes return
+HEAD during a saved batch requires reconciliation and a new batch. Starting a
+new fix fast-forwards a clean owner worktree when it is behind the fetched PR
+head, with progress messages showing both commits. Unfinished batches at that
+HEAD, Git operations in progress, local changes, and genuinely diverged branches
+require inspection in Magit. Ignored files are never overwritten by this update.
+Agent-configuration changes return
 the exact diff and a token for explicit `--trust-agent-config TOKEN`.
 
 An exact commit can be associated automatically only when its sole parent is the

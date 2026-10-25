@@ -134,6 +134,13 @@ related batch for diff/commit/recovery actions.
 Validation passed all 100 ERT tests, warning-free byte compilation, and a read-only
 render of the saved PR #4 session; no live feedback or worktree was changed.
 
+New fixes now fast-forward a clean owner worktree when the PR has advanced from
+another checkout, instead of misreporting this as divergence. Progress names the
+old/new commits and the new batch records the updated baseline. Unfinished saved
+batches, dirty state, in-progress Git operations, ignored-file collisions, and
+true divergence retain their inspection paths. The 94 owner and trust tests
+passed, including nine new synchronization cases using temporary repositories.
+
 ## 6. Add interactive PR-owner fixes (`F`)
 
 After the non-interactive owner workflow, implement the

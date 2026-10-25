@@ -145,6 +145,14 @@ accumulated edits. Skipped prerequisites block dependent tasks. Changed HEAD
 requires manual reconciliation and a new batch. A running buffer can be left
 with `q` or by switching toolkits; cancel with `K` before killing it.
 
+For a new `f`, a clean owner worktree that is behind GitHub fast-forwards to the
+fetched PR commit before planning. The progress log shows the update, and the new
+fix records that commit as its baseline. This lets you continue after pushing
+changes from another checkout. A saved batch resumed with `r` keeps its original
+baseline. Local changes, unfinished batches at the current HEAD, in-progress Git
+operations, or genuine divergence require inspection with `C-u m`; no automatic
+stash, rebase, or merge commit is used.
+
 After a successful fix, `m` stages the saved, verified batch and opens a native
 Magit commit editor with a suggested message from its findings and fix summaries.
 Edit it if needed, then press `C-c C-c` to commit. On a batch/task heading, `m`

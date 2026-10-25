@@ -408,7 +408,14 @@ remote. Display ambiguity rather than guessing among matching remotes.
 
 New batches require clean source/index state. Existing unpushed owner commits
 are allowed when the freshly fetched PR head remains an ancestor of local HEAD;
-record both identities. Divergence requires manual reconciliation.
+record both identities. When local HEAD is instead an ancestor of the fetched
+PR head, fast-forward the clean owner worktree before creating the new batch.
+Report the old and new commits in progress and record the updated baseline.
+Preserve earlier batch records, checks, and associations. Block this update when
+an unfinished batch still uses the current HEAD or a Git operation is in
+progress; never autostash, squash, or overwrite ignored files. Resume operations
+keep their original baseline and do not use this synchronization. Genuine
+divergence requires manual reconciliation through `C-u m`.
 
 `m` prepares the explicitly selected batch, the latest batch containing selected
 feedback, or otherwise the most recent batch for committing.

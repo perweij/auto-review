@@ -224,13 +224,10 @@ def execute(session, state, request):
                 if batch["settings"] != state["settings"]:
                     raise ApiError("settings_changed", "Restore the batch's saved provider settings before resuming it.")
             else:
-                workspace.clean(session, state)
-                baseline = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
-                if not workspace.ancestor(session, remote, baseline):
-                    raise ApiError("diverged", "Owner branch diverged from GitHub; reconcile it in Magit.")
                 items = session.items(state, request.get("items"))
                 if any(not i["actionable"] for i in items):
                     raise ApiError("invalid_target", "Choose feedback with an actionable discussion, not an empty verdict.")
+                baseline = workspace.new_batch_head(session, state, remote)
                 snapshot = workspace.checkpoint(session, state, "batch baseline")
                 batch = {"id": uuid.uuid4().hex, "created_at": now(), "baseline": baseline, "remote_head": remote,
                          "baseline_ref": workspace.pin_commit(session, baseline),

@@ -8,6 +8,7 @@ import tempfile
 import uuid
 
 from .common import ApiError, digest, now
+from .events import emit
 from .processes import run
 from .repository import normalize_remote
 from .storage import hash_file
@@ -155,6 +156,31 @@ def ancestor(session, older, newer):
     if code not in (0, 1):
         raise ApiError("invalid_commit", "Cannot check commit ancestry.")
     return code == 0
+
+
+def new_batch_head(session, state, remote):
+    """Bring a clean, behind owner branch forward before recording a new batch."""
+    clean(session, state)
+    worktree = state["worktree"]
+    for name in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"):
+        path = session.repo.git("rev-parse", "--path-format=absolute", "--git-path", name, cwd=worktree).stdout.strip()
+        if Path(path).exists():
+            raise ApiError("git_in_progress", "A Git operation is in progress; finish it in Magit before starting a fix.")
+    head = session.repo.git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+    if ancestor(session, remote, head):
+        return head
+    if not ancestor(session, head, remote):
+        raise ApiError("diverged", "Owner and GitHub branches have different commits; use C-u m to reconcile in Magit, then start a new fix.")
+    if any(b["baseline"] == head and b["status"] != "ready" for b in state["batches"]):
+        raise ApiError("worktree_behind", "Owner worktree is behind GitHub with an unfinished batch; use C-u m to inspect and reconcile it before starting a new fix.")
+    emit("progress", message=f"Owner worktree is behind GitHub; fast-forwarding {head[:12]} to {remote[:12]} before starting the new fix.")
+    session.repo.git("merge", "--ff-only", "--no-squash", "--no-autostash", "--no-overwrite-ignore", remote, cwd=worktree)
+    validate(session, state)
+    clean(session, state)
+    if session.repo.git("rev-parse", "HEAD", cwd=worktree).stdout.strip() != remote:
+        raise ApiError("stale_source", "Owner HEAD changed during synchronization; inspect it in Magit and retry.")
+    emit("progress", message=f"Owner worktree updated to {remote[:12]}; starting the new fix from this commit.")
+    return remote
 
 
 def exact_commits(session, batch, head):
