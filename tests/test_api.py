@@ -342,6 +342,37 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(recovered["status"], "unstaged")
         self.assertEqual(len(dispatch(self.request("history"))["generations"]), 2)
 
+    def test_latest_read_replaces_issues_after_head_changes(self):
+        self.change("edit", comment="p1", body="Old saved wording")
+        old_generation = self.session.id
+        candidate = Path(str(self.path) + "-history") / "attempt-new"
+        shutil.copytree(self.path, candidate)
+        self.git("commit", "--allow-empty", "-qm", "Updated feature")
+        manifest = read_json(candidate / "manifest.json")
+        manifest["session_directory"] = str(self.path)
+        manifest["snapshot"]["head"] = self.git("rev-parse", "HEAD")
+        atomic_json(candidate / "manifest.json", manifest)
+        # Reuse an ID, but remove the other old issue and change the wording.
+        ledger = read_json(candidate / "publication/contributions.json")
+        ledger["proposals"] = ledger["proposals"][:1]
+        ledger["proposals"][0]["basis"]["body_md"] = "Latest analysis wording"
+        ledger["proposals"][0]["body_md"] = "Latest analysis wording"
+        atomic_json(candidate / "publication/contributions.json", ledger)
+        (self.path / ".pending-review").symlink_to(candidate)
+        pending = dispatch(self.request(generation=None))
+        self.assertEqual(pending["generation"], old_generation)
+        self.assertEqual(len(pending["comments"]), 2)
+        (self.path / ".current-review").symlink_to(candidate)
+        (self.path / ".pending-review").unlink()
+        current = dispatch(self.request(generation=None))
+        self.assertNotEqual(current["generation"], old_generation)
+        self.assertEqual(current["snapshot"]["head"], manifest["snapshot"]["head"])
+        self.assertEqual([c["id"] for c in current["comments"]], ["p1"])
+        self.assertEqual(current["comments"][0]["body"], "Latest analysis wording")
+        old = dispatch(self.request())
+        self.assertEqual(len(old["comments"]), 2)
+        self.assertEqual(old["comments"][0]["body"], "Old saved wording")
+
     def test_generation_and_body_versions_survive_git_gc(self):
         self.change("edit", comment="p1", body="Saved wording")
         refs = self.git("for-each-ref", "--format=%(refname)", "refs/pr-review/api/")

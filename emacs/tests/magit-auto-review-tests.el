@@ -195,7 +195,8 @@
              (alist-get 'historical old) t
              (alist-get 'operations old) '(((operation_id . "external") (kind . "review")))
              (alist-get 'generation latest) "new"
-             (alist-get 'current_generation latest) "new")
+             (alist-get 'current_generation latest) "new"
+             (alist-get 'comments latest) (list (car (alist-get 'comments latest))))
        (magit-auto-review--accept old)
        (should magit-auto-review--progress)
        (cl-letf (((symbol-function 'magit-auto-review--call)
@@ -205,6 +206,9 @@
          (execute-kbd-macro "g")
          (should (equal magit-auto-review--generation "new"))
          (should (equal (alist-get 'body (magit-auto-review--comment "p1")) "Body 1"))
+         (should (= (length (alist-get 'comments magit-auto-review--review)) 1))
+         (should-not (magit-auto-review--comment "p2"))
+         (should-not (string-match-p "Finding 2\\|Finding 3\\|Saved human wording" (buffer-string)))
          (should (magit-auto-review--mutable-p))
          (should-not magit-auto-review--new-ready)
          (should-not magit-auto-review--operation)
@@ -213,6 +217,7 @@
          (setq magit-auto-review--history-view t magit-auto-review--generation "old")
          (magit-auto-review-refresh)
          (should (equal (alist-get 'body (magit-auto-review--comment "p1")) "Saved human wording"))
+         (should (magit-auto-review--comment "p2"))
          (should (equal (alist-get 'status (magit-auto-review--comment "p1")) "staged")))))))
 
 (ert-deftest auto-review/history-refresh-stays-pinned ()
