@@ -2,7 +2,7 @@
 import copy
 import uuid
 
-from .common import ApiError, now, require_text
+from .common import ApiError, digest, now, require_text
 from .state import Session
 
 
@@ -49,6 +49,23 @@ def placement_for(session, state, value):
     if value.get("kind") == "review":
         return {"kind": "review"}
     raise ApiError("invalid_target", "Choose code, an existing thread, or an overall assessment.")
+
+
+def preview_comment(session, state, request):
+    """Render a new comment in context without saving it or changing revision."""
+    revision = digest(state)
+    state = copy.deepcopy(state)
+    placement = placement_for(session, state, request.get("placement"))
+    comment = new_comment(require_text(request.get("body", ""), "body", empty=True),
+                          require_text(request.get("title", "New comment"), "title"), placement)
+    state["comments"].append(comment)
+    review = session.view(state)
+    review["revision"] = revision
+    preview = next(c for c in review["comments"] if c["id"] == comment["id"])
+    preview["composing"] = True
+    preview["blockers"] = [b for b in preview["blockers"] if b != "Comment text is empty."]
+    preview["bulk_blockers"] = [b for b in preview["bulk_blockers"] if b != "Comment text is empty."]
+    return {"review": review, "comment": comment["id"]}
 
 
 def mutate(session, state, request):

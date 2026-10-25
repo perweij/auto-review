@@ -22,6 +22,7 @@
 (declare-function magit-auto-review--render-conversations "magit-auto-review-conversations" ())
 (declare-function magit-auto-review--insert-review-status "magit-auto-review-conversations" ())
 (declare-function magit-auto-review-pull-requests "magit-auto-review-pulls" (&optional directory))
+(declare-function magit-auto-review-edit-menu "magit-auto-review-actions" ())
 
 (defcustom magit-auto-review-claude-model nil
   "Default Claude model for new reviews; R validates it against CLI choices."
@@ -58,6 +59,8 @@ These are model instructions, not an enforced process timeout."
 (defvar-local magit-auto-review--history-origin nil)
 (defvar-local magit-auto-review--history-view nil)
 (defvar-local magit-auto-review--placement-comment nil)
+(defvar-local magit-auto-review--placement-callback nil)
+(defvar-local magit-auto-review--placement-context nil)
 (defvar-local magit-auto-review--run-settings nil)
 (defvar-local magit-auto-review--notice nil)
 (defvar magit-auto-review--collapse-on-render nil)
@@ -78,6 +81,7 @@ These are model instructions, not an enforced process timeout."
     (define-key map (kbd "C-c C-k") #'magit-auto-review-cancel-edit)
     (define-key map (kbd "C-c C-r") #'magit-auto-review-recover-edit)
     (define-key map (kbd "C-c C-e") #'magit-auto-review-return-to-edit)
+    (define-key map (kbd "C-c ?") #'magit-auto-review-edit-menu)
     map))
 
 (defvar magit-auto-review-mode-map
@@ -138,6 +142,24 @@ These are model instructions, not an enforced process timeout."
     (unless section (user-error "Move to a comment first"))
     (oref section value)))
 
+(defun magit-auto-review--section-context ()
+  "Describe the nearest draft, posted discussion, or saved-version section."
+  (let ((section (magit-current-section)) kind)
+    (while (and section (not kind))
+      (setq kind (pcase (oref section type)
+                   ((or 'review-version 'review-versions) 'version)
+                   ('review-thread 'discussion)
+                   ('review-body 'body)
+                   ('review-comment 'comment))
+            section (oref section parent)))
+    kind))
+
+(defun magit-auto-review--require-current-draft ()
+  "Prevent actions on context from unexpectedly changing its containing draft."
+  (pcase (magit-auto-review--section-context)
+    ('version (user-error "Earlier text is read-only history; y recovers a copy. Move to the current draft to change it"))
+    ('discussion (user-error "These messages are posted GitHub context. Move to Your draft reply to change the outgoing draft"))))
+
 (defun magit-auto-review--editable ()
   "Check that editing the current generation is possible."
   (when (or magit-auto-review--history-view (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review)))
@@ -161,7 +183,7 @@ These are model instructions, not an enforced process timeout."
           (concat
            ;; Keep editing/operation feedback visible even in a narrow terminal.
            (cond (magit-auto-review--editor
-                  " EDITING · C-c C-c save · C-c C-k cancel · C-c C-e return |")
+                  " EDITING · C-c C-c save draft · C-c C-k cancel · C-c ? help |")
                  (magit-auto-review--progress (concat " " magit-auto-review--progress " |"))
                  (magit-auto-review--new-ready
                   (if magit-auto-review--history-view
@@ -256,8 +278,12 @@ These are model instructions, not an enforced process timeout."
       (push (cons identity section) magit-auto-review--sections)
       (magit-insert-heading
         (propertize
-         (concat (magit-auto-review--severity-label comment) " · "
+         (concat (if (equal (alist-get 'classification comment) "HUMAN")
+                     (concat (if (equal (alist-get 'status comment) "published") "Published" "Draft")
+                             (if (equal (alist-get 'kind (alist-get 'placement comment)) "reply") " reply" " comment"))
+                   (magit-auto-review--severity-label comment)) " · "
                 (or (alist-get 'path context) "Overall / unplaced") ": " (alist-get 'title comment)
+                (if (magit-auto-review--true-p (alist-get 'composing comment)) "  [new, unsaved]" "")
                 (if (magit-auto-review--true-p (alist-get 'override comment)) "  [manual placement]" "")
                 (if (alist-get 'blockers comment) "  [needs attention]" ""))
          'face 'magit-auto-review-finding))
@@ -277,7 +303,7 @@ These are model instructions, not an enforced process timeout."
         (when thread
           (magit-insert-section (review-thread (alist-get 'key thread) t)
             (magit-insert-heading
-              (format "Discussion%s%s (%d comments)"
+              (format "GitHub discussion%s%s (%d posted comments)"
                       (if (magit-auto-review--true-p (alist-get 'is_resolved thread)) " · resolved" "")
                       (if (magit-auto-review--true-p (alist-get 'is_outdated thread)) " · outdated" "")
                       (length (alist-get 'comments thread))))
@@ -285,13 +311,19 @@ These are model instructions, not an enforced process timeout."
               (insert (propertize (format "@%s · %s\n" (alist-get 'author message) (alist-get 'created_at message))
                                   'face 'magit-section-secondary-heading))
               (insert (magit-auto-review--conversation-body (alist-get 'body message)) "\n\n")))))
-      (insert (propertize (if (equal (alist-get 'kind (alist-get 'placement comment)) "reply") "Your reply\n" "Your comment\n")
-                          'face 'magit-section-secondary-heading))
-      (let ((start (point)))
-        (insert (alist-get 'body comment))
-        (put-text-property start (point) 'auto-review-body identity)
-        ;; Empty drafts still have a stable insertion position.
-        (insert (propertize "\n" 'auto-review-body-end identity 'rear-nonsticky t)))
+      (magit-insert-section (review-body identity)
+        (magit-insert-heading
+          (concat (if (equal (alist-get 'status comment) "published") "Published"
+                    (if (magit-auto-review--true-p (alist-get 'composing comment)) "New unsaved" "Your draft"))
+                  (if (equal (alist-get 'kind (alist-get 'placement comment)) "reply") " reply" " comment")))
+        (unless (equal (alist-get 'status comment) "published")
+          (insert (propertize "Only this text is published from this item. e edits; k excludes this draft; ? explains.\n"
+                              'face 'shadow)))
+        (let ((start (point)))
+          (insert (alist-get 'body comment))
+          (put-text-property start (point) 'auto-review-body identity)
+          ;; Empty drafts still have a stable insertion position.
+          (insert (propertize "\n" 'auto-review-body-end identity 'rear-nonsticky t))))
       (when after
         (insert "\n")
         (magit-auto-review--insert-code
@@ -302,19 +334,28 @@ These are model instructions, not an enforced process timeout."
         (insert "\n"))
       (when (alist-get 'blockers comment)
         (insert (propertize (concat "  " (string-join (alist-get 'blockers comment) " ") "\n") 'face 'warning)))
+      (when (equal (alist-get 'kind (alist-get 'placement comment)) "unplaced")
+        (insert "  Press a to choose a code line, thread, or overall PR assessment.\n"))
       (when (and (not (alist-get 'blockers comment)) (alist-get 'bulk_blockers comment))
         (insert (propertize "  Inspect and stage individually; excluded from bulk staging.\n" 'face 'shadow)))
       (when (alist-get 'evidence comment)
         (magit-insert-section (review-evidence identity t)
           (magit-insert-heading "Evidence and additional locations (l to visit)")
           (dolist (evidence (alist-get 'evidence comment)) (insert evidence "\n"))))
-      (when (alist-get 'versions comment)
-        (magit-insert-section (review-versions identity t)
-          (magit-insert-heading (format "Saved text versions (%d)" (length (alist-get 'versions comment))))
-          (cl-loop for version in (alist-get 'versions comment) for index from 0 do
-                   (magit-insert-section (review-version (cons identity index) t)
-                     (magit-insert-heading (format "%s · %s" (alist-get 'at version) (alist-get 'status version)))
-                     (insert (or (alist-get 'body version) "") "\n")))))
+      ;; Empty drafts from older clients are not useful text versions. Keep the
+      ;; original indices and saved records so recovery/history remain intact.
+      (let ((versions (cl-loop for version in (alist-get 'versions comment) for index from 0
+                               unless (string-empty-p (string-trim (or (alist-get 'body version) "")))
+                               collect (cons index version))))
+        (when versions
+          (magit-insert-section (review-versions identity t)
+            (magit-insert-heading (format "Saved text versions (%d)" (length versions)))
+            (insert "Earlier wording for recovery; never included in publication. TAB reads; y recovers a copy.\n")
+            (dolist (entry versions)
+              (let ((version (cdr entry)))
+                (magit-insert-section (review-version (cons identity (car entry)) t)
+                  (magit-insert-heading (format "%s · %s" (alist-get 'at version) (alist-get 'status version)))
+                  (insert (alist-get 'body version) "\n")))))))
       (insert "\n"))))
 
 (defun magit-auto-review--fold-key (section)
@@ -337,6 +378,14 @@ These are model instructions, not an enforced process timeout."
           (when (oref parent hidden) (setq target parent)))
         (setq parent (oref parent parent)))
       (goto-char (oref target start)))))
+
+(defun magit-auto-review--reveal-comment (id)
+  "Show draft ID, its own body, and its status group."
+  (magit-auto-review--goto-comment id t)
+  (when-let ((section (cdr (assoc id magit-auto-review--sections))))
+    (magit-section-show section)
+    (dolist (child (oref section children))
+      (when (eq (oref child type) 'review-body) (magit-section-show child)))))
 
 (defun magit-auto-review--render (&optional target)
   "Render the active view, optionally visiting draft TARGET."
@@ -365,7 +414,8 @@ These are model instructions, not an enforced process timeout."
                                         (if (equal (alist-get 'kind (alist-get 'coverage magit-auto-review--review)) "followup")
                                             "none (limited follow-up)" "unavailable"))
                                     (magit-auto-review--verdict-label)) 'face 'shadow))
-        (insert "P publishes Staged comments and the overall verdict. TAB expands context.\n")
+        (insert "Each item is one draft; its GitHub discussion is context. s stages; k excludes this draft.\n")
+        (insert "a chooses an attachment. P publishes Staged comments and the verdict. ? shows actions.\n")
         (when-let ((reason (alist-get 'reason (cl-find-if (lambda (v) (not (magit-auto-review--true-p (alist-get 'available v))))
                                                          (alist-get 'verdicts magit-auto-review--review)))))
           (insert (propertize (concat reason "\n") 'face 'shadow)))
@@ -400,7 +450,7 @@ These are model instructions, not an enforced process timeout."
            (oset s hidden
                  (or (and (eq (oref s type) 'review-comment)
                           (member (oref s value) magit-auto-review--collapse-on-render))
-                     (gethash (magit-auto-review--fold-key s) folds t))))))
+                     (gethash (magit-auto-review--fold-key s) folds (not (eq (oref s type) 'review-body))))))))
       ;; Apply visibility from the root. Showing a descendant separately can
       ;; cut a hole in its collapsed parent's invisibility overlay.
       (magit-section-show magit-root-section)
@@ -521,6 +571,7 @@ earlier results remain in history; this never makes network or model calls."
 
 (defun magit-auto-review--move (operation)
   "Move whole comments with OPERATION while retaining the source cursor."
+  (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (let* ((ids (magit-auto-review--selected-ids))
            (magit-auto-review--collapse-on-render ids)
@@ -557,8 +608,7 @@ earlier results remain in history; this never makes network or model calls."
   "Reveal and return to the active inline editor without discarding text."
   (interactive)
   (unless magit-auto-review--editor (user-error "No inline edit is active"))
-  (magit-auto-review--goto-comment (plist-get magit-auto-review--editor :id) t)
-  (magit-section-show (cdr (assoc (plist-get magit-auto-review--editor :id) magit-auto-review--sections)))
+  (magit-auto-review--reveal-comment (plist-get magit-auto-review--editor :id))
   (goto-char (plist-get magit-auto-review--editor :start))
   (when-let ((window (get-buffer-window (current-buffer))))
     (set-window-point window (point))
@@ -569,6 +619,7 @@ earlier results remain in history; this never makes network or model calls."
   "Edit only the selected comment body inline; save with C-c C-c."
   (interactive)
   (magit-auto-review--editable)
+  (magit-auto-review--require-current-draft)
   (if magit-auto-review--editor (magit-auto-review-return-to-edit)
    (let* ((id (magit-auto-review--id)) (comment (magit-auto-review--comment id))
          (section (magit-auto-review--comment-section))
@@ -576,12 +627,11 @@ earlier results remain in history; this never makes network or model calls."
          (end (text-property-any (oref section start) (oref section end) 'auto-review-body-end id)))
     (when (equal (alist-get 'status comment) "published") (user-error "Published comments are read-only; create a follow-up"))
     (setq start (or start end))
-    (magit-auto-review--goto-comment id t)
-    (magit-section-show section)
+    (magit-auto-review--reveal-comment id)
     (let ((inhibit-read-only t))
       (put-text-property (point-min) (point-max) 'read-only t)
       ;; Permit insertion at either boundary, including a zero-length body.
-      ;; The before-change guard still forbids deleting the sentinel/context.
+      ;; The overlay guard still forbids deleting the sentinel/context.
       (put-text-property start (1+ end) 'read-only nil)
       (put-text-property start (1+ end) 'front-sticky '(read-only))
       (put-text-property (1- start) start 'rear-nonsticky '(read-only))
@@ -589,31 +639,48 @@ earlier results remain in history; this never makes network or model calls."
       (setq magit-auto-review--editor
             (list :id id :start (copy-marker start) :end (copy-marker end t)
                   :keymap (current-local-map)
-                  :overlay (make-overlay start end nil nil t)
+                  :overlay (make-overlay start (1+ end) nil nil t)
+                  :guard (make-overlay (point-min) (point-max) nil nil t)
+                  :hint (if (equal (alist-get 'kind (alist-get 'placement comment)) "reply")
+                            "Type your reply here…" "Type your comment here…")
                   :revision (alist-get 'revision magit-auto-review--review) :original (alist-get 'body comment)))
-      (overlay-put (plist-get magit-auto-review--editor :overlay) 'face 'magit-auto-review-editing)
+      (overlay-put (plist-get magit-auto-review--editor :overlay) 'face '(:inherit magit-auto-review-editing :extend t))
+      ;; Emacs clears before-change-functions when a hook rejects an edit.
+      ;; Overlay hooks remain installed after an error, including at boundaries.
+      (dolist (hook '(modification-hooks insert-in-front-hooks insert-behind-hooks))
+        (overlay-put (plist-get magit-auto-review--editor :guard) hook '(magit-auto-review--protect-edit)))
+      (magit-auto-review--edit-hint)
       (use-local-map magit-auto-review-edit-map)
       (setq buffer-read-only nil)
       (buffer-enable-undo)
       (setq buffer-undo-list nil)
-      (add-hook 'before-change-functions #'magit-auto-review--protect-edit nil t)
       (magit-auto-review-return-to-edit)
       (message "Editing the displayed comment. C-c C-c saves; C-c C-k cancels; C-c C-e returns here.")))))
 
-(defun magit-auto-review--protect-edit (begin end)
-  "Reject changes outside the active body from BEGIN to END."
-  (when (and magit-auto-review--editor
-             (or (< begin (marker-position (plist-get magit-auto-review--editor :start)))
-                 (> end (marker-position (plist-get magit-auto-review--editor :end)))))
-    (user-error "Only the comment body is editable")))
+(defun magit-auto-review--edit-hint ()
+  "Show an empty editor's insertion point without adding draft text."
+  (when magit-auto-review--editor
+    (overlay-put (plist-get magit-auto-review--editor :overlay) 'before-string
+                 (concat (propertize "C-c C-c save draft · C-c C-k cancel · C-c ? help\n" 'face 'magit-section-secondary-heading)
+                         (when (= (marker-position (plist-get magit-auto-review--editor :start))
+                                  (marker-position (plist-get magit-auto-review--editor :end)))
+                           (propertize (plist-get magit-auto-review--editor :hint) 'face 'shadow 'cursor 0))))))
+
+(defun magit-auto-review--protect-edit (_overlay after begin end &optional _length)
+  "Keep edits between BEGIN and END in the active body; refresh its hint AFTER."
+  (when magit-auto-review--editor
+    (if after (magit-auto-review--edit-hint)
+      (when (or (< begin (marker-position (plist-get magit-auto-review--editor :start)))
+                (> end (marker-position (plist-get magit-auto-review--editor :end))))
+        (user-error "Only the comment body is editable; C-c C-e returns to it")))))
 
 (defun magit-auto-review--finish-edit ()
   "Remove editor markers and restore the read-only review buffer."
   (use-local-map (plist-get magit-auto-review--editor :keymap))
+  (delete-overlay (plist-get magit-auto-review--editor :guard))
   (delete-overlay (plist-get magit-auto-review--editor :overlay))
   (dolist (key '(:start :end)) (set-marker (plist-get magit-auto-review--editor key) nil))
   (setq magit-auto-review--editor nil buffer-read-only t)
-  (remove-hook 'before-change-functions #'magit-auto-review--protect-edit t)
   (set-buffer-modified-p nil))
 
 (defun magit-auto-review-save ()
@@ -621,21 +688,48 @@ earlier results remain in history; this never makes network or model calls."
   (interactive)
   (unless magit-auto-review--editor (user-error "No inline edit is active"))
   (let* ((id (plist-get magit-auto-review--editor :id))
+         (new (plist-get magit-auto-review--editor :new))
+         (comment (magit-auto-review--comment id))
          (body (buffer-substring-no-properties (plist-get magit-auto-review--editor :start)
                                               (plist-get magit-auto-review--editor :end)))
-         (result (magit-auto-review--call (magit-auto-review--request "mutate" '(operation . "edit")
-                                                                   `(comment . ,id) `(body . ,body)))))
+         (_ (when (and new (string-empty-p (string-trim body)))
+              (user-error "Write the comment, or cancel it with C-c C-k")))
+         (result (magit-auto-review--call
+                  (if new
+                      (magit-auto-review--request "mutate" '(operation . "create")
+                                                 `(title . ,(alist-get 'title comment)) `(body . ,body)
+                                                 `(placement . ,(alist-get 'placement comment)))
+                    (magit-auto-review--request "mutate" '(operation . "edit") `(comment . ,id) `(body . ,body))))))
     (magit-auto-review--finish-edit)
+    (setq id (if new (car (alist-get 'changed result)) id))
     (magit-auto-review--accept (alist-get 'review result) id)
-    (message "Comment saved; changed text is Unstaged")))
+    (magit-auto-review--reveal-comment id)
+    (let* ((section (cdr (assoc id magit-auto-review--sections)))
+           (saved (magit-auto-review--comment id))
+           ;; Property lookup compares with `eq'. JSON supplies distinct string
+           ;; objects for changed IDs and the rendered comment's ID.
+           (body-id (alist-get 'id saved)))
+      (goto-char (or (text-property-any (oref section start) (oref section end) 'auto-review-body body-id)
+                     (text-property-any (oref section start) (oref section end) 'auto-review-body-end body-id)))
+      (when-let ((window (get-buffer-window (current-buffer))))
+        (set-window-point window (point))
+        (with-selected-window window (recenter)))
+      (magit-auto-review--notify
+       (format "Saved “%s” in %s%s. Showing its text; s stages, k excludes this draft, P publishes Staged."
+               (alist-get 'title saved) (capitalize (alist-get 'status saved))
+               (if new " as a separate draft" ""))))))
 
 (defun magit-auto-review-cancel-edit ()
-  "Cancel the inline edit, restoring the last saved body."
+  "Cancel a new comment completely, or restore an existing draft's saved body."
   (interactive)
   (unless magit-auto-review--editor (user-error "No inline edit is active"))
-  (let ((id (plist-get magit-auto-review--editor :id)))
+  (let ((id (plist-get magit-auto-review--editor :id))
+        (original (plist-get magit-auto-review--editor :original-review)))
     (magit-auto-review--finish-edit)
-    (magit-auto-review--render id)))
+    (if original (magit-auto-review--accept original)
+      (magit-auto-review--render id))
+    (magit-auto-review--notify (if original "New comment cancelled; no draft was saved."
+                                "Edits cancelled; the saved draft is unchanged."))))
 
 (defun magit-auto-review-visit (&optional location)
   "Visit the reviewed file at point, highlighting the actual line/range."

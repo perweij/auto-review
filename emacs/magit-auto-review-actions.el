@@ -122,6 +122,7 @@
 (defun magit-auto-review-acknowledge ()
   "Acknowledge inspection of changed discussion, leaving the comment Unstaged."
   (interactive)
+  (magit-auto-review--require-current-draft)
   (magit-auto-review--mutate "acknowledge" `(comment . ,(magit-auto-review--id)))
   (magit-auto-review--notify "Discussion change acknowledged; inspect placement, then s to stage"))
 
@@ -191,32 +192,56 @@
                             (lambda (result) (magit-auto-review--accept (alist-get 'review result))))))
 
 (defun magit-auto-review-new-comment ()
-  "Create a new Unstaged comment, then edit it inline."
+  "Choose a new comment's attachment and compose it before saving a draft."
   (interactive)
   (when (magit-auto-review--can-leave)
+    (magit-auto-review--editable)
     (let* ((placement (get-text-property (point) 'auto-review-new-location))
-           (title (read-string "Comment title: "))
-           (result (apply #'magit-auto-review--mutate "create" `(title . ,title) '(body . "")
-                          (when placement `((placement . ,placement)))))
-           (id (car (alist-get 'changed result))))
-      (magit-auto-review--goto-comment id t)
-      (magit-auto-review-edit))))
+           (title (read-string "Comment title: " nil nil "New comment")))
+      (magit-auto-review--new-comment-at title placement))))
+
+(defun magit-auto-review--new-comment-at (title placement)
+  "Compose TITLE at PLACEMENT, asking for its attachment when absent."
+  (if placement (magit-auto-review--compose-comment title placement)
+    (let ((choice (read-char-choice "Attach new comment to [c]ode, [t]hread, [o]verall PR; [q] cancel: " '(?c ?t ?o ?q))))
+      (pcase choice
+        (?o (magit-auto-review--compose-comment title '((kind . "review"))))
+        ((or ?c ?t)
+         (magit-auto-review--placement-browser
+          nil (if (= choice ?c) 'code 'thread)
+          (lambda (chosen) (magit-auto-review--compose-comment title chosen))))))))
+
+(defun magit-auto-review--compose-comment (title placement &optional body)
+  "Preview TITLE at PLACEMENT and edit BODY; persist only when saved."
+  (magit-auto-review--editable)
+  (when magit-auto-review--editor (user-error "Finish the current inline edit first"))
+  (let* ((original magit-auto-review--review)
+         (result (magit-auto-review--call
+                  (magit-auto-review--request "preview-comment" `(title . ,title)
+                                             `(placement . ,placement) `(body . ,(or body "")))))
+         (id (alist-get 'comment result)))
+    (magit-auto-review--accept (alist-get 'review result) id)
+    (magit-auto-review--goto-comment id t)
+    (magit-auto-review-edit)
+    (setq magit-auto-review--editor (plist-put magit-auto-review--editor :new t)
+          magit-auto-review--editor (plist-put magit-auto-review--editor :original-review original))))
 
 (defun magit-auto-review-follow-up ()
-  "Create a distinct new follow-up to the published comment at point."
+  "Compose a distinct follow-up to the published comment at point."
   (interactive)
   (when (magit-auto-review--can-leave)
     (let* ((comment (magit-auto-review--comment (magit-auto-review--id)))
            (_ (unless (equal (alist-get 'status comment) "published")
                 (user-error "Follow-up applies to a published comment; c creates a new comment")))
-           (result (magit-auto-review--mutate "create" `(title . ,(concat "Follow-up: " (alist-get 'title comment))) '(body . ""))))
-      (magit-auto-review--goto-comment (car (alist-get 'changed result)) t)
-      (magit-auto-review-edit)
-      (magit-auto-review--notify "Write the follow-up here, save, then a to choose its discussion or code placement"))))
+           (place (alist-get 'placement comment)))
+      (magit-auto-review--new-comment-at
+       (concat "Follow-up: " (alist-get 'title comment))
+       (when (equal (alist-get 'kind place) "reply") place)))))
 
 (defun magit-auto-review-placement ()
   "Choose an attachment using code/conversations, or return to automatic placement."
   (interactive)
+  (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
     (let* ((id (magit-auto-review--id)) (comment (magit-auto-review--comment id)))
@@ -229,25 +254,35 @@
         (?o (magit-auto-review--mutate "placement" `(comment . ,id) '(placement . ((kind . "review")))))
         (?a (magit-auto-review--mutate "automatic" `(comment . ,id)))))))
 
-(defun magit-auto-review--placement-browser (id kind)
-  "Open a contextual attachment picker for ID of KIND."
+(defun magit-auto-review--placement-browser (id kind &optional callback)
+  "Pick an attachment of KIND for ID, or pass it to CALLBACK for a new comment."
   (let* ((origin (current-buffer))
          (review magit-auto-review--review)
+         (context (magit-auto-review--request "read"))
          (diff (and (eq kind 'code) (magit-auto-review--call (magit-auto-review--request "diff")))))
     (pop-to-buffer (generate-new-buffer "*Choose comment placement*"))
     (magit-section-mode)
     (setq-local magit-auto-review--history-origin origin)
     (setq-local magit-auto-review--placement-comment id)
+    (setq-local magit-auto-review--placement-callback callback)
+    (setq-local magit-auto-review--placement-context context)
     (let ((inhibit-read-only t))
       (magit-insert-section (placement-root)
-        (insert "Choose a code line/range or thread; RET attaches the unchanged text and unstages it.\n\n")
+        (insert (if callback "Select a code line/range or thread; RET starts writing; q cancels without creating a draft.\n\n"
+                  "Select a code line/range or thread; RET changes this draft's attachment; q cancels.\n\n"))
         (if (eq kind 'code)
             (magit-auto-review--insert-placement-diff diff)
           (magit-auto-review--insert-placement-threads review))))
     (use-local-map (copy-keymap magit-section-mode-map))
     (local-set-key (kbd "RET") #'magit-auto-review--choose-placement)
     (local-set-key (kbd "q") #'quit-window)
+    (local-set-key (kbd "?") #'magit-auto-review-placement-help)
     (goto-char (point-min))))
+
+(defun magit-auto-review-placement-help ()
+  "Explain the attachment picker."
+  (interactive)
+  (message "Move to a code line or thread heading and press RET; select a region for a code range. q cancels."))
 
 (defun magit-auto-review--insert-placement-diff (diff)
   "Insert DIFF rows with whole-line attachment coordinates."
@@ -287,7 +322,9 @@
   (let ((placement (copy-tree (get-text-property (point) 'auto-review-choose)))
         (section (magit-current-section))
         (origin magit-auto-review--history-origin)
-        (id magit-auto-review--placement-comment))
+        (id magit-auto-review--placement-comment)
+        (callback magit-auto-review--placement-callback)
+        (context magit-auto-review--placement-context))
     (if (use-region-p)
         (let ((first (get-text-property (region-beginning) 'auto-review-choose))
               (last (get-text-property (1- (region-end)) 'auto-review-choose)))
@@ -302,9 +339,12 @@
     (unless placement (user-error "Move to a code line or a discussion"))
     (unless (buffer-live-p origin) (user-error "The original review buffer has been closed"))
     (with-current-buffer origin
-      (magit-auto-review--mutate "placement" `(comment . ,id) `(placement . ,placement)))
+      (when (or magit-auto-review--editor (not (equal context (magit-auto-review--request "read"))))
+        (user-error "The review changed; return to it and choose an attachment again"))
+      (unless callback (magit-auto-review--mutate "placement" `(comment . ,id) `(placement . ,placement))))
     (quit-window t)
-    (pop-to-buffer origin)))
+    (pop-to-buffer origin)
+    (when callback (funcall callback placement))))
 
 (defun magit-auto-review-diff ()
   "Show the full reviewed PR diff from immutable Git revisions."
@@ -319,6 +359,7 @@
 (defun magit-auto-review-adapt ()
   "Explicitly request wording that considers the full attached conversation."
   (interactive)
+  (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (let ((id (magit-auto-review--id)) (origin (current-buffer)))
       (magit-auto-review--start
@@ -441,7 +482,9 @@
 
 (defun magit-auto-review--draft-p ()
   "Whether point is on a mutable draft."
-  (and (magit-auto-review--mutable-p) (magit-auto-review--status-p "unstaged" "staged" "suppressed")))
+  (and (magit-auto-review--mutable-p)
+       (not (memq (magit-auto-review--section-context) '(version discussion)))
+       (magit-auto-review--status-p "unstaged" "staged" "suppressed")))
 
 (defun magit-auto-review--code-context-p ()
   "Whether a reviewed file can be opened from point."
@@ -466,6 +509,7 @@
 (defun magit-auto-review--stage-context-p (status)
   "Whether point is in a mutable STATUS group or one of its comments."
   (and (magit-auto-review--mutable-p)
+       (not (memq (magit-auto-review--section-context) '(version discussion)))
        (or (magit-auto-review--status-p status)
            (when-let ((section (magit-current-section)))
              (and (eq (oref section type) 'review-group) (equal (oref section value) status))))))
@@ -495,16 +539,45 @@
    ("r" "Check uncertain submissions on GitHub" magit-auto-review-resolve-publication :if magit-auto-review--uncertain-publication-p)
    ("q" "Close menu" transient-quit-one)])
 
+(transient-define-prefix magit-auto-review-edit-menu ()
+  "Save or cancel the active inline comment."
+  ["Inline comment · these actions do not publish to GitHub"
+   ("s" "Save draft locally" magit-auto-review-save)
+   ("k" (lambda () (if (plist-get magit-auto-review--editor :new) "Cancel new comment" "Cancel edits"))
+    magit-auto-review-cancel-edit)
+   ("e" "Return to the text" magit-auto-review-return-to-edit)
+   ("q" "Keep editing" transient-quit-one)])
+
+(defun magit-auto-review--context-help-lines ()
+  "Explain what the selected section represents and which text is outgoing."
+  (pcase (magit-auto-review--section-context)
+    ('version '("This is earlier saved wording, not an outgoing comment."
+                "TAB reads it; y recovers a copy. Saved versions are never published."
+                "Empty earlier snapshots are omitted from this view."))
+    ('discussion '("These are comments already posted on GitHub, shown as context."
+                   "Draft actions do not change these messages."
+                   "Move to Your draft reply to edit or exclude the outgoing reply."))
+    (_ (if (magit-auto-review--status-p "published")
+           '("This comment has already been published. f composes a new follow-up.")
+         '("Each item contains one outgoing draft; the code, discussion, and versions are context."
+           "k excludes only that draft from publication and keeps its context/history in Suppressed."
+           "c on code creates a separate Unstaged draft, shown expanded after saving.")))))
+
+(defun magit-auto-review--context-help (_children)
+  "Build explanatory help for the section at point."
+  (transient-parse-suffixes 'magit-auto-review-dispatch (magit-auto-review--context-help-lines)))
+
 (transient-define-prefix magit-auto-review-dispatch ()
   "Inspect, edit, stage, and publish contextual review comments."
+  [:class transient-column :setup-children magit-auto-review--context-help]
   [["Comments"
     ("s" "Move to Staged" magit-auto-review-stage :if (lambda () (magit-auto-review--stage-context-p "unstaged")))
     ("u" "Move to Unstaged" magit-auto-review-unstage :if (lambda () (magit-auto-review--stage-context-p "staged")))
     ("e" "Edit displayed comment" magit-auto-review-edit :if magit-auto-review--draft-p)
-    ("a" "Inspect/change placement" magit-auto-review-placement :if magit-auto-review--draft-p)
-    ("k" "Move to Suppressed" magit-auto-review-suppress :if (lambda () (and (magit-auto-review--draft-p) (magit-auto-review--status-p "unstaged" "staged"))))
+    ("a" "Choose code/thread/overall attachment" magit-auto-review-placement :inapt-if (lambda () (not (magit-auto-review--draft-p))))
+    ("k" "Exclude this draft from publication (Suppressed)" magit-auto-review-suppress :if (lambda () (and (magit-auto-review--draft-p) (magit-auto-review--status-p "unstaged" "staged"))))
     ("r" "Restore to Unstaged" magit-auto-review-restore :if (lambda () (magit-auto-review--stage-context-p "suppressed")))
-    ("c" "New comment at code cursor" magit-auto-review-new-comment :if magit-auto-review--mutable-p)
+    ("c" "New comment…" magit-auto-review-new-comment :if magit-auto-review--mutable-p)
     ("f" "New follow-up draft" magit-auto-review-follow-up :if (lambda () (and (magit-auto-review--mutable-p) (magit-auto-review--status-p "published"))))]
    ["Context and history"
     ("C" "Conversations and follow-up" magit-auto-review-conversations :if (lambda () magit-auto-review--review))

@@ -26,6 +26,7 @@ opaque identities, not paths clients should interpret.
 | `history` | `session` | Generations, commits, times, status, saved edits/document counts |
 | `diff` | `session`, `generation`, optional `path` | Reviewed changed files, hunks, and patches |
 | `file` | `session`, `generation`, `path`, optional `side`, `commit` | Immutable Git blob text and revision |
+| `preview-comment` | `session`, `generation`, `revision`, `placement`, optional `title`, `body` | Unsaved comment rendered in context; no draft is persisted |
 
 Omitting `generation` in `read` selects the completed current generation. Pin
 the returned identity for subsequent reads; do not silently follow a pointer.
@@ -100,6 +101,14 @@ terminates the provider process group and reaps its child. Discovery has its own
 process lifecycle and does not occupy the review-operation slot.
 
 ## Local mutations
+
+`preview-comment` validates an explicit attachment against the current generation
+and revision. It returns `{review,comment}` with one temporary comment marked
+`composing: true`. The review's revision remains the saved revision. That comment
+ID is only for rendering; it cannot be edited, staged, or published through the
+API. Cancelling drops the preview locally. Saving uses `mutate/create` with the
+chosen title, body, and placement, which returns a new persistent ID. The Emacs
+composer requires nonempty text before saving and keeps the input after errors.
 
 Every mutation includes `session`, `generation`, and the last read `revision`.
 Stale requests fail without applying changes. The result returns a fresh

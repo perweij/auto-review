@@ -62,11 +62,12 @@ Model CLI programs are required only for an explicit model operation.
 | `TAB`, native section navigation | Fold and navigate comments, code, and conversations |
 | `s` / `u` | Stage / unstage the whole comment, status group, or selected sibling headings |
 | `e` | Edit the comment body inline; surrounding context is read-only |
-| `C-c C-c` / `C-c C-k` | Save / cancel the inline edit |
+| `C-c C-c` / `C-c C-k` | Save the draft locally / cancel the new comment or edits |
+| `C-c ?` | Save/Cancel help while typing; `?` remains ordinary punctuation |
 | `C-c C-r` | Recover an unsaved/stale edit as a new current draft |
 | `C-c C-e` | Return to the active inline editor after scrolling away |
-| `c` / `f` | Create a comment at the code cursor / a follow-up draft to a published comment |
-| `k` / `r` | Suppress / restore a comment; suppression is reversible |
+| `c` / `f` | Choose an attachment and compose a new comment / follow-up |
+| `k` / `r` | Exclude the selected draft from publication (Suppressed) / restore it |
 | `a` | Choose code, an existing thread, overall assessment, or automatic placement |
 | `RET` | Visit the file at the reviewed revision with the actual range highlighted |
 | `d` / `l` | Full PR diff / secondary evidence locations |
@@ -148,6 +149,17 @@ reports the reasons, and moves to the first skipped comment. A finding with no
 structured primary location requires a manual placement; prose filenames are
 never turned into guessed anchors.
 
+Each draft item contains exactly one comment to publish, under **Your draft
+comment** or **Your draft reply**. Human comments have **Draft comment** or
+**Draft reply** headings rather than a model severity. The foldable **GitHub
+discussion** contains already posted messages for context. If two drafts reply
+to the same thread, stage one with `s` and exclude the other with `k` on its own
+heading or body. Only that outgoing draft is excluded; its context and history
+remain available in Suppressed. `r` restores it. These actions do not alter the
+GitHub thread. `?` explains the selected draft, posted discussion, or saved
+version; draft actions on posted messages or versions are blocked to avoid
+changing the containing draft by mistake.
+
 Code has old and new line numbers. Highlighted lines are the exact attachment,
 and your comment appears directly beneath them. Replies follow a foldable full
 conversation, including resolved/outdated labels. An outdated conversation uses
@@ -156,11 +168,26 @@ working-tree file. `q` returns from that window, the full diff, or evidence.
 
 `e` puts point in the displayed comment body and enables ordinary text typing.
 The body is highlighted and the header starts with **EDITING** and save/cancel
-keys. `C-c C-e` returns there if you scroll away. Single-letter review commands
-are suspended until you save or cancel. `c` on a code line creates a new comment
-attached to that line; elsewhere it creates an unplaced draft. `f` on a Published
-comment creates a separate follow-up draft: save its wording, then use `a` to
-choose its discussion or code attachment.
+keys. Save, Cancel, and `C-c ?` help also appear immediately above the input.
+An empty body shows “Type your comment here…” (or “Type your reply here…”);
+start typing at that prompt. The prompt is display-only and is never saved or
+published. Context and validation messages remain protected after rejected edits.
+`C-c C-e` returns to the body if you scroll away. Single-letter review commands
+are suspended until you save or cancel. `c` on a code line selects that attachment;
+elsewhere it asks for code, an existing thread, or an overall PR assessment before
+opening the editor. The code/thread picker uses `RET` to choose and `q` to cancel.
+`f` on a Published comment starts a separate follow-up and asks for its attachment
+unless it already identifies a reply thread. Existing drafts use `a` to change
+their attachment, including older unplaced drafts.
+
+New comments remain unsaved compositions until they have an attachment and
+nonempty text. `C-c C-c` saves them as Unstaged drafts and opens their text under
+Unstaged; it does not publish. This includes comments created on code inside a
+Staged item: each is a separate draft, with its own code context and attachment.
+Saving an existing edit also expands that draft and places point at its text.
+`C-c C-k` cancels a new comment without creating an empty item. When editing an
+existing draft, cancellation restores its saved text. Publishing remains `P p`
+after staging the desired drafts.
 
 Changing text or placement unstages the complete comment and preserves prior
 saved wording. Saving unchanged wording preserves staging. Manual placement is
@@ -224,7 +251,7 @@ results and `G` explicitly refreshes GitHub. `q` returns to the preceding view.
 
 | Key | Conversation action |
 | --- | --- |
-| `c` | Create an attached Unstaged reply and edit it in the drafts buffer |
+| `c` | Compose an attached reply; save locally with `C-c C-c` or cancel with `C-c C-k` |
 | `F` | Check the thread at point or selected sibling thread headings |
 | `x` / `X` | Resolve / reopen the thread after fresh permission and context checks |
 | `RET` / `b` | Visit saved code / open the conversation on GitHub |
@@ -270,7 +297,9 @@ does not describe cached information as live.
 
 `h` lists generations, including earlier runs at the same commit, interrupted
 attempts, and saved human-edit counts. `RET` opens a read-only contextual view.
-Expand saved text versions under a comment or historical combined documents,
+Saved text versions are earlier wording for recovery, never additional outgoing
+comments. Empty or whitespace-only versions are omitted from the view; their
+stored history is retained. Expand a saved version or historical combined document,
 then use `y` to recover text into an existing current comment or a new Unstaged
 draft. A new recovered draft needs a current attachment before staging.
 

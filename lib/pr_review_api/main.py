@@ -3,7 +3,7 @@ import json
 import sys
 
 from .common import ApiError, PROTOCOL, emit, locked
-from .commands import mutate
+from .commands import mutate, preview_comment
 from .state import Session, discover
 from . import operations, publication, settings, models, workflow, pulls
 
@@ -14,7 +14,7 @@ def dispatch(request):
     operation = request.get("command")
     if operation == "capabilities":
         return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "history", "diff", "file", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup"]}
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup"]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":
@@ -50,6 +50,8 @@ def dispatch(request):
     with locked(session.lock):
         state = session.load()
         session.check_write(request, state)
+        if operation == "preview-comment":
+            return preview_comment(session, state, request)
         if operation == "mutate":
             return mutate(session, state, request)
         # Never interleave CLI Git/network state mutations with publication.

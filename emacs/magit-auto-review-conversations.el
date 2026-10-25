@@ -4,6 +4,7 @@
 ;; Saved conversation state is independent of drafts and review verdicts.
 ;;; Code:
 (require 'magit-auto-review)
+(declare-function magit-auto-review--compose-comment "magit-auto-review-actions" (title placement &optional body))
 (declare-function magit-auto-review--start "magit-auto-review-actions" (request callback))
 (declare-function magit-auto-review--mutable-p "magit-auto-review-actions" ())
 (defvar-local magit-auto-review--conversation-origin nil)
@@ -149,7 +150,7 @@
           (if (magit-auto-review--true-p (alist-get 'stale assessment)) " (stale)" "")))
 
 (defun magit-auto-review-conversation-reply ()
-  "Create an attached Unstaged reply, optionally using a fresh saved proposal."
+  "Compose an attached reply, optionally using a fresh saved proposal."
   (interactive)
   (magit-auto-review--editable)
   (when (and (buffer-live-p magit-auto-review--conversation-origin)
@@ -160,20 +161,14 @@
                               :key (lambda (x) (alist-get 'thread_key x)) :test #'equal))
          (body (if (magit-auto-review--true-p (alist-get 'stale assessment)) ""
                  (or (alist-get 'suggested_reply assessment) "")))
-         (result (magit-auto-review--call
-                  (magit-auto-review--request "mutate" '(operation . "create")
-                                             '(title . "Conversation reply") (cons 'body body)
-                                             `(placement . ((kind . "reply") (key . ,key))))))
-         (review (alist-get 'review result)) (id (car (alist-get 'changed result)))
+         (review magit-auto-review--review)
          (origin magit-auto-review--conversation-origin)
          (directory default-directory))
-    (magit-auto-review--accept review)
     (pop-to-buffer (if (buffer-live-p origin) origin (get-buffer-create "*Auto-review drafts*")))
     (unless (derived-mode-p 'magit-auto-review-mode) (magit-auto-review-mode))
     (setq default-directory directory)
-    (magit-auto-review--accept review id)
-    (magit-auto-review--goto-comment id t)
-    (magit-auto-review-edit)))
+    (magit-auto-review--accept review)
+    (magit-auto-review--compose-comment "Conversation reply" `((kind . "reply") (key . ,key)) body)))
 
 (defun magit-auto-review--change-thread (resolved)
   "Explicitly change the selected thread to RESOLVED."

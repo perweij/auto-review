@@ -309,6 +309,50 @@ class ApiTest(unittest.TestCase):
         self.change("restore", comment="p1")
         self.assertEqual(self.session.load()["comments"][0]["status"], "unstaged")
 
+    def test_new_comment_preview_validates_attachment_without_saving_any_draft(self):
+        self.change("stage", comment="p1")
+        before = self.session.file.read_bytes()
+        request = self.request("preview-comment", title="New observation", body="",
+                               placement={"kind": "inline", "path": "source.txt", "side": "RIGHT", "line": 2})
+        result = dispatch(request)
+        preview = next(c for c in result["review"]["comments"] if c["id"] == result["comment"])
+        self.assertTrue(preview["composing"])
+        self.assertEqual(preview["context"]["path"], "source.txt")
+        self.assertEqual(result["review"]["revision"], request["revision"])
+        self.assertEqual(self.session.file.read_bytes(), before)
+        self.assertEqual(len(dispatch(self.request())["comments"]), 2)
+        for placement in (None, {"kind": "unplaced"}, {"kind": "reply", "key": "thread:missing"}):
+            with self.subTest(placement=placement), self.assertRaises(ApiError):
+                dispatch({**request, "placement": placement})
+        self.assertEqual(self.session.file.read_bytes(), before)
+        saved = self.change("create", title=preview["title"], body="A complete new comment", placement=preview["placement"])
+        self.assertEqual(len(saved["review"]["comments"]), 3)
+        self.assertEqual(saved["review"]["comments"][-1]["body"], "A complete new comment")
+        self.assertNotIn("composing", saved["review"]["comments"][-1])
+        with self.assertRaises(ApiError) as stale:
+            dispatch(request)
+        self.assertEqual(stale.exception.code, "stale_revision")
+
+    def test_two_drafts_in_one_thread_can_be_staged_and_discarded_independently(self):
+        state = self.session.load()
+        state["discussion"]["items"] = [{"key": "thread:test", "kind": "thread", "root_id": 88,
+                                         "can_reply": True, "path": "source.txt", "line": 2,
+                                         "comments": [{"id": 88, "body": "Posted comment"}]}]
+        self.session.save(state)
+        placement = {"kind": "reply", "key": "thread:test"}
+        first = self.change("create", title="Reply", body="Keep this reply", placement=placement)["changed"][0]
+        second = self.change("create", title="Reply", body="Added by mistake", placement=placement)["changed"][0]
+        self.change("stage", comment=first)
+        result = self.change("suppress", comment=second)
+        self.assertEqual(next(c["status"] for c in result["review"]["comments"] if c["id"] == first), "staged")
+        self.assertEqual(next(c["status"] for c in result["review"]["comments"] if c["id"] == second), "suppressed")
+        actions = publication.make_actions(self.session, self.session.load())
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["comment_ids"], [first])
+        self.assertEqual(self.session.load()["discussion"], state["discussion"])
+        self.change("restore", comment=second)
+        self.assertEqual(next(c["body"] for c in self.session.load()["comments"] if c["id"] == second), "Added by mistake")
+
     def test_placement_override_keeps_text_and_unstages(self):
         self.change("edit", comment="p1", body="Human wording")
         self.change("stage", comment="p1")

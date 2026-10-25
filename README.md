@@ -358,8 +358,10 @@ usable. Run `make check-backend`, `make check-emacs`, or `make check-all`.
 ## Following up on review conversations
 
 In Emacs, `C` opens all saved conversations, with unresolved threads (including
-outdated ones) separate from resolved threads. `c` creates an attached reply
-draft; `x` resolves a conversation and `X` reopens it. These explicit thread
+outdated ones) separate from resolved threads. `c` composes an attached reply;
+`C-c C-c` saves it locally and `C-c C-k` cancels it. Each reply is a separate
+draft that can be staged or suppressed independently. `x` resolves a conversation
+and `X` reopens it. These explicit thread
 actions refresh and validate GitHub state first. They do not change your review
 verdict. Opening the view and `g` remain local; `G` refreshes GitHub.
 
