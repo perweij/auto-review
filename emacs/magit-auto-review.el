@@ -489,17 +489,22 @@ These are model instructions, not an enforced process timeout."
     (if number (magit-auto-review--open-pr directory number)
       (magit-auto-review-pull-requests directory))))
 
-(defun magit-auto-review--open-pr (directory number &optional repository)
-  "Open NUMBER in DIRECTORY, optionally scoped to REPOSITORY."
+(defun magit-auto-review--find-session (directory number repository)
+  "Find a saved session for NUMBER in DIRECTORY, scoped to REPOSITORY.
+Ask which session to open when more than one matches.  Discovery is local."
   (let* ((default-directory directory)
          (sessions (alist-get 'sessions
                              (magit-auto-review--call `((command . "discover") (cwd . ,directory)
-                                                       (pr . ,number) (repository . ,repository)))))
-         (selected (if (= (length sessions) 1) (car sessions)
-                     (when sessions
-                       (let* ((choices (mapcar (lambda (s) (cons (format "#%s · %s · %s" (alist-get 'pr s) (alist-get 'repository s) (alist-get 'created_at s)) s)) sessions))
-                              (name (completing-read "Saved review: " choices nil t)))
-                         (cdr (assoc name choices)))))))
+                                                       (pr . ,number) (repository . ,repository))))))
+    (if (= (length sessions) 1) (car sessions)
+      (when sessions
+        (let* ((choices (mapcar (lambda (s) (cons (format "#%s · %s · %s" (alist-get 'pr s) (alist-get 'repository s) (alist-get 'created_at s)) s)) sessions))
+               (name (completing-read "Saved review: " choices nil t)))
+          (cdr (assoc name choices)))))))
+
+(defun magit-auto-review--open-pr (directory number &optional repository)
+  "Open NUMBER in DIRECTORY, optionally scoped to REPOSITORY."
+  (let ((selected (magit-auto-review--find-session directory number repository)))
     (pop-to-buffer (get-buffer-create (format "*Auto-review %s #%s (%s)*"
                                                (or repository (alist-get 'repository selected)
                                                    (file-name-nondirectory (directory-file-name directory)))
@@ -523,8 +528,16 @@ earlier results remain in history; this never makes network or model calls."
   (interactive)
   (if magit-auto-review--editor
       (message "Finish the inline edit before refreshing; progress remains visible in the header")
-    (let ((request (magit-auto-review--request "read"))
-          (previous magit-auto-review--generation))
+    (let* ((session (or magit-auto-review--session
+                        (alist-get 'session
+                                   (magit-auto-review--find-session
+                                    default-directory magit-auto-review--target
+                                    magit-auto-review--repository))))
+           (request (magit-auto-review--request "read"))
+           (previous magit-auto-review--generation))
+      (unless session
+        (user-error "No saved review found here yet; use R to run the reviewers"))
+      (setf (alist-get 'session request) session)
       (when (or current (not magit-auto-review--history-view))
         (setf (alist-get 'generation request) nil))
       ;; Only change the view identity after a successful read.  A failed read

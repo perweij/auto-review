@@ -17,6 +17,22 @@ api_mutate() {
     api "$request" "$saved"
 }
 
+@test "first API run returns discover sessions and resumed run returns the current generation" {
+    run api '{"command":"run","pr":"https://github.com/org/repo/pull/7"}' ''
+    assert_success
+    saved=$(session_directory)
+    jq -se --arg saved "$saved" 'last.result.sessions | length==1 and
+        .[0].session==$saved and .[0].pr==7 and .[0].repository=="github.com/org/repo"' <<< "$output"
+    generation=$(jq -sr 'last.result.sessions[0].generation' <<< "$output")
+    stages=$(cat "$FIXTURE/stages")
+    run api '{"command":"read"}' "$saved"; assert_success
+    jq -e --arg generation "$generation" '.result.generation==$generation and (.result.comments|length)>0' <<< "$output"
+    run api '{"command":"run"}' "$saved"; assert_success
+    jq -se --arg saved "$saved" --arg generation "$generation" 'last.result |
+        .session==$saved and .generation==$generation and .new_review_ready==true' <<< "$output"
+    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+}
+
 @test "API adopts legacy drafts without model calls and posts separate inline comments" {
     run_review; assert_success
     saved=$(session_directory)

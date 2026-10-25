@@ -11,7 +11,7 @@ from .common import ApiError, atomic_json, locked, read_json, state_root
 from .events import emit, event_sink
 from .processes import Cancelled, cancellation_scope, run as process
 from .commands import comment_by_id
-from .state import Session
+from .state import Session, discover
 
 def process_start(pid):
     try:
@@ -116,6 +116,11 @@ def run(request):
     common = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=request.get('cwd', '.')).stdout.strip()
     with operation({'common': common, 'pr': str(request.get('pr', '')).rstrip('/').split('/')[-1], 'kind': 'followup' if request.get('followup_threads') else 'review'}):
         session = execute(request)
+    if not request.get('session'):
+        # Protocol 1 first-run clients adopt a session from the discovery list.
+        # Use resolved identity so URL targets and inferred repositories match.
+        return discover({**request, 'pr': session.manifest['pr'],
+                         'repository': session.manifest['repository']})
     return {'session': str(session.root), 'generation': session.id, 'new_review_ready': True}
 
 

@@ -173,6 +173,11 @@ save it explicitly into a current draft.
   use focused checks; `synthesis_tests=full` permits a suite only in synthesis
   (or the single-provider structured review). Freeze the complete settings for
   confirmation retries; do not re-read global frontend defaults.
+  Without a `session` in the request, completion returns `{sessions: [...]}` with
+  the same descriptors as `discover`, scoped to the resolved repository and PR.
+  With a `session`, completion returns `{session, generation, new_review_ready}`.
+  Store the returned session before reading results; completion does not itself
+  replace the displayed generation.
 - `cancel`: takes only `operation_id` from a `started` event; verifies process
   identity/start time before signalling the owned operation. The CLI cleans up
   its model process groups and preserves completed checkpoints.
