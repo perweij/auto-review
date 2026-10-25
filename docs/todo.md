@@ -49,3 +49,36 @@ is no evidenced defect. Distinguish these proposals from defects and concrete
 risks, establish their evidence and usefulness criteria, and reuse the local
 triage and issue-publication workflow. This extension is intentionally excluded
 from the [first-version specification](proactive-review.md).
+
+## 5. Add toolkit selection and the PR owner's toolkit
+
+Implement the [PR-owner mode specification](pr-owner-mode.md) after the earlier
+scheduled work. This is planned, not started; create its feature branch only
+when implementation begins and reconcile the plan with the completed Python
+backend migration and other intervening changes.
+
+Add explicit toolkit selection and an owner inbox independent of reviewer runs.
+Support non-interactive `f` fixes in a dedicated owner worktree, with separate
+fix/review provider settings, dependency-aware batch planning that can combine
+related feedback, and durable checkpoints. Use native Magit for human staging,
+committing, and pushing, then prepare verified commit-linked replies for explicit
+publication.
+
+The specification documents all delivery milestones: preparation; toolkit shell
+and inbox; individual fixes and recovery; dependency-aware batches; commit-linked
+replies; and integration/documentation. The first increments are reviewable
+separately, but group fixes and per-task review remain part of this package.
+
+## 6. Add interactive PR-owner fixes (`F`)
+
+After the non-interactive owner workflow, implement the
+[later interactive milestone](pr-owner-mode.md#later-milestone-interactive-fixes)
+as a separate work package. First test Claude and Codex in a supported Emacs
+terminal, evaluating vterm before Eat if needed. Validate rendering, multiline
+input, resizing, scrolling, escape keys, process ownership, cancellation, and
+safe completion before automatic review.
+
+Choose the terminal integration only after that experiment. Then add individual
+and sequential-group `F` sessions using the existing owner worktree, plans,
+checkpoints, settings, and review flow. Terminal dependencies and this experiment
+are excluded from the initial owner-mode package.
