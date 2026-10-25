@@ -198,20 +198,27 @@ initialize_run() {
         [[ ! -f $file ]] || cp -- "$file" "$SCRATCH/resume-prompts/"
     done
     # Configuration belongs to its generation. Fork before recording a change.
+    prepare_analysis_kind
     local saved_configuration
     saved_configuration=$(python3 "$ROOT/lib/review-settings.py" <<< "$(jq -cn --arg file "$RUN_DIR/manifest.json" '{manifest:$file}')")
     if [[ $(jq -cS . <<< "$saved_configuration") != "$(jq -cS . <<< "$RUN_CONFIGURATION")" ]] &&
-        jq -e '.phases.synthesis.status=="completed"' "$RUN_DIR/manifest.json" >/dev/null; then begin_review_attempt; fi
+        jq -e '.phases.synthesis.status=="completed" or .phases.followup.status=="completed"' "$RUN_DIR/manifest.json" >/dev/null; then begin_review_attempt; fi
     manifest '.configuration=$configuration | .tools = {git:$git,gh:$gh,codex:$codex,claude:$claude} | .models = {codex:$cm,claude:$am,claude_effort:$ce,codex_effort:$xe,claude_permission_mode:$mode} | .viewer = $viewer | .viewer_permission = $permission | .status = "running"' \
         --arg git "$GIT_VERSION" --arg gh "$GH_VERSION" --arg codex "$CODEX_VERSION" --arg claude "$CLAUDE_VERSION" --argjson configuration "$RUN_CONFIGURATION" --arg ce "$CLAUDE_EFFORT" --arg xe "$CODEX_EFFORT" --arg cm "$CODEX_MODEL" --arg am "$CLAUDE_MODEL" --arg mode "$PERMISSION_MODE" --arg viewer "$VIEWER" --arg permission "$VIEWER_PERMISSION"
     say "Artifacts: $RUN_DIR"
 }
 prepare_worktree() {
-    local attempt fetched_head fetched_base matched=false old_head old_merge
+    local attempt fetched_head fetched_base base_source matched=false old_head old_merge
     if jq -e '.snapshot_update!=null' "$RUN_DIR/manifest.json" >/dev/null; then finish_snapshot_update; fi
     for attempt in 1 2; do
         BASE_BRANCH=$(jq -r .baseRefName "$SCRATCH/pr.json")
-        git fetch --no-tags --refmap= --no-write-fetch-head "$REMOTE" "+refs/pull/$PR/head:$HEAD_REF" "+refs/heads/$BASE_BRANCH:$BASE_REF" || die 'Cannot fetch PR and base'
+        base_source=refs/heads/$BASE_BRANCH
+        # Closed PR metadata can retain a historical base while the branch moves
+        # on. Fetch that recorded commit, preserving historical review support.
+        if [[ $(jq -r .state "$SCRATCH/pr.json") != OPEN ]]; then
+            base_source=$(jq -r .baseRefOid "$SCRATCH/pr.json")
+        fi
+        git fetch --no-tags --refmap= --no-write-fetch-head "$REMOTE" "+refs/pull/$PR/head:$HEAD_REF" "+$base_source:$BASE_REF" || die 'Cannot fetch PR and base'
         # Metadata after fetch closes normal setup races without assuming base is stationary.
         fetch_pr_metadata "$SCRATCH/pr.json"
         fetched_head=$(git rev-parse "$HEAD_REF"); fetched_base=$(git rev-parse "$BASE_REF")

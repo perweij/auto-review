@@ -4,6 +4,7 @@ prepare_contributions() {
     recover_actions
     collect_discussion
     if $DISCUSSION_READY; then reconcile_contributions; fi
+    collect_review_status
 }
 reconcile_contributions() {
     local output=$RUN_DIR/reviews/contributions.json previous_hash='' attempts=0

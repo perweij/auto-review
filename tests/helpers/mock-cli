@@ -29,6 +29,7 @@ if [[ $tool == gh ]]; then
             [[ ${MOCK_PR_INACCESSIBLE:-} != 1 ]] || exit 1
             head=$(git --git-dir="$FIXTURE/remote.git" rev-parse refs/pull/7/head)
             base=$(git --git-dir="$FIXTURE/remote.git" rev-parse refs/heads/main)
+            base=${MOCK_PR_BASE_SHA:-$base}
             jq -nc --arg head "$head" --arg base "$base" --arg author "${MOCK_AUTHOR:-author}" --arg state "${MOCK_PR_STATE:-OPEN}" --arg host "${MOCK_HOST:-github.com}" \
                 '{number:7,title:"A useful change",body:"PR description",url:("https://"+$host+"/org/repo/pull/7"),state:$state,isDraft:false,baseRefName:"main",baseRefOid:$base,headRefName:"feature",headRefOid:$head,isCrossRepository:true,author:{login:$author}}'
         else echo 'Rendered discussion'; fi
@@ -43,12 +44,17 @@ if [[ $tool == gh ]]; then
                 body=@*) body=${arg#body=@} ;;
             esac
         done
-        if $post && [[ $* == *'--input -'* ]]; then
+        if { $post || [[ $endpoint == graphql ]]; } && [[ $* == *'--input -'* ]]; then
             exec python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mock-gh-json.py" "$endpoint"
         fi
         case $endpoint in
             user) echo "${MOCK_VIEWER:-reviewer}" ;;
             graphql)
+                if [[ $* == *latestOpinionatedReviews* ]]; then
+                    if [[ -f $FIXTURE/review-status.json ]]; then cat "$FIXTURE/review-status.json"
+                    else echo '{"data":{"viewer":{"login":"reviewer"},"repository":{"pullRequest":{"number":7,"reviewDecision":null,"viewerLatestReview":null,"latestOpinionatedReviews":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}'; fi
+                    exit
+                fi
                 if [[ ${MOCK_GRAPHQL_FAIL:-} == 1 ]]; then echo '{"errors":[{"message":"forbidden"}],"data":{}}'; exit; fi
                 count=$(cat "$FIXTURE/refresh-count" 2>/dev/null || echo 0)
                 count=$((count+1)); echo "$count" > "$FIXTURE/refresh-count"
@@ -165,7 +171,8 @@ if [[ ${MOCK_ADAPT:-} == 1 ]]; then
 fi
 
 stage=claude
-if [[ $tool == codex && $* == *contributions.schema.json* ]]; then stage=contributions
+if [[ $* == *followup.schema.json* || $* == *suggested_reply* ]]; then stage=followup
+elif [[ $tool == codex && $* == *contributions.schema.json* ]]; then stage=contributions
 elif [[ $tool == codex && $* == *synthesis.schema.json* ]]; then stage=synthesis
 elif [[ $tool == codex ]]; then stage=codex
 elif [[ $* == *validity_conflicts* ]]; then stage=contributions
@@ -183,7 +190,7 @@ if [[ $stage == claude ]]; then
         [[ ! -f $directory/reviews/codex.md ]] || exit 8
     done
 fi
-if [[ $stage == synthesis || $stage == contributions ]]; then cat > "$FIXTURE/$stage-stdin"; else
+if [[ $stage == synthesis || $stage == contributions || $stage == followup ]]; then cat > "$FIXTURE/$stage-stdin"; else
     # Independent invocations must receive EOF, even with interactive parent stdin.
     [[ -z $(cat) ]] || exit 9
 fi
@@ -255,6 +262,10 @@ elif [[ $stage == claude ]]; then
     echo '{"type":"assistant","message":"investigating"}'
     if [[ ${MOCK_CLAUDE_ERROR:-} == 1 ]]; then echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"result":"Budget exceeded"}'
     else echo '{"type":"result","subtype":"success","is_error":false,"result":"Claude independent finding: source.txt:1","permission_denials":[]}'; fi
+elif [[ $stage == followup ]]; then
+    if [[ -f $FIXTURE/followup-model.json ]]; then result=$(cat "$FIXTURE/followup-model.json")
+    else result='{"assessments":[{"thread_key":"thread:T1","outcome":"ADDRESSED","evidence":"Current implementation persists the retry key.","limitations":"Code tracing only; no tests run.","suggested_reply":""}]}'; fi
+    jq -nc --argjson result "$result" '{type:"result",subtype:"success",is_error:false,structured_output:$result}' | emit_structured
 elif [[ $stage == synthesis ]]; then
     if [[ ${MOCK_SCHEMA_INVALID:-} == 1 ]]; then echo '{"type":"result","subtype":"success","structured_output":{"recommendation":"MAYBE"}}' | emit_structured
     else

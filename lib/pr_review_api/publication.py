@@ -4,6 +4,7 @@ import json
 import uuid
 
 from .common import ApiError, ROOT, atomic_json, command, digest, git, now, read_json
+from . import workflow
 
 
 def checkout(session):
@@ -44,14 +45,13 @@ def refresh(session, state):
     new_hash = session.manifest.get("discussion", {}).get("hash")
     pr = read_json(session.path / "publication/pr-latest.json", {})
     state["checked"] = {"at": now(), "head": pr.get("headRefOid"), "pr": pr}
+    affected = workflow.affected_drafts(state["discussion"], discussion, state["comments"]) if old_hash != new_hash else []
     state["discussion"], state["discussion_hash"] = discussion, new_hash
-    affected = []
     if old_hash != new_hash:
         for comment in state["comments"]:
-            if comment["status"] == "staged":
+            if comment["id"] in affected:
                 comment["status"] = "unstaged"
                 comment["needs_attention"] = "Discussion changed; inspect it and acknowledge this comment before staging again."
-                affected.append(comment["id"])
     state.pop("prepared", None)
     session.save(state)
     return affected
@@ -86,7 +86,7 @@ def make_actions(session, state):
         identity = "api-" + uuid.uuid4().hex
         comment_markers = {c["id"]: marker(session, identity + "/" + c["id"]) for c in review}
         payload = {"commit_id": session.git.head,
-                   "event": state["verdict"] if not state["verdict_submitted"] else "COMMENT",
+                   "event": state["verdict"] if state.get("verdict_requested") and not state["verdict_submitted"] else "COMMENT",
                    "body": with_marker(overall[0]["body"] if overall else "", marker(session, identity))}
         inline = []
         for c in review:
@@ -234,16 +234,20 @@ def prepare(session, state):
                 actions[index] = copy.deepcopy(previous)
                 actions[index]["status"] = "draft"
                 break
-    batch = {"id": uuid.uuid4().hex, "actions": actions, "created_at": now()}
+    batch = {"id": uuid.uuid4().hex, "actions": actions, "created_at": now(),
+             "review_status": workflow.status_fingerprint(session)}
     state["prepared"] = batch
     session.save(state)
     counts = {"inline": sum(len(a["payload"].get("comments", [])) for a in actions),
               "replies": sum(a["kind"] == "reply" for a in actions),
               "overall": sum(c["status"] == "staged" and c["placement"]["kind"] == "review" for c in state["comments"])}
+    warnings = ([f"{state['blocking_findings']} retained blocking findings remain."]
+                if state.get("blocking_findings", 0) and any(a["event"] == "APPROVE" for a in actions) else [])
+    if session.manifest.get("analysis_kind") == "followup":
+        warnings.append(f"Limited coverage: only {len(session.manifest.get('followup_threads', []))} selected conversations were assessed; the whole PR was not reviewed.")
     return {"ready": True, "confirmation": digest(batch), "counts": counts,
             "verdict": next((a["event"] for a in actions if a["kind"] == "review"), None),
-            "warnings": ([f"{state['blocking_findings']} retained blocking findings remain."]
-                         if state.get("blocking_findings", 0) and any(a["event"] == "APPROVE" for a in actions) else []),
+            "warnings": warnings,
             "review": session.view(state)}
 
 
@@ -262,6 +266,9 @@ def publish(session, state, request):
                 "review": session.view(state)}
     if refresh(session, state):
         return {"complete": False, "reason": "Discussion changed after confirmation.", "review": session.view(state)}
+    if batch.get("review_status") != workflow.status_fingerprint(session):
+        return {"complete": False, "reason": "GitHub review status changed. Inspect it and prepare publication again.",
+                "review": session.view(state)}
     bridge(session, "validate", next((a["event"] for a in batch["actions"] if a["kind"] == "review"), "COMMENT"))
     for previous in (a for b in state["batches"] for a in b["actions"]):
         if previous["status"] in ("draft", "failed"):
@@ -273,6 +280,9 @@ def publish(session, state, request):
         # the shared discussion collector, including implicit review wrappers.
         if refresh(session, state):
             return {"complete": False, "reason": "Discussion changed; unsent comments need inspection.", "review": session.view(state)}
+        if not any(a["status"] == "published" and a["kind"] == "review" for a in batch["actions"]) and batch.get("review_status") != workflow.status_fingerprint(session):
+            return {"complete": False, "reason": "GitHub review status changed; prepare the remaining publication again.",
+                    "review": session.view(state)}
         bridge(session, "validate", action["event"])
         action["status"] = "submitting"
         persist_action(session, state, action)

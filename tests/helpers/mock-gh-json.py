@@ -26,6 +26,14 @@ def count(name):
 
 user = {"login": os.environ.get("MOCK_VIEWER", "reviewer")}
 common = {"user": user, "created_at": "2026-01-03", "updated_at": "2026-01-03"}
+if endpoint == "graphql":
+    operation = "unresolveReviewThread" if "unresolveReviewThread" in payload["query"] else "resolveReviewThread"
+    threads = read("threads.json", [])
+    thread = next(t for t in threads if t["id"] == payload["variables"]["id"])
+    thread["isResolved"] = operation == "resolveReviewThread"
+    write("threads.json", threads)
+    print(json.dumps({"data": {operation: {"thread": {"id": thread["id"], "isResolved": thread["isResolved"]}}}}))
+    sys.exit(0)
 if endpoint.endswith("/replies"):
     number = count("reply-count")
     if os.environ.get("MOCK_REPLY_FAIL_AT") == str(number):

@@ -101,10 +101,11 @@ finish_publication_reset() {
 }
 commit_review_attempt() {
     local stage report previous promotion_fd
-    $CONTRIBUTIONS_READY || return 0
+    if [[ ${ANALYSIS_KIND:-full} != followup ]]; then $CONTRIBUTIONS_READY || return 0; fi
     [[ -L $SESSION_DIR/.pending-review && $(realpath -e "$SESSION_DIR/.pending-review") == "$RUN_DIR" ]] || return 0
     local -a stages=(synthesis contributions)
     if dual_review; then stages=(claude codex "${stages[@]}"); fi
+    if [[ ${ANALYSIS_KIND:-full} == followup ]]; then stages=(followup); fi
     jq -e --argjson stages "$(jq -cn --args '$ARGS.positional' -- "${stages[@]}")" '.phases as $phases | all($stages[]; $phases[.].status=="completed")' "$RUN_DIR/manifest.json" >/dev/null ||
         die 'Replacement review is incomplete; previous review remains current'
     for stage in "${stages[@]}"; do

@@ -140,4 +140,33 @@ Useful regression scenarios for that audit include:
 - A previously resolved concern recurs and needs follow-up or reopening.
 - A reviewer lacks permission to resolve, reopen, or dismiss the relevant item.
 
-No implementation audit or refactoring was performed as part of this research.
+The research above preceded implementation. The following coverage record tracks
+the subsequent reviewer follow-up work.
+
+## Implementation coverage: reviewer follow-up
+
+The Emacs interface now keeps draft publication and conversation follow-up
+separate. `C` opens all conversations, `F` checks selected threads against the
+latest source, and `x`/`X` explicitly resolve/reopen a thread. The backend exposes
+the same capabilities through its versioned API. Models propose assessments;
+they do not perform GitHub workflow actions.
+
+| Capability | Coverage and evidence |
+| --- | --- |
+| Separate assessment, conversation, submitted decision, and next verdict | Implemented in the API state view and Emacs status summary. `tests/test_workflow.py` checks independent verdict and resolution state. |
+| Preserve outdated unresolved conversations | Implemented in the Conversations view and assessment input. Backend and Emacs tests cover outdated-but-unresolved threads. |
+| Reply, resolve, and reopen | Implemented with explicit actions, current permission checks, fresh-context checks, and read-back after uncertain responses. Resolution is separate from staged publication. |
+| Review selected concerns after new commits | Implemented as limited follow-up generations using the saved processing provider and focused verification. `tests/followup.bats` covers latest-head analysis, reuse, failure/resume, provider selection, and returning to full review. |
+| Choose the overall verdict | Implemented. New draft generations default to Comment; stronger verdicts require explicit selection. Limited follow-up publication discloses its scope. |
+| Preserve staged work during refresh | Implemented through discussion dependencies. Thread replies depend on their selected/referenced conversations; new inline and overall comments conservatively depend on all discussion content. Unrelated resolution metadata does not unstage them. |
+| Inspect submitted GitHub review status | Implemented as optional cached metadata, separate from publication receipts and the model recommendation. Missing status remains unavailable. Later Comment activity is shown separately from opinionated review state. |
+| New inline comments, multiline ranges, local drafts, and exact publication | Existing shared draft/publication workflow retained. Published comments remain read-only; follow-ups create new drafts. |
+| General timeline comments, dedicated file-level comments, suggestion application, and GitHub-native pending-review editing | Delegated to GitHub/Forge. The tool supports an overall review assessment and editable comment text, but does not claim dedicated controls for all these operations. |
+| Review requests, dismissals, remote comment editing/deletion, and file-viewed synchronization | Deliberately delegated to GitHub/Forge in this iteration. |
+| Complete merge-policy interpretation and merge administration | Delegated to GitHub. The displayed aggregate review status is not a complete merge-eligibility calculation. |
+
+The workflow tests use mocked GitHub/model responses and real local Git snapshots;
+they do not validate a model's semantic accuracy or publish to a live PR. Full
+validation uses the backend checks plus Emacs byte compilation and ERT. See
+[the API contract](api.md) and [Emacs usage](../emacs/README.md) for operations and
+compatibility behavior.

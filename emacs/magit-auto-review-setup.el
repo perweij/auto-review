@@ -101,7 +101,8 @@
           (append
            (if magit-auto-review--session
                `((command . "settings") (session . ,magit-auto-review--session))
-             `((command . "settings") (pr . ,magit-auto-review--target) (cwd . ,default-directory)))
+             `((command . "settings") (pr . ,magit-auto-review--target) (cwd . ,default-directory)
+               (repository . ,magit-auto-review--repository)))
            `((defaults . ((reviewers . ,(vconcat magit-auto-review-reviewers))
                           (processing_provider . ,magit-auto-review-processing-provider)
                           (claude_model . ,magit-auto-review-claude-model)
@@ -283,7 +284,10 @@
    ("t" (lambda () (magit-auto-review--setup-label 'synthesis_tests "Testing"))
     (lambda () (interactive) (magit-auto-review--choice-open 'synthesis_tests)) :transient t)]
   [:class transient-column :setup-children magit-auto-review--setup-info]
-  ["Proceed"
+  [:description (lambda () (format "PR #%s · %s"
+                                  (or (alist-get 'pr magit-auto-review--review) magit-auto-review--target)
+                                  (or (alist-get 'repository magit-auto-review--review)
+                                      magit-auto-review--repository "current repository")))
    ("r" "Run/resume" magit-auto-review-setup-submit :inapt-if (lambda () (not (magit-auto-review--setup-ready-p))))
    ("g" "Refresh choices / retry" magit-auto-review-refresh-choices :transient t)
    ("q" "Cancel" transient-quit-one)])

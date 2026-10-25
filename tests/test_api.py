@@ -136,16 +136,17 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(published["complete"])
         self.assertEqual(posts[0][1]["comments"][0]["body"].split("\n\n<!--")[0], "Exact human wording")
 
-    def test_initial_verdict_uses_model_suggestion_without_overwriting_saved_choice(self):
+    def test_initial_verdict_requires_explicit_choice_and_preserves_it(self):
         synthesis = read_json(self.path / "reviews/synthesis.json")
         synthesis["recommendation"] = "REQUEST_CHANGES"
         atomic_json(self.path / "reviews/synthesis.json", synthesis)
-        self.assertEqual(dispatch(self.request())["verdict"], "REQUEST_CHANGES")
+        self.assertEqual(dispatch(self.request())["verdict"], "COMMENT")
         self.assertEqual(publication.make_actions(self.session, self.session.load()), [])
         self.change("stage", comment="p1")
+        self.assertEqual(publication.make_actions(self.session, self.session.load())[0]["event"], "COMMENT")
+        self.change("verdict", verdict="REQUEST_CHANGES")
+        self.assertEqual(dispatch(self.request())["verdict"], "REQUEST_CHANGES")
         self.assertEqual(publication.make_actions(self.session, self.session.load())[0]["event"], "REQUEST_CHANGES")
-        self.change("verdict", verdict="COMMENT")
-        self.assertEqual(dispatch(self.request())["verdict"], "COMMENT")
 
     def test_own_pr_defaults_to_comment_and_explains_unavailable_verdicts(self):
         synthesis = read_json(self.path / "reviews/synthesis.json")
@@ -308,6 +309,50 @@ class ApiTest(unittest.TestCase):
         self.change("restore", comment="p1")
         self.assertEqual(self.session.load()["comments"][0]["status"], "unstaged")
 
+    def test_new_comment_preview_validates_attachment_without_saving_any_draft(self):
+        self.change("stage", comment="p1")
+        before = self.session.file.read_bytes()
+        request = self.request("preview-comment", title="New observation", body="",
+                               placement={"kind": "inline", "path": "source.txt", "side": "RIGHT", "line": 2})
+        result = dispatch(request)
+        preview = next(c for c in result["review"]["comments"] if c["id"] == result["comment"])
+        self.assertTrue(preview["composing"])
+        self.assertEqual(preview["context"]["path"], "source.txt")
+        self.assertEqual(result["review"]["revision"], request["revision"])
+        self.assertEqual(self.session.file.read_bytes(), before)
+        self.assertEqual(len(dispatch(self.request())["comments"]), 2)
+        for placement in (None, {"kind": "unplaced"}, {"kind": "reply", "key": "thread:missing"}):
+            with self.subTest(placement=placement), self.assertRaises(ApiError):
+                dispatch({**request, "placement": placement})
+        self.assertEqual(self.session.file.read_bytes(), before)
+        saved = self.change("create", title=preview["title"], body="A complete new comment", placement=preview["placement"])
+        self.assertEqual(len(saved["review"]["comments"]), 3)
+        self.assertEqual(saved["review"]["comments"][-1]["body"], "A complete new comment")
+        self.assertNotIn("composing", saved["review"]["comments"][-1])
+        with self.assertRaises(ApiError) as stale:
+            dispatch(request)
+        self.assertEqual(stale.exception.code, "stale_revision")
+
+    def test_two_drafts_in_one_thread_can_be_staged_and_discarded_independently(self):
+        state = self.session.load()
+        state["discussion"]["items"] = [{"key": "thread:test", "kind": "thread", "root_id": 88,
+                                         "can_reply": True, "path": "source.txt", "line": 2,
+                                         "comments": [{"id": 88, "body": "Posted comment"}]}]
+        self.session.save(state)
+        placement = {"kind": "reply", "key": "thread:test"}
+        first = self.change("create", title="Reply", body="Keep this reply", placement=placement)["changed"][0]
+        second = self.change("create", title="Reply", body="Added by mistake", placement=placement)["changed"][0]
+        self.change("stage", comment=first)
+        result = self.change("suppress", comment=second)
+        self.assertEqual(next(c["status"] for c in result["review"]["comments"] if c["id"] == first), "staged")
+        self.assertEqual(next(c["status"] for c in result["review"]["comments"] if c["id"] == second), "suppressed")
+        actions = publication.make_actions(self.session, self.session.load())
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["comment_ids"], [first])
+        self.assertEqual(self.session.load()["discussion"], state["discussion"])
+        self.change("restore", comment=second)
+        self.assertEqual(next(c["body"] for c in self.session.load()["comments"] if c["id"] == second), "Added by mistake")
+
     def test_placement_override_keeps_text_and_unstages(self):
         self.change("edit", comment="p1", body="Human wording")
         self.change("stage", comment="p1")
@@ -340,6 +385,37 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(recovered["placement"]["kind"], "unplaced")
         self.assertEqual(recovered["status"], "unstaged")
         self.assertEqual(len(dispatch(self.request("history"))["generations"]), 2)
+
+    def test_latest_read_replaces_issues_after_head_changes(self):
+        self.change("edit", comment="p1", body="Old saved wording")
+        old_generation = self.session.id
+        candidate = Path(str(self.path) + "-history") / "attempt-new"
+        shutil.copytree(self.path, candidate)
+        self.git("commit", "--allow-empty", "-qm", "Updated feature")
+        manifest = read_json(candidate / "manifest.json")
+        manifest["session_directory"] = str(self.path)
+        manifest["snapshot"]["head"] = self.git("rev-parse", "HEAD")
+        atomic_json(candidate / "manifest.json", manifest)
+        # Reuse an ID, but remove the other old issue and change the wording.
+        ledger = read_json(candidate / "publication/contributions.json")
+        ledger["proposals"] = ledger["proposals"][:1]
+        ledger["proposals"][0]["basis"]["body_md"] = "Latest analysis wording"
+        ledger["proposals"][0]["body_md"] = "Latest analysis wording"
+        atomic_json(candidate / "publication/contributions.json", ledger)
+        (self.path / ".pending-review").symlink_to(candidate)
+        pending = dispatch(self.request(generation=None))
+        self.assertEqual(pending["generation"], old_generation)
+        self.assertEqual(len(pending["comments"]), 2)
+        (self.path / ".current-review").symlink_to(candidate)
+        (self.path / ".pending-review").unlink()
+        current = dispatch(self.request(generation=None))
+        self.assertNotEqual(current["generation"], old_generation)
+        self.assertEqual(current["snapshot"]["head"], manifest["snapshot"]["head"])
+        self.assertEqual([c["id"] for c in current["comments"]], ["p1"])
+        self.assertEqual(current["comments"][0]["body"], "Latest analysis wording")
+        old = dispatch(self.request())
+        self.assertEqual(len(old["comments"]), 2)
+        self.assertEqual(old["comments"][0]["body"], "Old saved wording")
 
     def test_generation_and_body_versions_survive_git_gc(self):
         self.change("edit", comment="p1", body="Saved wording")
@@ -390,6 +466,8 @@ class ApiTest(unittest.TestCase):
         manifest = read_json(self.path / "manifest.json")
         manifest["discussion"]["hash"] = "different"
         atomic_json(self.path / "manifest.json", manifest)
+        atomic_json(self.path / "discussion/snapshot-a/discussion.json",
+                    {"items": [{"key": "comment:9", "kind": "comment", "comments": [{"id": 9, "body": "New evidence"}]}]})
         with patch.object(publication, "bridge"):
             result = dispatch(self.request("refresh"))
         c = result["review"]["comments"][0]

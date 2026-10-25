@@ -87,6 +87,10 @@ reused only when their inputs still match. If no run matches or several match,
 it stops with guidance; `--resume` explicitly selects a run, including one stored
 outside the current state directory. Existing worktrees are never overwritten.
 
+Open PRs are checked against the current base branch. Closed or merged PRs use
+the base commit recorded in GitHub's PR metadata, so later changes to the base
+branch do not prevent a historical review. Publication remains disabled for them.
+
 When the PR head or merge-base changes, rerunning automatically updates the review.
 A separate working attempt is created for the new review. The earlier artifacts
 (including selections, human edits and publication receipts) remain available,
@@ -232,8 +236,9 @@ they add to the conversation:
 Replies consider the complete conversation, including later corrections, questions,
 and conclusions. They explain what is new instead of repeating the opening comment.
 Selected additions to one thread become one reply. Follow-ups to timeline comments
-or review bodies go in the main review with links. The tool never resolves or
-reopens threads. An outdated comment is not automatically a resolved issue.
+or review bodies go in the main review with links. Models never resolve or reopen
+threads. The Emacs Conversations view supports explicit reviewer resolution and
+reopening. An outdated comment is not automatically a resolved issue.
 
 Use `t p1` to toggle a proposal, `i p1` to inspect its full discussion, `e p1` to
 edit its draft, `s` to inspect suppressed duplicates, `v` to preview the batch, and
@@ -340,9 +345,41 @@ earlier fix. These are sample-based checks, not a guarantee of model judgment.
 The optional [Emacs package](emacs/README.md) shows review comments directly in
 their code and discussion context. Use native sections to stage, unstage, edit,
 correct placement, browse saved generations, and publish exact inline comments.
-`M-x magit-auto-review` opens a saved review without running models. A versioned
+`M-x magit-auto-review` opens a repository PR list using saved local data. Press
+`g` there to discover open PRs on GitHub, then `RET` to open one or `R r` to
+configure and run it. `B` returns from a review to the list. Opening from a Forge
+PR goes directly to that PR. Opening the list or a review never runs models. A versioned
 [JSON API](docs/api.md) keeps the frontend independent of private state files.
 
 The package lives alongside the backend under `emacs/`, with separate checks and
 a [Guix package definition](guix.scm). The ordinary CLI remains independently
 usable. Run `make check-backend`, `make check-emacs`, or `make check-all`.
+
+## Following up on review conversations
+
+In Emacs, `C` opens all saved conversations, with unresolved threads (including
+outdated ones) separate from resolved threads. `c` composes an attached reply;
+`C-c C-c` saves it locally and `C-c C-k` cancels it. Each reply is a separate
+draft that can be staged or suppressed independently. `x` resolves a conversation
+and `X` reopens it. These explicit thread
+actions refresh and validate GitHub state first. They do not change your review
+verdict. Opening the view and `g` remain local; `G` refreshes GitHub.
+
+`F` checks the conversation at point or selected conversation headings against
+the latest pushed code, using the saved processing provider. This creates a
+limited follow-up generation without running another full PR review. It reports
+Addressed, Still present, No longer applicable, or Uncertain, with evidence and
+verification limits. Read the assessments before resolving or replying. No
+assessment automatically creates a draft, posts a reply, or changes thread state.
+
+The backend equivalent is `pr-review api` with `command: "followup"`; the CLI
+also accepts repeated `--followup-thread thread:KEY` options when resuming an
+existing review. Follow-up always uses focused checks, regardless of the full
+review's synthesis testing setting. Earlier reports, edits and receipts remain
+in history. Follow-up does not transfer old drafts or imply whole-PR approval.
+
+New API/Emacs draft generations default to Comment. Approve and Request changes
+require an explicit reviewer choice, separate from the model recommendation and
+the last submitted GitHub review. GitHub review status is not overall merge
+eligibility. See the [workflow overview](docs/github-review-process-overview.md)
+for the state model and features delegated to GitHub/Forge.

@@ -21,10 +21,12 @@ opaque identities, not paths clients should interpret.
 | --- | --- | --- |
 | `capabilities` | none | Protocol version, features, command names |
 | `discover` | `cwd`, optional `pr`, `repository` | Matching saved sessions in this Git common directory |
+| `pull-requests` | `cwd`, optional `repository` | Repository choices, cached PR list, last-check time, and matching saved sessions |
 | `read` | `session`, optional `generation` | Saved review, comments, contextual rows/threads, staging, last check, operations |
 | `history` | `session` | Generations, commits, times, status, saved edits/document counts |
 | `diff` | `session`, `generation`, optional `path` | Reviewed changed files, hunks, and patches |
 | `file` | `session`, `generation`, `path`, optional `side`, `commit` | Immutable Git blob text and revision |
+| `preview-comment` | `session`, `generation`, `revision`, `placement`, optional `title`, `body` | Unsaved comment rendered in context; no draft is persisted |
 
 Omitting `generation` in `read` selects the completed current generation. Pin
 the returned identity for subsequent reads; do not silently follow a pointer.
@@ -33,6 +35,22 @@ and verified running operations. Explicit `g` in the main UI selects current;
 history buffers keep reading their pinned generation until the user chooses
 `N` to open current. Background completion never replaces the displayed text,
 and an open inline editor prevents structural refresh.
+
+Repository discovery is separate from saved review discovery. `pull-requests`
+returns `{repositories,repository,checked_at,pull_requests}`; each PR has `pr`,
+`repository`, `url`, `title`, `state`, and `sessions`. Cached GitHub rows also have
+`draft` and `head_branch`. An unrefreshed saved PR has state `UNKNOWN`. Multiple
+repository remotes require an explicit `repository` selection before refresh;
+PR numbers and saved sessions are scoped to that repository.
+
+With `refresh: true`, `pull-requests` explicitly contacts GitHub without model
+calls. It lists every page of open PRs and fetches the current state of saved PRs
+missing from that list. Only a complete successful refresh replaces the cache;
+errors preserve the prior list and all review drafts. This uses GitHub's
+[pull request endpoints](https://docs.github.com/en/rest/pulls/pulls) and
+[`gh api` pagination](https://cli.github.com/manual/gh_api). Opening the repository
+list remains local; `g` in that list refreshes GitHub. In an individual review,
+`g` retains its existing local-results behavior.
 
 Rows have `old`, `new`, `kind`, `text`, and `highlight`. Comments carry their
 actual primary context and full saved thread. `thread_contexts` exposes choices
@@ -84,6 +102,14 @@ process lifecycle and does not occupy the review-operation slot.
 
 ## Local mutations
 
+`preview-comment` validates an explicit attachment against the current generation
+and revision. It returns `{review,comment}` with one temporary comment marked
+`composing: true`. The review's revision remains the saved revision. That comment
+ID is only for rendering; it cannot be edited, staged, or published through the
+API. Cancelling drops the preview locally. Saving uses `mutate/create` with the
+chosen title, body, and placement, which returns a new persistent ID. The Emacs
+composer requires nonempty text before saving and keeps the input after errors.
+
 Every mutation includes `session`, `generation`, and the last read `revision`.
 Stale requests fail without applying changes. The result returns a fresh
 `review`, `changed` IDs, and `skipped` IDs/reasons. Store the returned revision.
@@ -129,7 +155,10 @@ save it explicitly into a current draft.
 
 - `refresh`: fetch complete GitHub context, record last checked head/time,
   retain manual text/placement, and unstage affected comments if discussion
-  changed. No LLM calls or automatic rewriting.
+  dependencies changed. Replies depend on their thread and referenced discussions;
+  inline/overall drafts retain conservative review-wide content dependencies.
+  Unrelated resolution or review-status metadata does not unstage drafts. No LLM
+  calls or automatic rewriting.
 - `run`: run/resume with `session` or `cwd` plus `pr` (number or URL), optional
   `repository`, `reviewers` (nonempty array containing `claude`, `codex`, or both),
   `processing_provider`, `claude_model`, `codex_model`, `claude_effort`,
@@ -190,10 +219,59 @@ one explicitly written overall assessment in a review. An explicitly chosen
 verdict may be submitted without comments. Replies-only batches have no new
 review verdict. Hidden markers accompany exact saved human wording.
 
-For a newly imported generation, the initial verdict follows the model's
-recommendation when permitted for the authenticated account, otherwise COMMENT.
-Existing saved verdict choices are preserved. This is one overall PR assessment;
+For a newly imported generation, the initial verdict is COMMENT. APPROVE and
+REQUEST_CHANGES require explicit `verdict` selection; legacy automatic defaults
+are interpreted as COMMENT. Existing explicit choices and in-flight publication
+receipts are preserved. This is one overall PR assessment;
 individual comments do not have separate verdicts.
+
+## Conversations and limited follow-up
+
+Capabilities advertise `conversations`, `review-status`, and `followup`. `read`
+adds `coverage: {kind: "full"|"followup", threads: [...]}`, `review_status`, and
+`followup_assessments`. Legacy generations default to full coverage. A follow-up
+has `recommendation: null`; it makes no overall model recommendation. Each history
+entry includes `analysis_kind`.
+
+`review_status` contains `available`, `checked_at`, GitHub's aggregate review
+`decision`, the viewer's latest `opinionated` review, and `latest_activity`.
+Review objects retain GitHub's `id`, `state`, `submittedAt`, `url`, and `commit.oid`.
+Missing optional status support means unavailable, not approved. This metadata is
+separate from discussion fingerprints and is not overall merge eligibility.
+
+Thread records add nullable `can_resolve`, `can_unresolve`, and `resolved_by`.
+Each `thread_contexts` entry includes `participated` and an `expected` token object.
+Keep `is_outdated` and `is_resolved` separate.
+
+`thread-state` takes the ordinary session/generation/revision fields, `thread`
+(a saved thread key), `resolved` (boolean), and the displayed context's `expected`
+object. This explicit command performs one direct network operation; it is not a
+draft mutation or staged publication. It checks the authenticated account, PR
+membership/open state, permissions, current head, and thread contents. Changed
+context returns a refreshed `review` and a reason without writing. An already
+satisfied state is a no-op. Responses contain `changed`, `reason`, `review`, and
+optionally `uncertain`; read-back after a lost response reports observed state
+without claiming authorship or blindly retrying. The existing `resolve` command
+continues to mean publication-receipt recovery.
+
+`followup` takes session/generation/revision and a nonempty `threads` array of
+distinct saved thread keys. Optional model settings and `trusted_snapshot` follow
+`run` conventions. It refreshes GitHub, pins the latest source, invokes only the
+saved processing provider, and creates a limited generation through the existing
+attempt/history machinery. Focused verification is always used. Like `run`, it
+emits operation progress, supports cancellation, and returns the new generation
+without changing the displayed view. Repeating unchanged inputs reuses results.
+
+Each assessment has `thread_key`, `outcome` (ADDRESSED, STILL_PRESENT,
+NOT_APPLICABLE, or UNCERTAIN), `evidence`, `limitations`, and `suggested_reply`
+(possibly empty). Read views add `head` and `stale`. No draft is created
+automatically. Clients can explicitly `create` an attached reply with a fresh
+suggestion and then use the existing edit/stage/prepare/publish flow.
+
+Follow-up preserves prior generations and starts with no carried drafts. An
+explicit overall verdict is permitted, but `prepare.warnings` discloses limited
+coverage. Review-status changes invalidate confirmation without unnecessarily
+unstaging drafts. Neither assessment nor thread resolution clears a review verdict.
 
 Intent is durable before each network request. Parent review and individual
 inline comment receipts are retained, and lookup matches marker, viewer,

@@ -34,6 +34,7 @@ case $operation in
         fetch_pr_metadata "$RUN_DIR/publication/pr-latest.json"
         collect_discussion
         $DISCUSSION_READY || die 'Complete GitHub discussion is unavailable'
+        collect_review_status
         ;;
     validate)
         current_viewer=$(gh api --hostname "$HOST" user --jq .login)

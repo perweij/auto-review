@@ -21,9 +21,17 @@ For a source checkout:
 
 Open a Git repository or a Forge pull request and run `M-x magit-auto-review`.
 Forge dispatch/topic menus use `V`; Magit dispatch uses `C-c r`, leaving its
-native `V` (Revert) binding intact. Existing reviews are discovered locally.
-If none exists, `R` opens review setup. Merely opening a buffer never invokes
-a model or contacts GitHub.
+native `V` (Revert) binding intact. From a repository, Auto-review opens a PR list
+using saved local data. Press `g` there to fetch open PRs from GitHub, including
+ones with no saved review. Saved closed/merged reviews remain in a separate group.
+Select a PR with `RET`, or use `R` to open its setup and `r` to run it. The setup
+menu shows the target PR. A sole old saved review is never selected automatically.
+
+If there are several repository remotes, choose which repository to list. Use `o`
+in the list (or `C-u M-x magit-auto-review`) to open a known PR number directly.
+Opening from a Forge PR still opens that PR directly. Merely opening a buffer
+never invokes a model or contacts GitHub; the list shows when it was last checked.
+A failed GitHub refresh retains the saved list and reports the error.
 
 For the adjacent stable-emacs checkout, use its `manifest-auto-review.scm`
 overlay. The frontend and backend are copied into the Guix store from this
@@ -54,14 +62,17 @@ Model CLI programs are required only for an explicit model operation.
 | `TAB`, native section navigation | Fold and navigate comments, code, and conversations |
 | `s` / `u` | Stage / unstage the whole comment, status group, or selected sibling headings |
 | `e` | Edit the comment body inline; surrounding context is read-only |
-| `C-c C-c` / `C-c C-k` | Save / cancel the inline edit |
+| `C-c C-c` / `C-c C-k` | Save the draft locally / cancel the new comment or edits |
+| `C-c ?` | Save/Cancel help while typing; `?` remains ordinary punctuation |
 | `C-c C-r` | Recover an unsaved/stale edit as a new current draft |
 | `C-c C-e` | Return to the active inline editor after scrolling away |
-| `c` / `f` | Create a comment at the code cursor / a follow-up draft to a published comment |
-| `k` / `r` | Suppress / restore a comment; suppression is reversible |
+| `c` / `f` | Choose an attachment and compose a new comment / follow-up |
+| `k` / `r` | Exclude the selected draft from publication (Suppressed) / restore it |
 | `a` | Choose code, an existing thread, overall assessment, or automatic placement |
 | `RET` | Visit the file at the reviewed revision with the actual range highlighted |
 | `d` / `l` | Full PR diff / secondary evidence locations |
+| `C` | Open Conversations, including unmatched and outdated unresolved threads |
+| `B` | Return to the repository PR list; `g` there discovers PRs on GitHub |
 | `g` | Open the latest completed results locally; history buffers stay pinned |
 | `G` | Explicitly refresh GitHub discussion and last-checked source information |
 | `R` / `N` | Configure and run/resume / open the current completed review from an older or history view |
@@ -79,6 +90,11 @@ new reviews use `magit-auto-review-reviewers`, `magit-auto-review-claude-model`,
 `magit-auto-review-codex-model`, the corresponding `*-effort` variables,
 `magit-auto-review-processing-provider`, and `magit-auto-review-synthesis-tests`.
 Menu changes do not alter these defaults.
+
+Inside an individual review, `g` reloads that PR's saved results and `R r`
+reruns that same PR. To review another PR, use `B`, refresh the list with `g`,
+and select it. Switching PR buffers preserves saved history and any inline edit
+in the previous buffer.
 
 | Setup key | Setting |
 | --- | --- |
@@ -133,6 +149,17 @@ reports the reasons, and moves to the first skipped comment. A finding with no
 structured primary location requires a manual placement; prose filenames are
 never turned into guessed anchors.
 
+Each draft item contains exactly one comment to publish, under **Your draft
+comment** or **Your draft reply**. Human comments have **Draft comment** or
+**Draft reply** headings rather than a model severity. The foldable **GitHub
+discussion** contains already posted messages for context. If two drafts reply
+to the same thread, stage one with `s` and exclude the other with `k` on its own
+heading or body. Only that outgoing draft is excluded; its context and history
+remain available in Suppressed. `r` restores it. These actions do not alter the
+GitHub thread. `?` explains the selected draft, posted discussion, or saved
+version; draft actions on posted messages or versions are blocked to avoid
+changing the containing draft by mistake.
+
 Code has old and new line numbers. Highlighted lines are the exact attachment,
 and your comment appears directly beneath them. Replies follow a foldable full
 conversation, including resolved/outdated labels. An outdated conversation uses
@@ -141,11 +168,26 @@ working-tree file. `q` returns from that window, the full diff, or evidence.
 
 `e` puts point in the displayed comment body and enables ordinary text typing.
 The body is highlighted and the header starts with **EDITING** and save/cancel
-keys. `C-c C-e` returns there if you scroll away. Single-letter review commands
-are suspended until you save or cancel. `c` on a code line creates a new comment
-attached to that line; elsewhere it creates an unplaced draft. `f` on a Published
-comment creates a separate follow-up draft: save its wording, then use `a` to
-choose its discussion or code attachment.
+keys. Save, Cancel, and `C-c ?` help also appear immediately above the input.
+An empty body shows “Type your comment here…” (or “Type your reply here…”);
+start typing at that prompt. The prompt is display-only and is never saved or
+published. Context and validation messages remain protected after rejected edits.
+`C-c C-e` returns to the body if you scroll away. Single-letter review commands
+are suspended until you save or cancel. `c` on a code line selects that attachment;
+elsewhere it asks for code, an existing thread, or an overall PR assessment before
+opening the editor. The code/thread picker uses `RET` to choose and `q` to cancel.
+`f` on a Published comment starts a separate follow-up and asks for its attachment
+unless it already identifies a reply thread. Existing drafts use `a` to change
+their attachment, including older unplaced drafts.
+
+New comments remain unsaved compositions until they have an attachment and
+nonempty text. `C-c C-c` saves them as Unstaged drafts and opens their text under
+Unstaged; it does not publish. This includes comments created on code inside a
+Staged item: each is a separate draft, with its own code context and attachment.
+Saving an existing edit also expands that draft and places point at its text.
+`C-c C-k` cancels a new comment without creating an empty item. When editing an
+existing draft, cancellation restores its saved text. Publishing remains `P p`
+after staging the desired drafts.
 
 Changing text or placement unstages the complete comment and preserves prior
 saved wording. Saving unchanged wording preserves staging. Manual placement is
@@ -167,13 +209,14 @@ Expand Staged to inspect the exact wording in code/conversation context. The
 heading shows **your** verdict; the model suggestion is separate. `v` (also in
 `P`) opens a chooser for Comment, Request changes, or Approve. This is one overall
 assessment of the PR, submitted with the staged batch, not a per-comment label.
-New drafts default to the model suggestion if GitHub allows it; existing saved
-choices are retained. On your own PR, GitHub permits Comment only, which still
+New drafts default to Comment; Approve and Request changes require your explicit
+choice. The model suggestion remains separate, and existing explicit choices are
+retained. On your own PR, GitHub permits Comment only, which still
 supports inline discussions. The choice belongs to this review, not global
 Transient defaults.
 
 `P p` refreshes and validates the source snapshot, complete discussion, account,
-and attachments. Changes that require inspection return affected comments to
+and attachments. Changed discussions return dependent comments to
 Unstaged. After reading a changed discussion, `i` marks it inspected; this does
 not stage, rewrite, or publish the draft. That action is offered only when
 inspection is required. Then stage again. The
@@ -198,6 +241,43 @@ After drafts have been saved through the API, the terminal CLI uses the same
 draft ledger through a terminal adapter. Switching interfaces cannot publish
 an obsolete generated aggregate body.
 
+## Conversations and follow-up
+
+`C` opens a separate Conversations buffer using the saved snapshot. All unresolved
+threads are listed, including outdated ones; resolved threads are available in a
+collapsed group. Each conversation contains its complete discussion, saved code
+context, participation marker, and any follow-up assessment. `g` loads saved
+results and `G` explicitly refreshes GitHub. `q` returns to the preceding view.
+
+| Key | Conversation action |
+| --- | --- |
+| `c` | Compose an attached reply; save locally with `C-c C-c` or cancel with `C-c C-k` |
+| `F` | Check the thread at point or selected sibling thread headings |
+| `x` / `X` | Resolve / reopen the thread after fresh permission and context checks |
+| `RET` / `b` | Visit saved code / open the conversation on GitHub |
+
+Resolve/Reopen are direct commands, separate from staged publication. If the
+source or discussion changed since display, the refreshed view asks you to inspect
+it and invoke the command again. An uncertain response is read back; no automatic
+retry is sent. Resolution does not change your submitted review verdict.
+
+`F` uses the saved processing provider and focused verification limits at the
+latest pinned commit. Its new generation assesses only selected conversations;
+it does not scan the whole PR or produce an overall model verdict. Each outcome
+includes evidence and limitations. Assessments become stale when their source or
+conversation changes. `c` can seed a reply from a fresh saved suggestion, but no
+draft, publication, or resolution happens automatically. The publication preview
+discloses limited coverage if you explicitly submit a verdict from this generation.
+
+The status summary separates GitHub's review status, your submitted decision,
+later Comment activity, and your next publication verdict. GitHub review status
+does not establish overall merge eligibility. Unrelated resolution metadata leaves
+drafts staged; changes to their discussion dependencies require inspection. New
+inline and overall comments retain conservative review-wide discussion dependencies.
+
+Recovery, cancellation, agent-configuration trust, and manual GitHub refresh are
+grouped under Advanced in the main help menu, with their existing keys.
+
 ## Generations and history
 
 A replacement finishing displays “New review ready” and records completion in
@@ -217,7 +297,9 @@ does not describe cached information as live.
 
 `h` lists generations, including earlier runs at the same commit, interrupted
 attempts, and saved human-edit counts. `RET` opens a read-only contextual view.
-Expand saved text versions under a comment or historical combined documents,
+Saved text versions are earlier wording for recovery, never additional outgoing
+comments. Empty or whitespace-only versions are omitted from the view; their
+stored history is retained. Expand a saved version or historical combined document,
 then use `y` to recover text into an existing current comment or a new Unstaged
 draft. A new recovered draft needs a current attachment before staging.
 

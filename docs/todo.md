@@ -1,6 +1,10 @@
 # Planned work
 
-## 1. Add an Advanced section to the Emacs help menu
+## Completed: Add an Advanced section to the Emacs help menu
+
+Implemented with reviewer follow-up. The main help menu groups `T`, `G`, `K`, and
+`y` under Advanced and preserves their bindings and existing contextual visibility.
+`T` remains available so a saved trust request can be inspected after a failure.
 
 The `?` menu mixes routine review actions with commands used only for recovery or exceptional situations. Add an **Advanced** section to `magit-auto-review-dispatch` so the usual review flow is easier to scan. Keep the existing keys.
 

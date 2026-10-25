@@ -1,0 +1,13 @@
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  viewer { login }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number reviewDecision
+      viewerLatestReview { id state submittedAt url commit { oid } }
+      latestOpinionatedReviews(first: 100, after: $cursor) {
+        nodes { id state submittedAt url author { login } commit { oid } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}

@@ -5,6 +5,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       reviewThreads(first: 100, after: $cursor) {
         nodes {
           id isResolved isOutdated viewerCanReply path line originalLine
+          viewerCanResolve viewerCanUnresolve resolvedBy { login }
           comments(first: 1) { totalCount nodes { databaseId } }
         }
         pageInfo { hasNextPage endCursor }

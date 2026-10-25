@@ -152,15 +152,27 @@ def run(request):
             flag = "--trust-agent-config" if field == "trusted_snapshot" else "--" + field.replace("_", "-")
             args += [flag, value]
     args += ["--reviewers", ",".join(configuration["reviewers"])]
+    for key in request.get("followup_threads", []):
+        args += ["--followup-thread", key]
     from .common import git
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd).stdout.strip()
     pr = str(session.manifest["pr"]) if request.get("session") else str(request.get("pr", "")).rstrip("/").split("/")[-1]
     stream([ROOT / "bin/pr-review", *args, "--no-publish"], cwd,
-           owner={"common": common, "pr": pr, "kind": "review"})
+           owner={"common": common, "pr": pr, "kind": "followup" if request.get("followup_threads") else "review"})
     if request.get("session"):
         current = Session({"session": str(session.root)})
         return {"session": str(current.root), "generation": current.id, "new_review_ready": True}
     return discover({**request, "cwd": cwd, "pr": pr})
+
+
+def followup(session, request):
+    keys = request.get("threads")
+    if (not isinstance(keys, list) or not keys or
+            any(not isinstance(k, str) or not k.startswith("thread:") or len(k) <= 7 for k in keys)
+            or len(keys) != len(set(keys))):
+        raise ApiError("invalid_request", "Select distinct existing conversations for follow-up.")
+    # The shell repeats selection validation against fresh, complete GitHub data.
+    return run({**request, "session": str(session.root), "followup_threads": sorted(keys)})
 
 
 def adapt(session, state, request):

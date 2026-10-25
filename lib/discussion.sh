@@ -60,3 +60,35 @@ discussion_unavailable() {
     warn "$1. Publication paused; local reports and drafts are retained."
     manifest '.discussion.complete = false | .discussion.error = $error | .publication.status = "paused"' --arg error "$1"
 }
+
+# Optional review-status metadata is separate from semantic discussion hashes.
+collect_review_status() {
+    local cursor='' previous='' next dir
+    local -a cursor_args
+    dir=$(mktemp -d "$RUN_DIR/discussion/status-XXXXXX")
+    printf '[]\n' > "$dir/reviews.json"
+    printf '{"available":false}\n' > "$RUN_DIR/discussion/review-status.json.tmp"
+    mv -- "$RUN_DIR/discussion/review-status.json.tmp" "$RUN_DIR/discussion/review-status.json"
+    while true; do
+        cursor_args=()
+        [[ -z $cursor ]] || cursor_args=(-f "cursor=$cursor")
+        if ! gh api --hostname "$HOST" graphql -f "query=$(cat "$ROOT/prompts/review-status.graphql")" \
+            -f "owner=${REPO%/*}" -f "name=${REPO##*/}" -F "number=$PR" "${cursor_args[@]}" > "$dir/page.json" 2> "$dir/error.log"; then return 0; fi
+        if ! jq -e --argjson pr "$PR" '(.errors // [] | length)==0 and (.data.viewer.login|type)=="string" and
+            .data.repository.pullRequest.number==$pr and
+            (.data.repository.pullRequest.latestOpinionatedReviews | (.nodes|type)=="array" and
+            all(.nodes[]; (.author.login|type)=="string" and (.state|type)=="string") and
+            (.pageInfo.hasNextPage|type)=="boolean")' "$dir/page.json" >/dev/null; then return 0; fi
+        jq --slurpfile page "$dir/page.json" '. + $page[0].data.repository.pullRequest.latestOpinionatedReviews.nodes' "$dir/reviews.json" > "$dir/reviews.tmp"
+        mv -- "$dir/reviews.tmp" "$dir/reviews.json"
+        [[ $(jq -r '.data.repository.pullRequest.latestOpinionatedReviews.pageInfo.hasNextPage' "$dir/page.json") == true ]] || break
+        next=$(jq -r '.data.repository.pullRequest.latestOpinionatedReviews.pageInfo.endCursor // empty' "$dir/page.json")
+        if [[ -z $next || $next == "$cursor" || $next == "$previous" ]]; then return 0; fi
+        previous=$cursor; cursor=$next
+    done
+    jq --slurpfile reviews "$dir/reviews.json" --arg time "$(now)" '.data.viewer.login as $viewer |
+        .data.repository.pullRequest | {available:true,checked_at:$time,decision:.reviewDecision,
+        latest_activity:.viewerLatestReview,opinionated:([$reviews[0][] | select((.author.login|ascii_downcase)==($viewer|ascii_downcase))] | first)}' \
+        "$dir/page.json" > "$RUN_DIR/discussion/review-status.json.tmp"
+    mv -- "$RUN_DIR/discussion/review-status.json.tmp" "$RUN_DIR/discussion/review-status.json"
+}

@@ -30,6 +30,8 @@ then error("Thread reply counts disagree; refresh required") else . end |
      url:([.[] | select(.id == $root)][0].html_url),path:$thread.path,line:$thread.line,
      original_line:$thread.originalLine,is_resolved:$thread.isResolved,
      is_outdated:$thread.isOutdated,can_reply:$thread.viewerCanReply,
+     can_resolve:$thread.viewerCanResolve,can_unresolve:$thread.viewerCanUnresolve,
+     resolved_by:$thread.resolvedBy.login,
      comments:map(comment)}),
   ($issues[0][] | {key:("comment:"+(.id|tostring)),kind:"comment",comments:[comment]}),
   ($reviews[0][] | select(.state != "PENDING") |

@@ -1,0 +1,16 @@
+{
+  "type": "object", "additionalProperties": false, "required": ["assessments"],
+  "properties": {
+    "assessments": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["thread_key", "outcome", "evidence", "limitations", "suggested_reply"],
+      "properties": {
+        "thread_key": {"type": "string"},
+        "outcome": {"type": "string", "enum": ["ADDRESSED", "STILL_PRESENT", "NOT_APPLICABLE", "UNCERTAIN"]},
+        "evidence": {"type": "string", "minLength": 1},
+        "limitations": {"type": "string"},
+        "suggested_reply": {"type": "string"}
+      }
+    }}
+  }
+}
