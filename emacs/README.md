@@ -106,8 +106,8 @@ reply workflow because they already have GitHub destinations.
 | `k` / `U` | Defer / restore feedback locally |
 | `r` / `A` | Resume the selected batch / explicitly adopt manual changes and reverify |
 | `p` / `? S` | Replan unfinished work / skip the selected task and resume |
-| `d` / `C-u d` | Saved task/batch diff / current partial changes since its checkpoint |
-| `m` / `C-u m` | Stage the verified fix and open its commit editor / inspect Magit without staging |
+| `d` / `C-u d` | Saved logical fix/task/batch diff / current partial changes since its checkpoint |
+| `m` / `C-u m` | Prepare the selected logical fix or next batch commit / inspect Magit without staging |
 | `a` / `C-u a` | Detect exact commits / explicitly associate selected feedback and commits |
 | `c` / `e` | Compose a reply / edit an unpublished reply |
 | `s` / `u` | Stage / unstage replies, a reply group, or sibling headings |
@@ -163,12 +163,22 @@ baseline. Local changes, unfinished batches at the current HEAD, in-progress Git
 operations, or genuine divergence require inspection with `C-u m`; no automatic
 stash, rebase, or merge commit is used.
 
-After a successful fix, `m` stages the saved, verified batch and opens a native
-Magit commit editor with a suggested message from its findings and fix summaries.
-Edit it if needed, then press `C-c C-c` to commit. On a batch/task heading, `m`
-uses that batch; on feedback it uses the latest batch containing that item;
-elsewhere it uses the most recent batch. It prepares the entire
-verified batch, including combined fixes, rather than guessing per-item files.
+After a successful group fix, expand its batch to see **Logical fix commits (in
+order)**. Each reviewed task normally becomes one commit; related findings can
+share a task. The batch shows **Fixes committed N/M**, and each commit row names
+its findings and either the detected hash or its next step. `m` on the batch
+prepares the next uncommitted fix and opens a native Magit commit editor with
+that fix's message. `m` on a commit row, task, or feedback targets its logical
+fix; feedback uses its latest related batch. Elsewhere `m` uses the latest batch's
+next commit. Selecting a later fix explains which earlier commit must come first.
+Edit the message if needed, commit with `C-c C-c`, return to Owner and press `g`,
+then prepare the next commit. `d` on a commit row shows just that fix's saved patch.
+The full group finishes its combined review before commit preparation is enabled.
+Staging uses each reviewed snapshot, including earlier versions of files that
+later tasks also edited. It does not split work by filename or guess patch ownership.
+Combined-review repairs or adopted changes that break those boundaries retain
+one combined commit with an explanation. Outcomes satisfied by earlier changes
+share a commit rather than creating an empty one.
 Later unstaged edits, including edits to the same files, remain unstaged. Existing
 staging is accepted only when it contains exact versions from this fix; unrelated
 or conflicting staging opens status with an explanation and remains untouched.
@@ -185,8 +195,10 @@ name, and the PR may target a fork. New owner branches configure that upstream
 without a same-name push-remote; old generated mappings migrate on the next fix
 or commit preparation, preserving manual configuration. Missing or ambiguous
 remotes require manual upstream configuration. `a` creates staged fixed-in replies
-only when exact verified commits have reached the fresh PR head. `C-u a` supports
-explicit associations for split commits or extra changes. Inspect/edit those
+only when exact verified commits have reached the fresh PR head. For a recorded
+sequence, each reply links to its own logical fix commit; already committed
+prefixes can be associated independently. `C-u a` supports explicit associations
+for arbitrary splits or extra changes. Inspect/edit those
 replies before `P`; publishing does not resolve threads or change review verdicts.
 
 `a` reports the saved commit associations, or explicitly says when none matched.
@@ -195,12 +207,15 @@ are provenance links; local findings still have no GitHub reply destination, and
 association does not mark feedback handled or resolve a thread.
 
 After committing, return to Owner and press `g`. It checks reachable local commits
-for a unique match to the verified tree and its sole baseline parent, then
+for a unique exact group commit or a recorded sequence of reviewed task trees
+with matching sole parents, then
 automatically finishes unchanged local findings with verified `fixed` outcomes.
 It shows **Committed HASH** and moves both their feedback and fully handled fixes
 out of the active sections into **Deferred / History**. GitHub feedback retains
 its reply/resolution steps. No GitHub fetch, model, staging, or commit is triggered.
-Split/rebased commits and changed or incomplete verification require inspection.
+Each confirmed logical fix can finish its local findings while later commits
+remain pending. Arbitrary splits/rebases and changed or incomplete verification
+require inspection. Existing single commits covering a whole group stay recognized.
 An explicit `U` or re-import overrides automatic completion for that finding's
 current fix. If a detected commit becomes unreachable, automatically finished
 feedback returns to Attention; manual handling stays respected.

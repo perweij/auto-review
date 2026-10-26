@@ -183,14 +183,17 @@ def new_batch_head(session, state, remote):
     return remote
 
 
+def commit_records(session, baseline, head):
+    """Read reachable commit identities, trees, and parents in one Git call."""
+    records = session.repo.git("log", "--no-patch", "--no-show-signature", "--format=%H %T %P",
+                               baseline + ".." + head, "--").stdout.splitlines()
+    return [(fields[0], fields[1], fields[2:]) for line in records if len(fields := line.split()) >= 2]
+
+
 def exact_commits(session, batch, head):
     """Find reachable commits with the verified tree and sole baseline parent."""
-    # Local refresh checks every saved batch. Read trees and parents together
-    # instead of spawning another Git process for each intervening commit.
-    records = session.repo.git("log", "--no-patch", "--no-show-signature", "--format=%H %T %P",
-                               batch["baseline"] + ".." + head, "--").stdout.splitlines()
-    return [fields[0] for line in records if len(fields := line.split()) == 3
-            and fields[1:] == [batch["final_tree"], batch["baseline"]]]
+    return [sha for sha, tree, parents in commit_records(session, batch["baseline"], head)
+            if tree == batch["final_tree"] and parents == [batch["baseline"]]]
 
 
 def diff(session, before, after):

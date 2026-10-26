@@ -5,7 +5,7 @@ import uuid
 from .common import ApiError, digest, now, require_text
 from .publication import gh, valid_receipt, with_marker
 from .owner_state import refresh
-from . import owner_git as workspace
+from . import owner_git as workspace, owner_commit_plan
 
 
 def commit(session, value):
@@ -46,12 +46,13 @@ def associate(session, state, request):
             for key in keys:
                 associations[key] = {"commits": commits, "method": "explicit", "at": now()}
         else:
-            matches = workspace.exact_commits(session, batch, local)
-            if len(matches) == 1:
-                for key in (k for k in batch["items"] if k in fixed_items(batch)):
+            _plan, progress = owner_commit_plan.update(session, batch, local)
+            if progress["items"]:
+                for key in (k for k in batch["items"] if k in fixed_items(batch) and k in progress["items"]):
                     # A newly amended exact commit can replace an obsolete automatic association.
-                    if key not in associations or associations[key]["method"] == "exact":
-                        associations[key] = {"commits": matches, "method": "exact", "at": now()}
+                    if key not in associations or associations[key]["method"] in ("exact", "task"):
+                        associations[key] = {"commits": progress["items"][key],
+                                             "method": "exact" if progress["method"] == "exact" else "task", "at": now()}
         for key, association in associations.items():
             association["refs"] = [workspace.pin_commit(session, sha) for sha in association["commits"]]
             item = session.items(state, [key])[0]

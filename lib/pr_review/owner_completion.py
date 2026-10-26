@@ -2,7 +2,7 @@
 import copy
 
 from .common import ApiError
-from . import owner_git
+from . import owner_git, owner_commit_plan
 
 
 def manual_triage(state, item):
@@ -29,19 +29,20 @@ def reconcile(session, state):
             for key in batch["items"]:
                 latest[key] = batch
             batch.pop("commit_match", None)
+            batch.pop("commit_progress", None)
             if batch["status"] != "ready" or not batch.get("final_tree"):
                 continue
-            matches = owner_git.exact_commits(session, batch, head)
-            if len(matches) == 1:
-                batch["commit_match"] = {"commit": matches[0]}
+            _plan, progress = owner_commit_plan.update(session, batch, head)
+            if progress["complete"]:
                 result["committed_batches"] += 1
 
         for item in updated["feedback"]:
             batch = latest.get(item["key"], {})
             fingerprint = item["fingerprint"]
+            commits = batch.get("commit_progress", {}).get("items", {}).get(item["key"])
             proof = None
             if (item["kind"] == "local_review" and not item.get("missing")
-                    and batch.get("status") == "ready" and batch.get("commit_match")
+                    and batch.get("status") == "ready" and commits
                     and not batch.get("discussion_stale") and not batch.get("integrity_failure")
                     and batch.get("verified_fingerprints", {}).get(item["key"]) == fingerprint
                     and item["key"] in batch.get("verified_items", [])
@@ -49,7 +50,7 @@ def reconcile(session, state):
                     and not batch["review"].get("blocking")
                     and any(o["item"] == item["key"] and o["status"] == "fixed"
                             for o in batch["review"]["outcomes"])):
-                proof = {"batch": batch["id"], "commit": batch["commit_match"]["commit"], "fingerprint": fingerprint}
+                proof = {"batch": batch["id"], "commit": commits[-1], "fingerprint": fingerprint}
             previous = item.get("local_completion")
             if previous and not proof:
                 item.pop("local_completion")

@@ -6,7 +6,7 @@ import uuid
 from .common import ApiError, now
 from .events import emit
 from .operations import operation
-from . import owner_git as workspace, owner_providers as models
+from . import owner_git as workspace, owner_providers as models, owner_commit_plan
 from .owner_state import refresh
 
 
@@ -154,6 +154,7 @@ def final_review(session, state, batch):
             for task in batch["tasks"]:
                 if task.get("after") and task["after"]["tree"] != batch["final_tree"]:
                     task["verification_superseded"] = True
+            owner_commit_plan.update(session, batch, batch["baseline"])
             return
         if not batch.get("verify_only") and review["complete"] and review["blocking"] and batch["repairs"] < 1:
             batch["repairs"] += 1

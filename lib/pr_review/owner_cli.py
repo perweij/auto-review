@@ -21,6 +21,7 @@ def main(argv):
     parser.add_argument("--item", dest="items", action="append")
     parser.add_argument("--batch")
     parser.add_argument("--task")
+    parser.add_argument("--unit", help="logical fix commit to prepare or inspect")
     parser.add_argument("--skip", action="append", default=[])
     parser.add_argument("--adopt", action="store_true")
     parser.add_argument("--replan", action="store_true")
@@ -76,6 +77,10 @@ def main(argv):
             request.update(session=view["session"], revision=view["revision"], command="owner-" + action)
             if action == "open":
                 request["command"] = "owner-read"
+            if action == "prepare-commit" and args.get("items"):
+                if len(args["items"]) != 1:
+                    raise ApiError("invalid_request", "Choose one feedback item, or use --batch for its next logical commit.")
+                request["item"] = args["items"][0]
             if action in ("resolve", "reopen"):
                 request.update(command="owner-thread-state", resolved=action == "resolve", item=(args.get("items") or [None])[0])
             if action == "resume":

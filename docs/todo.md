@@ -175,6 +175,19 @@ the Fixes header. Validation passed 106 owner/trust tests and 108 ERT tests.
 A read-only preview of the real PR #4 session confirmed all three exact commits
 and eight remaining local findings moving to History, without changing live state.
 
+Group fixes now prepare one commit per logical reviewed task where their saved
+checkpoints form an unbroken chain. Related findings share a commit, and final
+repairs or adopted changes that obscure those boundaries retain one explained
+combined commit. Owner shows ordered commit rows and progress; `m` prepares the
+selected or next fix, `g` finishes each committed local finding, and `a` links
+GitHub feedback to its own fix commit. Existing whole-group commits remain valid.
+The [commit-granularity follow-up](pr-owner-mode.md#follow-up-logical-fix-commits)
+records its scope and acceptance criteria. Validation passed all 161 Bats,
+211 Python, and 111 ERT tests, lint, and warning-free byte compilation. A read-only
+preview of PR #4 derived five logical fixes from its eight-finding batch and
+retained recognition of all three existing combined commits without changing
+the saved session.
+
 ## 6. Add interactive PR-owner fixes (`F`)
 
 After the non-interactive owner workflow, implement the

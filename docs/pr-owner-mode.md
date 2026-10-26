@@ -139,13 +139,14 @@ show completed/total task counts and the current blocking explanation; `m`
 retains unstaged changes and directs the user to inspect/resume verification.
 
 After committing a local fix, `g` checks reachable commits for a unique exact
-tree and sole-baseline-parent match. Current verified `fixed` outcomes in the
+group match or an exact sequence of reviewed task trees with matching sole
+parents, starting at the original baseline. Current verified `fixed` outcomes in the
 latest batch finish automatically, with their commit hash retained. Move both
 the feedback and a fully handled ready batch to History, labeled **Done locally**,
 retaining verification status and artifacts. `h` still supports manual handling.
 GitHub feedback keeps its explicit reply/resolution workflow. Reconciliation
 performs no Git writes, model calls, or network access. Missing/ambiguous matches,
-split/rebased commits, stale feedback, and incomplete verification do not trigger
+arbitrary splits/rebases, stale feedback, and incomplete verification do not trigger
 automatic handling. A lost automatic proof reopens feedback; explicit handling,
 restore, defer, and re-import decisions remain respected. `r` requires selecting
 one fix or related feedback, rather than choosing the latest batch from a group
@@ -447,20 +448,35 @@ progress; never autostash, squash, or overwrite ignored files. Resume operations
 keep their original baseline and do not use this synchronization. Genuine
 divergence requires manual reconciliation through `C-u m`.
 
-`m` prepares the explicitly selected batch, the latest batch containing selected
-feedback, or otherwise the most recent batch for committing.
-It requires a ready verified result at the current HEAD, stages the exact saved
-blobs for its changed paths, and opens a native Magit commit editor with a suggested
-message. Human `C-c C-c` finishes the commit. It prepares the entire verified
-batch; overlapping fixes are not split by filenames. Later unstaged edits remain
-unstaged even within fix files. Unrelated or conflicting preexisting staging,
-paused/stale/empty results, changed HEAD, a busy index, or an in-progress Git
-operation leads to status/manual inspection without replacing existing staging.
+After the whole batch passes final review, derive an ordered commit plan from
+its independently reviewed task checkpoints. Each logical task normally becomes
+one commit; related findings can share that task. Use the exact cumulative tree
+after each task, preserving separate edits to the same file without assigning
+ownership by filename. Require an unbroken chain from the baseline tree to the
+final reviewed tree. Missing/discontinuous snapshots, adopted changes, or final
+review repairs that cross those boundaries fall back to one combined commit with
+an explanation. A concern satisfied by earlier changes shares their commit rather
+than creating an empty one. Preserve the ability to recognize an existing exact
+whole-batch commit; do not rewrite previous user commits.
+
+The GUI shows ordered logical commit rows, their included findings, detected
+hashes, and **Fixes committed N/M**. `m` on a batch prepares its next uncommitted
+unit. A commit row, task, or feedback item targets its logical fix; elsewhere
+`m` uses the latest batch's next unit. Preparing a later unit requires all earlier
+units to have exact matching commits. HEAD must equal the immediately preceding
+unit's detected SHA, or the original baseline for the first unit. Stage the saved
+blobs for that unit's changed paths and open a native Magit editor with only its
+findings/summaries in the message. Human `C-c C-c` finishes each commit; `g`
+recognizes it, and the next `m` prepares the next fix. Later fixes and manual edits
+remain unstaged even within the same files. `d` on a commit row shows its exact
+patch. Unrelated or conflicting staging, paused/stale/empty results, unexpected
+HEAD changes, a busy index, or an in-progress Git operation leads to inspection
+without replacing existing staging.
 Use the owner execution lock and a temporary index under Git's index lock;
-validate the complete staged tree before atomic replacement. Preserve an existing
+validate the complete staged tree against the selected checkpoint before atomic replacement. Preserve an existing
 commit editor's wording. `C-u m` provides inspection without staging.
-If a commit with the exact verified tree and sole baseline parent is already
-reachable from HEAD, `m` reports it as already committed and opens inspection.
+If the selected unit or whole batch already has an exact reachable match,
+`m` reports its commit(s) and opens inspection.
 Association is not a prerequisite for this detection. `a` reports saved links
 visibly, including hashes on folded finding/batch headings, and explains an empty
 match. Linked commits do not automatically change local triage or resolve threads.
@@ -473,12 +489,17 @@ automatically reset, stash, rebase, or discard user work.
 
 ### Association rules
 
-Automatically associate a commit only when its parent equals the batch's original
-baseline commit, its complete tree equals the final verified batch tree, and all
-associated feedback items have successful code-fix outcomes.
+Automatically associate either an exact whole-group commit or the recognized
+prefix of its recorded logical commit plan. The first unit must have the batch's
+original baseline as its sole parent; each following unit must have the preceding
+matched commit as its sole parent. Every complete tree must equal its recorded,
+independently reviewed checkpoint. The whole batch must have passed final review,
+and associated feedback must have successful code-fix outcomes. Each item links
+to the unit covering it, allowing local completion and pushed replies before
+later units are committed. Ambiguous matching sequences require inspection.
 
 Items classified as clarification, no justified change, or already addressed do
-not automatically receive a fixed-in claim. Partial commits, split commits,
+not automatically receive a fixed-in claim. Partial patches, arbitrary split commits,
 additional changes, and ambiguous matches require explicit item-to-commit or
 commit-range association. Save actual SHAs and provenance. Overlapping filenames
 alone do not establish an association or prove a fix.
@@ -598,6 +619,17 @@ automatically resolving threads.
 Exit criteria: this non-interactive package meets the validation requirements
 below, existing interfaces remain supported, and documentation distinguishes
 implemented behavior from the later interactive package.
+
+### Follow-up: logical fix commits
+
+Group execution remains unattended through the final combined review. Its saved
+task checkpoints then support smaller human-confirmed commits, ordered staging,
+per-fix messages, partial local completion, and precise GitHub commit links.
+Combined repairs retain a conservative, explained grouping. Acceptance includes
+overlapping file edits, shared/no-extra-patch outcomes, partial commit progress,
+amendments, dropped or ambiguous prefixes, preservation of unrelated edits/index
+state, and compatibility with already committed batches. Manual regrouping and
+automatic committing remain outside this follow-up.
 
 ### Later milestone: interactive fixes
 
@@ -727,6 +759,19 @@ details/history, contextual Transient menus, and selecting the related batch
 from feedback. A read-only render of the saved PR #4 session confirmed its linked
 commit, local finishing guidance, and four task actions. No saved feedback,
 GitHub state, or user worktree was changed by these checks.
+
+The logical-commit follow-up on 2026-10-26 passed all 161 Bats, 211 Python,
+and 111 ERT tests, lint, warning-free byte compilation, local documentation
+links, and Python 3.9 grammar checks. Eleven added real-Git tests cover successive
+commits with overlapping files, later manual edits, selected-unit order and CLI
+targeting, partial completion and per-thread replies, combined repairs,
+shared/no-extra-patch outcomes, amendments, dropped commits, unrelated and
+ambiguous histories, unchanged conflicting staging, and existing combined commits.
+Three added ERT tests cover commit rows, scoped actions and hashes, and changed
+history guidance. A read-only PR #4 preview derived five logical fixes covering
+its eight findings (2, 2, 1, 1, 2) and recognized all three already committed
+batches. No live session/worktree, GitHub state, or existing commit was changed;
+GitHub and provider calls in regression tests were mocked.
 
 The implementation adds no Guix dependency or package-layout change. The existing
 migration follow-ups for a real Guix build and execution on Python 3.9 remain in

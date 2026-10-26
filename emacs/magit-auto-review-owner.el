@@ -130,10 +130,24 @@
 
 (defun magit-auto-review-owner--batch-commit-label (batch &optional key)
   "Show a locally confirmed commit for BATCH, or its saved associations."
-  (if-let ((commit (and (or (not key) (member key (magit-auto-review-owner--verified-keys batch)))
-                       (alist-get 'commit (alist-get 'commit_match batch)))))
-      (concat " · Committed " (substring commit 0 (min 12 (length commit))))
-    (magit-auto-review-owner--commit-label (magit-auto-review-owner--linked-commits batch key))))
+  (let* ((progress (alist-get 'commit_progress batch))
+         (commits (and key (cdr (cl-find key (alist-get 'items progress)
+                                        :key (lambda (entry) (format "%s" (car entry))) :test #'equal))))
+         (commit (and (or (not key) (member key (magit-auto-review-owner--verified-keys batch)))
+                      (alist-get 'commit (alist-get 'commit_match batch)))))
+    (cond
+     (commits (concat " · Committed " (string-join (mapcar (lambda (sha) (substring sha 0 (min 12 (length sha)))) commits) ", ")))
+     ((and (not key) (> (or (alist-get 'total progress) 0) 1))
+      (format " · Fixes committed %d/%d" (alist-get 'completed progress) (alist-get 'total progress)))
+     (commit (concat " · Committed " (substring commit 0 (min 12 (length commit)))))
+     (t (magit-auto-review-owner--commit-label (magit-auto-review-owner--linked-commits batch key))))))
+
+(defun magit-auto-review-owner--commit-unit-at-point ()
+  "Return the logical fix commit row at point."
+  (when-let ((section (magit-auto-review-owner--at 'owner-commit-unit)))
+    (cl-find (cdr (oref section value))
+             (alist-get 'units (alist-get 'commit_plan (magit-auto-review-owner--batch-at-point)))
+             :key (lambda (unit) (alist-get 'id unit)) :test #'equal)))
 
 (defun magit-auto-review-owner--brief (text &optional width)
   "Return TEXT on one line, limited to WIDTH display columns."
@@ -222,6 +236,13 @@
       "Verified feedback is handled locally. Remaining feedback needs separate work; select it under Attention needed.")
      ((and outcomes (not fixed))
       "No new code fix is needed. h marks the verified feedback handled locally.")
+     ((member (alist-get 'status (alist-get 'commit_progress batch)) '("diverged" "ambiguous"))
+      (concat "Next: inspect in Magit. " (alist-get 'reason (alist-get 'commit_progress batch))))
+     ((and (alist-get 'commit_progress batch)
+           (< (alist-get 'completed (alist-get 'commit_progress batch)) (alist-get 'total (alist-get 'commit_progress batch))))
+      (format "Next: m on this batch prepares commit %d of %d; commit with C-c C-c, then g checks it."
+              (1+ (alist-get 'completed (alist-get 'commit_progress batch)))
+              (alist-get 'total (alist-get 'commit_progress batch))))
      ((and (not linked) (alist-get 'commit_match batch))
       (if (cl-every (lambda (item) (equal (alist-get 'kind item) "local_review")) items)
           "Exact fix commit detected. g finishes verified local findings; explicitly restored findings stay queued until h or a new fix."
@@ -245,6 +266,29 @@
                 (format "%d feedback items" (length (alist-get 'items batch))))
               (magit-auto-review-owner--batch-commit-label batch)))
     (insert (magit-auto-review-owner--next-step batch) "\n")
+    (when (equal (alist-get 'status batch) "ready")
+      (let* ((plan (alist-get 'commit_plan batch))
+             (progress (alist-get 'commit_progress batch))
+             (units (alist-get 'units plan)))
+        (when (alist-get 'reason plan) (insert "Commit grouping: " (alist-get 'reason plan) "\n"))
+        (when (> (length units) 1)
+          (insert "Logical fix commits (in order):\n")
+          (cl-loop for unit in units for position from 1 do
+                   (let ((sha (cdr (cl-find (alist-get 'id unit) (alist-get 'units progress)
+                                           :key (lambda (entry) (format "%s" (car entry))) :test #'equal))))
+                     (magit-insert-section section (owner-commit-unit (cons (alist-get 'id batch) (alist-get 'id unit)) t)
+                       (push section magit-auto-review-owner--sections)
+                       (magit-insert-heading
+                         (format "%d/%d · %s · %s" position (length units)
+                                 (cond (sha (concat "Committed " (substring sha 0 (min 12 (length sha)))))
+                                       ((member (alist-get 'status progress) '("diverged" "ambiguous")) "Inspect commits")
+                                       ((= position (1+ (or (alist-get 'completed progress) 0))) "Ready to commit")
+                                       (t "After earlier commit"))
+                                 (magit-auto-review-owner--brief
+                                  (string-join (mapcar #'magit-auto-review-owner--item-label (alist-get 'items unit)) "; "))))
+                       (insert "m prepares or inspects this commit; d shows its exact patch.\n")
+                       (dolist (key (alist-get 'items unit))
+                         (insert "  · " (magit-auto-review-owner--item-label key) "\n"))))))))
     (when (> (length (alist-get 'items batch)) 1)
       (insert "Included feedback:\n")
       (dolist (key (alist-get 'items batch))
@@ -497,7 +541,7 @@
             (concat " " (pcase (alist-get 'status result)
                            ("busy" "Saved results reloaded; commit check waits for the running Owner operation")
                            ("unavailable" (concat "Commit check unavailable: " (alist-get 'reason result)))
-                           (_ (format "Local commits checked · %d committed fixes · %d findings moved to History · %d reopened"
+                           (_ (format "Local commits checked · %d committed groups · %d findings moved to History · %d reopened"
                                       (or (alist-get 'committed_batches result) 0)
                                       (length (alist-get 'handled_items result))
                                       (length (alist-get 'reopened_items result)))))))
@@ -607,12 +651,13 @@
   (or (condition-case nil (magit-auto-review-owner--selected 'owner-feedback) (user-error nil))
       (when (and (not (use-region-p)) (magit-auto-review-owner--at 'owner-batch))
         (let* ((batch (magit-auto-review-owner--batch-at-point))
+               (unit (magit-auto-review-owner--commit-unit-at-point))
                (task-section (magit-auto-review-owner--at 'owner-task))
                (task (and task-section (cl-find (oref task-section value) (alist-get 'tasks batch)
                                                 :key (lambda (value) (alist-get 'id value)) :test #'equal))))
           (when (and (equal (alist-get 'status batch) "ready")
                      (not (magit-auto-review--true-p (alist-get 'discussion_stale batch))))
-            (cl-remove-if-not (lambda (key) (member key (if task (alist-get 'items task) (alist-get 'items batch))))
+            (cl-remove-if-not (lambda (key) (member key (alist-get 'items (or unit task batch))))
                               (magit-auto-review-owner--verified-keys batch)))))))
 
 (defun magit-auto-review-owner-handled ()
@@ -680,11 +725,13 @@
       (setf (alist-get 'revision magit-auto-review-owner--editor-request) (alist-get 'revision view)))))
 
 (defun magit-auto-review-owner-diff (&optional current)
-  "Inspect a saved task/batch diff; with CURRENT prefix, show partial changes."
+  "Inspect a logical fix, task, or batch; CURRENT shows partial changes."
   (interactive "P")
   (let* ((task (magit-auto-review-owner--at 'owner-task))
+         (unit (magit-auto-review-owner--commit-unit-at-point))
          (result (magit-auto-review--call (magit-auto-review-owner--request "owner-diff"
                   `(batch . ,(magit-auto-review-owner--batch-id)) `(task . ,(and task (oref task value)))
+                  `(unit . ,(alist-get 'id unit))
                   `(current . ,(if current t :false))))))
     (pop-to-buffer (get-buffer-create "*Owner fix diff*"))
     (let ((inhibit-read-only t)) (erase-buffer) (insert (alist-get 'diff result)) (diff-mode) (view-mode 1))))
@@ -706,12 +753,15 @@
                       (if matches "P u (upstream)" "configure this upstream before pushing"))))))
 
 (defun magit-auto-review-owner-magit (&optional inspect)
-  "Stage the verified batch and open its commit editor in native Magit.
+  "Stage the selected logical fix or the batch's next commit in native Magit.
 With prefix INSPECT, open status only.  Existing commit messages are retained."
   (interactive "P")
   (let* ((path (alist-get 'worktree magit-auto-review-owner--view))
          (view magit-auto-review-owner--view)
          (batch (magit-auto-review-owner--batch-at-point))
+         (unit (magit-auto-review-owner--commit-unit-at-point))
+         (feedback (magit-auto-review-owner--at 'owner-feedback))
+         (task (magit-auto-review-owner--at 'owner-task))
          (running (process-live-p magit-auto-review-owner--process))
          prepared editor)
     (unless (and path (file-directory-p path)) (user-error "Run a fix to prepare the owner worktree first"))
@@ -722,7 +772,10 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
           (progn
             (setq prepared (magit-auto-review--call
                             (magit-auto-review-owner--request "owner-prepare-commit"
-                              `(batch . ,(alist-get 'id batch)))))
+                              `(batch . ,(alist-get 'id batch))
+                              `(unit . ,(alist-get 'id unit))
+                              `(item . ,(and feedback (oref feedback value)))
+                              `(task . ,(and task (oref task value))))))
             (setq view (alist-get 'owner prepared))
             (magit-auto-review-owner--accept view))
         (magit-auto-review-api-error
@@ -737,6 +790,8 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
       (cond
        ((and editor (not inspect)) (pop-to-buffer editor))
        ((magit-auto-review--true-p (alist-get 'ready prepared))
+        (when (alist-get 'position prepared)
+          (message "Preparing fix commit %d of %d" (alist-get 'position prepared) (alist-get 'total prepared)))
         (let ((magit-commit-ask-to-stage nil))
           (magit-commit-create (list "--edit" (concat "--message=" (alist-get 'message prepared))))))
        ((alist-get 'reason prepared) (message "%s" (alist-get 'reason prepared)))))))
@@ -868,6 +923,13 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
          (ready (and (equal (alist-get 'status batch) "ready")
                      (not (magit-auto-review--true-p (alist-get 'discussion_stale batch)))))
          (handled (and batch (magit-auto-review-owner--batch-handled-p batch)))
+         (progress (alist-get 'commit_progress batch))
+         (unit (or (magit-auto-review-owner--commit-unit-at-point)
+                   (and (= (length items) 1)
+                        (cl-find-if (lambda (value) (member (alist-get 'key (car items)) (alist-get 'items value)))
+                                    (alist-get 'units (alist-get 'commit_plan batch))))))
+         (unit-committed (and unit (cl-find (alist-get 'id unit) (alist-get 'units progress)
+                                           :key (lambda (entry) (format "%s" (car entry))) :test #'equal)))
          (running (process-live-p magit-auto-review-owner--process))
          actions)
     (cl-labels ((offer (condition key label command) (when condition (push (list key label command) actions))))
@@ -913,8 +975,10 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
         (offer magit-auto-review-owner--trust "T" "Inspect changed agent configuration" #'magit-auto-review-owner-trust))
       (offer batch "d" "Inspect fix diff" #'magit-auto-review-owner-diff)
       (offer (and (alist-get 'worktree magit-auto-review-owner--view) (or batch running))
-             "m" (if (and ready (not handled) (not (alist-get 'commit_match batch))
-                          (not (magit-auto-review-owner--linked-commits batch)))
+             "m" (if (and ready (not handled)
+                          (if progress
+                              (and (member (alist-get 'status progress) '("unstarted" "partial")) (not unit-committed))
+                            (and (not (alist-get 'commit_match batch)) (not (magit-auto-review-owner--linked-commits batch)))))
                      "Prepare commit in Magit" "Inspect worktree in Magit") #'magit-auto-review-owner-magit)
       (offer (or batch running) "L" "Progress / selected attempt log" #'magit-auto-review-owner-log)
       (unless (or items batch replies running)

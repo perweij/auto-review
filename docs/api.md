@@ -123,8 +123,8 @@ belong to that selected toolkit. Owner selection never depends on PR authorship.
 | `owner-refresh` | `session`, `revision` | Fetch complete GitHub discussions and metadata; return owner view |
 | `owner-mutate` | `session`, `revision`, `operation`, operation-specific fields below | Local atomic change; return owner view |
 | `owner-fix` | `session`, `revision`, `items` or `batch`, optional controls below | Plan/fix/review or resume; return owner view |
-| `owner-diff` | `session`, `batch`, optional `task` | `{diff,before,after}` for a retained task/batch |
-| `owner-prepare-commit` | `session`, `revision`, optional `batch` | Stage an exact verified snapshot; return `{owner,ready,worktree,batch,paths,message}` or `{owner,ready:false,worktree,reason}` |
+| `owner-diff` | `session`, `batch`, optional `task` or `unit` | `{diff,before,after}` for a retained task, logical commit, or batch |
+| `owner-prepare-commit` | `session`, `revision`, optional `batch`, `unit`, `item`, `task` | Stage the selected/next logical fix; return `{owner,ready,worktree,batch,unit,position,total,paths,message}` or `{owner,ready:false,worktree,reason}` |
 | `owner-associate` | `session`, `revision`, optional `batch`, `items`, `commits` | Associate verified fixes and generate reachable fixed-in replies |
 | `owner-prepare` | `session`, `revision` | Fresh `{owner,token,replies}` publication preview |
 | `owner-publish` | `session`, `revision`, `token` | Send the explicitly confirmed preview; return owner view |
@@ -138,13 +138,16 @@ before it fails. Opening creates a session idempotently without a revision.
 under the execution lock, ignoring a displayed revision. `owner-read` stays a
 pure saved-state read. Reconciliation uses read-only Git commands, without
 network/model calls, staging, refs, reply creation, or publication. A ready
-batch's `commit_match.commit` records a unique reachable commit with exactly its
-verified tree and sole baseline parent. Only current `fixed` outcomes for local
+batch's `commit_match.commit` records the completing commit of a unique exact
+group commit or a recorded sequence of verified task checkpoints. Each sequence
+commit must have the preceding matched commit as its sole parent, starting at
+the original batch baseline. Only current `fixed` outcomes for local
 findings in their latest batch are automatically handled; stale feedback,
 incomplete results, integrity failures, missing items, and explicit triage
 overrides prevent completion. `local_completion` retains its batch, commit, and
 feedback fingerprint. Lost proof reopens only automatically handled feedback;
-an exact amendment updates the proof. This proves a recorded fix was committed,
+an exact amendment updates the proof. A matched prefix can finish its own findings
+while later units remain pending. This proves a recorded fix was committed,
 not that subsequent edits preserve its semantics or that it was pushed.
 
 The response-only `reconciliation` has `status: "complete"`, `committed_batches`,
@@ -159,8 +162,11 @@ execution lock, and pins a current tree for inspection against the last saved
 batch checkpoint. It does not adopt that tree or change the real index.
 
 `owner-prepare-commit` takes the owner execution lock and Git's index lock. It
-uses the explicitly selected batch or the most recent batch. A ready batch must
-still match HEAD and its saved feedback; paused, stale, empty, or committed batches
+uses the explicitly selected batch or the most recent batch. `unit` targets a
+logical commit; `item` or `task` finds the unit covering that selection. Without
+a selector it prepares the next uncommitted unit. A ready batch must
+still match its saved feedback and HEAD must equal the previous recognized unit
+commit (or original baseline for the first). Paused, stale, empty, or committed selections
 return `ready:false` for manual inspection. Merge/rebase/cherry-pick state also
 prevents preparation.
 For an unverified batch, `reason` includes its status, completed/total task counts,
@@ -173,20 +179,38 @@ still apply. Incomplete implementation requires the fixer again.
 Existing staged paths must be exact versions from this fix;
 unrelated staging and partial/manual variants are retained without alteration.
 Preparation installs only the changed paths' saved blobs through a temporary
-index, verifies its complete tree equals the final reviewed tree, and atomically
+index, verifies its complete tree equals that unit's reviewed checkpoint, and atomically
 replaces the index. Working files stay untouched, including later edits to fix
 files. A busy index is never stolen; errors retain the previous index.
-The operation records `batch.commit_preparation` with time, HEAD, tree, and paths.
+The operation records `batch.commit_preparation` with time, HEAD, tree, paths, and unit.
 It performs no model/GitHub calls and creates no commit. Clients open the returned
 message in a human commit editor. Repeated preparation is safe, and completed
 exact-tree commits retain the existing association behavior. CLI equivalent:
-`pr-review owner prepare-commit --session PATH [--batch ID]`.
+`pr-review owner prepare-commit --session PATH [--batch ID] [--unit ID]`.
 If HEAD has advanced, a reachable commit with the sole baseline parent and exact
 verified tree returns `ready:false, committed:true, commits:[SHA]` and an
 "already committed" reason. This detection needs no prior association and does
 not create one. Existing explicit associations are acknowledged separately without
 claiming that a partial/split commit is an exact match; unmatched HEAD changes
 still require inspection. No index changes occur in these cases.
+
+Ready batches carry a deterministic `commit_plan` with `mode`, original `baseline`,
+`final_tree`, and ordered `units` (`id`, `before_tree`, `tree`, `items`, `tasks`).
+Unbroken, independently reviewed task checkpoints produce logical commits.
+Shared outcomes with no extra patch combine their earlier changes. Missing or
+discontinuous checkpoints and combined-review repairs fall back to a combined
+unit with `reason`; no heuristic path splitting occurs. The full batch must have
+passed combined verification before any unit can be prepared. Existing ready
+sessions derive their plan on demand, and existing whole-group commits remain
+valid without history rewriting.
+
+`commit_progress` has `status` (`unstarted`, `partial`, `complete`, `diverged`, or
+`ambiguous`), `complete`, `total`, `completed`, ordered `commits`, and maps `units`
+and `items` to exact matched SHAs. Unexpected HEAD changes between units block
+staging; ambiguous histories do not create automatic associations. `owner-associate`
+uses method `task` for exact unit matches and preserves explicit associations.
+Pushed prefixes may generate replies for their own items; later uncommitted
+findings receive no fixed-in claim.
 
 `owner-import` is the exception to owner-session selectors: it takes the source
 reviewer's session/generation/revision and validates them under the shared PR and

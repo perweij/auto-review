@@ -254,12 +254,20 @@ You can also fix GitHub feedback you posted yourself. After `G`, it appears unde
 reply destination: their fixes can be associated with commits, but do not generate
 fixed-in replies. Published feedback retains its normal thread/timeline reply flow.
 
-After a fix finishes, press `m` to stage its saved, verified changes and open a
-Magit commit editor with a suggested message. Finish with `C-c C-c`, then push
-to the displayed **Push PR** destination with `P u`. Later edits stay unstaged,
-including edits to the same files. Conflicting or unrelated existing staging is
+After a group fix finishes, its logical fixes normally become separate commits.
+Related findings may share one fix. Under **Fixes**, expand the batch to see the
+ordered commit rows. `m` on the batch prepares the next commit; on a commit row
+or feedback item it targets that logical fix. Earlier commits must be completed
+first. Magit receives the saved, verified changes and a message for just that fix.
+Finish with `C-c C-c`, return to Owner, press `g`, and repeat `m` for the next fix.
+Later fixes and manual edits stay unstaged, including separate changes to the
+same file. Push to the displayed **Push PR** destination with `P u`.
+Conflicting or unrelated existing staging is
 preserved and requires manual inspection. Use `C-u m` for status only. Automatic
 committing remains a later milestone.
+If combined-review repairs or adopted changes invalidate the separate task
+boundaries, Owner explains why the group needs one combined commit. An existing
+single commit of the whole group is also recognized.
 
 The progress log names the number of selected feedback items and distinguishes
 **Fix verified** from **Fix paused**. A paused result shows completed-task counts
@@ -275,7 +283,7 @@ fix automatically finishes its local findings and moves the completed fix under
 **Deferred / History**, showing **Committed HASH**. Group fixes list their included
 feedback when expanded. GitHub feedback keeps its reply workflow: push, then use
 `a` to associate commits and prepare replies. `h` remains available for manual
-completion; split/rebased commits require inspection. `U` and explicit re-import
+completion; arbitrary splits/rebases outside the recorded sequence require inspection. `U` and explicit re-import
 keep a finding queued until you finish it or make a new fix. `r` requires selecting
 one fix or its feedback; the Fixes header never resumes a group.
 Fix results show their next step, with verification details and earlier attempts folded separately.
@@ -293,7 +301,8 @@ pr-review owner 123 fix --item thread:THREAD_ID --verify-only
 pr-review owner 123 resume --batch BATCH_ID
 pr-review owner 123 diff --batch BATCH_ID --current
 pr-review owner 123 resume --batch BATCH_ID --adopt
-pr-review owner 123 prepare-commit --batch BATCH_ID  # stage verified snapshot; return suggested message
+pr-review owner 123 prepare-commit --batch BATCH_ID  # stage the next logical fix; return suggested message
+pr-review owner 123 prepare-commit --batch BATCH_ID --unit TASK_ID  # target one recorded commit
 pr-review owner 123 reconcile               # check local commits and finish matching local findings
 pr-review owner 123 associate               # after human commits and pushes
 pr-review owner 123 prepare                 # inspect exact staged replies and token

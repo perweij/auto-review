@@ -146,6 +146,7 @@ def invoke(session, state, batch, role, context):
         + json.dumps(str(scratch)) + "\n")
     if role == "plan":
         instructions += ("Read only. Plan tasks covering each selected item exactly once. Combine overlapping concerns, "
+                         "keeping unrelated fixes separate: reviewed task boundaries become logical commits where possible. "
                          "identify prerequisites, and explain rationale and one expected outcome per original item. Use task IDs such as t1. "
                          "Do not add unselected feedback. Existing completed tasks are context, not new work.\n")
     elif role == "fix":

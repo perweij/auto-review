@@ -6,21 +6,23 @@ import tempfile
 
 from .common import ApiError, now
 from .processes import run
-from . import owner_git as workspace
+from . import owner_git as workspace, owner_commit_plan
 
 
-def message(state, batch):
+def message(state, batch, unit=None):
     items = {i["key"]: i for i in state["feedback"]}
     def line(text):
         return " ".join(str(text or "").split())
     titles = []
-    for key in batch["verified_items"]:
+    for key in unit["items"] if unit else batch["verified_items"]:
         item = items[key]
         title = item.get("title") or (item.get("comments") or [{}])[0].get("body") or "Review feedback"
         titles.append(line(title.splitlines()[0])[:160])
     subject = ("Fix: " + titles[0])[:72] if len(titles) == 1 else f"Address review feedback for PR #{state['pr']}"
+    if unit and len(batch.get("commit_plan", {}).get("units", [])) > 1 and titles:
+        subject = ("Fix: " + titles[0])[:72]
     summaries = list(dict.fromkeys(line(t.get("implementation", {}).get("summary")) for t in batch["tasks"]
-                                  if t.get("status") == "complete"))
+                                  if t.get("status") == "complete" and (not unit or t["id"] in unit["tasks"])))
     body = "\n".join("- " + title for title in titles)
     return subject + "\n\n" + body + "\n\n" + "\n".join(s for s in summaries if s) + "\n\nPR: " + state["url"] + "\n"
 
@@ -48,22 +50,37 @@ def prepare(session, state, request):
     batch = batches[0]
     if batch["status"] != "ready":
         return stopped(unverified_reason(batch))
-    if batch["baseline"] != head:
-        matches = workspace.exact_commits(session, batch, head)
-        if len(matches) == 1:
-            return {**stopped(f"Saved fix already committed in {matches[0][:12]}; opening Magit for inspection."),
-                    "committed": True, "commits": matches}
+    plan, progress = owner_commit_plan.update(session, batch, head)
+    session.save(state)
+    selected = [u for u in plan["units"] if (request.get("unit") == u["id"] or
+                request.get("item") in u["items"] or request.get("task") in u["tasks"])]
+    explicit = any(request.get(k) for k in ("unit", "item", "task"))
+    if len(selected) > 1:
+        return stopped("Choose one logical fix or select its batch for the next commit.")
+    if explicit and not selected:
+        return stopped("This selection has no separate code commit; inspect the fix plan or select its batch.")
+    if progress["complete"] or (selected and selected[0]["id"] in progress["units"]):
+        commits = [progress["units"][selected[0]["id"]]] if selected else progress["commits"]
+        return {**stopped("Saved fix already committed in " + ", ".join(sha[:12] for sha in commits) +
+                         "; opening Magit for inspection."), "committed": True, "commits": commits}
+    if progress["status"] in ("diverged", "ambiguous"):
         associated = list(dict.fromkeys(sha for association in batch.get("associations", {}).values()
                                         for sha in association["commits"] if workspace.ancestor(session, sha, head)))
         if associated:
             return stopped("Associated commits: " + ", ".join(sha[:12] for sha in associated) +
                            ". HEAD differs from the verified baseline; opening Magit for inspection.")
-        return stopped("HEAD changed since this fix; inspect or associate the existing commits in Owner.")
+        return stopped(progress["reason"])
     fingerprints = {i["key"]: i["fingerprint"] for i in state["feedback"] if not i.get("missing")}
     if (batch.get("discussion_stale") or batch.get("integrity_failure")
             or any(fingerprints.get(k) != v for k, v in batch.get("verified_fingerprints", {}).items())):
         return stopped("The verified fix context changed; inspect and reverify before preparing a commit.")
-    paths = session.repo.git("diff", "--name-only", "--no-renames", "-z", head, batch["final_tree"], "--").stdout.split("\0")[:-1]
+    if not plan["units"]:
+        return stopped("The verified fix has no code changes to commit.")
+    unit = plan["units"][progress["completed"]]
+    if selected and selected[0]["id"] != unit["id"]:
+        return stopped(f"Commit fix {progress['completed'] + 1} of {progress['total']} first; select the batch and press m to prepare it.")
+    target = unit["tree"]
+    paths = session.repo.git("diff", "--name-only", "--no-renames", "-z", head, target, "--").stdout.split("\0")[:-1]
     if not paths:
         return stopped("The verified fix has no code changes to commit.")
     if any("\ufffd" in path for path in paths):
@@ -104,7 +121,7 @@ def prepare(session, state, request):
                         mode, _kind, oid = info.split()
                         entries[name] = (mode, oid)
                 return entries
-            final = tree_entries(batch["final_tree"])
+            final = tree_entries(target)
             staged = git("diff", "--cached", "--name-only", "--no-renames", "-z", head, "--").split("\0")[:-1]
             current = tree_entries(git("write-tree").strip())
             if any(p not in paths or current.get(p) != final.get(p) for p in staged):
@@ -117,7 +134,7 @@ def prepare(session, state, request):
                 mode, oid = final.get(path, ("0", zero))
                 records.append(f"{mode} {oid}\t{path}\0")
             git("update-index", "--add", "--remove", "-z", "--index-info", input_bytes="".join(records).encode())
-            if git("write-tree").strip() != batch["final_tree"]:
+            if git("write-tree").strip() != target:
                 raise ApiError("commit_preparation_failed", "Prepared index differs from the verified fix; index left unchanged.")
             if session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip() != head:
                 return stopped("HEAD changed while preparing the commit; retry after inspecting Magit.")
@@ -132,7 +149,8 @@ def prepare(session, state, request):
     finally:
         if not installed:
             lock.unlink(missing_ok=True)
-    batch["commit_preparation"] = {"at": now(), "head": head, "tree": batch["final_tree"], "paths": paths}
+    batch["commit_preparation"] = {"at": now(), "head": head, "tree": target, "paths": paths, "unit": unit["id"]}
     session.save(state)
     return {**result, "ready": True, "owner": session.view(state), "batch": batch["id"], "paths": paths,
-            "message": message(state, batch)}
+            "unit": unit["id"], "position": progress["completed"] + 1, "total": progress["total"],
+            "message": message(state, batch, unit)}

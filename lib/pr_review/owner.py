@@ -45,6 +45,11 @@ def dispatch(request):
             task = next((t for t in batch["tasks"] if t["id"] == request.get("task")), None)
             before = task["before"]["tree"] if task and task.get("before") else batch["baseline"]
             after = task.get("after", batch["checkpoint"])["tree"] if task else batch["checkpoint"]["tree"]
+            if request.get("unit"):
+                unit = next((u for u in batch.get("commit_plan", {}).get("units", []) if u["id"] == request["unit"]), None)
+                if not unit:
+                    raise ApiError("invalid_target", "Choose a saved logical fix commit to inspect.")
+                before, after = unit["before_tree"], unit["tree"]
             if request.get("current"):
                 session.check(request, state)
                 before = batch["checkpoint"]["tree"]
