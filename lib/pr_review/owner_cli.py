@@ -1,4 +1,4 @@
-"""Explicit owner commands; no automatic commit, push, or publication menu."""
+"""Explicit owner commands, including opt-in commits; push/publication stay explicit."""
 import argparse
 import json
 from pathlib import Path
@@ -26,6 +26,9 @@ def main(argv):
     parser.add_argument("--adopt", action="store_true")
     parser.add_argument("--replan", action="store_true")
     parser.add_argument("--verify-only", action="store_true")
+    committing = parser.add_mutually_exclusive_group()
+    committing.add_argument("--auto-commit", dest="auto_commit", action="store_true", default=None)
+    committing.add_argument("--no-auto-commit", dest="auto_commit", action="store_false")
     parser.add_argument("--current", action="store_true", help="inspect partial changes since the batch checkpoint")
     parser.add_argument("--operation-id", help="operation to cancel")
     parser.add_argument("--commit", dest="commits", action="append")
@@ -73,6 +76,8 @@ def main(argv):
             else:
                 view = dispatch({"command": "owner-open", "pr": args["pr"], "repository": args["repository"]})
             action = args.pop("action")
+            if args.get("auto_commit") is not None and action not in ("fix", "resume"):
+                raise ApiError("invalid_request", "Commit mode flags apply only to fix or resume.")
             request = {k: v for k, v in args.items() if v is not None}
             request.update(session=view["session"], revision=view["revision"], command="owner-" + action)
             if action == "open":

@@ -50,6 +50,8 @@ def prepare(session, state, request):
     batch = batches[0]
     if batch["status"] != "ready":
         return stopped(unverified_reason(batch))
+    if batch.get("commit_execution", {}).get("inspection_required"):
+        return stopped(batch["commit_execution"]["error"])
     plan, progress = owner_commit_plan.update(session, batch, head)
     session.save(state)
     selected = [u for u in plan["units"] if (request.get("unit") == u["id"] or

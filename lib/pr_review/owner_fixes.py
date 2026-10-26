@@ -6,7 +6,7 @@ import uuid
 from .common import ApiError, now
 from .events import emit
 from .operations import operation
-from . import owner_git as workspace, owner_providers as models, owner_commit_plan
+from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit
 from .owner_state import refresh
 
 
@@ -179,8 +179,15 @@ def check_fresh(session, state, batch):
 
 def execute(session, state, request):
     """Caller holds only the owner execution lock throughout inference."""
+    if "auto_commit" in request and type(request["auto_commit"]) is not bool:
+        raise ApiError("invalid_request", "auto_commit must be a Boolean.")
+    if request.get("auto_commit"):
+        owner_auto_commit.timeout()
+        if request.get("verify_only"):
+            raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
     with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "kind": "owner-fix"}):
         batch = None
+        completing = False
         try:
             # Refresh before creating a worktree; failure leaves existing source untouched.
             refresh(session, state)
@@ -189,6 +196,22 @@ def execute(session, state, request):
                 batch = next((b for b in state["batches"] if b["id"] == request["batch"]), None)
                 if not batch:
                     raise ApiError("invalid_request", "Choose an existing owner batch.")
+                if request.get("auto_commit") and batch.get("verify_only"):
+                    raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
+                if "auto_commit" in request:
+                    batch["auto_commit"] = request["auto_commit"]
+                    session.save(state)
+                controls = any(request.get(k) for k in ("adopt", "replan", "skip"))
+                if batch.get("commit_execution") and controls:
+                    head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
+                    if head != batch["baseline"]:
+                        completing = True
+                        raise ApiError("stale_source", "This batch has entered committing; reconcile and start a new batch before replanning or adopting changes.")
+                if batch["status"] == "ready" and not controls and (batch.get("auto_commit") or "auto_commit" in request or batch.get("commit_execution")):
+                    if batch.get("auto_commit"):
+                        completing = True
+                        return owner_auto_commit.execute(session, state, batch, remote)
+                    return session.view(state)
                 orphaned = [a for a in batch["attempts"] if a["status"] == "running"]
                 for attempt in orphaned:
                     attempt.update(status="interrupted", finished_at=now(), error="Owning operation ended before recording completion.")
@@ -246,6 +269,7 @@ def execute(session, state, request):
                          "settings": copy.deepcopy(state["settings"]), "checkpoint": snapshot, "tasks": [],
                          "git_admin": workspace.admin(session, state),
                          "verify_only": bool(request.get("verify_only")),
+                         "auto_commit": request.get("auto_commit", False),
                          "plans": [], "attempts": [], "repairs": 0, "status": "planning"}
                 state["batches"].append(batch)
                 session.save(state)
@@ -288,9 +312,12 @@ def execute(session, state, request):
             final_review(session, state, batch)
             check_fresh(session, state, batch)
             session.save(state)
+            if batch["status"] == "ready" and batch.get("auto_commit"):
+                completing = True
+                return owner_auto_commit.execute(session, state, batch, remote)
             return session.view(state)
         except BaseException as exc:
-            if batch is not None:
+            if batch is not None and not completing:
                 batch.update(status="interrupted" if getattr(exc, "code", None) == "cancelled" else "paused", error=str(exc))
                 session.save(state)
             raise

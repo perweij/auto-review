@@ -263,11 +263,27 @@ Finish with `C-c C-c`, return to Owner, press `g`, and repeat `m` for the next f
 Later fixes and manual edits stay unstaged, including separate changes to the
 same file. Push to the displayed **Push PR** destination with `P u`.
 Conflicting or unrelated existing staging is
-preserved and requires manual inspection. Use `C-u m` for status only. Automatic
-committing remains a later milestone.
+preserved and requires manual inspection. Use `C-u m` for status only.
 If combined-review repairs or adopted changes invalidate the separate task
 boundaries, Owner explains why the group needs one combined commit. An existing
 single commit of the whole group is also recognized.
+
+Use **`C-u f`** to continue automatically through committing and reply preparation.
+It completes the combined review, creates the logical commits in order, finishes
+matching local findings, and stages **Fixed in HASH** replies to the original
+GitHub conversations. Replies show **Awaiting push** until their commits reach
+the PR. Push with Magit, then use `P` to check and preview all staged replies and
+confirm publication; no separate `a` step is needed. Nothing is pushed, published,
+or resolved automatically. Local findings have no GitHub reply destination.
+
+The batch remembers **Auto commit**; `r` resumes it without repeating successful
+provider work. `C-u r` selects automatic or manual completion, including enabling
+it for an already verified batch. Commit failures retain verification and report
+partial commit progress. Hooks and signing are honored; failures never trigger
+an unsigned or hook-free retry. The per-commit timeout defaults to 120 seconds;
+`PR_REVIEW_COMMIT_TIMEOUT` sets a positive integer number of seconds. An open
+Magit commit editor must be finished/cancelled before starting automatic completion.
+Human reply edits and explicit unstaging survive retries.
 
 The progress log names the number of selected feedback items and distinguishes
 **Fix verified** from **Fix paused**. A paused result shows completed-task counts
@@ -281,8 +297,8 @@ directory; the Owner checkout and its real Git index remain protected.
 After committing, return to Owner and press `g`. An exact match to a verified
 fix automatically finishes its local findings and moves the completed fix under
 **Deferred / History**, showing **Committed HASH**. Group fixes list their included
-feedback when expanded. GitHub feedback keeps its reply workflow: push, then use
-`a` to associate commits and prepare replies. `h` remains available for manual
+feedback when expanded. For manual fixes, push and use `a` to associate commits
+and prepare replies. Automatic fixes already have their replies staged. `h` remains available for manual
 completion; arbitrary splits/rebases outside the recorded sequence require inspection. `U` and explicit re-import
 keep a finding queued until you finish it or make a new fix. `r` requires selecting
 one fix or its feedback; the Fixes header never resumes a group.
@@ -299,6 +315,8 @@ pr-review owner 123 fix --item thread:THREAD_ID
 pr-review owner 123 fix --item thread:FIRST --item thread:SECOND
 pr-review owner 123 fix --item thread:THREAD_ID --verify-only
 pr-review owner 123 resume --batch BATCH_ID
+pr-review owner 123 fix --item thread:THREAD_ID --auto-commit
+pr-review owner 123 resume --batch BATCH_ID --no-auto-commit
 pr-review owner 123 diff --batch BATCH_ID --current
 pr-review owner 123 resume --batch BATCH_ID --adopt
 pr-review owner 123 prepare-commit --batch BATCH_ID  # stage the next logical fix; return suggested message
@@ -319,8 +337,9 @@ triage, reply, and explicit resolve/reopen operations.
 
 Settings have `fix` and `review` objects, each with `provider`, `model`, and
 `effort`, plus `verification: "focused"`. Both initially use the default
-processing provider; thereafter they are independent. Every fix operation
-validates fresh model metadata and performs the live authentication probes.
+processing provider; thereafter they are independent. Fix operations that run
+providers validate fresh model metadata and perform live authentication probes;
+commit-only recovery needs no provider access.
 Opening or editing settings does not invoke inference.
 
 The planner can combine related concerns and order tasks by dependency. Tasks run
@@ -336,7 +355,8 @@ stage, commit, and push. The view shows the actual head repository and branch,
 including forks. A unique existing matching remote is configured on initial
 setup; missing/ambiguous remotes need explicit configuration in Magit. Check the
 displayed PR destination when pushing the differently named owner branch.
-The application never commits, pushes, or resolves threads as part of fixing.
+Only the explicit automatic-completion option creates commits. The application
+never pushes or resolves threads as part of fixing.
 
 Owner sessions live under the state root's separate `owners-v1` subtree. Private
 tree checkpoints preserve tracked and nonignored untracked files without touching
@@ -345,7 +365,8 @@ plans, prompts, checks, and reports remain available. For partial/manual changes
 inspect `diff --current` and Magit before `resume --adopt`. Unstage any staged
 changes first. `--replan` replans unfinished/changed feedback against accumulated
 changes; `--skip TASK_ID` leaves dependent tasks blocked. Changed local or remote
-HEAD during a saved batch requires reconciliation and a new batch. Starting a
+HEAD during provider execution requires reconciliation and a new batch;
+commit-only recovery recognizes its own already committed prefix. Starting a
 new fix fast-forwards a clean owner worktree when it is behind the fetched PR
 head, with progress messages showing both commits. Unfinished batches at that
 HEAD, Git operations in progress, local changes, and genuinely diverged branches
@@ -353,14 +374,15 @@ require inspection in Magit. Ignored files are never overwritten by this update.
 Agent-configuration changes return
 the exact diff and a token for explicit `--trust-agent-config TOKEN`.
 
-An exact commit can be associated automatically only when its sole parent is the
-batch baseline and its tree equals the final verified patch. Split/partial commits
-and other changes require explicit `associate --batch ID --item KEY --commit SHA`
+Exact association recognizes either the whole verified patch with the baseline
+as sole parent, or the recorded sequence of logical trees with matching parents.
+Arbitrary splits/partial commits require explicit `associate --batch ID --item KEY --commit SHA`
 (repeat items/commits as needed). Only verified code-fix outcomes get generated
-fixed-in replies, and only after the SHAs are reachable from the freshly fetched
-PR head. These replies enter Staged, remain editable, and still require explicit
-publication. Ordinary composed replies start Unstaged. Changed discussion or
-unreachable commits unstage affected replies without replacing human wording.
+fixed-in replies. Manual association generates them after their SHAs reach the
+freshly fetched PR head; automatic completion stages them locally as Awaiting push.
+Both require remote reachability and explicit confirmation for publication.
+Ordinary composed replies start Unstaged. Changed discussion or loss of previously
+confirmed remote commits unstages affected replies without replacing human wording.
 Uncertain writes require `recover` before another send; confirmed receipts remain
 historical after later amendments or force-pushes.
 

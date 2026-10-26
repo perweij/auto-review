@@ -126,7 +126,7 @@ def mutate(session, state, request):
             elif action == "stage":
                 if not state.get("metadata"):
                     raise ApiError("refresh_required", "Refresh GitHub before staging replies.")
-                owner_publication.blockers(session, state, reply, state["metadata"]["headRefOid"])
+                owner_publication.blockers(session, state, reply, state["metadata"]["headRefOid"], allow_unpushed=True)
                 reply["status"] = "staged"
             else:
                 reply["status"] = "unstaged"

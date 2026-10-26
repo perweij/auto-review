@@ -18,6 +18,74 @@ def fixed_items(batch):
     return {o["item"] for o in batch.get("review", {}).get("outcomes", []) if o["status"] == "fixed"}
 
 
+def bind_exact(batch, progress):
+    """Keep explicit human associations when recording exact local matches."""
+    associations = batch.setdefault("associations", {})
+    for key, commits in progress["items"].items():
+        if key in fixed_items(batch) and (key not in associations or associations[key]["method"] in ("exact", "task")):
+            associations[key] = {"commits": commits, "method": "exact" if progress["method"] == "exact" else "task", "at": now()}
+
+
+def draft_fixed(session, state, batch, remote=None, automatic=False):
+    """Prepare destination-specific drafts; automatic drafts may await a push."""
+    issues = []
+    pending = {a["reply"] for a in state["actions"] if a["status"] in ("ambiguous", "submitting")}
+    for key, association in batch.get("associations", {}).items():
+        association["refs"] = [workspace.pin_commit(session, sha) for sha in association["commits"]]
+        item = session.items(state, [key])[0]
+        if item["kind"] == "local_review":
+            continue
+        if automatic and batch.get("commit_progress", {}).get("items", {}).get(key) != association["commits"]:
+            issues.append({"item": key, "reason": "An explicit association differs from this fix; inspect its reply."})
+            continue
+        if not automatic and not all(workspace.ancestor(session, sha, remote) for sha in association["commits"]):
+            continue
+        repository = state["push_target"]["repository"]
+        reason = None
+        if not repository:
+            reason = "GitHub no longer identifies the PR head repository; inspect the destination."
+        elif item["fingerprint"] != batch["verified_fingerprints"].get(key) or item.get("missing"):
+            reason = "Feedback changed; inspect the reply context."
+        elif item["kind"] == "thread" and not item.get("can_reply"):
+            reason = "GitHub does not permit replying to this feedback."
+        existing = next((r for r in state["replies"] if r.get("batch") == batch["id"] and r["source"] == key), None)
+        if automatic and not existing and any(r["source"] == key and r["status"] != "published" for r in state["replies"]):
+            reason = "An existing reply needs inspection; no duplicate was created."
+        if reason:
+            if automatic:
+                issues.append({"item": key, "reason": reason})
+            elif not repository:
+                raise ApiError("missing_head_repository", reason)
+            continue
+        body = "Fixed in " + ", ".join(f"[{sha[:12]}](https://{repository}/commit/{sha})" for sha in association["commits"]) + "."
+        if item["kind"] != "thread":
+            body = f"In response to [this feedback]({item['comments'][0]['url']}):\n\n" + body
+        if existing:
+            if existing["id"] in pending:
+                if automatic:
+                    issues.append({"item": key, "reason": "Recover the uncertain publication before changing this reply."})
+                continue
+            if not automatic and association["method"] == "explicit" and existing["status"] != "published":
+                # An inspected manual reassociation can replace exact local proof
+                # (e.g. after rebasing). It still needs the normal pushed-commit checks.
+                for field in ("automatic", "awaiting_push", "push_confirmed", "commit_repository"):
+                    existing.pop(field, None)
+            if existing["status"] != "published" and existing.get("commits") != association["commits"]:
+                existing.update(commits=association["commits"], status="unstaged", needs_attention="Commit association changed; inspect this reply.")
+                if not existing.get("human_edited"):
+                    existing["body"] = body
+            if automatic and existing.get("needs_attention"):
+                issues.append({"item": key, "reason": existing["needs_attention"]})
+            continue  # Preserve wording, publication, and explicit unstaging.
+        extra = {"automatic": True, "awaiting_push": True, "push_confirmed": False,
+                 "commit_repository": repository} if automatic else {}
+        state["replies"].append(new_reply(item, body, batch=batch["id"], commits=association["commits"], status="staged", **extra))
+    if automatic:
+        batch["reply_issues"] = issues
+    state.pop("prepared", None)
+    return issues
+
+
 def associate(session, state, request):
     refresh(session, state)
     remote = workspace.fetch_head(session, state)
@@ -47,34 +115,9 @@ def associate(session, state, request):
                 associations[key] = {"commits": commits, "method": "explicit", "at": now()}
         else:
             _plan, progress = owner_commit_plan.update(session, batch, local)
-            if progress["items"]:
-                for key in (k for k in batch["items"] if k in fixed_items(batch) and k in progress["items"]):
-                    # A newly amended exact commit can replace an obsolete automatic association.
-                    if key not in associations or associations[key]["method"] in ("exact", "task"):
-                        associations[key] = {"commits": progress["items"][key],
-                                             "method": "exact" if progress["method"] == "exact" else "task", "at": now()}
-        for key, association in associations.items():
-            association["refs"] = [workspace.pin_commit(session, sha) for sha in association["commits"]]
-            item = session.items(state, [key])[0]
-            if item["kind"] == "local_review":
-                continue  # Local findings have provenance, but no GitHub reply destination.
-            if not all(workspace.ancestor(session, sha, remote) for sha in association["commits"]):
-                continue
-            if not state["push_target"]["repository"]:
-                raise ApiError("missing_head_repository", "GitHub no longer identifies the PR head repository; inspect the destination before generating commit links.")
-            if item["fingerprint"] != batch["verified_fingerprints"].get(key):
-                continue
-            existing = next((r for r in state["replies"] if r.get("batch") == batch["id"] and r["source"] == key), None)
-            body = "Fixed in " + ", ".join(f"[{sha[:12]}](https://{state['push_target']['repository']}/commit/{sha})" for sha in association["commits"]) + "."
-            if item["kind"] != "thread":
-                body = f"In response to [this feedback]({item['comments'][0]['url']}):\n\n" + body
-            if existing:
-                if existing["status"] != "published" and existing.get("commits") != association["commits"]:
-                    existing.update(commits=association["commits"], status="unstaged", needs_attention="Commit association changed; inspect this reply.")
-                    if not existing.get("human_edited"):
-                        existing["body"] = body
-                continue
-            state["replies"].append(new_reply(item, body, batch=batch["id"], commits=association["commits"], status="staged"))
+            if not batch.get("commit_execution", {}).get("inspection_required"):
+                bind_exact(batch, progress)
+        draft_fixed(session, state, batch, remote)
     invalidate(session, state, remote)
     state.pop("prepared", None)
     session.save(state)
@@ -89,6 +132,21 @@ def new_reply(item, body, **extra):
             "body": body, "status": "unstaged", "versions": [], "created_at": now(), **extra}
 
 
+def automatic_proof(session, state, reply):
+    """A staged-before-push claim must still have its exact local proof."""
+    batch = next((b for b in state["batches"] if b["id"] == reply.get("batch")), None)
+    if (not batch or batch["status"] != "ready" or batch.get("integrity_failure")
+            or batch.get("commit_execution", {}).get("inspection_required")
+            or reply["source"] not in fixed_items(batch)
+            or batch.get("verified_fingerprints", {}).get(reply["source"]) != reply["fingerprint"]
+            or reply.get("commit_repository") != state.get("push_target", {}).get("repository")):
+        return False
+    workspace.validate(session, state)
+    head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
+    progress = owner_commit_plan.inspect(session, batch, head)
+    return progress["items"].get(reply["source"]) == reply.get("commits")
+
+
 def invalidate(session, state, remote):
     items = {i["key"]: i for i in state["feedback"]}
     for reply in state["replies"]:
@@ -98,26 +156,37 @@ def invalidate(session, state, remote):
         reason = None
         if not item or item.get("missing") or item["fingerprint"] != reply["fingerprint"]:
             reason = "Discussion changed; inspect and acknowledge this reply."
+        elif reply.get("automatic") and not automatic_proof(session, state, reply):
+            reason = "The exact local fix or reply destination changed; inspect and reassociate this reply."
         elif reply.get("commits") and any(not workspace.ancestor(session, sha, remote) for sha in reply["commits"]):
-            reason = "Associated commit is not on the current PR; push or reassociate before staging."
+            if reply.get("automatic") and not reply.get("push_confirmed"):
+                reply["awaiting_push"] = True
+            else:
+                reason = "Associated commit is not on the current PR; push or reassociate before staging."
+        elif reply.get("automatic"):
+            reply.update(awaiting_push=False, push_confirmed=True)
         if reason:
             reply.update(status="unstaged", needs_attention=reason)
 
 
-def blockers(session, state, reply, remote):
+def blockers(session, state, reply, remote, allow_unpushed=False):
     item = session.items(state, [reply["source"]])[0]
     if item["kind"] == "local_review":
         raise ApiError("local_only", "Local findings do not have a GitHub reply destination.")
     if reply.get("needs_attention") or item["fingerprint"] != reply["fingerprint"]:
         raise ApiError("stale_discussion", "Inspect and acknowledge the changed reply context first.")
+    if reply.get("automatic") and not automatic_proof(session, state, reply):
+        raise ApiError("stale_commit", "The exact local fix or reply destination changed; inspect this reply.")
     require_text(reply["body"], "reply body")
     if item["kind"] == "thread" and not item.get("can_reply"):
         raise ApiError("permission_denied", "GitHub does not permit replying to this thread.")
     if reply.get("commits") and any(not workspace.ancestor(session, sha, remote) for sha in reply["commits"]):
-        raise ApiError("unpublished_commit", "The fix commits are not on the current PR head.")
+        if not (allow_unpushed and reply.get("automatic") and not reply.get("push_confirmed")):
+            raise ApiError("unpublished_commit", "The fix commits are not on the current PR head. Push first, then retry P; no replies were omitted.")
 
 
 def prepare(session, state):
+    selected_ids = {r["id"] for r in state["replies"] if r["status"] == "staged"}
     refresh(session, state)
     remote = workspace.fetch_head(session, state)
     invalidate(session, state, remote)
@@ -126,11 +195,13 @@ def prepare(session, state):
         raise ApiError("closed_pr", "Publishing owner replies requires an open PR.")
     if any(a["status"] in ("submitting", "ambiguous") for a in state["actions"]):
         raise ApiError("uncertain_publication", "Recover uncertain replies before publishing again.")
-    selected = [r for r in state["replies"] if r["status"] == "staged"]
+    selected = [r for r in state["replies"] if r["id"] in selected_ids]
     if not selected:
         raise ApiError("nothing_staged", "Stage at least one reply.")
     for reply in selected:
         blockers(session, state, reply, remote)
+        if reply["status"] != "staged":
+            raise ApiError("stale_reply", "A selected reply changed; inspect and stage it again. Nothing was omitted from the preview.")
     payload = {"head": remote, "viewer": state["viewer"], "replies": copy.deepcopy(selected)}
     token = digest(payload)
     state["prepared"] = {"token": token, **payload}

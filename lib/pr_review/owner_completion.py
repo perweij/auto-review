@@ -44,6 +44,7 @@ def reconcile(session, state):
             if (item["kind"] == "local_review" and not item.get("missing")
                     and batch.get("status") == "ready" and commits
                     and not batch.get("discussion_stale") and not batch.get("integrity_failure")
+                    and not batch.get("commit_execution", {}).get("inspection_required")
                     and batch.get("verified_fingerprints", {}).get(item["key"]) == fingerprint
                     and item["key"] in batch.get("verified_items", [])
                     and batch.get("review", {}).get("complete") is True

@@ -202,11 +202,25 @@ and sequential-group `F` sessions using the existing owner worktree, plans,
 checkpoints, settings, and review flow. Terminal dependencies and this experiment
 are excluded from the initial owner-mode package.
 
-## 7. Optional automatic owner commits
+## 7. Implemented: automatic owner commits and staged replies
 
-After the human-confirmed commit handoff is established, add an opt-in automatic
-commit step to continue the fix pipeline without opening an editor. Reuse exact
-verified staging, suggested messages, and commit associations. Define behavior
-for hooks/signing failures, changed HEAD/index, cancellation, retry/crash recovery,
-and retaining human edits. Committing must not imply pushing, publishing replies,
-or resolving threads. This milestone is separate from interactive `F`.
+`C-u f` fixes/reviews the item or group, creates its logical commits after combined
+verification, and prepares/stages replies to the original GitHub destinations.
+The batch remembers automatic completion; `r` resumes it and `C-u r` selects
+automatic or manual completion. Hooks/signing are honored, failures retain
+verification and commits, and recovery detects successful but unrecorded commits
+without duplicate commits or provider reruns. Local findings finish automatically.
+
+Replies awaiting push retain staged selection. After a human push, `P` checks
+the whole selection, previews it, and requires confirmation; no separate `a`
+step is needed. Human wording, explicit unstaging, and uncertain receipts remain
+protected. Pushing, publication, and thread resolution are never automatic.
+See the [implementation specification](pr-owner-mode.md#implemented-follow-up-automatic-commits-and-staged-replies).
+Interactive `F` remains a separate future milestone.
+
+Validation on 2026-10-26 passed 161 Bats, 234 Python, and 115 ERT tests, lint,
+warning-free byte compilation, documentation links, and Python 3.9 grammar checks.
+Real Git coverage includes hooks, SSH signing, timeout/cancellation, interrupted
+commit recovery, and publication readiness. A disposable native Magit check
+confirmed inspection of completed automatic fixes and local reconciliation.
+Providers/GitHub were mocked; the live PR worktree was not changed.

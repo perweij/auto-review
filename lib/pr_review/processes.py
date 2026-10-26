@@ -182,7 +182,8 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                     except subprocess.TimeoutExpired:
                         pass
                     if child.poll() is None:
-                        emit("progress", message=f"Warning: {stage} emitted a terminal error; stopping the model.")
+                        detail = "exceeded its time limit" if reason == "timeout" else "emitted a terminal error"
+                        emit("progress", message=f"Warning: {stage} {detail}; stopping the process.")
                         stop_group(child)
                     stopped = True
                     drain_deadline = time.monotonic() + 1

@@ -108,6 +108,8 @@ reply workflow because they already have GitHub destinations.
 | `p` / `? S` | Replan unfinished work / skip the selected task and resume |
 | `d` / `C-u d` | Saved logical fix/task/batch diff / current partial changes since its checkpoint |
 | `m` / `C-u m` | Prepare the selected logical fix or next batch commit / inspect Magit without staging |
+| `C-u f` | Fix/review the item or group, then automatically commit and stage replies |
+| `C-u r` | Choose automatic or manual completion and resume the selected batch |
 | `a` / `C-u a` | Detect exact commits / explicitly associate selected feedback and commits |
 | `c` / `e` | Compose a reply / edit an unpublished reply |
 | `s` / `u` | Stage / unstage replies, a reply group, or sibling headings |
@@ -188,6 +190,35 @@ status only, including when inspecting partial work or staging manual changes.
 When the saved fix already exists as an exact commit in the current branch,
 `m` names that commit and opens status without asking for another association or
 restaging it. This also works after later commits have advanced HEAD.
+
+For automatic completion, use **`C-u f`** on an item or group. The full group
+passes final review before committing begins. It uses the same ordered logical
+fixes and explained combined-commit fallback as `m`. Hooks, signing, and identity
+follow normal Git configuration. Each commit's actual parent/tree is checked;
+unexpected hook changes stop for inspection without resets or lost edits.
+There is a 120-second timeout per commit (`PR_REVIEW_COMMIT_TIMEOUT` overrides it).
+
+The batch shows **Auto commit**, progress, and staged reply counts. Its matching
+local findings finish automatically. GitHub feedback gets a staged reply with
+its own commit link and original thread/timeline destination. **Awaiting push**
+means selected for publication but not yet publishable. After pushing, `P` checks
+every selected reply and shows the exact preview before asking for confirmation.
+A blocked reply stops the whole preview; it is not silently omitted. Changed
+context or lost previously confirmed remote commits require inspection. Initial
+waiting for a push preserves staged selection.
+
+Ordinary `r` remembers the batch's completion mode. `C-u r` chooses automatic or
+manual completion, also allowing an existing verified batch to opt in. A paused
+automatic phase retains successful verification and any completed commits.
+Recovery detects a commit even if the process stopped before saving its result,
+and repairs missing reply drafts without duplicate commits or provider reruns.
+Unfinished reply preparation can be resumed even after every commit exists.
+An existing human reply, edited wording, explicit unstaging, or uncertain
+publication is preserved. Missing destinations and conflicting drafts appear as
+reply-preparation issues. Finish/cancel an open Magit commit editor before an
+automatic start/resume. `K` cancels; `g` never starts commits or publication.
+Once committing has started, replanning/adopting requires reconciliation and a
+new batch. Interactive provider `F` remains a separate future feature.
 
 The owner Magit buffer shows **Push PR** with the intended destination. Use `P u`
 to push to that upstream after committing. The local owner branch has a unique

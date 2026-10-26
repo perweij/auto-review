@@ -22,8 +22,9 @@ of feedback items by dependency and combine related concerns into coherent fix
 tasks. Execution remains sequential in a dedicated owner worktree.
 
 Providers plan, modify code, test, and review automatically. The user controls
-staging code (including explicit `m` preparation), committing, pushing,
-publishing replies, and resolving threads.
+staging code and committing through `m`, or explicitly opts into automatic
+completion with `C-u f`. Pushing, publishing replies, and resolving threads
+remain explicit user operations.
 Use native Magit for the Git operations rather than building another staging or
 commit interface.
 
@@ -38,13 +39,14 @@ This work package includes:
 - Durable checkpoints, cancellation, recovery, and partial-batch replanning.
 - Automatic exact-match commit association, explicit association otherwise, and
   staged commit-linked replies after push verification.
+- Optional `C-u f` commits after combined review, with staged replies awaiting push.
 - CLI, version-1 JSON API, and Emacs support through shared application services.
 
 Separate work:
 
 - Interactive owner-mode `F`, terminal integration, and its feasibility test.
 - CI repair, merge administration, and requesting another review.
-- Automatic commits, pushes, reply publication, or thread resolution.
+- Automatic pushes, reply publication, or thread resolution.
 - Implementing the Repository review toolkit itself.
 
 The [TODO list](todo.md) tracks this package and the subsequent interactive work.
@@ -515,8 +517,9 @@ ancestors of the PR's reported current head. Use that PR identity rather than
 assuming an arbitrary local tracking ref or similarly named branch is current.
 Unpushed or unreachable commits block fixed-in publication.
 
-After verification, generate editable commit-linked replies directly into
-**Staged**:
+Manual association generates editable replies after remote verification;
+automatic completion generates them after exact local commit verification, into
+**Staged · Awaiting push**. Both require remote verification before publication:
 
 - Inline feedback replies to its original thread.
 - General comments and review summaries receive a PR timeline comment linking
@@ -532,8 +535,10 @@ regenerating proposals.
 
 Publication requires explicit user action and fresh account, destination,
 discussion, and commit-reachability checks. Changed wording, associations,
-discussion dependencies, or unreachable commits unstage affected unpublished
-replies. Never silently rewrite a human-edited draft to accommodate those changes.
+discussion dependencies, or loss of previously confirmed remote commits unstage
+affected unpublished replies. Initial awaiting-push replies retain staged intent
+but cannot publish. Validate the entire selected set without silently omitting
+blocked replies. Never silently rewrite human wording to accommodate changes.
 
 Record publication intent before sending. Partial success moves only confirmed
 replies to Published. Uncertain responses require read-back recovery before retry;
@@ -586,7 +591,7 @@ or model invocation; reviewer workflows remain compatible.
   and Open Magit.
 
 Exit criteria: a single concern produces an inspectable, verified patch or an
-honest non-success outcome; interruption preserves work and never commits,
+honest non-success outcome; ordinary `f` interruption preserves work and never commits,
 pushes, or publishes automatically.
 
 ### Milestone 3: dependency-aware batches
@@ -653,14 +658,53 @@ Exit criteria for that later package: both supported provider CLIs pass the live
 terminal acceptance matrix, the user can reliably escape/cancel/return, and
 interactive work participates in the same recovery and publication rules.
 
-## Later milestone: optional automatic commits
+## Implemented follow-up: automatic commits and staged replies
 
-After the human-confirmed `m` handoff is established, an opt-in step may create
-the verified commit without opening an editor. Reuse the exact staged tree and
-message preparation. Define hook/signing failure handling, HEAD/index checks,
-cancellation, and idempotent recovery before enabling pipeline continuation.
-An automatic commit must not imply pushing, publishing, or resolving feedback.
-This milestone is independent of interactive `F`; see the [TODO](todo.md).
+`C-u f` opts a selected item/group into automatic completion. Ordinary `f` retains
+the manual Magit checkpoint. Save `auto_commit` per batch; `r` retains it and
+`C-u r` selects automatic or manual completion, including for a ready batch.
+Older sessions default to manual. Read-only verification cannot opt in.
+
+Finish every applicable task and combined review before creating any commit.
+Use the recorded logical boundaries, generated messages, and exact staging;
+combined-review repairs can retain one explained combined commit. Run normal
+Git hooks and signing, without an editor or unsigned/hook-free fallback. Check
+branch, HEAD, index, and feedback before each commit and its actual parent/tree
+afterward. Retain later fixes and unrelated edits. Unexpected hook/source changes
+pause for manual inspection; never reset, amend, or erase an existing commit.
+
+Persist each attempt's expected parent/tree/message before launching Git, then
+its result and artifacts. Use the existing execution lock, cancellable process
+groups, and a 120-second per-commit timeout (`PR_REVIEW_COMMIT_TIMEOUT` overrides).
+Keep verification `ready` when automatic completion pauses. Resuming recognizes
+commits created before a result was saved, checks interrupted changes, and retries
+only unfinished commits/drafting without invoking providers. Once commits have
+begun, adoption/replanning requires reconciliation and a new batch. An existing
+Magit commit editor blocks an automatic start/resume.
+
+After each confirmed commit, save exact associations and prepare/stage fixed-in
+replies to the corresponding original GitHub destinations. Local findings finish
+through existing exact-commit reconciliation and receive no GitHub reply. Related
+items share their actual commit; separate units have separate links. Preserve
+human wording, explicit unstaging/associations, prior publication, and uncertain
+receipts. Conflicting drafts, changed associations, and missing destinations are
+visible reply-preparation issues; avoid duplicates. Recovery can repair missing
+drafts after all commits already exist.
+
+Staging records publication intent independently of readiness. New automatic
+replies remain **Staged · Awaiting push** until delivery to the fresh PR head is
+confirmed. `P` verifies the entire selected set and previews it before explicit
+confirmation. A blocker prevents the whole preview; it never silently drops an
+item. Losing previously confirmed remote commits, changed context, or obsolete
+local proof requires unstaging and inspection. No automatic push, publication,
+or thread resolution is introduced. `g` remains local reconciliation.
+
+Show the batch's completion mode, commit progress, reply counts, and concluding
+success/pause messages; preserve accessible artifacts and a recovery action.
+Validation covers real Git commits/hooks/signing, overlapping snapshots, partial
+failure, timeout/cancellation, before/after-commit crashes, duplicate prevention,
+before/after-push publication, manual wording/selection, and old/manual sessions.
+This package is independent of the later interactive `F` work.
 
 ## Validation and completion
 
@@ -772,6 +816,20 @@ history guidance. A read-only PR #4 preview derived five logical fixes covering
 its eight findings (2, 2, 1, 1, 2) and recognized all three already committed
 batches. No live session/worktree, GitHub state, or existing commit was changed;
 GitHub and provider calls in regression tests were mocked.
+
+The automatic-commit follow-up on 2026-10-26 passed all 161 Bats, 234 Python,
+and 115 ERT tests, lint, warning-free byte compilation, local documentation
+links, and Python 3.9 grammar checks. Twenty-three added Python tests use real
+temporary Git repositories to cover ordered commits, combined-review timing,
+partial completion, hook/signing failures, real SSH signatures, timeouts,
+interrupted commit recovery, unexpected changes, preserved manual edits,
+idempotent reply preparation, push readiness, publication selection, and explicit
+reassociation after a rebase. Four added ERT tests cover prefix arguments,
+remembered completion mode, progress/recovery display, and commit-editor exclusion.
+A disposable native Magit check confirmed that completed automatic fixes open
+for inspection without preparing another commit and that local reconciliation
+retains existing commits and awaiting-push replies. GitHub and providers were
+mocked; these checks did not change the live PR worktree or publish anything.
 
 The implementation adds no Guix dependency or package-layout change. The existing
 migration follow-ups for a real Guix build and execution on Python 3.9 remain in

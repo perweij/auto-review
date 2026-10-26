@@ -212,6 +212,54 @@ uses method `task` for exact unit matches and preserves explicit associations.
 Pushed prefixes may generate replies for their own items; later uncommitted
 findings receive no fixed-in claim.
 
+`owner-fix` accepts optional Boolean `auto_commit`. A new batch defaults to false;
+omission on resume preserves the saved choice, and explicit false disables it.
+The CLI exposes mutually exclusive `--auto-commit` / `--no-auto-commit` on `fix`
+and `resume`. Automatic committing is incompatible with `verify_only`. Older
+sessions without the field retain manual completion.
+
+After final combined verification, automatic completion stages and commits each
+logical unit, using normal hooks/signing and the saved generated message without
+an editor. `PR_REVIEW_COMMIT_TIMEOUT` is a positive integer, default 120 seconds.
+Before and after each attempt, branch/HEAD/index and exact parent/tree checks
+protect the recorded result; hook/source changes require inspection. No reset,
+amend, push, hook bypass, or unsigned retry is performed.
+
+`batch.commit_execution` separates completion from verification: `status` is
+`pending`, `running`, `paused`, or `complete`; `attempts` retain each unit's intended
+`parent`, `tree`, `message`, artifact directory, timestamps, state and actual SHA
+when confirmed. Failures retain the ready verification and save `error`;
+unexpected changes additionally set `inspection_required`. Intent is saved before
+launching Git. Resuming scans for exact commits before retrying and bypasses
+provider execution for a ready batch. An already pushed recognized prefix is
+accepted; unrelated remote changes pause recovery. Replanning/adoption after
+HEAD advances requires a new batch. `g`/`owner-reconcile` remains local and never
+creates commits or replies.
+
+Confirmed automatic commits create exact associations and idempotent generated
+replies, then reconcile local findings. `batch.reply_issues` contains item/reason
+entries for missing destinations or drafts needing inspection. These can pause
+completion after all commits exist; `r` retries drafting without another commit.
+Local findings and outcomes without a verified code fix generate no reply.
+
+Automatic replies add `automatic`, `commit_repository`, `awaiting_push`, and
+`push_confirmed` fields. Their `status: staged` records publication selection;
+`awaiting_push: true` records an initial reachability blocker without unstaging.
+Staging is allowed before push only with a valid exact local proof. Preparation
+and publication always require fresh remote reachability. Once remote delivery
+was confirmed, losing it requires unstaging/inspection. Context or provenance
+changes also block and unstage the affected draft. Human edits, explicit
+unstaging, published records, explicit associations, and uncertain submissions
+are retained; retries do not silently restage or duplicate them.
+Explicit manual reassociation of an unpublished reply switches it to the existing
+manual publication checks, allowing recovery after a rebase. Changed commit links
+still require inspection/restaging; uncertain publication receipts remain intact.
+
+`owner-prepare` retains the selected reply IDs across its refresh/validation:
+if any becomes invalid or is awaiting push, the whole preview fails rather than
+silently omitting that reply. `owner-publish` retains exact-preview confirmation
+and per-destination validation. Automatic completion never invokes publication.
+
 `owner-import` is the exception to owner-session selectors: it takes the source
 reviewer's session/generation/revision and validates them under the shared PR and
 reviewer draft locks, after acquiring the destination's execution lock. The
@@ -304,8 +352,9 @@ To resume, provide `batch` instead of `items`. Optional controls are `adopt: tru
 for explicitly inspected manual/partial changes, `replan: true` for unfinished
 or changed discussion, `skip: [TASK_ID,…]`, and `trusted_snapshot` from an exact
 `trust_required` error. That error also carries `paths` and `diff` for inspection.
-Resume keeps the original baseline and provider settings; changed HEAD requires
-reconciliation and a new batch. Unstaging code is a human operation. Integrity
+Provider resume keeps the original baseline and settings; changed HEAD requires
+reconciliation and a new batch. Commit-only recovery instead recognizes its own
+recorded sequence. Unstaging code is a human operation. Integrity
 failures persist across retries until explicit adoption; records are retained.
 
 `owner-fix` emits standard `started`/`progress` events. Use shared `cancel` with
@@ -315,12 +364,13 @@ the owner lock; publication/thread mutations then take the shared PR lock before
 short state transactions. Conflicts return `busy`. Human confirmation is outside
 all locks.
 
-Without explicit commits, `owner-associate` checks ready batches for a sole-parent,
-exact-tree commit. Explicit associations require `batch` and nonempty `commits`
+Without explicit commits, `owner-associate` checks ready batches for an exact
+whole-group commit or recorded logical sequence. Explicit associations require `batch` and nonempty `commits`
 (SHAs or commit revisions); optional `items` limits verified fixed outcomes.
-No filename heuristic or fixed-in claim is inferred for other outcomes. Drafts
-are generated only after associated commits are reachable from the freshly
-fetched PR head. Each original destination receives its own editable draft:
+No filename heuristic or fixed-in claim is inferred for other outcomes. This
+manual association operation generates drafts after their commits reach the fresh
+PR head; automatic completion can stage them earlier as awaiting push.
+Each original destination receives its own editable draft:
 inline thread reply, or source-linked issue/timeline comment for general feedback.
 
 Publication tokens cover exact reply bodies, destinations, commit associations,
