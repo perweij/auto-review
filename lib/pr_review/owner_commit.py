@@ -25,6 +25,16 @@ def message(state, batch):
     return subject + "\n\n" + body + "\n\n" + "\n".join(s for s in summaries if s) + "\n\nPR: " + state["url"] + "\n"
 
 
+def unverified_reason(batch):
+    tasks = batch.get("tasks", [])
+    completed = sum(task.get("status") == "complete" for task in tasks)
+    pending = next((task for task in tasks if task.get("status") not in ("complete", "skipped", "blocked")), {})
+    report = pending.get("review") or pending.get("implementation") or batch.get("review") or {}
+    reason = batch.get("error") or "; ".join(report.get("blocking", [])) or report.get("summary") or "Combined verification has not passed."
+    return (f"Selected fix is {batch['status']} ({completed}/{len(tasks)} tasks complete). {reason} "
+            "Changes remain unstaged. Inspect this batch under Fixes and resume with r before preparing a commit.")
+
+
 def prepare(session, state, request):
     workspace.validate(session, state)
     workspace.configure_push(session, state)
@@ -33,9 +43,11 @@ def prepare(session, state, request):
         return {**result, "reason": reason, "owner": session.view(state)}
     head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
     batches = [b for b in state["batches"] if b["id"] == request["batch"]] if request.get("batch") else state["batches"][-1:]
-    if not batches or batches[0]["status"] != "ready":
-        return stopped("No verified fix is ready to commit at this HEAD; inspect the worktree in Magit.")
+    if not batches:
+        return stopped("No saved fix matches this selection; choose a fix under Fixes or inspect the worktree in Magit.")
     batch = batches[0]
+    if batch["status"] != "ready":
+        return stopped(unverified_reason(batch))
     if batch["baseline"] != head:
         matches = workspace.exact_commits(session, batch, head)
         if len(matches) == 1:

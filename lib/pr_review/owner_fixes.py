@@ -86,6 +86,12 @@ def context(session, state, batch, keys, before):
 
 
 def run_task(session, state, batch, task):
+    # An incomplete assessment is a review retry, not a new implementation.
+    # execute() has already checked source, Git state, feedback, and settings.
+    if (task["status"] == "needs_attention" and task.get("review", {}).get("complete") is False
+            and task.get("implementation", {}).get("complete") is True
+            and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]):
+        task["status"] = "reviewing"
     if batch.get("verify_only") and task["status"] != "reviewing":
         task.update(before=batch["checkpoint"], status="reviewing", implementation={"summary": "Read-only verification requested"})
     if task["status"] != "reviewing":
@@ -102,6 +108,8 @@ def run_task(session, state, batch, task):
     while True:
         data = context(session, state, batch, task["items"], task["before"]["tree"])
         data["implementation_report"] = task["implementation"]
+        if task.get("review", {}).get("complete") is False:
+            data["previous_incomplete_review"] = task["review"]
         review = validate_result(models.invoke(session, state, batch, "review", data), task["items"])
         task["review"] = review
         task["after"] = batch["checkpoint"]
@@ -136,6 +144,8 @@ def final_review(session, state, batch):
         session.save(state)
         data = context(session, state, batch, keys, batch["baseline"])
         data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks."
+        if batch.get("review", {}).get("complete") is False:
+            data["previous_incomplete_review"] = batch["review"]
         review = validate_result(models.invoke(session, state, batch, "review", data), keys)
         batch["review"] = review
         if successful(review):

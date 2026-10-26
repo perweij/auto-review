@@ -5,6 +5,7 @@ from .common import ApiError, digest, locked, now, read_json, require_text
 from .repository import Repository
 from .state import Session
 from .owner_state import OwnerSession, open_session
+from .owner_completion import manual_triage
 
 
 def from_review(request):
@@ -59,6 +60,8 @@ def from_review(request):
             old = previous.get(item["key"])
             if old and old["fingerprint"] == item["fingerprint"]:
                 imported[index] = {**old, "queued": True, "triage": "attention", "attention": True}
+                # Re-import is an explicit request to reconsider this finding.
+                manual_triage(state, imported[index])
             else:
                 item.update(imported_at=now(), versions=copy.deepcopy(old.get("versions", [])) if old else [])
                 if old:

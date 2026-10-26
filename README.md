@@ -235,12 +235,14 @@ Optional environment settings:
 
 Owner mode opens independently of saved reviewer runs. It keeps complete incoming
 discussions, unread/changed state, local triage, review verdicts, thread resolution,
-and outdated-code status separate. Opening and local reload use saved data;
-refresh explicitly reads GitHub without a model call.
+and outdated-code status separate. Opening uses saved discussions. Local reload
+(`g`) also checks Git commits; `G` explicitly reads GitHub without a model call.
 
 To fix findings from your own local analysis, select a finding, status group, or
 sibling headings in Reviewer and press `o` (**Send to Owner for fixing**). Owner
-opens with exactly those items selected; press `f` to run the fix/review pipeline.
+imports exactly those items and focuses the first one; press `f` to fix the item
+at point. For a batch, press `f` on an Owner group heading or explicitly select
+sibling headings. Importing does not leave an active selection over the group.
 The handoff copies saved wording, original findings, and code/discussion context
 without changing reviewer staging or publishing anything. Repeating it does not
 duplicate unchanged findings. Explicitly re-importing an edited draft retains the
@@ -259,10 +261,24 @@ including edits to the same files. Conflicting or unrelated existing staging is
 preserved and requires manual inspection. Use `C-u m` for status only. Automatic
 committing remains a later milestone.
 
-After committing and pushing, `a` links the commit to the fix. For a local finding,
-press `h` on the finding or verified fix to finish: the feedback moves to History
-and the fix reads **Done locally**. No GitHub reply is needed. Fix results show
-their next step, with verification details and earlier attempts folded separately.
+The progress log names the number of selected feedback items and distinguishes
+**Fix verified** from **Fix paused**. A paused result shows completed-task counts
+and the verification blocker. Its changes remain unstaged; inspect the saved fix
+and resume it with `r` before using automatic commit preparation.
+If implementation succeeded but review was incomplete, `r` retries that review
+against the unchanged fix, then checks the combined result. Reviewers can run
+focused tests with disposable files and Git repositories in an attempt's scratch
+directory; the Owner checkout and its real Git index remain protected.
+
+After committing, return to Owner and press `g`. An exact match to a verified
+fix automatically finishes its local findings and moves the completed fix under
+**Deferred / History**, showing **Committed HASH**. Group fixes list their included
+feedback when expanded. GitHub feedback keeps its reply workflow: push, then use
+`a` to associate commits and prepare replies. `h` remains available for manual
+completion; split/rebased commits require inspection. `U` and explicit re-import
+keep a finding queued until you finish it or make a new fix. `r` requires selecting
+one fix or its feedback; the Fixes header never resumes a group.
+Fix results show their next step, with verification details and earlier attempts folded separately.
 `?` shows actions for the current selection; `+` opens the complete command list.
 
 ```bash
@@ -278,6 +294,7 @@ pr-review owner 123 resume --batch BATCH_ID
 pr-review owner 123 diff --batch BATCH_ID --current
 pr-review owner 123 resume --batch BATCH_ID --adopt
 pr-review owner 123 prepare-commit --batch BATCH_ID  # stage verified snapshot; return suggested message
+pr-review owner 123 reconcile               # check local commits and finish matching local findings
 pr-review owner 123 associate               # after human commits and pushes
 pr-review owner 123 prepare                 # inspect exact staged replies and token
 pr-review owner 123 publish --confirm TOKEN

@@ -105,10 +105,15 @@
      (should (equal (alist-get 'items sent) ["local:first"]))
      (should (string-match-p "Attention needed (2)" (buffer-string)))
      (should (string-match-p "Done locally · local:first" (buffer-string)))
+     (should (string-match-p "Fixes (0)" (owner-test-visible-text)))
+     (should-not (string-match-p "Done locally · local:first" (owner-test-visible-text)))
+     (should (equal (oref (magit-current-section) value) "history"))
      (should (equal (alist-get 'status (car (alist-get 'batches magit-auto-review-owner--view))) "ready"))
      (let ((section (owner-test-goto 'owner-feedback "local:first")))
        (should (equal (oref (oref section parent) value) "history")))
-     (owner-test-goto 'owner-batch "b1")
+     (let ((section (owner-test-goto 'owner-batch "b1")))
+       (should (equal (oref (oref section parent) value) "history")))
+     (should-error (magit-auto-review-owner-handled) :type 'user-error)
      (should-not (assoc "h" (magit-auto-review-owner--menu-actions))))))
 
 (ert-deftest owner/finish-from-task-excludes-unverified-and-unrelated-items ()
@@ -216,7 +221,7 @@
          (save-window-excursion (magit-auto-review-owner-diff nil)))
        (should (equal (alist-get 'batch sent) "b1"))))))
 
-(ert-deftest owner/import-selects-only-handed-off-items-for-f ()
+(ert-deftest owner/import-focuses-first-item-without-an-implicit-group-selection ()
   (save-window-excursion
     (let ((transient-mark-mode t) buffer request)
       (unwind-protect
@@ -224,14 +229,48 @@
             (magit-auto-review-owner-show-import
              `((owner . ,(owner-test-local-view)) (items . ("local:first" "local:second"))) temporary-file-directory)
             (setq buffer (current-buffer))
-            (should (use-region-p))
+            (should-not (use-region-p))
             (should (string-match-p "saved code context" (buffer-string)))
             (should (string-match-p "Preserved local wording" (buffer-string)))
             (should (string-match-p "No GitHub reply destination" (buffer-string)))
             (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (r &optional _cb) (setq request r))))
               (magit-auto-review-owner-fix))
-            (should (equal (alist-get 'items request) ["local:first" "local:second"])))
+            (should (equal (alist-get 'items request) ["local:first"])))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest owner/import-then-group-or-individual-f-targets-the-visible-heading ()
+  (save-window-excursion
+    (let ((transient-mark-mode t) buffer sent)
+      (unwind-protect
+          (progn
+            (magit-auto-review-owner-show-import
+             `((owner . ,(owner-test-local-view)) (items . ("local:first" "local:second"))) temporary-file-directory)
+            (setq buffer (current-buffer))
+            (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (r &optional _cb) (setq sent r))))
+              (owner-test-goto 'owner-group "attention")
+              (magit-auto-review-owner-fix)
+              (should (equal (alist-get 'items sent) ["local:first" "local:second" "thread:T1"]))
+              (owner-test-goto 'owner-feedback "local:first")
+              (magit-auto-review-owner-fix)
+              (should (equal (alist-get 'items sent) ["local:first"]))
+              (let ((first (point)) (last (owner-test-goto 'owner-feedback "local:second")))
+                (goto-char first)
+                (push-mark (oref last end) t t)
+                (activate-mark)
+                (magit-auto-review-owner-fix)
+                (should (equal (alist-get 'items sent) ["local:first" "local:second"])))))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest owner/render-clears-a-region-before-rebuilding-sections ()
+  (owner-test-buffer
+   (let ((transient-mark-mode t))
+     (owner-test-goto 'owner-feedback "thread:T1")
+     (push-mark (point-max) t t)
+     (activate-mark)
+     (should (use-region-p))
+     (magit-auto-review-owner--render)
+     (should-not (use-region-p))
+     (should (equal (magit-auto-review-owner--selected 'owner-feedback) '("thread:T1"))))))
 
 (ert-deftest owner/own-comments-are-visible-and-fixable-without-an-alert ()
   (owner-test-buffer
@@ -293,11 +332,61 @@
      (magit-section-show section))
    (cl-letf (((symbol-function 'magit-auto-review--call)
               (lambda (request)
-                (should (equal (alist-get 'command request) "owner-read"))
+                (should (equal (alist-get 'command request) "owner-reconcile"))
                 (owner-test-view))))
      (magit-auto-review-owner-refresh))
    (should (equal (oref (magit-current-section) value) "thread:T1"))
    (should-not (oref (magit-current-section) hidden))))
+
+(ert-deftest owner/refresh-shows-confirmed-commits-and-moves-finished-fixes-to-history ()
+  (owner-test-buffer
+   (magit-auto-review-owner--accept (owner-test-completed-local-view))
+   (owner-test-goto 'owner-batch "b1")
+   (let ((view (copy-tree magit-auto-review-owner--view)))
+     (setf (alist-get 'triage (car (alist-get 'feedback view))) "handled"
+           (alist-get 'attention (car (alist-get 'feedback view))) :false
+           (alist-get 'commit_match (car (alist-get 'batches view))) '((commit . "0123456789abcdef"))
+           (alist-get 'reconciliation view) '((status . "complete") (committed_batches . 1)
+                                              (handled_items . ("local:first")) (reopened_items)))
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (request)
+                  (should (equal (alist-get 'command request) "owner-reconcile")) view)))
+       (magit-auto-review-owner-refresh)))
+   (should (string-match-p "1 findings moved to History" header-line-format))
+   (should (equal (oref (magit-current-section) value) "history"))
+   (should (string-match-p "Fixes (0)" (owner-test-visible-text)))
+   (should (string-match-p "Committed 0123456789ab" (buffer-string)))
+   (should (equal (oref (oref (owner-test-goto 'owner-batch "b1") parent) value) "history"))))
+
+(ert-deftest owner/refresh-while-running-keeps-the-read-only-snapshot-path ()
+  (owner-test-buffer
+   (setq header-line-format " Running review")
+   (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+             ((symbol-function 'magit-auto-review--call)
+              (lambda (request)
+                (should (equal (alist-get 'command request) "owner-read")) (owner-test-view))))
+     (magit-auto-review-owner-refresh))
+   (should (equal header-line-format " Running review"))))
+
+(ert-deftest owner/resume-requires-one-selected-fix-and-refuses-committed-history ()
+  (owner-test-buffer
+   (owner-test-goto 'owner-group "fixes")
+   (let (sent)
+     (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (request) (setq sent request))))
+       (should-error (magit-auto-review-owner-resume) :type 'user-error)
+       (should-not sent)
+       (owner-test-goto 'owner-batch "b1")
+       (magit-auto-review-owner-resume)
+       (should (equal (alist-get 'batch sent) "b1"))
+       (setq sent nil)
+       (setf (alist-get 'commit_match (car (alist-get 'batches magit-auto-review-owner--view))) '((commit . "abc")))
+       (should-error (magit-auto-review-owner-resume) :type 'user-error)
+       (should-not sent)))))
+
+(ert-deftest owner/group-fix-shows-its-included-feedback-without-unfolding-reports ()
+  (owner-test-buffer
+   (magit-section-show (owner-test-goto 'owner-batch "b1"))
+   (should (string-match-p "Included feedback:\n  · First concern\n  · Second concern" (owner-test-visible-text)))))
 
 (ert-deftest owner/stage-group-addresses-outgoing-replies-only ()
   (owner-test-buffer
@@ -532,12 +621,53 @@
      (funcall result (owner-test-view))
      (should-not magit-auto-review-owner--operation)
      (should-not magit-auto-review-owner--process)
-     (should (equal header-line-format " Owner operation complete"))
+     (should (string-prefix-p " Fix verified" header-line-format))
      (with-current-buffer "*PR Owner progress*"
        (let ((lines (last (split-string (buffer-string) "\n" t) 3)))
          (should (string-suffix-p "Starting owner-fix" (nth 0 lines)))
          (should (string-suffix-p "Process running: 85s elapsed" (nth 1 lines)))
-         (should (string-match-p " UTC] github.com/org/repo #7 · Owner operation complete\\'" (nth 2 lines))))))))
+         (should (string-match-p " UTC] github.com/org/repo #7 · Fix verified" (nth 2 lines))))))))
+
+(defun owner-test-paused-view ()
+  "Return a saved batch paused after one task, with an incomplete second review."
+  (let* ((view (owner-test-view)) (batch (car (alist-get 'batches view))))
+    (setf (alist-get 'status batch) "paused"
+          (alist-get 'tasks batch)
+          '(((id . "t1") (status . "complete") (items . ("thread:T1")))
+            ((id . "t2") (status . "needs_attention") (items . ("thread:T2"))
+             (review . ((summary . "Verification incomplete") (complete . :false)
+                        (blocking . ("Real-Git snapshot verification is missing.")))))))
+    view))
+
+(ert-deftest owner/paused-fix-is-not-announced-as-complete-and-shows-its-reason ()
+  (owner-test-buffer
+   (let (event result)
+     (cl-letf (((symbol-function 'magit-auto-review--async)
+                (lambda (_request on-event on-result _on-error) (setq event on-event result on-result) nil)))
+       (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-fix" '(items . ["thread:T1" "thread:T2"]))))
+     (should (string-match-p "Starting owner-fix · 2 feedback item(s)" header-line-format))
+     (funcall event '((type . "progress") (message . "Review process finished")))
+     (funcall result (owner-test-paused-view))
+     (should (string-prefix-p " Fix paused · 1/2 tasks complete" header-line-format))
+     (should (string-match-p "Real-Git snapshot verification is missing" header-line-format))
+     (magit-section-show (owner-test-goto 'owner-batch "b1"))
+     (should (string-match-p "Real-Git snapshot verification is missing" (owner-test-visible-text)))
+     (should (string-match-p "m opens status only" (owner-test-visible-text)))
+     (with-current-buffer "*PR Owner progress*"
+       (let ((last (car (last (split-string (buffer-string) "\n" t)))))
+         (should (string-match-p "Fix paused" last))
+         (should-not (string-match-p "operation complete" last)))))))
+
+(ert-deftest owner/resume-conclusion-uses-requested-batch-rather-than-latest ()
+  (owner-test-buffer
+   (let* ((view (owner-test-paused-view)) (other (car (alist-get 'batches (owner-test-view)))) result)
+     (setf (alist-get 'id other) "other")
+     (setf (alist-get 'batches view) (append (alist-get 'batches view) (list other)))
+     (cl-letf (((symbol-function 'magit-auto-review--async)
+                (lambda (_request _on-event on-result _on-error) (setq result on-result) nil)))
+       (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-fix" '(batch . "b1"))))
+     (funcall result view)
+     (should (string-prefix-p " Fix paused" header-line-format)))))
 
 (ert-deftest owner/progress-log-records-errors-and-cancellation-after-heartbeat ()
   (dolist (reason '("Operation cancelled" "Backend stopped without a result"))

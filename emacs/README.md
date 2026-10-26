@@ -73,8 +73,11 @@ to attention; the user's own messages remain context without unread alerts.
 
 From Reviewer, press `o` on a finding, a status heading (for example Unstaged), or
 a region of sibling finding headings to **Send to Owner for fixing**. The owner
-buffer opens with those items selected, in their displayed order; press `f` to
-plan/fix/review that selection. The handoff itself is local and invokes no model.
+buffer imports those items in their displayed order and focuses the first one;
+`f` fixes the item at point. No group region is activated automatically. To fix
+a batch, use `f` on an Owner group heading or select sibling headings explicitly.
+An Attention needed group includes every item currently in that group, including
+previously imported findings. The handoff itself is local and invokes no model.
 It uses the saved draft text and preserves the original findings, reviewed commit,
 and code/discussion context. Resolve an active inline edit before sending.
 Reviewer wording and staging stay unchanged.
@@ -95,13 +98,13 @@ reply workflow because they already have GitHub destinations.
 
 | Key | Owner action |
 | --- | --- |
-| `g` / `G` | Reload saved results / explicitly fetch GitHub |
+| `g` / `G` | Reload and check local fix commits / explicitly fetch GitHub |
 | `f` | Plan, fix, and review the item, group, or selected sibling headings |
 | `V` | Verify selected concerns without a fixer invocation |
 | `R f` / `R r` | Choose fix / automatic-review provider, model, and effort |
 | `i` / `h` | Acknowledge inspected feedback/context / finish feedback or a verified fix locally |
 | `k` / `U` | Defer / restore feedback locally |
-| `r` / `A` | Resume a batch / explicitly adopt manual changes and reverify |
+| `r` / `A` | Resume the selected batch / explicitly adopt manual changes and reverify |
 | `p` / `? S` | Replan unfinished work / skip the selected task and resume |
 | `d` / `C-u d` | Saved task/batch diff / current partial changes since its checkpoint |
 | `m` / `C-u m` | Stage the verified fix and open its commit editor / inspect Magit without staging |
@@ -116,9 +119,16 @@ reply workflow because they already have GitHub destinations.
 | `b` / `B` / `M` | Open on GitHub / PR list / toolkit chooser |
 | `?` / `? +` | Actions for the current selection / complete owner command reference |
 
-The progress log includes timestamps and PR identities, with explicit start,
-completion, and stopped/error messages. A finished operation ends with its
-conclusion rather than the last provider heartbeat.
+The progress log includes timestamps, PR identities, and the number of selected
+feedback items at launch. Finishing a provider process does not mean a fix is
+verified: the header/log say **Fix verified** or **Fix paused**, with task counts
+and the current blocker. Expanding a paused fix shows that reason without opening
+historical reports. `m` explains the pause and opens status only, preserving the
+unstaged changes; inspect and resume that batch with `r` for remaining verification.
+When the implementation succeeded and only review was incomplete, resuming
+unchanged work retries that review and the combined check, without rerunning the
+successful fixer. Review can use disposable Git fixtures outside the checkout.
+Other operations retain explicit completion and stopped/error messages.
 
 Owner `F` is unbound; interactive provider handoff is deferred. Reviewer `F`
 continues to check existing conversations against pushed code.
@@ -129,7 +139,7 @@ order as the tie-breaker. Tasks run sequentially in one owner worktree, with a
 review after each task and a final review of the combined patch. Inspect task
 expectations, per-item outcomes, performed checks, blocking findings, retained
 attempts, and commit associations in **Fixes**. Each fix expands to a next step
-and short result. **Verification and task details** and **Attempt history** start
+and short result, plus the included feedback for a group fix. **Verification and task details** and **Attempt history** start
 folded; older failed reviews remain in history without obscuring the final result.
 `?` offers actions for the selected feedback, fix, or reply, with its next step
 above the menu. `+` opens the complete command reference. Settings default from the
@@ -184,15 +194,27 @@ Linked hashes appear on the finding and batch headings even when folded. These
 are provenance links; local findings still have no GitHub reply destination, and
 association does not mark feedback handled or resolve a thread.
 
-To finish a committed local finding, press `h` on its feedback heading or its
-verified fix result. The feedback leaves Attention needed for **Deferred / History**,
-and a fully handled fix reads **Done locally**. No reply is required for local
-findings. Until then, **Verified** means the automatic review passed, not that
-your handling is complete. The fix's saved reports and commit links stay available.
+After committing, return to Owner and press `g`. It checks reachable local commits
+for a unique match to the verified tree and its sole baseline parent, then
+automatically finishes unchanged local findings with verified `fixed` outcomes.
+It shows **Committed HASH** and moves both their feedback and fully handled fixes
+out of the active sections into **Deferred / History**. GitHub feedback retains
+its reply/resolution steps. No GitHub fetch, model, staging, or commit is triggered.
+Split/rebased commits and changed or incomplete verification require inspection.
+An explicit `U` or re-import overrides automatic completion for that finding's
+current fix. If a detected commit becomes unreachable, automatically finished
+feedback returns to Attention; manual handling stays respected.
+
+`h` still finishes selected feedback or a verified fix manually. Fully handled
+fixes move to History and read **Done locally**. No reply is required for local
+findings. **Verified** means the automatic review passed; the saved reports and
+commit links stay available after completion.
 On a batch or task, `h` handles only its verified feedback; skipped and unrelated
 items stay as they were. Paused or stale fix results must be inspected before
 using this shortcut. Direct feedback triage remains available independently.
 GitHub replies, thread resolution, and review verdicts remain separate actions.
+Select a particular fix or its feedback before `r`: pressing it on the Fixes
+header gives a selection hint and never silently resumes the latest batch.
 
 The owner reply editor uses `C-c C-c` to save locally and `C-c C-k` to cancel.
 If saving fails because the session changed, its text remains intact. `C-c C-r`

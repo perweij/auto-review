@@ -141,6 +141,40 @@ batches, dirty state, in-progress Git operations, ignored-file collisions, and
 true divergence retain their inspection paths. The 94 owner and trust tests
 passed, including nine new synchronization cases using temporary repositories.
 
+The import/commit follow-up removes the automatic group region left by Reviewer
+`o`, which could reject a subsequent group action and accidentally submit the
+whole import when the cursor returned to its first item. Explicit group/region
+actions remain supported. Launch messages now show selection size, and fix
+conclusions distinguish verification success from a paused batch. Paused commit
+preparation explains task counts and the blocker while preserving unstaged work.
+Validation passed 104 ERT tests, 84 owner Python tests, and lint. Regressions cover
+import → group `f` → individual `f`, explicit regions, paused result messages,
+and consecutive fix/commit preparation after HEAD advances. Separately, 90 tests
+passed against an isolated copy of the saved paused fix; its live worktree,
+index, and verification state were left unchanged.
+
+The paused review exposed a separate permissions problem: reviewers could not
+create real-Git test fixtures. Owner attempts now provide scratch storage, with
+Codex review rooted there and the actual checkout read-only. Focused tests may
+create disposable repositories without changing the Owner index or shared Git
+state. Resume retries an incomplete review of an unchanged successful fix before
+the combined check, rather than invoking the fixer again. Validation passed 98
+owner/trust Python tests, a Codex sandbox probe allowing fixture Git operations
+and denying writes outside scratch, and two focused real-Git checks of the saved
+checkpoint fix under those same permissions. Those checks left the live batch
+unchanged; subsequent dogfooding confirmed successful resume and committing.
+
+Commit completion is now reconciled by Owner `g`. Exact verified local commits
+finish their unchanged local findings automatically, with commit hashes shown
+on finding/fix headings. Fully handled fixes move out of Fixes into History;
+expanded groups list the feedback they include. Manual `h` remains available,
+and `U`/re-import overrides are preserved. Dropped automatic commit proof reopens
+the affected findings; GitHub reply/resolution work remains explicit. `r` now
+requires one selected fix, avoiding the misleading latest-batch fallback from
+the Fixes header. Validation passed 106 owner/trust tests and 108 ERT tests.
+A read-only preview of the real PR #4 session confirmed all three exact commits
+and eight remaining local findings moving to History, without changing live state.
+
 ## 6. Add interactive PR-owner fixes (`F`)
 
 After the non-interactive owner workflow, implement the

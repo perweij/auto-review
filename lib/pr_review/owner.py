@@ -5,10 +5,10 @@ from contextlib import nullcontext
 
 from .common import ApiError, locked, require_text
 from .owner_state import OwnerSession, open_session, discover, toolkit, refresh, validate_settings
-from . import owner_git, owner_fixes, owner_publication, owner_commit
+from . import owner_git, owner_fixes, owner_publication, owner_commit, owner_completion
 
 
-COMMANDS = ["owner-open", "owner-import", "owner-discover", "owner-read", "owner-refresh", "owner-mutate", "owner-fix",
+COMMANDS = ["owner-open", "owner-import", "owner-discover", "owner-read", "owner-reconcile", "owner-refresh", "owner-mutate", "owner-fix",
             "owner-diff", "owner-prepare-commit", "owner-associate", "owner-prepare", "owner-publish", "owner-recover", "owner-thread-state", "toolkit"]
 
 
@@ -26,6 +26,16 @@ def dispatch(request):
     session = OwnerSession(request)
     if name == "owner-read":
         return session.view()
+    if name == "owner-reconcile":
+        # Refresh derives everything from the current saved state under lock;
+        # it accepts a stale displayed revision just as owner-read does.
+        try:
+            with locked(session.execution_lock):
+                return owner_completion.reconcile(session, session.load())
+        except ApiError as exc:
+            if exc.code != "busy":
+                raise
+            return {**session.view(), "reconciliation": {"status": "busy"}}
     if name == "owner-diff":
         with locked(session.execution_lock) if request.get("current") else nullcontext():
             state = session.load()
@@ -80,6 +90,7 @@ def mutate(session, state, request):
             if action == "acknowledge":
                 item["unread"] = False
             else:
+                owner_completion.manual_triage(state, item)
                 item["triage"] = {"defer": "deferred", "restore": "attention", "handled": "handled"}[action]
                 item["queued"] = action == "restore"
             item["attention"] = item["triage"] == "attention" and bool(item.get("queued") or item["unread"] or item.get("change_requested") or

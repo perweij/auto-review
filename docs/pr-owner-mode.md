@@ -101,7 +101,9 @@ PR discovery is available in either toolkit. Switching toolkits is explicit;
 being the PR author does not silently select a mode or grant GitHub permissions.
 
 The reviewer `o` action sends a selected finding, status group, or sibling headings
-to Owner, where the exact selection is retained for `f`. This is a local snapshot
+to Owner, where only those items are imported and the first is focused. The
+handoff does not activate a region: `f` on an item fixes that item, while `f` on
+a group or an explicitly selected region fixes that selection. This is a local snapshot
 of saved wording, original findings, reviewed commit, and code/discussion context.
 It neither changes reviewer staging nor invokes a model. Saved source revisions
 are validated; identical imports reuse the same item, and explicitly re-imported
@@ -112,7 +114,7 @@ or resolution destination is fabricated for them.
 
 ### Refresh and layout
 
-Opening uses cached information. `g` reloads saved results; `G` explicitly fetches
+Opening uses cached information. `g` reloads results and checks local commits; `G` explicitly fetches
 GitHub. Show the last successful refresh and preserve cached information after
 failure. Fix and publication operations perform their own freshness checks.
 Opening, browsing, and local triage never invoke a model.
@@ -121,21 +123,33 @@ Opening, browsing, and local triage never invoke a model.
 | --- | --- |
 | Attention needed | Unresolved threads, new or edited incoming comments/review summaries, and outstanding change-request reviews |
 | Your GitHub comments | Self-authored nonempty feedback available for explicit fixes without unread alerts |
-| Fixes | Batch plans, task progress, patches, checks, review findings, and commit associations |
+| Fixes | Active batch plans, task progress, patches, checks, review findings, and commit associations |
 | Replies | Unstaged, Staged, and Published outgoing replies |
-| Deferred / History | Deferred feedback, handled items, previous attempts, and saved drafts |
+| Deferred / History | Deferred feedback, handled items and completed fix batches, previous attempts, and saved drafts |
 
 Fix headings show a human-readable concern, a verification/handling label, and
-linked commits. Expanding a fix shows its next step and short final result;
+linked or detected commits. Expanding a fix shows its next step, short final result, and included feedback;
 verification/task details and historical attempts are separately folded. Earlier
 failed reviews remain inspectable without appearing alongside the final outcome
 by default. `?` offers actions for the selected feedback, fix, or reply; `+` opens
 the complete command reference. Existing direct keybindings remain available.
+Show the selected feedback count when launching a fix. On return, report the
+saved batch's verification state, not generic process success. Paused batches
+show completed/total task counts and the current blocking explanation; `m`
+retains unstaged changes and directs the user to inspect/resume verification.
 
-After committing and associating a local fix, `h` on its feedback or verified
-batch/task finishes local handling. Move the feedback to History and label a
-fully handled batch **Done locally**, retaining its saved verification status and
-artifacts. **Verified** describes a successful review; it does not imply local
+After committing a local fix, `g` checks reachable commits for a unique exact
+tree and sole-baseline-parent match. Current verified `fixed` outcomes in the
+latest batch finish automatically, with their commit hash retained. Move both
+the feedback and a fully handled ready batch to History, labeled **Done locally**,
+retaining verification status and artifacts. `h` still supports manual handling.
+GitHub feedback keeps its explicit reply/resolution workflow. Reconciliation
+performs no Git writes, model calls, or network access. Missing/ambiguous matches,
+split/rebased commits, stale feedback, and incomplete verification do not trigger
+automatic handling. A lost automatic proof reopens feedback; explicit handling,
+restore, defer, and re-import decisions remain respected. `r` requires selecting
+one fix or related feedback, rather than choosing the latest batch from a group
+header. **Verified** describes a successful review; it does not imply local
 handling, a push, publication, or GitHub resolution. The batch/task shortcut is
 limited to verified items in a ready, non-stale result, leaving skipped and
 unrelated feedback alone. Local findings require no GitHub reply. A selected
@@ -255,7 +269,11 @@ Implement role-specific command builders through the shared provider adapters:
 
 - **Codex:** structured `exec`, selected model/effort, JSON events, ephemeral
   sessions, and `approval_policy=never`; `workspace-write` for fixing and
-  `read-only` for planning/review.
+  `read-only` for planning. Review uses `workspace-write` rooted in the attempt's
+  isolated scratch directory, with ambient writable roots, general temporary
+  directory grants, network access, and user/project execpolicy rules disabled.
+  The reviewer is directed to inspect the actual Owner checkout and applicable
+  project instructions; that checkout and shared Git metadata remain read-only.
 - **Claude:** print mode, selected model/effort, structured streamed output, no
   session persistence, and non-interactive permission handling. Fixing permits
   editing tools; planning/review retain existing editing restrictions. Retain
@@ -283,7 +301,19 @@ Replace the reviewer clean-tree invariant only within owner operations:
   loaded agent configuration invalidate that trust before another invocation.
 
 The orchestrator performs its own checkpoint/ref writes outside provider
-invocations. Providers do not stage, commit, push, publish, or resolve threads.
+invocations. Providers do not stage or commit existing repositories, push,
+publish, or resolve threads. Fix/review attempts receive a scratch directory and
+`TMPDIR` for focused tests, with bytecode writes and optional Git locks disabled.
+They may create scripts and disposable Git fixtures there, including fixture
+commits; fixture worktrees and shared object stores must also stay in scratch. Claude
+retains its existing tool denials and post-invocation integrity checks; it does
+not gain Codex's filesystem enforcement. The original per-check and total
+verification limits still apply. Scratch artifacts remain with the attempt.
+
+When implementation succeeded but a review was incomplete, resuming unchanged
+source retries the review with its previous blocker and original task diff,
+then runs the combined review. It does not rerun a successful implementation
+merely to retry verification. Changed source still requires explicit adoption.
 Treat feedback as task data, not authority to change these constraints.
 
 These controls retain the project's trusted-repository/container assumptions.

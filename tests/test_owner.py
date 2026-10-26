@@ -15,7 +15,7 @@ from pr_review.api import dispatch
 from pr_review.common import ApiError, atomic_json, digest, locked
 from pr_review.repository import Repository
 from pr_review.owner_state import OwnerSession
-from pr_review import owner_commit, owner_fixes, owner_git, owner_providers, owner_publication
+from pr_review import owner_commit, owner_completion, owner_fixes, owner_git, owner_providers, owner_publication
 from pr_review.providers import Runtime
 from pr_review.owner_cli import main as owner_cli
 from pr_review.state import Session as ReviewSession
@@ -254,6 +254,149 @@ class OwnerTest(unittest.TestCase):
         with self.assertRaises(ApiError):
             self.request("owner-thread-state", item=key, resolved=True)
         self.assertFalse(self.posts)
+
+    def test_local_commit_refresh_finishes_exact_local_fixes_and_preserves_other_work(self):
+        keys = self.handoff(self.saved_review(), ["p1", "p2"])["items"]
+        self.request("owner-fix", items=[keys[0], "thread:T1"])
+        sha = self.commit_fix(push=False)
+        worktree = Path(self.view["worktree"])
+        (worktree / "manual.txt").write_text("unrelated staged work\n")
+        self.git("add", "manual.txt", cwd=worktree)
+        (worktree / "manual.txt").write_text("later unstaged edit\n")
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=worktree))
+        before = (index.read_bytes(), self.git("show-ref"), len(self.calls))
+        with patch.object(Repository, "metadata", side_effect=AssertionError("No network")), \
+             patch("pr_review.owner_publication.associate", side_effect=AssertionError("No publication preparation")):
+            view = self.request("owner-reconcile", revision=0)
+        items = {i["key"]: i for i in view["feedback"]}
+        self.assertEqual(view["batches"][-1]["commit_match"], {"commit": sha})
+        self.assertEqual(view["reconciliation"]["handled_items"], [keys[0]])
+        self.assertEqual(items[keys[0]]["triage"], "handled")
+        self.assertEqual(items[keys[0]]["local_completion"]["commit"], sha)
+        self.assertTrue(items[keys[1]]["attention"])
+        self.assertTrue(items["thread:T1"]["attention"])
+        self.assertFalse(view["replies"])
+        self.assertFalse(self.posts)
+        self.assertEqual((index.read_bytes(), self.git("show-ref"), len(self.calls)), before)
+        self.assertEqual((worktree / "manual.txt").read_text(), "later unstaged edit\n")
+        again = self.request("owner-reconcile")
+        self.assertEqual(again["revision"], view["revision"])
+        self.assertEqual(again["reconciliation"]["handled_items"], [])
+
+    def test_commit_refresh_requires_current_complete_verified_feedback(self):
+        key = self.handoff(self.saved_review(), ["p1"])["items"][0]
+        view = self.request("owner-fix", items=[key])
+        original = copy.deepcopy(view["batches"][-1])
+        self.commit_fix(push=False)
+        session = OwnerSession({"session": self.path})
+        changes = [lambda b: b.update(status="paused"), lambda b: b.update(discussion_stale=True),
+                   lambda b: b.update(integrity_failure="attempt"), lambda b: b.update(verified_items=[]),
+                   lambda b: b["verified_fingerprints"].update({key: "older feedback"}),
+                   lambda b: b["review"].update(complete=False),
+                   lambda b: b["review"].update(blocking=["Not verified"]),
+                   lambda b: b["review"]["outcomes"][0].update(status="already_addressed")]
+        for change in changes:
+            with self.subTest(change=change):
+                state = session.load()
+                state["batches"] = [copy.deepcopy(original)]
+                change(state["batches"][0])
+                session.save(state)
+                view = self.request("owner-reconcile")
+                self.assertEqual(view["reconciliation"]["handled_items"], [])
+                self.assertEqual(next(i for i in view["feedback"] if i["key"] == key)["triage"], "attention")
+        state = session.load()
+        state["batches"] = [copy.deepcopy(original), {**copy.deepcopy(original), "id": "newer", "status": "paused"}]
+        session.save(state)
+        self.assertEqual(self.request("owner-reconcile")["reconciliation"]["handled_items"], [])
+
+    def test_split_commits_do_not_automatically_finish_local_findings(self):
+        key = self.handoff(self.saved_review(), ["p1"])["items"][0]
+        self.request("owner-fix", items=[key])
+        worktree = self.view["worktree"]
+        self.git("add", "source.txt", cwd=worktree)
+        self.git("commit", "-qm", "first part", cwd=worktree)
+        self.git("add", "new.txt", cwd=worktree)
+        self.git("commit", "-qm", "second part", cwd=worktree)
+        view = self.request("owner-reconcile")
+        self.assertNotIn("commit_match", view["batches"][-1])
+        self.assertEqual(view["reconciliation"]["handled_items"], [])
+
+    def test_explicit_restore_and_reimport_survive_automatic_commit_refresh(self):
+        review = self.saved_review()
+        key = self.handoff(review, ["p1"])["items"][0]
+        self.request("owner-fix", items=[key])
+        self.commit_fix(push=False)
+        self.request("owner-reconcile")
+        self.request("owner-mutate", operation="restore", items=[key])
+        view = self.request("owner-reconcile")
+        item = next(i for i in view["feedback"] if i["key"] == key)
+        self.assertTrue(item["attention"])
+        self.assertNotIn("local_completion", item)
+        self.request("owner-mutate", operation="handled", items=[key])
+        self.handoff(review, ["p1"])
+        view = self.request("owner-reconcile")
+        self.assertTrue(next(i for i in view["feedback"] if i["key"] == key)["attention"])
+
+    def test_dropped_commit_reopens_only_automatically_finished_items(self):
+        keys = self.handoff(self.saved_review(), ["p1", "p2"])["items"]
+        view = self.request("owner-fix", items=keys)
+        batch = view["batches"][-1]
+        self.commit_fix(push=False)
+        self.request("owner-mutate", operation="handled", items=[keys[1]])
+        self.request("owner-reconcile")
+        self.git("update-ref", "refs/heads/" + view["branch"], batch["baseline"])
+        view = self.request("owner-reconcile")
+        items = {i["key"]: i for i in view["feedback"]}
+        self.assertEqual(view["reconciliation"]["reopened_items"], [keys[0]])
+        self.assertNotIn("commit_match", view["batches"][-1])
+        self.assertTrue(items[keys[0]]["attention"])
+        self.assertEqual(items[keys[1]]["triage"], "handled")
+
+    def test_exact_amendment_updates_completion_without_reopening_feedback(self):
+        key = self.handoff(self.saved_review(), ["p1"])["items"][0]
+        self.request("owner-fix", items=[key])
+        self.commit_fix(push=False)
+        self.request("owner-reconcile")
+        self.git("commit", "--amend", "-qm", "amended message", cwd=self.view["worktree"])
+        sha = self.git("rev-parse", "HEAD", cwd=self.view["worktree"])
+        view = self.request("owner-reconcile")
+        self.assertEqual(view["reconciliation"]["reopened_items"], [])
+        self.assertEqual(view["reconciliation"]["handled_items"], [])
+        self.assertEqual(next(i for i in view["feedback"] if i["key"] == key)["local_completion"]["commit"], sha)
+
+    def test_commit_refresh_remains_readable_when_busy_or_worktree_is_missing(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        before = session.file.read_bytes()
+        with locked(session.execution_lock):
+            view = self.request("owner-reconcile")
+        self.assertEqual(view["reconciliation"]["status"], "busy")
+        worktree = Path(view["worktree"])
+        worktree.rename(worktree.with_name("moved-owner"))
+        view = self.request("owner-reconcile")
+        self.assertEqual(view["reconciliation"]["status"], "unavailable")
+        self.assertEqual(session.file.read_bytes(), before)
+
+    def test_commit_refresh_does_not_save_when_head_changes_during_check(self):
+        self.fix()
+        self.commit_fix(push=False)
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        before = session.file.read_bytes()
+        original = session.repo.git
+        calls = 0
+        def changed(*args, **kwargs):
+            nonlocal calls
+            if args == ("rev-parse", "HEAD"):
+                calls += 1
+                if calls == 2:
+                    return SimpleNamespace(stdout="different-head\n")
+            return original(*args, **kwargs)
+        with patch.object(session.repo, "git", side_effect=changed):
+            view = owner_completion.reconcile(session, state)
+        self.assertEqual(view["reconciliation"]["status"], "unavailable")
+        self.assertNotIn("commit_match", view["batches"][-1])
+        self.assertEqual(session.file.read_bytes(), before)
 
     def test_cli_import_uses_the_saved_reviewer_and_preserves_selection(self):
         review = self.saved_review()
@@ -922,6 +1065,68 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(view["batches"][-1]["status"], "paused")
         self.assertEqual([role for role, _ in self.calls], ["plan", "fix"])
         self.assertEqual(Path(view["worktree"], "source.txt").read_text(), "fixed\n")
+        self.request("owner-fix", batch=view["batches"][-1]["id"])
+        self.assertEqual([role for role, _ in self.calls], ["plan", "fix", "fix", "review", "review"])
+
+    def test_resume_incomplete_review_preserves_fix_and_retries_verification(self):
+        original = self.model
+        def incomplete(*args):
+            result = original(*args)
+            if args[3] == "review":
+                result.update(complete=False, blocking=["Real-Git fixture could not run"])
+            return result
+        with patch("pr_review.owner_providers.invoke", side_effect=incomplete):
+            view = self.fix()
+        batch = view["batches"][-1]
+        self.assertEqual(batch["status"], "paused")
+        self.assertEqual([role for role, _ in self.calls], ["plan", "fix", "review"])
+        before = batch["tasks"][0]["before"]
+        view = self.request("owner-fix", batch=batch["id"])
+        self.assertEqual(view["batches"][-1]["status"], "ready")
+        self.assertEqual([role for role, _ in self.calls], ["plan", "fix", "review", "review", "review"])
+        retry = self.calls[-2][1]
+        self.assertIn("Real-Git fixture could not run", retry["previous_incomplete_review"]["blocking"])
+        self.assertIn("+fixed", retry["task_diff"])
+        self.assertEqual(view["batches"][-1]["tasks"][0]["before"], before)
+        prepared = self.request("owner-prepare-commit", batch=batch["id"])
+        self.assertTrue(prepared["ready"])
+        self.assertEqual(self.git("write-tree", cwd=view["worktree"]), view["batches"][-1]["final_tree"])
+
+    def test_provider_review_runs_real_git_fixtures_without_touching_owner_index(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        batch["settings"]["review"]["provider"] = "codex"
+        worktree = Path(state["worktree"])
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=worktree))
+        before = index.read_bytes()
+        tree = batch["checkpoint"]["tree"]
+        result = {"summary": "Real Git checked", "outcomes": [], "checks": ["scratch Git fixture"],
+                  "complete": True, "blocking": []}
+        def provider(args, **kwargs):
+            scratch = Path(kwargs["env"]["TMPDIR"])
+            self.assertEqual(args[args.index("--cd") + 1], str(scratch))
+            self.assertFalse(scratch.is_relative_to(worktree))
+            self.assertEqual(kwargs["env"]["PYTHONDONTWRITEBYTECODE"], "1")
+            self.assertEqual(kwargs["env"]["GIT_OPTIONAL_LOCKS"], "0")
+            prompt = kwargs["input_bytes"].decode()
+            self.assertIn(str(worktree), prompt)
+            self.assertIn("uncommitted and untracked fixes", prompt)
+            self.assertIn("only in those disposable repositories", prompt)
+            with tempfile.TemporaryDirectory(dir=scratch) as fixture:
+                self.git("init", "-q", cwd=fixture)
+                Path(fixture, "test.txt").write_text("fixture\n")
+                self.git("add", ".", cwd=fixture)
+                self.git("commit", "-qm", "scratch only", cwd=fixture)
+                self.assertEqual(self.git("show", "HEAD:test.txt", cwd=fixture), "fixture")
+            Path(args[args.index("-o") + 1]).write_text(json.dumps(result))
+            return SimpleNamespace(returncode=0, events=[{"type": "turn.completed"}])
+        with patch("pr_review.owner_providers.run", side_effect=provider):
+            self.assertEqual(REAL_INVOKE(session, state, batch, "review", {"feedback": []}), result)
+        self.assertEqual(index.read_bytes(), before)
+        self.assertEqual(batch["checkpoint"]["tree"], tree)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), batch["baseline"])
 
     def test_orphaned_attempt_is_recorded_and_not_blindly_replayed(self):
         self.fix()
@@ -998,6 +1203,51 @@ class OwnerTest(unittest.TestCase):
             result = self.request("owner-prepare-commit", batch=view["batches"][-1]["id"])
             self.assertTrue(result["ready"])
             self.assertEqual(self.git("write-tree", cwd=view["worktree"]), view["batches"][-1]["final_tree"])
+
+    def test_consecutive_fixes_prepare_commits_at_the_updated_owner_head(self):
+        view = self.request("owner-fix", items=["thread:T1"])
+        first = self.request("owner-prepare-commit", batch=view["batches"][-1]["id"])
+        self.assertTrue(first["ready"])
+        self.git("commit", "-qm", first["message"], cwd=view["worktree"])
+        committed = self.git("rev-parse", "HEAD", cwd=view["worktree"])
+        self.request("owner-mutate", operation="handled", items=["thread:T1"])
+        original = self.model
+        def model(session, state, batch, role, context):
+            result = original(session, state, batch, role, context)
+            if role == "fix":
+                Path(state["worktree"], "source.txt").write_text("second fix\n")
+                batch["checkpoint"] = owner_git.checkpoint(session, state, "second fix")
+            return result
+        with patch.object(owner_providers, "invoke", side_effect=model):
+            view = self.request("owner-fix", items=["thread:T2"])
+        batch = view["batches"][-1]
+        self.assertEqual(batch["baseline"], committed)
+        second = self.request("owner-prepare-commit", batch=batch["id"])
+        self.assertTrue(second["ready"])
+        self.assertEqual(self.git("write-tree", cwd=view["worktree"]), batch["final_tree"])
+        self.assertIn("second fix", self.git("diff", "--cached", cwd=view["worktree"]))
+        self.assertIn("Verified fix", second["message"])
+
+    def test_commit_preparation_explains_paused_verification_and_keeps_staging_unchanged(self):
+        original = self.model
+        def model(*args):
+            result = original(*args)
+            if args[3] == "review":
+                result.update(complete=False, blocking=["Real-Git snapshot verification is missing."])
+            return result
+        with patch.object(owner_providers, "invoke", side_effect=model):
+            view = self.fix()
+        worktree = Path(view["worktree"])
+        index = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=worktree))
+        before = index.read_bytes()
+        result = self.request("owner-prepare-commit")
+        self.assertFalse(result["ready"])
+        self.assertIn("paused (0/1 tasks complete)", result["reason"])
+        self.assertIn("Real-Git snapshot verification is missing", result["reason"])
+        self.assertIn("resume with r", result["reason"])
+        self.assertEqual(index.read_bytes(), before)
+        self.assertEqual((worktree / "source.txt").read_text(), "fixed\n")
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), self.head)
 
     def test_commit_preparation_keeps_conflicting_staging_byte_for_byte(self):
         view = self.fix()
@@ -1305,8 +1555,22 @@ class PlanTest(unittest.TestCase):
             for role in ("plan", "fix", "review"):
                 choice = {"provider": "codex", "model": "chosen", "effort": "medium"}
                 args = owner_providers.argv(choice, Runtime(), role, directory, schema)
-                self.assertIn("sandbox_mode=" + ("workspace-write" if role == "fix" else "read-only"), args)
+                self.assertIn("sandbox_mode=" + ("read-only" if role == "plan" else "workspace-write"), args)
                 self.assertIn("approval_policy=never", args)
+                if role == "review":
+                    self.assertEqual(args[args.index("--cd") + 1], str(directory / "scratch"))
+                    self.assertIn("--skip-git-repo-check", args)
+                    self.assertIn("--ignore-rules", args)
+                    self.assertIn("sandbox_workspace_write.writable_roots=[]", args)
+                    self.assertIn("sandbox_workspace_write.exclude_tmpdir_env_var=true", args)
+                    self.assertIn("sandbox_workspace_write.exclude_slash_tmp=true", args)
+                    self.assertIn("sandbox_workspace_write.network_access=false", args)
+                elif role == "fix":
+                    self.assertNotIn("--cd", args)
+                    self.assertEqual(args[args.index("--add-dir") + 1], str(directory / "scratch"))
+                else:
+                    self.assertNotIn("--cd", args)
+                    self.assertNotIn("--add-dir", args)
                 choice["provider"] = "claude"
                 args = owner_providers.argv(choice, Runtime(), role, directory, schema)
                 self.assertEqual("Edit" in args, role != "fix")

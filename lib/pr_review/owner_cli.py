@@ -13,7 +13,7 @@ from .repository import repository_name
 
 def main(argv):
     parser = argparse.ArgumentParser(prog="pr-review owner")
-    actions = ["open", "import", "discover", "read", "refresh", "fix", "resume", "diff", "prepare-commit", "associate", "prepare", "publish", "recover", "triage", "reply", "settings", "resolve", "reopen", "cancel"]
+    actions = ["open", "import", "discover", "read", "reconcile", "refresh", "fix", "resume", "diff", "prepare-commit", "associate", "prepare", "publish", "recover", "triage", "reply", "settings", "resolve", "reopen", "cancel"]
     parser.add_argument("pr", nargs="?", help="PR number or URL (optional with --session)")
     parser.add_argument("action", nargs="?", default="read", choices=actions)
     parser.add_argument("--session")

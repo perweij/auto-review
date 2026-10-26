@@ -119,6 +119,7 @@ belong to that selected toolkit. Owner selection never depends on PR authorship.
 | `owner-import` | Reviewer `session`, `generation`, `revision`, distinct ordered `comments`, optional `defaults` | Copy saved comments into the same PR's owner session; return `{owner,items}` |
 | `owner-discover` | `cwd`, optional `repository`, `pr` | `{sessions}` for the Git common directory |
 | `owner-read` | `session` | Saved owner view; available while a fix runs |
+| `owner-reconcile` | `session` | Check local commits and finish matching local findings; return owner view plus `reconciliation` |
 | `owner-refresh` | `session`, `revision` | Fetch complete GitHub discussions and metadata; return owner view |
 | `owner-mutate` | `session`, `revision`, `operation`, operation-specific fields below | Local atomic change; return owner view |
 | `owner-fix` | `session`, `revision`, `items` or `batch`, optional controls below | Plan/fix/review or resume; return owner view |
@@ -130,9 +131,29 @@ belong to that selected toolkit. Owner selection never depends on PR authorship.
 | `owner-recover` | `session`, `revision` | Read back uncertain submissions; return owner view |
 | `owner-thread-state` | `session`, `revision`, `item`, boolean `resolved` | Explicit permission-checked resolve/reopen; return owner view |
 
-All owner mutations require the last displayed revision. Store returned revisions
+Owner mutations based on user selections require the last displayed revision. Store returned revisions
 and use `owner-read` after an error: a long operation can have saved partial work
 before it fails. Opening creates a session idempotently without a revision.
+`owner-reconcile` is another exception: it derives changes from the current state
+under the execution lock, ignoring a displayed revision. `owner-read` stays a
+pure saved-state read. Reconciliation uses read-only Git commands, without
+network/model calls, staging, refs, reply creation, or publication. A ready
+batch's `commit_match.commit` records a unique reachable commit with exactly its
+verified tree and sole baseline parent. Only current `fixed` outcomes for local
+findings in their latest batch are automatically handled; stale feedback,
+incomplete results, integrity failures, missing items, and explicit triage
+overrides prevent completion. `local_completion` retains its batch, commit, and
+feedback fingerprint. Lost proof reopens only automatically handled feedback;
+an exact amendment updates the proof. This proves a recorded fix was committed,
+not that subsequent edits preserve its semantics or that it was pushed.
+
+The response-only `reconciliation` has `status: "complete"`, `committed_batches`,
+`handled_items`, and `reopened_items`. With an active execution lock it returns
+the saved view and `status: "busy"`; an unavailable/changed worktree or a HEAD
+change during checking yields `status: "unavailable"` and `reason`, with no
+partial changes saved. Repeated unchanged checks preserve the revision.
+CLI equivalent: `pr-review owner reconcile --session PATH`.
+
 `owner-diff` with `current: true` additionally requires `revision`, takes the
 execution lock, and pins a current tree for inspection against the last saved
 batch checkpoint. It does not adopt that tree or change the real index.
@@ -141,7 +162,15 @@ batch checkpoint. It does not adopt that tree or change the real index.
 uses the explicitly selected batch or the most recent batch. A ready batch must
 still match HEAD and its saved feedback; paused, stale, empty, or committed batches
 return `ready:false` for manual inspection. Merge/rebase/cherry-pick state also
-prevents preparation. Existing staged paths must be exact versions from this fix;
+prevents preparation.
+For an unverified batch, `reason` includes its status, completed/total task counts,
+and the current verification blocker. A process returning a result successfully
+does not imply that the returned batch is `ready`.
+Resuming an unchanged task with successful implementation and incomplete review
+retries the review, preserving the original before/after scope and providing the
+previous verification blocker. Source, Git state, settings, and feedback checks
+still apply. Incomplete implementation requires the fixer again.
+Existing staged paths must be exact versions from this fix;
 unrelated staging and partial/manual variants are retained without alteration.
 Preparation installs only the changed paths' saved blobs through a temporary
 index, verifies its complete tree equals the final reviewed tree, and atomically

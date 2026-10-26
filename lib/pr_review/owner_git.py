@@ -185,12 +185,12 @@ def new_batch_head(session, state, remote):
 
 def exact_commits(session, batch, head):
     """Find reachable commits with the verified tree and sole baseline parent."""
-    matches = []
-    for sha in session.repo.git("rev-list", batch["baseline"] + ".." + head).stdout.splitlines():
-        parents = session.repo.git("rev-list", "--parents", "-n", "1", sha).stdout.split()
-        if parents[1:] == [batch["baseline"]] and session.repo.git("rev-parse", sha + "^{tree}").stdout.strip() == batch["final_tree"]:
-            matches.append(sha)
-    return matches
+    # Local refresh checks every saved batch. Read trees and parents together
+    # instead of spawning another Git process for each intervening commit.
+    records = session.repo.git("log", "--no-patch", "--no-show-signature", "--format=%H %T %P",
+                               batch["baseline"] + ".." + head, "--").stdout.splitlines()
+    return [fields[0] for line in records if len(fields := line.split()) == 3
+            and fields[1:] == [batch["final_tree"], batch["baseline"]]]
 
 
 def diff(session, before, after):
