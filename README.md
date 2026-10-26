@@ -6,6 +6,12 @@ challenges and consolidates the independent reports. That provider also compares
 findings with existing discussions and drafts useful contributions. GitHub
 publication requires human selection and explicit confirmation.
 
+Choose the **Reviewer** toolkit for analysis and outgoing review comments, or the
+**Owner** toolkit to process incoming feedback, prepare fixes, and draft replies.
+In Emacs, `M` switches toolkits and remembers the choice per repository. The
+terminal's existing review commands retain their behavior; owner commands use
+`pr-review owner`.
+
 ## Install
 
 Keep this directory intact and put `bin/pr-review` on your PATH, for example:
@@ -225,7 +231,167 @@ Optional environment settings:
 | `VISUAL`, `EDITOR` | Editor command and simple arguments; default `vi` |
 | `PR_REVIEW_MAX_EVENT_BYTES` | Maximum provider JSON record size in bytes; default 67108864 (64 MiB). Increase for larger valid results. Stderr is logged without this record limit. |
 
-## Publication and safeguards
+## PR owner workflow
+
+Owner mode opens independently of saved reviewer runs. It keeps complete incoming
+discussions, unread/changed state, local triage, review verdicts, thread resolution,
+and outdated-code status separate. Opening uses saved discussions. Local reload
+(`g`) also checks Git commits; `G` explicitly reads GitHub without a model call.
+
+To fix findings from your own local analysis, select a finding, status group, or
+sibling headings in Reviewer and press `o` (**Send to Owner for fixing**). Owner
+imports exactly those items and focuses the first one; press `f` to fix the item
+at point. For a batch, press `f` on an Owner group heading or explicitly select
+sibling headings. Importing does not leave an active selection over the group.
+The handoff copies saved wording, original findings, and code/discussion context
+without changing reviewer staging or publishing anything. Repeating it does not
+duplicate unchanged findings. Explicitly re-importing an edited draft retains the
+previous copy and marks dependent fix assessments stale.
+
+You can also fix GitHub feedback you posted yourself. After `G`, it appears under
+**Your GitHub comments** without an unread alert. Select it and press `f`, or use
+`U` to queue it under Attention needed. Local imported findings have no GitHub
+reply destination: their fixes can be associated with commits, but do not generate
+fixed-in replies. Published feedback retains its normal thread/timeline reply flow.
+
+After a group fix finishes, its logical fixes normally become separate commits.
+Related findings may share one fix. Under **Fixes**, expand the batch to see the
+ordered commit rows. `m` on the batch prepares the next commit; on a commit row
+or feedback item it targets that logical fix. Earlier commits must be completed
+first. Magit receives the saved, verified changes and a message for just that fix.
+Finish with `C-c C-c`, return to Owner, press `g`, and repeat `m` for the next fix.
+Later fixes and manual edits stay unstaged, including separate changes to the
+same file. Push to the displayed **Push PR** destination with `P u`.
+Conflicting or unrelated existing staging is
+preserved and requires manual inspection. Use `C-u m` for status only.
+If combined-review repairs or adopted changes invalidate the separate task
+boundaries, Owner explains why the group needs one combined commit. An existing
+single commit of the whole group is also recognized.
+
+Use **`C-u f`** to continue automatically through committing and reply preparation.
+It completes the combined review, creates the logical commits in order, finishes
+matching local findings, and stages **Fixed in HASH** replies to the original
+GitHub conversations. Replies show **Awaiting push** until their commits reach
+the PR. Push with Magit, then use `P` to check and preview all staged replies and
+confirm publication; no separate `a` step is needed. Nothing is pushed, published,
+or resolved automatically. Local findings have no GitHub reply destination.
+
+The batch remembers **Auto commit**; `r` resumes it without repeating successful
+provider work. `C-u r` selects automatic or manual completion, including enabling
+it for an already verified batch. Commit failures retain verification and report
+partial commit progress. Hooks and signing are honored; failures never trigger
+an unsigned or hook-free retry. The per-commit timeout defaults to 120 seconds;
+`PR_REVIEW_COMMIT_TIMEOUT` sets a positive integer number of seconds. An open
+Magit commit editor must be finished/cancelled before starting automatic completion.
+Human reply edits and explicit unstaging survive retries.
+
+The progress log names the number of selected feedback items and distinguishes
+**Fix verified** from **Fix paused**. A paused result shows completed-task counts
+and the verification blocker. Its changes remain unstaged; inspect the saved fix
+and resume it with `r` before using automatic commit preparation.
+If implementation succeeded but review was incomplete, `r` retries that review
+against the unchanged fix, then checks the combined result. Reviewers can run
+focused tests with disposable files and Git repositories in an attempt's scratch
+directory; the Owner checkout and its real Git index remain protected.
+
+After committing, return to Owner and press `g`. An exact match to a verified
+fix automatically finishes its local findings and moves the completed fix under
+**Deferred / History**, showing **Committed HASH**. Group fixes list their included
+feedback when expanded. For manual fixes, push and use `a` to associate commits
+and prepare replies. Automatic fixes already have their replies staged. `h` remains available for manual
+completion; arbitrary splits/rebases outside the recorded sequence require inspection. `U` and explicit re-import
+keep a finding queued until you finish it or make a new fix. `r` requires selecting
+one fix or its feedback; the Fixes header never resumes a group.
+Fix results show their next step, with verification details and earlier attempts folded separately.
+`?` shows actions for the current selection; `+` opens the complete command list.
+
+```bash
+pr-review owner 123                         # open/read cached owner state
+pr-review owner 123 refresh                 # collect current GitHub feedback
+pr-review owner 123 settings                # inspect independent fix/review settings
+pr-review owner 123 settings --settings-file /tmp/owner-settings.json
+pr-review owner import --review-session /path/to/review --comment p1 --comment p2
+pr-review owner 123 fix --item thread:THREAD_ID
+pr-review owner 123 fix --item thread:FIRST --item thread:SECOND
+pr-review owner 123 fix --item thread:THREAD_ID --verify-only
+pr-review owner 123 resume --batch BATCH_ID
+pr-review owner 123 fix --item thread:THREAD_ID --auto-commit
+pr-review owner 123 resume --batch BATCH_ID --no-auto-commit
+pr-review owner 123 diff --batch BATCH_ID --current
+pr-review owner 123 resume --batch BATCH_ID --adopt
+pr-review owner 123 prepare-commit --batch BATCH_ID  # stage the next logical fix; return suggested message
+pr-review owner 123 prepare-commit --batch BATCH_ID --unit TASK_ID  # target one recorded commit
+pr-review owner 123 reconcile               # check local commits and finish matching local findings
+pr-review owner 123 associate               # after human commits and pushes
+pr-review owner 123 prepare                 # inspect exact staged replies and token
+pr-review owner 123 publish --confirm TOKEN
+pr-review owner 123 recover                 # read back uncertain submissions
+pr-review owner discover                    # saved owner sessions in this checkout
+pr-review owner cancel --operation-id OPERATION_ID
+```
+
+Use item and batch IDs from the JSON responses. `--session PATH` accepts an opaque
+session returned by open/discovery in place of the PR number. `--repo` selects
+among repository remotes. `pr-review owner --help` lists the remaining local
+triage, reply, and explicit resolve/reopen operations.
+
+Settings have `fix` and `review` objects, each with `provider`, `model`, and
+`effort`, plus `verification: "focused"`. Both initially use the default
+processing provider; thereafter they are independent. Fix operations that run
+providers validate fresh model metadata and perform live authentication probes;
+commit-only recovery needs no provider access.
+Opening or editing settings does not invoke inference.
+
+The planner can combine related concerns and order tasks by dependency. Tasks run
+sequentially in a dedicated `pr-owner/...` branch and linked worktree, preserving
+every original feedback destination. The fixer may edit source; the planner and
+reviewer are read-only. Each task and the combined patch get an independent
+review, with at most one automatic repair at each checkpoint. Incomplete checks,
+clarification, or remaining blocking findings pause the batch. Owner checks use
+the focused 60-second-per-check/five-minute cumulative instruction limits.
+
+Use native Magit, or ordinary Git in the displayed owner worktree, to inspect,
+stage, commit, and push. The view shows the actual head repository and branch,
+including forks. A unique existing matching remote is configured on initial
+setup; missing/ambiguous remotes need explicit configuration in Magit. Check the
+displayed PR destination when pushing the differently named owner branch.
+Only the explicit automatic-completion option creates commits. The application
+never pushes or resolves threads as part of fixing.
+
+Owner sessions live under the state root's separate `owners-v1` subtree. Private
+tree checkpoints preserve tracked and nonignored untracked files without touching
+the real index or stash; ignored files are listed separately. Failed attempts,
+plans, prompts, checks, and reports remain available. For partial/manual changes,
+inspect `diff --current` and Magit before `resume --adopt`. Unstage any staged
+changes first. `--replan` replans unfinished/changed feedback against accumulated
+changes; `--skip TASK_ID` leaves dependent tasks blocked. Changed local or remote
+HEAD during provider execution requires reconciliation and a new batch;
+commit-only recovery recognizes its own already committed prefix. Starting a
+new fix fast-forwards a clean owner worktree when it is behind the fetched PR
+head, with progress messages showing both commits. Unfinished batches at that
+HEAD, Git operations in progress, local changes, and genuinely diverged branches
+require inspection in Magit. Ignored files are never overwritten by this update.
+Agent-configuration changes return
+the exact diff and a token for explicit `--trust-agent-config TOKEN`.
+
+Exact association recognizes either the whole verified patch with the baseline
+as sole parent, or the recorded sequence of logical trees with matching parents.
+Arbitrary splits/partial commits require explicit `associate --batch ID --item KEY --commit SHA`
+(repeat items/commits as needed). Only verified code-fix outcomes get generated
+fixed-in replies. Manual association generates them after their SHAs reach the
+freshly fetched PR head; automatic completion stages them locally as Awaiting push.
+Both require remote reachability and explicit confirmation for publication.
+Ordinary composed replies start Unstaged. Changed discussion or loss of previously
+confirmed remote commits unstages affected replies without replacing human wording.
+Uncertain writes require `recover` before another send; confirmed receipts remain
+historical after later amendments or force-pushes.
+
+See the [Emacs owner keys](emacs/README.md#pr-owner-toolkit),
+[API contract](docs/api.md#owner-toolkit), and
+[design and milestones](docs/pr-owner-mode.md). Interactive owner `F` remains a
+separate future work package.
+
+## Reviewer publication and safeguards
 
 The terminal and Emacs use the same drafts, optimistic revisions, and publisher.
 All fresh proposals start **Unstaged**; duplicates start **Suppressed**. A valid
@@ -317,6 +483,10 @@ make check
 # Optional: actual authenticated model CLIs, tiny synthetic repository, mocked
 # GitHub. Incurs model usage, never publishes, and retains artifacts under /tmp.
 tests/smoke.sh
+
+# Optional owner planner/fixer/reviewer smoke, with real model usage and no GitHub.
+python3 tests/smoke-owner.py --provider claude --model haiku --effort low
+python3 tests/smoke-owner.py --provider codex --model gpt-6-luna --effort low
 
 # Optional semantic evaluation: real Claude matching against curated conversations.
 # Other model stages and GitHub are mocked. Incurs model usage; never publishes.

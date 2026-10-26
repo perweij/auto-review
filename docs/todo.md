@@ -81,24 +81,112 @@ risks, establish their evidence and usefulness criteria, and reuse the local
 triage and issue-publication workflow. This extension is intentionally excluded
 from the [first-version specification](proactive-review.md).
 
-## 5. Add toolkit selection and the PR owner's toolkit
+## 5. Completed: toolkit selection and the PR owner's toolkit
 
-Implement the [PR-owner mode specification](pr-owner-mode.md) after the earlier
-scheduled work. This is planned, not started; create its feature branch only
-when implementation begins and reconcile the plan with the completed Python
-backend migration and other intervening changes.
+Implemented the [PR-owner mode specification](pr-owner-mode.md) on
+`feat/pr-owner-toolkit`, created from Python-migrated `main` at `f7f0f2e`.
 
-Add explicit toolkit selection and an owner inbox independent of reviewer runs.
-Support non-interactive `f` fixes in a dedicated owner worktree, with separate
+Explicit toolkit selection and an owner inbox work independently of reviewer runs.
+Non-interactive `f` fixes use a dedicated owner worktree, with separate
 fix/review provider settings, dependency-aware batch planning that can combine
-related feedback, and durable checkpoints. Use native Magit for human staging,
-committing, and pushing, then prepare verified commit-linked replies for explicit
-publication.
+related feedback, per-task and combined verification, and durable checkpoints.
+Owner `m` prepares exact verified staging and a suggested native Magit commit
+message; `C-u m` opens status only. Human confirmation creates the commit, and
+Magit `P u` pushes to the actual PR upstream. Verified commit-linked
+replies are staged for explicit publication with recovery for uncertain writes.
 
-The specification documents all delivery milestones: preparation; toolkit shell
-and inbox; individual fixes and recovery; dependency-aware batches; commit-linked
-replies; and integration/documentation. The first increments are reviewable
-separately, but group fixes and per-task review remain part of this package.
+The specification retains every delivery milestone, implementation boundaries,
+validation evidence, and the subsequent interactive milestone. Terminal, API,
+Emacs, and recovery usage are documented. Validation on 2026-10-25 passed all
+161 Bats, 141 Python, and 77 ERT tests, lint/byte compilation, and live
+planner/fixer/reviewer smoke tests for both Claude and Codex. Interactive `F`
+remains separate below.
+
+PR #4 dogfood follow-up: Reviewer `o` now hands selected saved findings to Owner
+for explicit `f` fixes, without requiring publication or changing reviewer drafts.
+Own GitHub comments are also fixable and appear in a separate section without
+self-notifications. Local imports preserve source context and prior versions,
+survive refresh, and never invent GitHub reply destinations. See the
+[updated owner contract](pr-owner-mode.md) and [Emacs workflow](../emacs/README.md#pr-owner-toolkit).
+Follow-up validation on 2026-10-25 passed all 161 Bats, 151 Python, and 83 ERT
+tests, lint, and warning-free byte compilation; GitHub and providers were mocked.
+
+The next dogfood adjustment adds explicit timestamped progress conclusions,
+corrects generated push-remote configuration, and makes `m` prepare a verified
+commit. Later or unrelated edits stay unstaged; conflicting existing staging is
+preserved for manual inspection. The owner Magit buffer identifies the actual PR
+destination and `P u` action.
+Validation passed 161 Bats, 165 Python, and 89 ERT tests, lint/byte compilation,
+and a native Magit handoff check in a disposable repository.
+Subsequent dogfood clarification: `a` now visibly reports saved associations and
+shows linked hashes on folded findings/batches. `m` recognizes an exact fix commit
+already in branch history and opens inspection without repeating the changed-HEAD
+association advice. This follow-up passed 167 Python and 92 ERT tests plus lint
+and warning-free byte compilation.
+
+The completion workflow now labels successful fixes **Verified**, shows their
+next step, and folds verification details separately from attempt history.
+`h` works from a verified fix/task as well as feedback, moves only its verified
+items to History, and labels fully handled fixes **Done locally**. `?` shows
+selection-specific actions; `+` retains the complete command reference. Local
+findings finish without a GitHub reply, and selected feedback targets its own
+related batch for diff/commit/recovery actions.
+Validation passed all 100 ERT tests, warning-free byte compilation, and a read-only
+render of the saved PR #4 session; no live feedback or worktree was changed.
+
+New fixes now fast-forward a clean owner worktree when the PR has advanced from
+another checkout, instead of misreporting this as divergence. Progress names the
+old/new commits and the new batch records the updated baseline. Unfinished saved
+batches, dirty state, in-progress Git operations, ignored-file collisions, and
+true divergence retain their inspection paths. The 94 owner and trust tests
+passed, including nine new synchronization cases using temporary repositories.
+
+The import/commit follow-up removes the automatic group region left by Reviewer
+`o`, which could reject a subsequent group action and accidentally submit the
+whole import when the cursor returned to its first item. Explicit group/region
+actions remain supported. Launch messages now show selection size, and fix
+conclusions distinguish verification success from a paused batch. Paused commit
+preparation explains task counts and the blocker while preserving unstaged work.
+Validation passed 104 ERT tests, 84 owner Python tests, and lint. Regressions cover
+import → group `f` → individual `f`, explicit regions, paused result messages,
+and consecutive fix/commit preparation after HEAD advances. Separately, 90 tests
+passed against an isolated copy of the saved paused fix; its live worktree,
+index, and verification state were left unchanged.
+
+The paused review exposed a separate permissions problem: reviewers could not
+create real-Git test fixtures. Owner attempts now provide scratch storage, with
+Codex review rooted there and the actual checkout read-only. Focused tests may
+create disposable repositories without changing the Owner index or shared Git
+state. Resume retries an incomplete review of an unchanged successful fix before
+the combined check, rather than invoking the fixer again. Validation passed 98
+owner/trust Python tests, a Codex sandbox probe allowing fixture Git operations
+and denying writes outside scratch, and two focused real-Git checks of the saved
+checkpoint fix under those same permissions. Those checks left the live batch
+unchanged; subsequent dogfooding confirmed successful resume and committing.
+
+Commit completion is now reconciled by Owner `g`. Exact verified local commits
+finish their unchanged local findings automatically, with commit hashes shown
+on finding/fix headings. Fully handled fixes move out of Fixes into History;
+expanded groups list the feedback they include. Manual `h` remains available,
+and `U`/re-import overrides are preserved. Dropped automatic commit proof reopens
+the affected findings; GitHub reply/resolution work remains explicit. `r` now
+requires one selected fix, avoiding the misleading latest-batch fallback from
+the Fixes header. Validation passed 106 owner/trust tests and 108 ERT tests.
+A read-only preview of the real PR #4 session confirmed all three exact commits
+and eight remaining local findings moving to History, without changing live state.
+
+Group fixes now prepare one commit per logical reviewed task where their saved
+checkpoints form an unbroken chain. Related findings share a commit, and final
+repairs or adopted changes that obscure those boundaries retain one explained
+combined commit. Owner shows ordered commit rows and progress; `m` prepares the
+selected or next fix, `g` finishes each committed local finding, and `a` links
+GitHub feedback to its own fix commit. Existing whole-group commits remain valid.
+The [commit-granularity follow-up](pr-owner-mode.md#follow-up-logical-fix-commits)
+records its scope and acceptance criteria. Validation passed all 161 Bats,
+211 Python, and 111 ERT tests, lint, and warning-free byte compilation. A read-only
+preview of PR #4 derived five logical fixes from its eight-finding batch and
+retained recognition of all three existing combined commits without changing
+the saved session.
 
 ## 6. Add interactive PR-owner fixes (`F`)
 
@@ -113,3 +201,26 @@ Choose the terminal integration only after that experiment. Then add individual
 and sequential-group `F` sessions using the existing owner worktree, plans,
 checkpoints, settings, and review flow. Terminal dependencies and this experiment
 are excluded from the initial owner-mode package.
+
+## 7. Implemented: automatic owner commits and staged replies
+
+`C-u f` fixes/reviews the item or group, creates its logical commits after combined
+verification, and prepares/stages replies to the original GitHub destinations.
+The batch remembers automatic completion; `r` resumes it and `C-u r` selects
+automatic or manual completion. Hooks/signing are honored, failures retain
+verification and commits, and recovery detects successful but unrecorded commits
+without duplicate commits or provider reruns. Local findings finish automatically.
+
+Replies awaiting push retain staged selection. After a human push, `P` checks
+the whole selection, previews it, and requires confirmation; no separate `a`
+step is needed. Human wording, explicit unstaging, and uncertain receipts remain
+protected. Pushing, publication, and thread resolution are never automatic.
+See the [implementation specification](pr-owner-mode.md#implemented-follow-up-automatic-commits-and-staged-replies).
+Interactive `F` remains a separate future milestone.
+
+Validation on 2026-10-26 passed 161 Bats, 234 Python, and 115 ERT tests, lint,
+warning-free byte compilation, documentation links, and Python 3.9 grammar checks.
+Real Git coverage includes hooks, SSH signing, timeout/cancellation, interrupted
+commit recovery, and publication readiness. A disposable native Magit check
+confirmed inspection of completed automatic fixes and local reconciliation.
+Providers/GitHub were mocked; the live PR worktree was not changed.

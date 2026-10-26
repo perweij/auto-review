@@ -72,6 +72,41 @@
     (should buffer-read-only)
     (should-not (buffer-modified-p))))
 
+(ert-deftest auto-review/send-selection-to-owner-preserves-reviewer-drafts ()
+  (auto-review-test-buffer
+   (goto-char (oref (oref (cdr (assoc "p1" magit-auto-review--sections)) parent) start))
+   (let ((before (copy-tree magit-auto-review--review)) request shown)
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (r) (setq request r) '((owner . ((session . "/owner"))) (items . ("local:1" "local:2" "local:3")))))
+               ((symbol-function 'magit-auto-review-owner-show-import)
+                (lambda (result directory) (setq shown (list result directory)))))
+       (magit-auto-review-send-to-owner))
+     (should (equal (alist-get 'command request) "owner-import"))
+     (should (equal (alist-get 'comments request) ["p1" "p2" "p3"]))
+     (should (equal (alist-get 'generation request) "old"))
+     (should (equal (alist-get 'revision request) "revision-1"))
+     (should shown)
+     (should (equal magit-auto-review--review before))
+     (should (eq (key-binding "o") #'magit-auto-review-send-to-owner)))))
+
+(ert-deftest auto-review/cancelled-inline-edit-resolution-does-not-handoff ()
+  (auto-review-test-buffer
+   (auto-review-test-goto "p1")
+   (cl-letf (((symbol-function 'magit-auto-review--can-leave) (lambda () nil))
+             ((symbol-function 'magit-auto-review--call) (lambda (_) (ert-fail "Must not send unsaved text"))))
+     (magit-auto-review-send-to-owner))))
+
+(ert-deftest auto-review/stale-owner-handoff-keeps-source-view ()
+  (auto-review-test-buffer
+   (auto-review-test-goto "p1")
+   (let ((before (buffer-string)))
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (_) (signal 'magit-auto-review-api-error '("Stale source revision"))))
+               ((symbol-function 'magit-auto-review-owner-show-import)
+                (lambda (&rest _) (ert-fail "Must not switch after failed import"))))
+       (should-error (magit-auto-review-send-to-owner) :type 'magit-auto-review-api-error))
+     (should (equal before (buffer-string))))))
+
 (ert-deftest auto-review/first-open-with-no-review-supports-native-command-hooks ()
   (save-window-excursion
     (let (opened requests)
@@ -94,7 +129,7 @@
               (magit-auto-review 98761)
               (should (eq opened (current-buffer)))
               (magit-section-post-command-hook)
-              (should (equal requests '("discover" "discover"))))
+              (should (equal requests '("discover" "toolkit" "discover" "toolkit"))))
           (when (buffer-live-p opened) (kill-buffer opened)))))))
 
 (ert-deftest auto-review/failed-initial-read-keeps-a-usable-section ()
@@ -103,10 +138,11 @@
       (cl-letf (((symbol-function 'magit-toplevel) (lambda () auto-review-test-root))
                 ((symbol-function 'magit-auto-review--call)
                  (lambda (request)
-                   (if (equal (alist-get 'command request) "discover")
-                       '((sessions . (((pr . 98762) (session . "/test/missing") (generation . "old")))))
-                     (setq opened (current-buffer))
-                     (signal 'magit-auto-review-api-error '("Saved review unavailable"))))))
+                   (pcase (alist-get 'command request)
+                     ("toolkit" '((toolkit . "reviewer")))
+                     ("discover" '((sessions . (((pr . 98762) (session . "/test/missing") (generation . "old"))))))
+                     (_ (setq opened (current-buffer))
+                        (signal 'magit-auto-review-api-error '("Saved review unavailable")))))))
         (unwind-protect
             (progn
               (should-error (magit-auto-review 98762) :type 'magit-auto-review-api-error)
@@ -155,6 +191,7 @@
                  (lambda (request)
                    (push request requests)
                    (pcase (alist-get 'command request)
+                     ("toolkit" '((toolkit . "reviewer")))
                      ("pull-requests"
                       (should-not (alist-get 'refresh request))
                       (auto-review-test-pulls nil))
@@ -190,7 +227,7 @@
               (should (equal (alist-get 'repository run-request) "github.com/org/repo"))
               (should-not (alist-get 'session run-request))
               (should (equal (mapcar (lambda (r) (alist-get 'command r)) (reverse requests))
-                             '("pull-requests" "discover"))))
+                             '("pull-requests" "toolkit" "discover"))))
           (dolist (buffer (list listing review))
             (when (buffer-live-p buffer) (kill-buffer buffer))))))))
 

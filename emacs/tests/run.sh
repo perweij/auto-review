@@ -8,4 +8,4 @@ if [[ -n ${AUTO_REVIEW_TEST_LOAD_FILE:-} ]]; then args+=(-l "$AUTO_REVIEW_TEST_L
   (setq byte-compile-error-on-warn t)
   (mapc (lambda (file) (unless (byte-compile-file file) (error "Byte compilation failed: %s" file)))
         (directory-files "emacs" t "\\.el$")))'
-"${EMACS:-emacs}" "${args[@]}" -l emacs/tests/magit-auto-review-tests.el -f ert-run-tests-batch-and-exit
+"${EMACS:-emacs}" "${args[@]}" -l emacs/tests/magit-auto-review-tests.el -l emacs/tests/magit-auto-review-owner-tests.el -f ert-run-tests-batch-and-exit

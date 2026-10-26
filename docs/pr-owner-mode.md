@@ -1,9 +1,13 @@
 # Reviewer and PR-owner toolkits
 
-Status: planned and deferred. This document specifies future work; it does not
-describe implemented behavior. Another feature will be completed before this
-work begins. Saving this plan does not start implementation or create its feature
-branch.
+Status: non-interactive owner mode implemented and validated on
+`feat/pr-owner-toolkit`, created from Python-migrated `main` at `f7f0f2e`.
+This document records the implementation contract and subsequent milestones.
+Interactive owner `F` remains deferred to its separate work package.
+
+Usage: [terminal workflow](../README.md#pr-owner-workflow),
+[Emacs keys and recovery](../emacs/README.md#pr-owner-toolkit), and
+[protocol-1 owner operations](api.md#owner-toolkit).
 
 ## Summary and scope
 
@@ -18,38 +22,41 @@ of feedback items by dependency and combine related concerns into coherent fix
 tasks. Execution remains sequential in a dedicated owner worktree.
 
 Providers plan, modify code, test, and review automatically. The user controls
-staging code, committing, pushing, publishing replies, and resolving threads.
+staging code and committing through `m`, or explicitly opts into automatic
+completion with `C-u f`. Pushing, publishing replies, and resolving threads
+remain explicit user operations.
 Use native Magit for the Git operations rather than building another staging or
 commit interface.
 
 This work package includes:
 
 - Toolkit selection and an owner inbox independent of reviewer runs.
+- Explicit local handoff of selected saved reviewer findings and fixes on
+  self-authored GitHub feedback.
 - Individual non-interactive `f` fixes and dependency-aware group `f` fixes.
 - Separate fix and automatic-review provider/model/effort settings.
 - One repair attempt after blocking review findings at each review checkpoint.
 - Durable checkpoints, cancellation, recovery, and partial-batch replanning.
 - Automatic exact-match commit association, explicit association otherwise, and
   staged commit-linked replies after push verification.
+- Optional `C-u f` commits after combined review, with staged replies awaiting push.
 - CLI, version-1 JSON API, and Emacs support through shared application services.
 
 Separate work:
 
 - Interactive owner-mode `F`, terminal integration, and its feasibility test.
 - CI repair, merge administration, and requesting another review.
-- Automatic commits, pushes, reply publication, or thread resolution.
+- Automatic pushes, reply publication, or thread resolution.
 - Implementing the Repository review toolkit itself.
 
 The [TODO list](todo.md) tracks this package and the subsequent interactive work.
 
 ## Preparation and relationship to earlier work
 
-Before implementation, inspect the then-current `main` and the completed earlier
-feature. Reconcile this specification with the actual shared services without
-reintroducing retired infrastructure. Create `feat/pr-owner-toolkit` from that
-baseline when owner-mode implementation starts. The current development checkout
-is sufficient; a separate development worktree is optional. This is distinct
-from the dedicated owner worktrees created by the product.
+Implementation began after the Python migration and its dogfood fixes merged.
+`feat/pr-owner-toolkit` was created from `f7f0f2e`; development uses the existing
+checkout. This is distinct from the dedicated owner worktrees created by the
+product. The baseline passed 161 Bats tests, 94 Python tests, and 63 ERT tests.
 
 Follow the architectural contracts in the
 [Python backend migration plan](python-migration.md): one Python application
@@ -58,10 +65,17 @@ rules. Owner orchestration belongs in Python. Reuse the migrated Git, GitHub,
 provider, process, storage, draft, and publication services; do not introduce new
 Bash orchestration or fabricate reviewer manifests to access those services.
 
-The initial repository inspection found reviewer-only assumptions in session
-discovery, provider integrity checks, settings, and publication endpoints. These
-are integration concerns to verify against the eventual implementation, not
-requirements to retain the old module names or Python-to-Bash bridges.
+The shared discussion collector now exposes a session-independent fetch, and the
+shared GitHub publisher/receipt validator supports PR timeline comments through
+issue endpoints. Repository discovery and toolkit preferences are additive;
+reviewer discovery and integrity rules retain their behavior.
+
+Owner use cases are in `owner.py`, with separate `owner_state.py`, `owner_git.py`,
+`owner_providers.py`, `owner_fixes.py`, and `owner_publication.py` services. Both
+`owner_cli.py` and the protocol dispatch call these services directly. The Emacs
+workflow is in `magit-auto-review-owner.el`. The existing Guix package copies all
+these Python/Emacs modules and prompts; no new runtime or terminal dependency is
+introduced.
 
 Keep this document current as milestones land, recording validation and remaining
 work. No implementation milestone below is complete merely because its plan has
@@ -88,9 +102,21 @@ Owner mode opens a PR without requiring a saved reviewer run. Existing repositor
 PR discovery is available in either toolkit. Switching toolkits is explicit;
 being the PR author does not silently select a mode or grant GitHub permissions.
 
+The reviewer `o` action sends a selected finding, status group, or sibling headings
+to Owner, where only those items are imported and the first is focused. The
+handoff does not activate a region: `f` on an item fixes that item, while `f` on
+a group or an explicitly selected region fixes that selection. This is a local snapshot
+of saved wording, original findings, reviewed commit, and code/discussion context.
+It neither changes reviewer staging nor invokes a model. Saved source revisions
+are validated; identical imports reuse the same item, and explicitly re-imported
+edits retain the previous copy and invalidate dependent assessments. GitHub refresh
+preserves these local items without implicitly following later reviewer edits.
+Local findings can have fix outcomes and commit associations, but no GitHub reply
+or resolution destination is fabricated for them.
+
 ### Refresh and layout
 
-Opening uses cached information. `g` reloads saved results; `G` explicitly fetches
+Opening uses cached information. `g` reloads results and checks local commits; `G` explicitly fetches
 GitHub. Show the last successful refresh and preserve cached information after
 failure. Fix and publication operations perform their own freshness checks.
 Opening, browsing, and local triage never invoke a model.
@@ -98,15 +124,48 @@ Opening, browsing, and local triage never invoke a model.
 | Owner section | Contents |
 | --- | --- |
 | Attention needed | Unresolved threads, new or edited incoming comments/review summaries, and outstanding change-request reviews |
-| Fixes | Batch plans, task progress, patches, checks, review findings, and commit associations |
+| Your GitHub comments | Self-authored nonempty feedback available for explicit fixes without unread alerts |
+| Fixes | Active batch plans, task progress, patches, checks, review findings, and commit associations |
 | Replies | Unstaged, Staged, and Published outgoing replies |
-| Deferred / History | Deferred feedback, handled items, previous attempts, and saved drafts |
+| Deferred / History | Deferred feedback, handled items and completed fix batches, previous attempts, and saved drafts |
+
+Fix headings show a human-readable concern, a verification/handling label, and
+linked or detected commits. Expanding a fix shows its next step, short final result, and included feedback;
+verification/task details and historical attempts are separately folded. Earlier
+failed reviews remain inspectable without appearing alongside the final outcome
+by default. `?` offers actions for the selected feedback, fix, or reply; `+` opens
+the complete command reference. Existing direct keybindings remain available.
+Show the selected feedback count when launching a fix. On return, report the
+saved batch's verification state, not generic process success. Paused batches
+show completed/total task counts and the current blocking explanation; `m`
+retains unstaged changes and directs the user to inspect/resume verification.
+
+After committing a local fix, `g` checks reachable commits for a unique exact
+group match or an exact sequence of reviewed task trees with matching sole
+parents, starting at the original baseline. Current verified `fixed` outcomes in the
+latest batch finish automatically, with their commit hash retained. Move both
+the feedback and a fully handled ready batch to History, labeled **Done locally**,
+retaining verification status and artifacts. `h` still supports manual handling.
+GitHub feedback keeps its explicit reply/resolution workflow. Reconciliation
+performs no Git writes, model calls, or network access. Missing/ambiguous matches,
+arbitrary splits/rebases, stale feedback, and incomplete verification do not trigger
+automatic handling. A lost automatic proof reopens feedback; explicit handling,
+restore, defer, and re-import decisions remain respected. `r` requires selecting
+one fix or related feedback, rather than choosing the latest batch from a group
+header. **Verified** describes a successful review; it does not imply local
+handling, a push, publication, or GitHub resolution. The batch/task shortcut is
+limited to verified items in a ready, non-stale result, leaving skipped and
+unrelated feedback alone. Local findings require no GitHub reply. A selected
+finding's diff/commit/recovery actions use its latest related batch.
 
 Use stable GitHub identities for feedback and preserve local triage across
 refreshes. Initial incoming nonempty feedback is unacknowledged until handled or
 explicitly acknowledged. New or edited discussion returns dependent items to
-attention and invalidates stale assessments. The user's own messages remain
-context without generating self-notifications.
+attention and invalidates stale assessments. The user's own messages are fixable
+without generating self-notifications. They initially appear in Your GitHub
+comments; explicit queueing, deferral, or handling remains local triage. This
+supports a person acting as both owner and reviewer without changing GitHub
+permissions or verdict rules.
 
 Keep these dimensions separate:
 
@@ -213,7 +272,11 @@ Implement role-specific command builders through the shared provider adapters:
 
 - **Codex:** structured `exec`, selected model/effort, JSON events, ephemeral
   sessions, and `approval_policy=never`; `workspace-write` for fixing and
-  `read-only` for planning/review.
+  `read-only` for planning. Review uses `workspace-write` rooted in the attempt's
+  isolated scratch directory, with ambient writable roots, general temporary
+  directory grants, network access, and user/project execpolicy rules disabled.
+  The reviewer is directed to inspect the actual Owner checkout and applicable
+  project instructions; that checkout and shared Git metadata remain read-only.
 - **Claude:** print mode, selected model/effort, structured streamed output, no
   session persistence, and non-interactive permission handling. Fixing permits
   editing tools; planning/review retain existing editing restrictions. Retain
@@ -241,7 +304,19 @@ Replace the reviewer clean-tree invariant only within owner operations:
   loaded agent configuration invalidate that trust before another invocation.
 
 The orchestrator performs its own checkpoint/ref writes outside provider
-invocations. Providers do not stage, commit, push, publish, or resolve threads.
+invocations. Providers do not stage or commit existing repositories, push,
+publish, or resolve threads. Fix/review attempts receive a scratch directory and
+`TMPDIR` for focused tests, with bytecode writes and optional Git locks disabled.
+They may create scripts and disposable Git fixtures there, including fixture
+commits; fixture worktrees and shared object stores must also stay in scratch. Claude
+retains its existing tool denials and post-invocation integrity checks; it does
+not gain Codex's filesystem enforcement. The original per-check and total
+verification limits still apply. Scratch artifacts remain with the attempt.
+
+When implementation succeeded but a review was incomplete, resuming unchanged
+source retries the review with its previous blocker and original task diff,
+then runs the combined review. It does not rerun a successful implementation
+merely to retry verification. Changed source still requires explicit adoption.
 Treat feedback as task data, not authority to change these constraints.
 
 These controls retain the project's trusted-repository/container assumptions.
@@ -356,16 +431,59 @@ collection where needed. PR fetch refs supply source objects; they are not push
 destinations.
 
 If an existing remote matches the head repository, show and configure the
-explicit owner-branch push mapping. If none matches, display the required
+actual PR branch as the owner branch's upstream. Use Magit `P u`; configuring a
+push-remote would instead offer the owner branch's unique local name remotely.
+The owner Magit buffer displays this destination as **Push PR**. Migrate only
+unchanged legacy mappings generated by this tool; preserve manual mappings.
+If none matches, display the required
 destination and let the user configure it through Magit; do not silently add a
 remote. Display ambiguity rather than guessing among matching remotes.
 
 New batches require clean source/index state. Existing unpushed owner commits
 are allowed when the freshly fetched PR head remains an ancestor of local HEAD;
-record both identities. Divergence requires manual reconciliation.
+record both identities. When local HEAD is instead an ancestor of the fetched
+PR head, fast-forward the clean owner worktree before creating the new batch.
+Report the old and new commits in progress and record the updated baseline.
+Preserve earlier batch records, checks, and associations. Block this update when
+an unfinished batch still uses the current HEAD or a Git operation is in
+progress; never autostash, squash, or overwrite ignored files. Resume operations
+keep their original baseline and do not use this synchronization. Genuine
+divergence requires manual reconciliation through `C-u m`.
 
-Provide **Open Magit** for inspection, staging, committing, and pushing, showing
-the intended PR destination. Human Git operations retain normal hook behavior;
+After the whole batch passes final review, derive an ordered commit plan from
+its independently reviewed task checkpoints. Each logical task normally becomes
+one commit; related findings can share that task. Use the exact cumulative tree
+after each task, preserving separate edits to the same file without assigning
+ownership by filename. Require an unbroken chain from the baseline tree to the
+final reviewed tree. Missing/discontinuous snapshots, adopted changes, or final
+review repairs that cross those boundaries fall back to one combined commit with
+an explanation. A concern satisfied by earlier changes shares their commit rather
+than creating an empty one. Preserve the ability to recognize an existing exact
+whole-batch commit; do not rewrite previous user commits.
+
+The GUI shows ordered logical commit rows, their included findings, detected
+hashes, and **Fixes committed N/M**. `m` on a batch prepares its next uncommitted
+unit. A commit row, task, or feedback item targets its logical fix; elsewhere
+`m` uses the latest batch's next unit. Preparing a later unit requires all earlier
+units to have exact matching commits. HEAD must equal the immediately preceding
+unit's detected SHA, or the original baseline for the first unit. Stage the saved
+blobs for that unit's changed paths and open a native Magit editor with only its
+findings/summaries in the message. Human `C-c C-c` finishes each commit; `g`
+recognizes it, and the next `m` prepares the next fix. Later fixes and manual edits
+remain unstaged even within the same files. `d` on a commit row shows its exact
+patch. Unrelated or conflicting staging, paused/stale/empty results, unexpected
+HEAD changes, a busy index, or an in-progress Git operation leads to inspection
+without replacing existing staging.
+Use the owner execution lock and a temporary index under Git's index lock;
+validate the complete staged tree against the selected checkpoint before atomic replacement. Preserve an existing
+commit editor's wording. `C-u m` provides inspection without staging.
+If the selected unit or whole batch already has an exact reachable match,
+`m` reports its commit(s) and opens inspection.
+Association is not a prerequisite for this detection. `a` reports saved links
+visibly, including hashes on folded finding/batch headings, and explains an empty
+match. Linked commits do not automatically change local triage or resolve threads.
+
+Human Git operations retain normal hook behavior;
 tool-owned Git plumbing follows the existing hooks-disabled convention. Never
 automatically reset, stash, rebase, or discard user work.
 
@@ -373,12 +491,17 @@ automatically reset, stash, rebase, or discard user work.
 
 ### Association rules
 
-Automatically associate a commit only when its parent equals the batch's original
-baseline commit, its complete tree equals the final verified batch tree, and all
-associated feedback items have successful code-fix outcomes.
+Automatically associate either an exact whole-group commit or the recognized
+prefix of its recorded logical commit plan. The first unit must have the batch's
+original baseline as its sole parent; each following unit must have the preceding
+matched commit as its sole parent. Every complete tree must equal its recorded,
+independently reviewed checkpoint. The whole batch must have passed final review,
+and associated feedback must have successful code-fix outcomes. Each item links
+to the unit covering it, allowing local completion and pushed replies before
+later units are committed. Ambiguous matching sequences require inspection.
 
 Items classified as clarification, no justified change, or already addressed do
-not automatically receive a fixed-in claim. Partial commits, split commits,
+not automatically receive a fixed-in claim. Partial patches, arbitrary split commits,
 additional changes, and ambiguous matches require explicit item-to-commit or
 commit-range association. Save actual SHAs and provenance. Overlapping filenames
 alone do not establish an association or prove a fix.
@@ -394,8 +517,9 @@ ancestors of the PR's reported current head. Use that PR identity rather than
 assuming an arbitrary local tracking ref or similarly named branch is current.
 Unpushed or unreachable commits block fixed-in publication.
 
-After verification, generate editable commit-linked replies directly into
-**Staged**:
+Manual association generates editable replies after remote verification;
+automatic completion generates them after exact local commit verification, into
+**Staged · Awaiting push**. Both require remote verification before publication:
 
 - Inline feedback replies to its original thread.
 - General comments and review summaries receive a PR timeline comment linking
@@ -411,8 +535,10 @@ regenerating proposals.
 
 Publication requires explicit user action and fresh account, destination,
 discussion, and commit-reachability checks. Changed wording, associations,
-discussion dependencies, or unreachable commits unstage affected unpublished
-replies. Never silently rewrite a human-edited draft to accommodate those changes.
+discussion dependencies, or loss of previously confirmed remote commits unstage
+affected unpublished replies. Initial awaiting-push replies retain staged intent
+but cannot publish. Validate the entire selected set without silently omitting
+blocked replies. Never silently rewrite human wording to accommodate changes.
 
 Record publication intent before sending. Partial success moves only confirmed
 replies to Published. Uncertain responses require read-back recovery before retry;
@@ -424,10 +550,18 @@ separate permission-checked action and does not change review verdicts.
 
 ## Delivery milestones
 
-The milestones below are ordered implementation increments. Milestones 1 and 2
-are independently reviewable but do not replace completion of this package.
-Group planning and per-task review remain committed scope. All implementation
-milestones are not started.
+The milestones below define the non-interactive package and its exit criteria.
+Milestones 0–5 are complete in this branch. Group planning and per-task review
+are included in the implementation; the validation record is below.
+
+| Milestone | Implementation evidence |
+| --- | --- |
+| 0. Preparation | Python migration baseline inspected; feature branch and baseline checks recorded above |
+| 1. Toolkit/inbox | Explicit repository preference, isolated owner sessions, complete discussion/triage, CLI/API, separate Emacs buffers and settings |
+| 2. Individual fixes/recovery | Real owner branch/worktree, role-specific providers, source/index/admin checks, pinned trees, cancellation, adoption, partial diff, native Magit |
+| 3. Dependency-aware batches | Exact item coverage and per-item expectations, acyclic planning, stable order, combined tasks, task/final review with bounded repairs, accumulated-change replanning |
+| 4. Commit-linked replies | Exact/explicit associations, fork targets, fresh reachability, per-destination drafts, durable intents/receipts, partial and uncertain publication recovery |
+| 5. Integration/docs | Usage/API/TODO updated; full backend and Emacs checks plus live Claude and Codex planner/fixer/reviewer smoke tests passed |
 
 ### Milestone 0: rebase the plan and prepare implementation
 
@@ -457,7 +591,7 @@ or model invocation; reviewer workflows remain compatible.
   and Open Magit.
 
 Exit criteria: a single concern produces an inspectable, verified patch or an
-honest non-success outcome; interruption preserves work and never commits,
+honest non-success outcome; ordinary `f` interruption preserves work and never commits,
 pushes, or publishes automatically.
 
 ### Milestone 3: dependency-aware batches
@@ -491,6 +625,17 @@ Exit criteria: this non-interactive package meets the validation requirements
 below, existing interfaces remain supported, and documentation distinguishes
 implemented behavior from the later interactive package.
 
+### Follow-up: logical fix commits
+
+Group execution remains unattended through the final combined review. Its saved
+task checkpoints then support smaller human-confirmed commits, ordered staging,
+per-fix messages, partial local completion, and precise GitHub commit links.
+Combined repairs retain a conservative, explained grouping. Acceptance includes
+overlapping file edits, shared/no-extra-patch outcomes, partial commit progress,
+amendments, dropped or ambiguous prefixes, preservation of unrelated edits/index
+state, and compatibility with already committed batches. Manual regrouping and
+automatic committing remain outside this follow-up.
+
 ### Later milestone: interactive fixes
 
 This is a separately planned work package after the non-interactive foundation.
@@ -512,6 +657,54 @@ ensure no interactive writer remains active when automatic review begins.
 Exit criteria for that later package: both supported provider CLIs pass the live
 terminal acceptance matrix, the user can reliably escape/cancel/return, and
 interactive work participates in the same recovery and publication rules.
+
+## Implemented follow-up: automatic commits and staged replies
+
+`C-u f` opts a selected item/group into automatic completion. Ordinary `f` retains
+the manual Magit checkpoint. Save `auto_commit` per batch; `r` retains it and
+`C-u r` selects automatic or manual completion, including for a ready batch.
+Older sessions default to manual. Read-only verification cannot opt in.
+
+Finish every applicable task and combined review before creating any commit.
+Use the recorded logical boundaries, generated messages, and exact staging;
+combined-review repairs can retain one explained combined commit. Run normal
+Git hooks and signing, without an editor or unsigned/hook-free fallback. Check
+branch, HEAD, index, and feedback before each commit and its actual parent/tree
+afterward. Retain later fixes and unrelated edits. Unexpected hook/source changes
+pause for manual inspection; never reset, amend, or erase an existing commit.
+
+Persist each attempt's expected parent/tree/message before launching Git, then
+its result and artifacts. Use the existing execution lock, cancellable process
+groups, and a 120-second per-commit timeout (`PR_REVIEW_COMMIT_TIMEOUT` overrides).
+Keep verification `ready` when automatic completion pauses. Resuming recognizes
+commits created before a result was saved, checks interrupted changes, and retries
+only unfinished commits/drafting without invoking providers. Once commits have
+begun, adoption/replanning requires reconciliation and a new batch. An existing
+Magit commit editor blocks an automatic start/resume.
+
+After each confirmed commit, save exact associations and prepare/stage fixed-in
+replies to the corresponding original GitHub destinations. Local findings finish
+through existing exact-commit reconciliation and receive no GitHub reply. Related
+items share their actual commit; separate units have separate links. Preserve
+human wording, explicit unstaging/associations, prior publication, and uncertain
+receipts. Conflicting drafts, changed associations, and missing destinations are
+visible reply-preparation issues; avoid duplicates. Recovery can repair missing
+drafts after all commits already exist.
+
+Staging records publication intent independently of readiness. New automatic
+replies remain **Staged · Awaiting push** until delivery to the fresh PR head is
+confirmed. `P` verifies the entire selected set and previews it before explicit
+confirmation. A blocker prevents the whole preview; it never silently drops an
+item. Losing previously confirmed remote commits, changed context, or obsolete
+local proof requires unstaging and inspection. No automatic push, publication,
+or thread resolution is introduced. `g` remains local reconciliation.
+
+Show the batch's completion mode, commit progress, reply counts, and concluding
+success/pause messages; preserve accessible artifacts and a recovery action.
+Validation covers real Git commits/hooks/signing, overlapping snapshots, partial
+failure, timeout/cancellation, before/after-commit crashes, duplicate prevention,
+before/after-push publication, manual wording/selection, and old/manual sessions.
+This package is independent of the later interactive `F` work.
 
 ## Validation and completion
 
@@ -537,6 +730,111 @@ the new provider write invocations through focused smoke tests in the supported
 environment; automated mocks do not establish actual CLI permission behavior or
 semantic model accuracy. Live terminal acceptance belongs exclusively to the
 later interactive package.
+
+### Implementation validation record
+
+Validation on 2026-10-25 passed:
+
+- `make check-backend`: lint, all 161 Bats acceptance tests, and all 141 Python
+  tests (including 47 owner tests).
+- `make check-emacs` with Emacs 30.2 and the supported Magit/Transient load file:
+  warning-free byte compilation and all 77 ERT tests (including 14 owner tests).
+- `git diff --check`, local documentation links, and Python 3.9 grammar parsing
+  for the production modules, entry point, and owner smoke script.
+- The live provider smoke checks described below, using disposable repositories.
+
+Owner tests use real temporary repositories/worktrees and mocked GitHub/model
+responses. They cover combined plans, invalid dependency/coverage/expectation
+output, focused verification failures, bounded task/final repairs, interrupted
+attempts, adoption/replanning, private trees and real-index isolation, changed
+configuration trust, Git administrative changes, fork mappings, exact/extra/split
+commits, amendments, force-push invalidation, account changes, stale edits,
+thread actions, partial publication, and marker read-back. Existing collection,
+pagination, process cancellation, and reviewer regression suites exercise the
+shared services. ERT covers isolated keys, display-order group selection, settings,
+fold retention, editor recovery, partial diffs, trust inspection, explicit
+publication, and native Magit handoff.
+
+Real provider acceptance on 2026-10-25 used
+`python3 tests/smoke-owner.py --provider claude --model haiku --effort low` and
+`python3 tests/smoke-owner.py --provider codex --model gpt-6-luna --effort low`.
+Each performed live authentication, structured read-only planning, a source edit
+and focused assertion, and structured read-only review in a disposable linked
+worktree. Both passed; HEAD, index, branch, and Git administrative state were
+preserved. GitHub was not contacted and nothing was published. These smoke tests
+incur model usage; they establish supported invocation behavior on a small
+fixture, not general correctness of model judgments. Codex required the supported
+environment's access to its CLI runtime state outside the restricted workspace.
+
+The PR #4 follow-up on 2026-10-25 added explicit Reviewer `o` handoff and fixing
+self-authored GitHub feedback. Validation passed all 161 Bats tests, 151 Python
+tests (57 owner tests), and 83 ERT tests, plus lint and warning-free byte
+compilation. Added coverage includes saved-wording/context preservation, exact
+group selection, stale revisions and busy locks, idempotent imports and changed
+source versions, local items surviving refresh, mixed local/GitHub fix batches,
+commit associations without invented reply destinations, and replies to the
+original self-authored thread. These checks use temporary repositories and
+mocked providers/GitHub; this follow-up did not run live inference or publish
+anything. The provider invocation contract remains unchanged.
+
+The subsequent commit-handoff follow-up passed 161 Bats, 165 Python, and 89 ERT
+tests, lint, warning-free byte compilation, Python 3.9 grammar checks, and local
+documentation links. Real temporary Git repositories cover exact staging,
+same-file later edits, unrelated/conflicting staging, additions/deletions, binary
+files, executable modes, symlinks, literal filenames, lock contention, cancellation,
+concurrent index changes, existing commits, and exact commit associations.
+An additional disposable-repository check used native Magit status and commit
+preparation with the editor launcher intercepted: the PR upstream appeared even
+with a global push-remote default, Git received `commit --edit` and the suggested
+message, and HEAD stayed unchanged. This was not a live interactive commit test.
+No GitHub/model calls were made by these checks.
+
+The association-status follow-up passed 167 Python tests, 92 ERT tests, lint,
+and warning-free byte compilation. It covers exact commits before/after
+association and beneath later commits, partial associations without false exact
+matches, unchanged staging during inspection, visible folded links, and empty
+association results. Read-only detection and Emacs rendering also reproduced the
+expected linked commit from the saved PR #4 dogfood session.
+
+The completion-UI follow-up passed all 100 ERT tests and warning-free byte
+compilation. Added cases cover finishing only a fix's verified feedback, empty
+verification, partial batches, preserving unrelated attention items, folded
+details/history, contextual Transient menus, and selecting the related batch
+from feedback. A read-only render of the saved PR #4 session confirmed its linked
+commit, local finishing guidance, and four task actions. No saved feedback,
+GitHub state, or user worktree was changed by these checks.
+
+The logical-commit follow-up on 2026-10-26 passed all 161 Bats, 211 Python,
+and 111 ERT tests, lint, warning-free byte compilation, local documentation
+links, and Python 3.9 grammar checks. Eleven added real-Git tests cover successive
+commits with overlapping files, later manual edits, selected-unit order and CLI
+targeting, partial completion and per-thread replies, combined repairs,
+shared/no-extra-patch outcomes, amendments, dropped commits, unrelated and
+ambiguous histories, unchanged conflicting staging, and existing combined commits.
+Three added ERT tests cover commit rows, scoped actions and hashes, and changed
+history guidance. A read-only PR #4 preview derived five logical fixes covering
+its eight findings (2, 2, 1, 1, 2) and recognized all three already committed
+batches. No live session/worktree, GitHub state, or existing commit was changed;
+GitHub and provider calls in regression tests were mocked.
+
+The automatic-commit follow-up on 2026-10-26 passed all 161 Bats, 234 Python,
+and 115 ERT tests, lint, warning-free byte compilation, local documentation
+links, and Python 3.9 grammar checks. Twenty-three added Python tests use real
+temporary Git repositories to cover ordered commits, combined-review timing,
+partial completion, hook/signing failures, real SSH signatures, timeouts,
+interrupted commit recovery, unexpected changes, preserved manual edits,
+idempotent reply preparation, push readiness, publication selection, and explicit
+reassociation after a rebase. Four added ERT tests cover prefix arguments,
+remembered completion mode, progress/recovery display, and commit-editor exclusion.
+A disposable native Magit check confirmed that completed automatic fixes open
+for inspection without preparing another commit and that local reconciliation
+retains existing commits and awaiting-push replies. GitHub and providers were
+mocked; these checks did not change the live PR worktree or publish anything.
+
+The implementation adds no Guix dependency or package-layout change. The existing
+migration follow-ups for a real Guix build and execution on Python 3.9 remain in
+the [TODO list](todo.md); this workspace has Python 3.12 and verified Python 3.9
+syntax. Interactive terminal acceptance remains exclusively a later milestone.
 
 Completion means milestones 0-5 satisfy their exit criteria, accepted fixes and
 replies remain inspectable and recoverable, no existing reviewer behavior has

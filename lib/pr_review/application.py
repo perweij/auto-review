@@ -8,9 +8,13 @@ from . import operations, publication, settings, models, workflow, pulls
 
 def dispatch(request):
     operation = request.get("command")
+    if isinstance(operation, str) and (operation.startswith("owner-") or operation == "toolkit"):
+        from .owner import dispatch as owner_dispatch
+        return owner_dispatch(request)
     if operation == "capabilities":
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup"]}
+        from .owner import COMMANDS
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner"],
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":

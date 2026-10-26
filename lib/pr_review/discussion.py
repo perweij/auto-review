@@ -94,37 +94,46 @@ def external(discussion, actions):
     return result
 
 
+def fetch(repository):
+    """Fetch complete discussion without depending on a reviewer session."""
+    values = {}
+    for name, endpoint in (("issues", f"issues/{repository.pr}/comments"),
+                           ("reviews", f"pulls/{repository.pr}/reviews"),
+                           ("inline", f"pulls/{repository.pr}/comments")):
+        values[name] = repository.pages(f"repos/{repository.name}/{endpoint}")
+    threads, cursor, seen = [], None, set()
+    while True:
+        variables = dict(owner=repository.name.split("/")[0], name=repository.name.split("/")[1], number=repository.pr)
+        if cursor:
+            variables["cursor"] = cursor
+        try:
+            data = repository.graphql((ROOT / "prompts/threads.graphql").read_text(), **variables)
+            pr = data["repository"]["pullRequest"]
+            page = pr["reviewThreads"]
+            if pr["number"] != repository.pr or not isinstance(page["nodes"], list) or type(page["pageInfo"]["hasNextPage"]) is not bool:
+                raise KeyError("thread page")
+            threads.extend(page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"].get("endCursor")
+            if not isinstance(cursor, str) or not cursor or cursor in seen:
+                raise KeyError("thread cursor")
+            seen.add(cursor)
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ApiError("incomplete_discussion", "Incomplete GraphQL thread response") from exc
+    values["threads"] = threads
+    return normalize(values["issues"], values["reviews"], values["inline"], threads), values
+
+
 def collect(repository, directory):
     directory = Path(directory)
     (directory / "discussion").mkdir(parents=True, exist_ok=True, mode=0o700)
     snapshot = Path(tempfile.mkdtemp(prefix="snapshot-", dir=directory / "discussion"))
     manifest = read_json(directory / "manifest.json")
     try:
-        values = {}
-        for name, endpoint in (("issues", f"issues/{repository.pr}/comments"),
-                               ("reviews", f"pulls/{repository.pr}/reviews"),
-                               ("inline", f"pulls/{repository.pr}/comments")):
-            values[name] = repository.pages(f"repos/{repository.name}/{endpoint}")
-            write_json(snapshot / (name + ".json"), values[name])
-        threads, cursor, seen = [], None, set()
-        while True:
-            variables = dict(owner=repository.name.split("/")[0], name=repository.name.split("/")[1], number=repository.pr)
-            if cursor:
-                variables["cursor"] = cursor
-            data = repository.graphql((ROOT / "prompts/threads.graphql").read_text(), **variables)
-            pr = data["repository"]["pullRequest"]
-            page = pr["reviewThreads"]
-            if pr["number"] != repository.pr or not isinstance(page["nodes"], list) or type(page["pageInfo"]["hasNextPage"]) is not bool:
-                raise ApiError("incomplete_discussion", "Incomplete GraphQL thread response")
-            threads.extend(page["nodes"])
-            if not page["pageInfo"]["hasNextPage"]:
-                break
-            cursor = page["pageInfo"].get("endCursor")
-            if not isinstance(cursor, str) or not cursor or cursor in seen:
-                raise ApiError("incomplete_discussion", "Invalid thread pagination cursor")
-            seen.add(cursor)
-        write_json(snapshot / "threads.json", threads)
-        discussion = normalize(values["issues"], values["reviews"], values["inline"], threads)
+        discussion, values = fetch(repository)
+        for name, value in values.items():
+            write_json(snapshot / (name + ".json"), value)
         write_json(snapshot / "discussion.json", discussion)
         from .receipts import actions as saved_actions
         actions = saved_actions(directory)

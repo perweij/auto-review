@@ -9,7 +9,7 @@ from .processes import Cancelled
 
 
 def parser():
-    result = argparse.ArgumentParser(prog='pr-review', description='Review a GitHub PR with a shared Python backend and optional publication.',
+    result = argparse.ArgumentParser(prog='pr-review', description='Review a GitHub PR with optional publication. For incoming feedback and fixes, use pr-review owner --help.',
         epilog='Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan), PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET (optional USD), PR_REVIEW_AUTH_TIMEOUT (default 60), PR_REVIEW_CODEX_PROBE_MODEL, XDG_STATE_HOME, VISUAL/EDITOR.')
     result.add_argument('pr', help='positive PR number or https://HOST/OWNER/REPO/pull/NUMBER')
     result.add_argument('-R', '--repo', dest='repository')
@@ -30,6 +30,9 @@ def main(argv=None):
         from .api import main as api
         api()
         return 0
+    if argv and argv[0] == 'owner':
+        from .owner_cli import main as owner
+        return owner(argv[1:])
     if len(argv) == 2 and argv[0] == 'drafts':
         from .terminal import terminal
         try:

@@ -90,6 +90,16 @@
                     (magit-auto-review--setup-redraw)))))
          magit-auto-review--setup-processes)))))
 
+(defun magit-auto-review--default-settings ()
+  "Return customized defaults for initializing a new workflow."
+  `((reviewers . ,(vconcat magit-auto-review-reviewers))
+    (processing_provider . ,magit-auto-review-processing-provider)
+    (claude_model . ,magit-auto-review-claude-model)
+    (codex_model . ,magit-auto-review-codex-model)
+    (claude_effort . ,magit-auto-review-claude-effort)
+    (codex_effort . ,magit-auto-review-codex-effort)
+    (synthesis_tests . ,magit-auto-review-synthesis-tests)))
+
 (defun magit-auto-review-run ()
   "Configure this review, then explicitly run or resume it."
   (interactive)
@@ -103,13 +113,7 @@
                `((command . "settings") (session . ,magit-auto-review--session))
              `((command . "settings") (pr . ,magit-auto-review--target) (cwd . ,default-directory)
                (repository . ,magit-auto-review--repository)))
-           `((defaults . ((reviewers . ,(vconcat magit-auto-review-reviewers))
-                          (processing_provider . ,magit-auto-review-processing-provider)
-                          (claude_model . ,magit-auto-review-claude-model)
-                          (codex_model . ,magit-auto-review-codex-model)
-                          (claude_effort . ,magit-auto-review-claude-effort)
-                          (codex_effort . ,magit-auto-review-codex-effort)
-                          (synthesis_tests . ,magit-auto-review-synthesis-tests))))))))
+           `((defaults . ,(magit-auto-review--default-settings)))))))
     (setq magit-auto-review--setup-settings (copy-tree (alist-get 'settings resolved))
           magit-auto-review--setup-catalogs nil
           magit-auto-review--setup-owner (current-buffer))

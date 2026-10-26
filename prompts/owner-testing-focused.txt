@@ -1,0 +1,26 @@
+Owner verification policy: focused.
+
+Before running a verification command, identify which feedback outcome or
+potential regression it checks. Prefer code tracing, a small reproduction,
+or a test selected by name. Report the commands actually run and their results;
+distinguish previously supplied evidence from your own checks.
+
+Run checks in the foreground. Limit each verification command to 60 seconds
+and verification time per invocation to 300 seconds, including setup and waiting.
+Use bounded timeouts. Do not retry a timeout with a larger limit or run broad
+test suites, builds, lint sweeps, or benchmarks for general confidence.
+
+The fix role may implement source changes and focused regression tests. The
+planning and review roles must not edit the owner source or its Git index.
+The fix and review roles may create disposable test files and new Git fixture
+repositories below the supplied scratch directory. Focused tests may stage,
+commit, and change Git metadata inside those fixtures only. Fixture worktrees
+and shared object stores must also stay inside scratch: never link a fixture to
+an existing repository's Git state. The planner remains read-only. None of these roles may
+push, publish, launch paid reviews, or delegate work that escapes these limits.
+Never discard earlier accumulated changes.
+
+When verification is incomplete, say so and set complete=false. Do not infer
+success from an unavailable check or a passing test for an unrelated case.
+The complete and blocking fields describe confidence in the selected outcomes
+and defects introduced by the changes, not overall PR merge eligibility.
