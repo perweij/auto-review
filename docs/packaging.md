@@ -8,27 +8,23 @@ Emacs package-manager installation runs at startup.
 ## Local development
 
 The root `guix.scm` returns the Emacs package, which propagates its backend,
-Magit and Forge. It snapshots the local code, prompts, packaging files and tests;
-root-level files outside that allowlist, hidden files, symlinks, state and
-compiled caches are excluded. Review the included directories before building:
-the selector is not a secret scanner. Edits require a rebuild and cannot change
-an already installed generation.
+Magit and Forge. It snapshots the local code, prompts, packaging files, tests, and
+root license file. Other root-level files outside that allowlist, hidden files,
+symlinks, state, and compiled caches are excluded. Review the included directories
+before building: the selector is not a secret scanner. Edits require a rebuild
+and cannot change an already installed generation.
 
-From this checkout, using the adjacent stable-emacs pin:
+From this checkout, using your own Guix channels file:
 
 ```sh
-guix time-machine -C ../stable-emacs/channels.scm -- build -f guix.scm
-guix time-machine -C ../stable-emacs/channels.scm -- shell -f guix.scm emacs
-make check-guix GUIX_CHANNELS=../stable-emacs/channels.scm
+guix time-machine -C /path/to/channels.scm -- build -f guix.scm
+guix time-machine -C /path/to/channels.scm -- shell -f guix.scm emacs
+make check-guix GUIX_CHANNELS=/path/to/channels.scm
 ```
 
-Any suitable caller-owned channels file can replace that path. `GUIX` selects
+Replace `/path/to/channels.scm` with your channels file. `GUIX` selects
 the Guix executable for `make check-guix`. Auto-review does not maintain an
 independent Emacs/Magit/Transient pin.
-
-The existing stable-emacs development overlay can still load this `guix.scm`.
-The normal stable-emacs manifest and Fleet installation do not yet include
-auto-review; that integration is a separate step.
 
 ## Reusable recipe interface
 
@@ -47,19 +43,19 @@ constructors use the consuming Guix graph. Construct a new pair when changing
 source; do not override only the source field of an already constructed package,
 because the backend builder captures the constructor's source argument.
 
-For the later stable-emacs release integration, stable-emacs will carry an exact
-copy of `guix/auto-review/packages.scm` on its channel load path, recording the
-upstream revision. It will supply a public Git source pinned by commit and hash
-from that same revision. The recipe must be available during Guix evaluation;
-a source fetched during a package build cannot itself supply the recipe for
-that evaluation. This arrangement needs no auto-review channel or Fleet
-component. Keep the copied module and source pin together when updating.
+For a consuming Guix channel, make `(auto-review packages)` available on its
+load path during evaluation and supply a public source pinned by commit and hash.
+Keep the recipe revision and source pin together when updating. A source fetched
+during the build cannot supply a recipe needed earlier during Guix evaluation.
 
 ## Runtime boundary
 
 The backend contains `bin/pr-review`, `lib/pr_review` and `prompts` with their
 relative layout preserved. It resolves symlinks to find these resources and
 does not write Python import caches. Its shebang names its Guix Python directly.
+Both packages declare GPL-3.0-or-later. When the root `LICENSE` file is present,
+each installs it under its own `share/doc/<package-name>/` directory. Source
+snapshots include that file.
 
 Packaged Git, GitHub CLI (Guix package `github-cli`, executable `gh`) and SSH
 precede the inherited PATH only inside the backend and its children. They are

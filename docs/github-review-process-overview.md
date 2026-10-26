@@ -1,11 +1,8 @@
 # GitHub review process overview
 
-Research date: 2026-10-25.
-
-This document records GitHub's review workflow and provides a checklist for a
-future coverage audit of pr-review. It distinguishes GitHub behavior from proposed
-program design. It does not establish that the implementation covers these
-operations or commit the project to implementing every GitHub feature.
+Auto-review keeps finding assessments, conversation state, review verdicts, and
+merge requirements separate. This guide explains those distinctions and which
+operations are handled here or left to GitHub/Forge.
 
 ## Comments, conversations, and verdicts
 
@@ -82,70 +79,9 @@ reassess the revised code and update their verdict as appropriate.
 Sources: [branch protection settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 and [re-requesting a review](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/incorporating-feedback-in-your-pull-request#re-requesting-a-review).
 
-## Reviewer workflow coverage checklist
+## Auto-review workflow coverage
 
-GitHub provides mechanisms; the reviewer's substantive responsibility is to assess
-the change, communicate actionable feedback, and revisit that assessment after
-revisions. Use this inventory for the program audit:
-
-| Area | Operations or behavior to cover |
-| --- | --- |
-| Understand the change | Read the PR description, related discussion, changed files, and relevant surrounding code. |
-| Inspect and verify | Investigate correctness, tests, security, and dependency changes; track files viewed where useful. |
-| Leave feedback | General comments; file, single-line, and multiline comments; exact code suggestions. |
-| Prepare a review | Publish an individual comment or accumulate private pending comments; edit/discard drafts; submit the review. |
-| Give a verdict | Comment, approve, or request changes, with a clear summary. |
-| Continue discussions | Read complete threads, reply in the appropriate conversation, and correct earlier feedback. |
-| Track completion | Distinguish unresolved, resolved, and outdated threads; resolve or reopen when permitted. |
-| Review revisions | Inspect new changes and verify earlier concerns; submit an updated verdict when appropriate. |
-| Handle review lifecycle | Understand pending, submitted, and dismissed reviews, review requests, and requests for another review. |
-| Respect merge policy | Account for required approvals, code owners, conversation resolution, stale approvals, and approval of the latest push. |
-
-Sources: [review guide](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/reviewing-proposed-changes-in-a-pull-request),
-[review quickstart](https://docs.github.com/en/pull-requests/get-started/reviewing-pull-requests-quickstart),
-[review API](https://docs.github.com/en/rest/pulls/reviews),
-[thread reopening API](https://docs.github.com/en/graphql/reference/pulls#unresolvereviewthread),
-and [branch protection settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
-
-## Proposed program model and audit approach
-
-Keep these dimensions separate:
-
-- **Finding assessment:** does the problem still exist?
-- **Conversation state:** is the thread resolved, and is its code context outdated?
-- **Review state:** what verdict has the reviewer submitted, and against which commit?
-- **Merge requirements:** what does GitHub currently require?
-
-This separation is a design recommendation derived from the documented behavior.
-GitHub's resolution flag records workflow state; it does not independently prove
-that a finding is fixed. Likewise, a review verdict is not a complete statement of
-merge eligibility.
-
-At the time of this research, the [project README](../README.md) explicitly says
-that outdated comments are not automatically resolved and that the tool never
-resolves or reopens threads. These are documented starting points, not verified
-implementation coverage.
-
-The next audit should classify each capability as **implemented**, **partial**,
-**missing**, or **deliberately delegated to GitHub/Forge**, citing implementation
-and relevant verification evidence. Decide which parts of the reviewer workflow
-the program should own before treating every unimplemented operation as a gap.
-
-Useful regression scenarios for that audit include:
-
-- A thread becomes outdated while remaining unresolved.
-- All threads are resolved while a Request changes verdict remains active.
-- An approving review coexists with an unresolved conversation.
-- A new push dismisses an approval or requires fresh approval under repository rules.
-- A previously resolved concern recurs and needs follow-up or reopening.
-- A reviewer lacks permission to resolve, reopen, or dismiss the relevant item.
-
-The research above preceded implementation. The following coverage record tracks
-the subsequent reviewer follow-up work.
-
-## Implementation coverage: reviewer follow-up
-
-The Emacs interface now keeps draft publication and conversation follow-up
+The Emacs interface keeps draft publication and conversation follow-up
 separate. `C` opens all conversations, `F` checks selected threads against the
 latest source, and `x`/`X` explicitly resolve/reopen a thread. The backend exposes
 the same capabilities through its versioned API. Models propose assessments;
@@ -160,9 +96,9 @@ they do not perform GitHub workflow actions.
 | Choose the overall verdict | Implemented. New draft generations default to Comment; stronger verdicts require explicit selection. Limited follow-up publication discloses its scope. |
 | Preserve staged work during refresh | Implemented through discussion dependencies. Thread replies depend on their selected/referenced conversations; new inline and overall comments conservatively depend on all discussion content. Unrelated resolution metadata does not unstage them. |
 | Inspect submitted GitHub review status | Implemented as optional cached metadata, separate from publication receipts and the model recommendation. Missing status remains unavailable. Later Comment activity is shown separately from opinionated review state. |
-| New inline comments, multiline ranges, local drafts, and exact publication | Existing shared draft/publication workflow retained. Published comments remain read-only; follow-ups create new drafts. |
+| New inline comments, multiline ranges, local drafts, and exact publication | Supported by the shared draft/publication workflow. Published comments remain read-only; follow-ups create new drafts. |
 | General timeline comments, dedicated file-level comments, suggestion application, and GitHub-native pending-review editing | Delegated to GitHub/Forge. The tool supports an overall review assessment and editable comment text, but does not claim dedicated controls for all these operations. |
-| Review requests, dismissals, remote comment editing/deletion, and file-viewed synchronization | Deliberately delegated to GitHub/Forge in this iteration. |
+| Review requests, dismissals, remote comment editing/deletion, and file-viewed synchronization | Deliberately delegated to GitHub/Forge by Auto-review. |
 | Complete merge-policy interpretation and merge administration | Delegated to GitHub. The displayed aggregate review status is not a complete merge-eligibility calculation. |
 
 The workflow tests use mocked GitHub/model responses and real local Git snapshots;

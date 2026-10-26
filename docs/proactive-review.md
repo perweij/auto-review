@@ -8,21 +8,21 @@ Add an on-demand workflow that reviews the repository's default branch, optional
 guided by a natural-language focus. Users inspect findings locally and explicitly
 publish worthwhile findings as individual GitHub issues.
 
-Treat this feature as the future **Repository review toolkit**, alongside two
-other planned major modes:
+Treat this feature as the future **Repository review toolkit**, alongside the
+implemented Reviewer and Owner toolkits:
 
 | Major mode | Purpose |
 | --- | --- |
 | PR reviewer's toolkit | Review another contributor's proposed changes |
-| PR owner's toolkit | Support the author of a PR; planned separately |
+| PR owner's toolkit | Process incoming feedback and prepare verified fixes |
 | Repository review toolkit | Proactively investigate existing code and report actionable findings |
 
-The future mode system will show only the selected mode's GUI operations.
-**Implementing that mode system, reorganizing the existing reviewer interface,
-and building the owner's toolkit are outside this specification.**
+The existing toolkit selector shows the selected toolkit's operations. Integrate
+the repository workflow as a third toolkit; changes to the existing reviewer and
+owner workflows are outside this specification.
 
 Design this feature with its own entry point, setup, results view, and operation
-menus so it can become the third mode without another GUI redesign. Share backend
+menus so it can become the third toolkit without another GUI redesign. Share backend
 infrastructure and useful UI components, but keep workflow-specific orchestration
 and controls separate. Do not add audit-specific branches throughout the existing
 PR reviewer menus.
@@ -32,7 +32,7 @@ support. Fix generation, branch/PR creation, scheduling, and comments on existin
 issues/PRs are excluded.
 
 An opt-in extension for actionable design, maintainability, and performance
-proposals is separate future work, tracked in [the TODO list](todo.md). Such
+proposals is separate future work, tracked in [the roadmap](roadmap.md). Such
 proposals should be distinguished from evidenced defects and use the same triage
 and publication workflow.
 
@@ -95,9 +95,8 @@ and isolated worktrees remain available for resume.
 
 ### Emacs interface
 
-Add `M-x magit-auto-review-audit` as a standalone entry point suitable for a future
-mode selector. Until that selector exists, the command directly opens this
-workflow.
+Add `M-x magit-auto-review-audit` as a standalone entry point and expose the
+Repository review toolkit through the existing toolkit selector.
 
 Provide dedicated audit setup, results, and action menus. Reuse UI components
 where practical, but display only repository-review operations:
@@ -117,9 +116,9 @@ not invoke models.
 
 ### Sessions and execution
 
-- Introduce session kind `pr` or `audit`; missing kind in existing manifests means
-  `pr`. This identifies the current workflow, without defining the future
-  application-wide mode architecture.
+- Introduce an `audit` session kind alongside PR reviewer sessions; missing kind
+  in legacy reviewer manifests means `pr`. Preserve the separate Owner session
+  format and keep discovery scoped to the selected toolkit.
 - Audit identity includes repository, session ID, default-branch name, reviewed
   commit, resolved focus, and review settings. Do not fabricate a PR number,
   merge-base, or empty diff.
@@ -258,5 +257,5 @@ evaluation publishes nothing.
 Acceptance: users can enter a dedicated repository-review workflow, investigate
 a focused default-branch snapshot, inspect and edit findings, publish selected
 findings as separate issues, or exit without remote changes or changes to their
-working checkout. The workflow is ready to become the third major mode when the
-separately planned mode system is introduced.
+working checkout. The workflow is available as the third toolkit alongside
+Reviewer and Owner.

@@ -380,7 +380,7 @@ every send records durable intent first. Only confirmed receipts become Publishe
 blindly resends. A proven unsent remainder becomes Unstaged. Edits or changed
 dependencies unstage replies; human wording and prior receipts remain intact.
 Publishing never resolves threads. The CLI equivalent is `pr-review owner`; see
-the [usage examples](../README.md#pr-owner-workflow).
+the [usage examples](manual.md#pr-owner-workflow).
 
 ## Reviewer local mutations
 

@@ -33,28 +33,18 @@ Opening from a Forge PR still opens that PR directly. Merely opening a buffer
 never invokes a model or contacts GitHub; the list shows when it was last checked.
 A failed GitHub refresh retains the saved list and reports the error.
 
-For the adjacent stable-emacs checkout, use its `manifest-auto-review.scm`
-overlay. The frontend and backend are copied into the Guix store from this
-checkout, and Magit/Forge/Transient still come from stable-emacs's one Guix pin:
+For Guix, build or enter an environment containing the paired frontend and
+backend from this repository, using your own channels file:
 
 ```sh
-cd ../stable-emacs
-guix time-machine -C channels.scm -- shell -m manifest-auto-review.scm -- \
-  emacs --init-directory="$PWD/emacs.d"
+guix time-machine -C /path/to/channels.scm -- build -f guix.scm
+guix time-machine -C /path/to/channels.scm -- shell -f guix.scm emacs
 ```
 
-Set `AUTO_REVIEW_SOURCE` to an absolute checkout path when it is not adjacent.
-This is a development source snapshot, not a fabricated release commit pin.
-The normal stable-emacs manifest stays usable without the overlay. Its init
-loads auto-review when the package is in the closure. From the auto-review
-checkout, build the package alone with
-`guix time-machine -C ../stable-emacs/channels.scm -- build -f guix.scm`.
-The packaged frontend defaults to its matching backend's absolute store path;
-an unrelated `pr-review` on PATH cannot override that default. Explicitly setting
-`magit-auto-review-executable` still works for development.
-No package installation or dependency updates occur inside Emacs. See
-[packaging](../docs/packaging.md) for the reusable recipe, runtime boundaries,
-and the `make check-guix` installed-package acceptance check.
+The packaged frontend defaults to its matching backend's absolute store path.
+You may override `magit-auto-review-executable` for development. No package
+installation or dependency updates occur inside Emacs. See
+[packaging](../docs/packaging.md) for reusable recipes and installed-package checks.
 
 The backend uses its existing GitHub and model authentication. This package
 does not copy tokens into authinfo or change credential storage. Existing `gh`,
@@ -276,8 +266,8 @@ inspect it and press `i` on the reply before staging again. `O` reads back uncer
 submissions; only confirmed replies become Published, and an unsent remainder
 requires another staging/preview cycle.
 
-The [owner design](../docs/pr-owner-mode.md) records the implementation scope,
-recovery rules, and subsequent interactive milestone.
+See the [owner manual](../docs/manual.md#pr-owner-workflow) for recovery rules
+and the [roadmap](../docs/roadmap.md#interactive-owner-fixes) for planned interactive fixes.
 
 ## Review flow
 
@@ -545,10 +535,6 @@ make check-all                  # Both
 
 `EMACS` selects the executable. `AUTO_REVIEW_TEST_LOAD_FILE` can load an explicit
 dependency graph for sandbox tests; otherwise the profile/site load path applies.
-The package has been exercised with Emacs 30.2 and the stable-emacs versions
-Magit 4.6.0, Forge 0.6.7, and Transient 0.13.2. That runtime check is distinct from
-building a Guix closure. The nested development container cannot perform the
-closure build; validate it on the normal supported host/build container.
-
-See [the protocol](../docs/api.md) for the frontend/backend contract and
-[the specification](../plan.md) for the underlying review pipeline.
+See [contributing](../CONTRIBUTING.md) for dependencies and validation guidance,
+[the protocol](../docs/api.md) for the frontend/backend contract, and
+[the manual](../docs/manual.md) for the underlying review workflow.

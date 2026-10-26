@@ -63,6 +63,10 @@
                (copy-recursively (string-append #$source "/" directory)
                                  (string-append #$output "/" directory)))
              '("bin" "lib" "prompts"))
+            (let ((license-file (string-append #$source "/LICENSE")))
+              (when (file-exists? license-file)
+                (install-file license-file
+                              (string-append #$output "/share/doc/auto-review"))))
             (let ((program (string-append #$output "/bin/pr-review"))
                   (interpreter-patches 0)
                   (environment-patches 0))
@@ -96,8 +100,7 @@
        "Run independent review models, retain drafts and historical contexts,
 and publish confirmed GitHub review comments.  Model CLI programs are provided
 by the caller; local draft operations do not require them.")
-      ;; The backend repository has no declared license.
-      (license #f))))
+      (license license:gpl3+))))
 
 (define (make-emacs-magit-auto-review backend)
   "Build the frontend from BACKEND's source and version, paired with BACKEND."
@@ -130,6 +133,12 @@ by the caller; local draft operations do not require them.")
                      (unless (= backend-patches 1)
                        (error "auto-review frontend/backend pairing patch mismatch"
                               backend-patches)))))
+               (add-after 'install 'install-license
+                 (lambda _
+                   (when (file-exists? "../LICENSE")
+                     (install-file
+                      "../LICENSE"
+                      (string-append #$output "/share/doc/emacs-magit-auto-review")))))
                (add-before 'install 'remove-test-lisp
                  (lambda _ (delete-file-recursively "tests"))))))
     (native-inputs (map specification->package '("bash" "git" "python")))

@@ -1,5 +1,5 @@
 ;; Local development entry point; the caller supplies the Guix channel pin.
-;; guix time-machine -C ../stable-emacs/channels.scm -- build -f guix.scm
+;; guix time-machine -C /path/to/channels.scm -- build -f guix.scm
 (use-modules (guix gexp)
              (srfi srfi-1)
              (srfi srfi-13))
@@ -21,7 +21,7 @@
     (and (or (string-null? relative)
              (member (car parts)
                      '("bin" "lib" "prompts" "emacs" "tests" "guix"
-                       "guix.scm" "Makefile")))
+                       "guix.scm" "Makefile" "LICENSE")))
          (not (any (lambda (name)
                      (or (string-prefix? "." name)
                          (member name '("__pycache__" "state"))
