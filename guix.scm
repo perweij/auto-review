@@ -1,82 +1,41 @@
-;; Build the local source snapshot with the caller's pinned Guix graph:
+;; Local development entry point; the caller supplies the Guix channel pin.
 ;; guix time-machine -C ../stable-emacs/channels.scm -- build -f guix.scm
-;; No independent Magit/Transient pins and no runtime package installation.
-(use-modules (guix packages)
-             (guix gexp)
-             (guix build-system trivial)
-             (guix build-system emacs)
-             (gnu packages)
-             ((guix licenses) #:prefix license:))
+(use-modules (guix gexp)
+             (srfi srfi-1)
+             (srfi srfi-13))
 
 (define auto-review-root
   (dirname (canonicalize-path (current-filename))))
 
+;; add-to-load-path also runs at expansion time, before the root definition
+;; above has necessarily been evaluated by Guile's compiler.
+(add-to-load-path
+ (string-append (dirname (canonicalize-path (current-filename))) "/guix"))
+(use-modules (auto-review packages))
+
+;; This is deliberately an allowlist: credentials, state, editor settings and
+;; unrelated untracked files in the checkout must not enter the store.
+(define (auto-review-source-file? file stat)
+  (let* ((relative (string-drop file (string-length auto-review-root)))
+         (parts (string-split (string-trim relative #\/) #\/)))
+    (and (or (string-null? relative)
+             (member (car parts)
+                     '("bin" "lib" "prompts" "emacs" "tests" "guix"
+                       "guix.scm" "Makefile")))
+         (not (any (lambda (name)
+                     (or (string-prefix? "." name)
+                         (member name '("__pycache__" "state"))
+                         (string-suffix? ".pyc" name)
+                         (string-suffix? ".elc" name)
+                         (string-suffix? "~" name)))
+                   parts))
+         ;; Never follow an unexpected symlink into files outside the checkout.
+         (memq (stat:type stat) '(regular directory)))))
+
 (define auto-review-source
   (local-file auto-review-root "auto-review-source"
               #:recursive? #t
-              #:select? (lambda (file stat)
-                          (let ((name (basename file)))
-                            (not (or (member name '(".git" "state" "__pycache__"))
-                                     (string-suffix? ".pyc" name)
-                                     (string-suffix? ".elc" name)))))))
+              #:select? auto-review-source-file?))
 
-(define auto-review-backend
-  (package
-    (name "auto-review")
-    (version "0.1.0")
-    (source auto-review-source)
-    (build-system trivial-build-system)
-    (arguments
-     (list
-      #:modules '((guix build utils))
-      #:builder
-      #~(begin
-          (use-modules (guix build utils))
-          (for-each (lambda (directory)
-                      (copy-recursively (string-append #$auto-review-source "/" directory)
-                                        (string-append #$output "/" directory)))
-                    '("bin" "lib" "prompts"))
-          (let ((program (string-append #$output "/bin/pr-review")))
-            (substitute* program
-              (("#!/usr/bin/env python3")
-               (string-append "#!" #$(specification->package "python") "/bin/python3"))
-              (("^import sys$")
-               (string-append "import sys\nimport os\n"
-                              "os.environ['PATH'] = '"
-                              #$(specification->package "git") "/bin:"
-                              #$(specification->package "gh") "/bin:' + os.environ.get('PATH', '')")))))))
-    (inputs (map specification->package '("git" "gh" "python")))
-    (home-page "https://github.com/perweij/auto-review")
-    (synopsis "Local GitHub review orchestration and versioned frontend API")
-    (description "Run independent review models, retain drafts and historical
-contexts, and publish confirmed GitHub review comments.  Model CLI programs are
-provided by the caller; local draft operations do not require them.")
-    ;; The existing backend repository has no declared license.
-    (license #f)))
-
-(define emacs-magit-auto-review
-  (package
-    (name "emacs-magit-auto-review")
-    (version "0.1.0")
-    (source auto-review-source)
-    (build-system emacs-build-system)
-    (arguments
-     (list #:lisp-directory "emacs"
-           #:tests? #t
-           #:test-command #~(list "bash" "../emacs/tests/run.sh")
-           #:phases
-           #~(modify-phases %standard-phases
-               (add-before 'install 'remove-test-lisp
-                 (lambda _ (delete-file-recursively "tests"))))))
-    (native-inputs (map specification->package '("bash" "git" "python")))
-    (propagated-inputs
-     (list (specification->package "emacs-magit")
-           (specification->package "emacs-forge") auto-review-backend))
-    (home-page "https://github.com/perweij/auto-review")
-    (synopsis "Inspect and stage contextual PR review comments in Magit")
-    (description "A Magit-section and Transient interface for auto-review, with
-inline draft editing, discussion-aware placement, explicit staging, immutable
-review history, and exact-comment publication through a versioned backend API.")
-    (license license:gpl3+)))
-
-emacs-magit-auto-review
+(make-emacs-magit-auto-review
+ (make-auto-review-backend auto-review-source #:version "0.1.0"))

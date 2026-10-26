@@ -3,6 +3,8 @@
 from pathlib import Path
 import sys
 
+# Source checkouts and immutable installations must stay free of import caches.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 from pr_review.cli import main
 

@@ -46,9 +46,15 @@ guix time-machine -C channels.scm -- shell -m manifest-auto-review.scm -- \
 Set `AUTO_REVIEW_SOURCE` to an absolute checkout path when it is not adjacent.
 This is a development source snapshot, not a fabricated release commit pin.
 The normal stable-emacs manifest stays usable without the overlay. Its init
-loads auto-review when the package is in the closure. Build the package alone
-with `guix time-machine -C ../stable-emacs/channels.scm -- build -f guix.scm`.
-No package installation or dependency updates occur inside Emacs.
+loads auto-review when the package is in the closure. From the auto-review
+checkout, build the package alone with
+`guix time-machine -C ../stable-emacs/channels.scm -- build -f guix.scm`.
+The packaged frontend defaults to its matching backend's absolute store path;
+an unrelated `pr-review` on PATH cannot override that default. Explicitly setting
+`magit-auto-review-executable` still works for development.
+No package installation or dependency updates occur inside Emacs. See
+[packaging](../docs/packaging.md) for the reusable recipe, runtime boundaries,
+and the `make check-guix` installed-package acceptance check.
 
 The backend uses its existing GitHub and model authentication. This package
 does not copy tokens into authinfo or change credential storage. Existing `gh`,

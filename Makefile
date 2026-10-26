@@ -1,4 +1,7 @@
-.PHONY: check check-all check-backend check-emacs lint test test-api
+.PHONY: check check-all check-backend check-emacs check-guix lint test test-api
+
+GUIX ?= guix
+GUIX_CHANNELS ?=
 
 check: check-backend
 
@@ -8,6 +11,9 @@ check-all: check-backend check-emacs
 
 check-emacs:
 	bash emacs/tests/run.sh
+
+check-guix:
+	GUIX="$(GUIX)" bash tests/check-guix.sh "$(GUIX_CHANNELS)"
 
 lint:
 	shellcheck -x tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh

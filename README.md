@@ -21,6 +21,11 @@ mkdir -p ~/.local/bin
 ln -s "$(pwd)/bin/pr-review" ~/.local/bin/pr-review
 ```
 
+For a Guix installation containing both the backend and Emacs frontend, see
+[packaging and validation](docs/packaging.md). The reusable recipe accepts the
+consumer's source revision and Guix dependency graph. The stable-emacs release
+integration will be added separately; no standalone Fleet component is needed.
+
 Requires Linux, Python 3.9+, Git, `gh`, and the model CLIs for enabled reviewers.
 The backend uses the Python standard library; no pip installation, Bash, jq,
 external `flock`, or external `timeout` is needed at runtime.
