@@ -39,9 +39,15 @@
   (eq value t))
 
 (defun magit-auto-review--encode (request)
-  "Encode REQUEST as a single protocol line."
-  (concat (json-serialize (cons '(protocol . 1) request)
-                          :null-object nil :false-object :false) "\n"))
+  "Encode REQUEST as a single protocol line with an absolute working directory."
+  ;; Emacs accepts abbreviated home paths, but the backend passes cwd directly
+  ;; to subprocesses without shell expansion.  Copy before normalizing so saved
+  ;; requests remain unchanged.  Both synchronous and async calls use this path.
+  (let ((request (copy-alist request)))
+    (when (alist-get 'cwd request)
+      (setf (alist-get 'cwd request) (expand-file-name (alist-get 'cwd request))))
+    (concat (json-serialize (cons '(protocol . 1) request)
+                            :null-object nil :false-object :false) "\n")))
 
 (defun magit-auto-review--event-result (event)
   "Validate and return a final result from EVENT, or raise its error."

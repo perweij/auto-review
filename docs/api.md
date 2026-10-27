@@ -6,6 +6,11 @@ stdout. All events have `protocol: 1` and a `type`: `started`, `progress`,
 nonzero and contain `{code,message,...}`. Request bodies are data, never shell
 fragments. Use argv invocation and a pipe, not interpolation into a command.
 
+`cwd` is a filesystem directory, not shell text. Frontends should send an
+absolute filename: the Emacs frontend expands home abbreviations (`~/…`) and
+relative directories before encoding requests. The backend does not perform
+shell expansion on this field.
+
 ```sh
 printf '%s\n' '{"protocol":1,"command":"capabilities"}' | bin/pr-review api
 ```

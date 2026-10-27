@@ -745,6 +745,64 @@
             (should (equal (magit-git-string "diff" "--cached") nil))))
       (delete-directory (alist-get 'root fixture) t))))
 
+(defmacro auto-review-test-with-home-repository (&rest body)
+  "Run BODY with a real Git checkout reached through an abbreviated home path."
+  (declare (indent 0) (debug t))
+  `(let* ((test-home (make-temp-file "auto-review home " t))
+          (process-environment (copy-sequence process-environment))
+          (magit-auto-review-executable (expand-file-name "bin/pr-review" auto-review-test-root)))
+     (unwind-protect
+         (progn
+           (setenv "HOME" test-home)
+           (setenv "XDG_STATE_HOME" (expand-file-name "state" test-home))
+           (setenv "GIT_CONFIG_GLOBAL" "/dev/null")
+           (setenv "GIT_CONFIG_NOSYSTEM" "1")
+           (make-directory (expand-file-name "repo with spaces" test-home))
+           (with-temp-buffer
+             (let ((default-directory "~/repo with spaces/"))
+               (should (zerop (call-process "git" nil t nil "init" "--quiet")))
+               (should (zerop (call-process "git" nil t nil "remote" "add" "origin"
+                                           "https://github.com/org/repo.git")))
+               ,@body)))
+       (delete-directory test-home t))))
+
+(ert-deftest auto-review/request-directory-is-expanded-without-changing-request ()
+  (auto-review-test-with-home-repository
+    (dolist (directory '("~/repo with spaces/" "../repo with spaces/"))
+      (let* ((request `((command . "discover") (cwd . ,directory)
+                        (body . "Keep ~/literal text")))
+             (before (copy-tree request))
+             (encoded (magit-auto-review--json (magit-auto-review--encode request))))
+        (should (equal (alist-get 'cwd encoded)
+                       (concat test-home "/repo with spaces/")))
+        (should (equal request before))
+        (should (equal (alist-get 'body encoded) "Keep ~/literal text"))))
+    (should-not (assq 'cwd (magit-auto-review--json
+                           (magit-auto-review--encode '((command . "capabilities"))))))))
+
+(ert-deftest auto-review/sync-transport-opens-home-relative-checkout ()
+  (auto-review-test-with-home-repository
+    (let ((result (magit-auto-review--call
+                   `((command . "pull-requests") (cwd . ,default-directory)))))
+      (should (equal (alist-get 'repository result) "github.com/org/repo"))
+      (should-not (alist-get 'pull_requests result)))))
+
+(ert-deftest auto-review/async-transport-opens-home-relative-checkout ()
+  (auto-review-test-with-home-repository
+    (let* (result failure
+           (process (magit-auto-review--async
+                     `((command . "pull-requests") (cwd . ,default-directory)) #'ignore
+                     (lambda (value) (setq result value))
+                     (lambda (error) (setq failure error))))
+           (deadline (+ (float-time) 5)))
+      (unwind-protect
+          (progn
+            (while (and (not result) (not failure) (< (float-time) deadline))
+              (accept-process-output process 0.05))
+            (should-not failure)
+            (should (equal (alist-get 'repository result) "github.com/org/repo")))
+        (when (process-live-p process) (delete-process process))))))
+
 (ert-deftest auto-review/async-transport-negotiates-with-real-backend ()
   (with-temp-buffer
     (let* ((magit-auto-review-executable (expand-file-name "bin/pr-review" auto-review-test-root))
