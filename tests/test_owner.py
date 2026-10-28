@@ -1004,6 +1004,25 @@ class OwnerTest(unittest.TestCase):
             self.assertFalse(item["attention"])
             self.assertIn("github_completion", item)
 
+    def test_deleted_completed_thread_stays_missing_without_attention(self):
+        self.publish_fix_with_thread_readback()
+        self.feedback[0]["is_resolved"] = True
+        view = self.request("owner-refresh")
+        self.assertIn("github_completion", view["feedback"][0])
+        deleted = self.feedback.pop(0)
+        for _ in range(2):
+            view = self.request("owner-refresh")
+            item = next(i for i in view["feedback"] if i["key"] == deleted["key"])
+            self.assertTrue(item["missing"])
+            self.assertFalse(item["attention"])
+            self.assertNotIn("github_completion", item)
+        deleted["is_resolved"] = False
+        self.feedback.append(deleted)
+        view = self.request("owner-refresh")
+        item = next(i for i in view["feedback"] if i["key"] == deleted["key"])
+        self.assertFalse(item.get("missing"))
+        self.assertTrue(item["attention"])
+
     def test_resolved_completion_reopens_for_new_feedback_and_respects_manual_restore(self):
         self.publish_fix_with_thread_readback()
         self.feedback[0]["is_resolved"] = True

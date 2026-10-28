@@ -155,7 +155,7 @@ def reconcile_resolved_feedback(state, items):
             if override != proof:
                 item.update(triage="handled", attention=False, queued=False, unread=False)
         elif previous and override != previous and item["triage"] == "handled":
-            item.update(triage="attention", attention=True, unread=True)
+            item.update(triage="attention", attention=not item.get("missing"), unread=True)
 
 
 def feedback_body(body):
