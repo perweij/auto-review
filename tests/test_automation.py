@@ -199,6 +199,66 @@ class AutomationTest(unittest.TestCase):
         self.assertEqual(result['outcome'], 'interrupted')
         self.assertEqual(result['affected'], [])
 
+    def test_unchanged_observations_skip_writes_and_refresh_store(self):
+        from pr_review.sessions import Store
+        store = Store.__new__(Store)
+        store.root, store.path = self.session.root, self.session.path
+        store.manifest = copy.deepcopy(self.session.manifest)
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        with patch.object(automation, 'atomic_json', wraps=atomic_json) as writes:
+            for _ in range(3):
+                store.save()
+            state = self.run.state = self.session.load()
+            equivalent = Session({'session': str(self.session.root)})
+            automation.observe(equivalent)
+            self.assertIs(self.run.store, equivalent)
+            self.assertIs(self.run.state, state)
+            self.assertEqual([c.args[0] for c in writes.call_args_list], [
+                state_root() / 'operations' / (self.op['operation_id'] + '.json'),
+                self.session.root / 'automatic-runs' / (self.op['operation_id'] + '.json')])
+            # Explicit persistence is independent of association changes.
+            self.run.record['reason'] = 'Progress saved explicitly'
+            self.run.save()
+            self.assertEqual(writes.call_count, 3)
+            result = self.run.finish('noop', 'Finished without rebinding')
+            self.assertEqual(writes.call_count, 4)
+            self.assertEqual(read_json(writes.call_args.args[0]), result)
+
+    def test_binding_transitions_persist_root_path_and_generation(self):
+        store = SimpleNamespace(root=self.session.root, path=self.session.path,
+                                manifest=copy.deepcopy(self.session.manifest))
+        with patch.object(automation, 'atomic_json', wraps=atomic_json) as writes:
+            self.run.bind(store)
+            for field, value in (('root', self.f.root / 'other-session'),
+                                 ('path', self.session.path / 'replacement'),
+                                 ('run_id', 'new-run')):
+                with self.subTest(field=field):
+                    previous_writes = writes.call_count
+                    self.run.state = self.session.load()
+                    if field == 'run_id':
+                        store.manifest[field] = value
+                    else:
+                        setattr(store, field, value)
+                    self.run.bind(store)
+                    self.assertIsNone(self.run.state)
+                    self.assertEqual(writes.call_count, previous_writes + 2)
+                    self.assertEqual(read_json(writes.call_args_list[-2].args[0])['session'], str(store.root))
+                    record = read_json(store.root / 'automatic-runs' / (self.op['operation_id'] + '.json'))
+                    self.assertEqual(record['session'], str(store.root))
+                    self.assertEqual(record['generation'], automation.generation(store.path, store.manifest))
+                    self.run.bind(store)
+                    self.assertEqual(writes.call_count, previous_writes + 2)
+
+    def test_preflight_duplicate_bindings_write_associations_once(self):
+        self.saved()
+        with patch.object(automation, 'atomic_json', wraps=atomic_json) as writes:
+            self.assertIsNone(self.run.before_analysis(self.session.root))
+            self.assertIsNone(self.run.before_analysis(self.session.root))
+        self.assertEqual(writes.call_count, 2)
+        self.assertEqual(self.run.store.path, self.session.path)
+        self.assertIsNotNone(self.run.state)
+
     def generated_duplicates(self, *ids):
         file = self.f.path / 'publication/contributions.json'
         ledger = read_json(file)

@@ -155,6 +155,7 @@ class AutomaticRun:
         self.root = None
         self.state = None
         self.state_generation = None
+        self.bound_identity = None
         self.record = dict(operation_id=operation['operation_id'], log_path=operation['log_path'],
                            started_at=now(), outcome='running', affected=[], receipts=[])
 
@@ -164,10 +165,14 @@ class AutomaticRun:
             self.state = None
             self.state_generation = identity
         self.store, self.root = store, store.root
+        binding = (store.root, store.path, identity[1])
+        if binding == self.bound_identity:
+            return
         self.operation.update(session=str(self.root), common=store.manifest['git_common_dir'],
                               pr=str(store.manifest['pr']))
         atomic_json(state_root() / 'operations' / (self.record['operation_id'] + '.json'), self.operation)
         self.save()
+        self.bound_identity = binding
 
     def save(self):
         if self.store:
