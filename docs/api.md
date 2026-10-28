@@ -373,6 +373,12 @@ adopts the current owner settings. Once model work exists, resume requires the
 batch's saved settings. This permits recovery from unsupported preflight choices
 without discarding the batch or its selected feedback.
 
+Owner views derive `superseded_by: [BATCH_ID,…]` for unused paused/interrupted
+batches whose unchanged feedback is entirely covered by newer verified work.
+This does not rewrite saved status or errors. Batches with attempts, plans,
+tasks, adopted checkpoints, or integrity/commit recovery state are not retired.
+Resuming a superseded batch returns `superseded_batch` with the replacement IDs.
+
 Owner feedback comments include `display_body`, which omits standalone
 publication receipt markers. The original `body` and content fingerprints are
 preserved. Marker-only reviews are non-actionable history; an outstanding

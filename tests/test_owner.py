@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_review.api import dispatch
 from pr_review.common import ApiError, atomic_json, digest, locked
 from pr_review.repository import Repository
-from pr_review.owner_state import OwnerSession, feedback_body
+from pr_review.owner_state import OwnerSession, feedback_body, superseded_batches
 from pr_review import owner_commit, owner_completion, owner_fixes, owner_git, owner_providers, owner_publication
 from pr_review.providers import Runtime
 from pr_review.owner_cli import main as owner_cli
@@ -499,6 +499,67 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(resumed["baseline"], batch["baseline"])
         self.assertEqual(resumed["items"], batch["items"])
         self.assertEqual(resumed["status"], "ready")
+
+    def unused_batch_then_verified_replacement(self):
+        with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")), self.assertRaises(ApiError):
+            self.fix()
+        return self.fix()
+
+    def test_unused_duplicate_is_superseded_without_rewriting_history(self):
+        view = self.unused_batch_then_verified_replacement()
+        old, replacement = view["batches"]
+        self.assertEqual(old["superseded_by"], [replacement["id"]])
+        self.assertEqual(old["status"], "paused")
+        self.assertEqual(old["error"], "Unsupported")
+        session = OwnerSession({"session": self.path})
+        saved = copy.deepcopy(session.load()["batches"][0])
+        self.assertNotIn("superseded_by", saved)
+        with patch("pr_review.owner_providers.preflight") as preflight, self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", batch=old["id"])
+        self.assertEqual(caught.exception.code, "superseded_batch")
+        self.assertEqual(caught.exception.details["superseded_by"], [replacement["id"]])
+        preflight.assert_not_called()
+        self.assertEqual(session.load()["batches"][0], saved)
+
+    def test_supersession_requires_untouched_batch_and_current_complete_verification(self):
+        view = self.unused_batch_then_verified_replacement()
+        old_id = view["batches"][0]["id"]
+        changes = [
+            lambda s: s["batches"][0].update(attempts=[{"role": "plan", "status": "failed"}]),
+            lambda s: s["batches"][0].update(tasks=[{"id": "work"}]),
+            lambda s: s["batches"][0]["checkpoint"].update(label="resume"),
+            lambda s: s["batches"][0].update(integrity_failure="Inspect source"),
+            lambda s: s["batches"][1].update(status="paused"),
+            lambda s: s["batches"][1].update(verified_items=["thread:T1"]),
+            lambda s: s["batches"][1]["review"].update(complete=False),
+            lambda s: s["batches"][1].update(discussion_stale=True),
+            lambda s: s["feedback"][0].update(fingerprint="changed"),
+            lambda s: s["feedback"][0].update(missing=True),
+        ]
+        for index, change in enumerate(changes):
+            with self.subTest(case=index):
+                state = copy.deepcopy(view)
+                change(state)
+                self.assertNotIn(old_id, superseded_batches(state))
+
+    def test_separate_replacement_batches_must_cover_every_original_item(self):
+        with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")), self.assertRaises(ApiError):
+            self.fix()
+        view = self.request("owner-fix", items=["thread:T1"])
+        self.assertNotIn("superseded_by", view["batches"][0])
+        self.commit_fix()
+        view = self.request("owner-fix", items=["thread:T2"])
+        self.assertEqual(view["batches"][0]["superseded_by"], [b["id"] for b in view["batches"][1:]])
+
+    def test_superseded_unused_batch_does_not_block_clean_fast_forward(self):
+        with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")), self.assertRaises(ApiError):
+            self.fix()
+        view = self.fix(verify_only=True)
+        self.assertIn("superseded_by", view["batches"][0])
+        head = self.advance_pr()
+        view = self.fix(verify_only=True)
+        self.assertEqual(view["batches"][-1]["baseline"], head)
+        self.assertEqual(view["batches"][-1]["status"], "ready")
 
     def test_invalid_plan_is_corrected_before_any_fix_runs(self):
         plans = []

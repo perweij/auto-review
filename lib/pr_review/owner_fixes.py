@@ -7,7 +7,7 @@ from .common import ApiError, now
 from .events import emit
 from .operations import operation
 from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit
-from .owner_state import refresh
+from .owner_state import refresh, superseded_batches
 
 
 def validate_plan(value, items):
@@ -235,6 +235,11 @@ def execute(session, state, request):
                 batch = next((b for b in state["batches"] if b["id"] == request["batch"]), None)
                 if not batch:
                     raise ApiError("invalid_request", "Choose an existing owner batch.")
+                replacements = superseded_batches(state).get(batch["id"])
+                if replacements:
+                    batch = None  # Preserve the original stop reason and artifacts.
+                    raise ApiError("superseded_batch", "This unused batch was superseded by newer verified fixes; no resume is needed.",
+                                   superseded_by=replacements)
                 if request.get("auto_commit") and batch.get("verify_only"):
                     raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
                 if "auto_commit" in request:
