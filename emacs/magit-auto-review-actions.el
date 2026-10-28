@@ -93,9 +93,10 @@
   "Confirm the exact agent-configuration snapshot reported by the backend."
   (interactive)
   (let ((buffer (get-buffer "*Auto-review progress*")) data)
-    ;; A retry launched in this buffer can have a newer snapshot than the
-    ;; historical CLI outcome.  A fresh buffer uses its own saved outcome.
-    (when (and buffer magit-auto-review--run-settings)
+    ;; A review or follow-up retry launched in this buffer can have a newer
+    ;; snapshot than the historical CLI outcome.  Otherwise use the saved outcome.
+    (when (and buffer (or magit-auto-review--run-settings
+                          magit-auto-review--followup-request))
       (with-current-buffer buffer
         (save-excursion
           (goto-char (point-max))

@@ -437,6 +437,56 @@
        (magit-auto-review-trust-config))
      (should (equal launched "new:base")))))
 
+(defun auto-review-test-followup-trust (mode)
+  (dolist (saved-snapshot '(nil "old:base"))
+    (with-temp-buffer
+      (insert "{\"confirmation_required\":\"agent_configuration\",\"snapshot\":\"followup:base\",\"paths\":\"followup/AGENTS.md\"}\n")
+      (let ((log (current-buffer))
+            (get-buffer-function (symbol-function 'get-buffer)))
+        (with-temp-buffer
+          (funcall mode)
+          (magit-auto-review--accept (auto-review-test-data))
+          (when saved-snapshot
+            (setf (alist-get 'automation magit-auto-review--review)
+                  `((error_code . "confirmation_required")
+                    (trusted_snapshot . ,saved-snapshot)
+                    (agent_config_paths . ("stale/AGENTS.md")))))
+          (should-not magit-auto-review--run-settings)
+          (let* ((request (append (magit-auto-review--request
+                                   "followup" '(threads . ["thread:T1" "thread:T2"]))
+                                  '((processing_provider . "codex")
+                                    (codex_model . "frozen-model") (codex_effort . "high"))))
+                 (expected (copy-tree request))
+                 sent prompt)
+            (cl-letf (((symbol-function 'magit-auto-review--start)
+                       (lambda (r _callback) (push r sent)))
+                      ((symbol-function 'magit-auto-review--call)
+                       (lambda (_) (ert-fail "Trust must reuse the frozen follow-up settings")))
+                      ((symbol-function 'yes-or-no-p)
+                       (lambda (text) (setq prompt text) t)))
+              (magit-auto-review--launch-followup request)
+              (cl-letf (((symbol-function 'get-buffer)
+                         (lambda (name)
+                           (if (equal name "*Auto-review progress*") log
+                             (funcall get-buffer-function name)))))
+                (magit-auto-review-trust-config)))
+            (should (= (length sent) 2))
+            (should (string-match-p "followup:base" prompt))
+            (should (string-match-p "followup/AGENTS.md" prompt))
+            (should-not (string-match-p "stale/AGENTS.md" prompt))
+            (setf (alist-get 'trusted_snapshot expected) "followup:base")
+            (should (equal (car sent) expected))
+            (should (equal magit-auto-review--followup-request expected))
+            (should (equal (cadr sent) request))
+            (should-not (alist-get 'trusted_snapshot request))
+            (should-not magit-auto-review--run-settings)))))))
+
+(ert-deftest auto-review/followup-trust-in-fresh-review-buffer ()
+  (auto-review-test-followup-trust #'magit-auto-review-mode))
+
+(ert-deftest auto-review/followup-trust-in-fresh-conversations-buffer ()
+  (auto-review-test-followup-trust #'magit-auto-review-conversations-mode))
+
 (ert-deftest auto-review/empty-inline-body-can-be-edited ()
   (auto-review-test-buffer
    (let ((comment (magit-auto-review--comment "p1"))) (setf (alist-get 'body comment) ""))
