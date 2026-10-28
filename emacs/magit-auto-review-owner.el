@@ -321,11 +321,11 @@
      ((alist-get 'reply_issues batch)
       (concat "Reply preparation needs inspection: "
               (string-join (mapcar (lambda (issue) (alist-get 'reason issue)) (alist-get 'reply_issues batch)) "; ")))
+     ((cl-some (lambda (r) (equal (alist-get 'status r) "unstaged")) replies)
+      "Next: inspect the unstaged replies under Replies, stage those you want with s, then P previews publication.")
      ((cl-some (lambda (r) (and (not (equal (alist-get 'status r) "published"))
                                 (magit-auto-review--true-p (alist-get 'awaiting_push r)))) replies)
       "Next: push with C-u m. G checks the push; P also checks it and previews staged replies for publication. No a or s is needed.")
-     ((cl-some (lambda (r) (equal (alist-get 'status r) "unstaged")) replies)
-      "Next: inspect the unstaged replies under Replies, stage those you want with s, then P previews publication.")
      ((cl-some (lambda (r) (equal (alist-get 'status r) "staged")) replies)
       "Next: inspect the staged replies, then P previews publication. They are already staged; no s is needed.")
      ((not replies) "Commit linked locally. Push with C-u m, then a checks GitHub and creates staged replies; P previews publication.")
