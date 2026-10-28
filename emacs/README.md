@@ -92,6 +92,29 @@ needed; `h` and `k` move it to history/deferred. Replies from teammates still
 generate attention normally. These feedback items use the usual commit-linked
 reply workflow because they already have GitHub destinations.
 
+Publication receipt markers are hidden from feedback text. A review containing
+only a marker remains in history and is not counted as a fixable comment.
+
+If a fix stops before any model work because its model or effort is unsupported,
+choose valid settings with `R f` and `R r`, then select the paused fix and press
+`r`. The same batch resumes with the corrected settings. Once model work has
+started, resume requires the batch's original settings, shown under
+**Verification and task details**. `T` trusts inspected repository agent
+configuration changes; it does not change model settings.
+
+Unchanged replies confirmed by this owner's publication receipts do not mark
+the original feedback changed. A verified fix with a published commit-linked
+reply moves to History when its thread is resolved. New feedback or reopening
+the thread restores attention; explicit local triage is preserved. Resolved
+threads are excluded from **Your GitHub comments**, so starting a group fix there
+selects the remaining available items. All conversation text stays inspectable.
+
+Owner headings use separate customizable faces:
+`magit-auto-review-owner-heading` inherits Magit's heading color and is bold;
+`magit-auto-review-owner-attention` uses the default text color in bold;
+`magit-auto-review-owner-item` inherits `shadow` with normal weight. Themes and
+`M-x customize-face` can override each independently, including in terminals.
+
 | Key | Owner action |
 | --- | --- |
 | `g` / `G` | Reload and check local fix commits / explicitly fetch GitHub |
@@ -194,11 +217,22 @@ follow normal Git configuration. Each commit's actual parent/tree is checked;
 unexpected hook changes stop for inspection without resets or lost edits.
 There is a 120-second timeout per commit (`PR_REVIEW_COMMIT_TIMEOUT` overrides it).
 
+Invalid plans receive up to two automatic correction attempts with the rejected
+plan and validation error. Fixing begins only after a valid plan is accepted.
+If correction fails, the paused batch and attempts are retained; `r` retries
+planning with the previous error. Provider failures and changed source or feedback
+stop without consuming further planning attempts.
+
 The batch shows **Auto commit**, progress, and staged reply counts. Its matching
 local findings finish automatically. GitHub feedback gets a staged reply with
 its own commit link and original thread/timeline destination. **Awaiting push**
 means selected for publication but not yet publishable. After pushing, `P` checks
 every selected reply and shows the exact preview before asking for confirmation.
+`C-u f` ends after commits and reply staging; it does not wait for a push or
+automatically publish. `g` only checks local state. After pushing, `G` confirms
+the push and updates the displayed reply state; `P` also performs that check.
+Already staged replies need neither `a` nor another `s`. For manual commits,
+`a` before pushing records the link; after pushing, `a` creates staged replies.
 A blocked reply stops the whole preview; it is not silently omitted. Changed
 context or lost previously confirmed remote commits require inspection. Initial
 waiting for a push preserves staged selection.

@@ -368,6 +368,24 @@ defaults; the resolved processing triplet initializes both owner roles. Settings
 are subsequently independent and validated against fresh CLI metadata before
 execution. Metadata selection uses the existing `models` command.
 
+If a batch stopped before recording any model attempts, plans, or tasks, resume
+adopts the current owner settings. Once model work exists, resume requires the
+batch's saved settings. This permits recovery from unsupported preflight choices
+without discarding the batch or its selected feedback.
+
+Owner feedback comments include `display_body`, which omits standalone
+publication receipt markers. The original `body` and content fingerprints are
+preserved. Marker-only reviews are non-actionable history; an outstanding
+change-request verdict still receives attention.
+
+For thread feedback, content fingerprints exclude only unchanged comments that
+match a confirmed publication receipt from this owner session (source thread,
+comment ID, author, and body). Raw comments remain available. Batch discussion
+freshness is recomputed against its saved fingerprints, including recovery from
+older false stale flags caused by those replies. Resolved threads with verified,
+published commit-linked fixes receive `github_completion` and move to handled;
+reopening or changed feedback restores attention unless explicitly overridden.
+
 For a new `owner-fix`, `items` is a nonempty ordered snapshot of feedback keys.
 Optional `verify_only: true` performs planning and review without fixing or
 repairing. Plans cover every item exactly once, can combine items, and include
@@ -377,6 +395,13 @@ combined patch receive review; a checkpoint permits at most one automatic repair
 Each result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
 `complete`, and `blocking`. Outcome statuses are `fixed`, `already_addressed`,
 `clarify`, and `no_change`; readiness requires complete, nonblocking verification.
+
+Plan `items` and `expected.item` use feedback keys; `depends_on` uses task IDs
+defined in the same plan. An invalid plan can receive two correction calls per
+invocation before pausing. `plan_rejections` retains each rejected plan, error,
+and timestamp; provider attempt artifacts are also retained. Corrections receive
+the previous plan and validation error and recheck source and discussion freshness.
+Resume of an older rejected attempt also supplies its validation error.
 
 Before recording a new batch, a clean owner branch behind the fetched PR head
 fast-forwards to that commit and emits progress messages. The saved baseline and
@@ -390,7 +415,7 @@ To resume, provide `batch` instead of `items`. Optional controls are `adopt: tru
 for explicitly inspected manual/partial changes, `replan: true` for unfinished
 or changed discussion, `skip: [TASK_ID,…]`, and `trusted_snapshot` from an exact
 `trust_required` error. That error also carries `paths` and `diff` for inspection.
-Provider resume keeps the original baseline and settings; changed HEAD requires
+Resume keeps the original baseline and, once model work starts, settings; changed HEAD requires
 reconciliation and a new batch. Commit-only recovery instead recognizes its own
 recorded sequence. Unstaging code is a human operation. Integrity
 failures persist across retries until explicit adoption; records are retained.

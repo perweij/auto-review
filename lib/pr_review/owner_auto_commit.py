@@ -138,7 +138,10 @@ def execute(session, state, batch, remote):
             raise
     progress = batch.get("commit_progress", {})
     replies = [r for r in state["replies"] if r.get("batch") == batch["id"] and r["status"] == "staged"]
-    emit("progress", message=f"Fix verified · automatic completion {phase['status']} · "
+    completion = "automatic commits complete" if phase["status"] == "complete" else f"automatic completion {phase['status']}"
+    emit("progress", message=f"Fix verified · {completion} · "
          f"{progress.get('completed', 0)}/{progress.get('total', 0)} fixes committed · {len(replies)} replies staged" +
-         (" (awaiting push)" if any(r.get("awaiting_push") for r in replies) else ""))
+         (" (awaiting push). Push in Magit, then P previews and confirms publication."
+          if any(r.get("awaiting_push") for r in replies) else
+          ". P previews and confirms publication." if replies else ""))
     return owner_completion.reconcile(session, state)
