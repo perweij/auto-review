@@ -281,19 +281,23 @@ These are model instructions, not an enforced process timeout."
   "Explain a saved automatic run and current recovery actions locally."
   (when-let ((run (alist-get 'automation magit-auto-review--review)))
     (let* ((analysis (alist-get 'analysis magit-auto-review--review))
+           (superseded (magit-auto-review--true-p (alist-get 'superseded run)))
            (pending (alist-get 'pending analysis))
            (displayed (alist-get 'displayed analysis))
            (attention (cl-remove-if-not #'magit-auto-review--attention-reasons
                                         (alist-get 'comments magit-auto-review--review))))
       (insert (propertize (format "Automatic review: %s\n"
-                                 (pcase (alist-get 'outcome run)
-                                   ("running" "Running") ("published" "Publication confirmed")
-                                   ("noop" "Complete — nothing to publish") ("needs_attention" "Needs attention")
-                                   ("partial" "Partly published") ("uncertain" "Publication uncertain")
-                                   ("failed" "Failed") ("interrupted" "Interrupted") (_ "Saved outcome")))
+                                 (if superseded "Superseded by completed manual analysis"
+                                   (pcase (alist-get 'outcome run)
+                                     ("running" "Running") ("published" "Publication confirmed")
+                                     ("noop" "Complete — nothing to publish") ("needs_attention" "Needs attention")
+                                     ("partial" "Partly published") ("uncertain" "Publication uncertain")
+                                     ("failed" "Failed") ("interrupted" "Interrupted") (_ "Saved outcome"))))
                           'face 'magit-section-heading))
       (insert "Last automatic run: " (or (alist-get 'reason run) "No saved explanation.") "\n")
-      (when (equal (alist-get 'error_code run) "confirmation_required")
+      (when (and (not superseded) (not magit-auto-review--history-view)
+                 (not (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review)))
+                 (equal (alist-get 'error_code run) "confirmation_required"))
         (insert "Agent configuration changed. Inspect the changes and L; T explicitly trusts the saved snapshot and resumes analysis.\n"))
       (cond
        (pending

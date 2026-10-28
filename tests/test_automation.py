@@ -427,6 +427,115 @@ class AutomationTest(unittest.TestCase):
         self.assertEqual(automation.summary(self.session)['outcome'], 'interrupted')
         self.assertEqual(before, path.read_bytes())
 
+    def trust_stop(self):
+        self.run.bind(self.session)
+        self.run.finish('needs_attention', 'Trust required', error_code='confirmation_required',
+                        trusted_snapshot='head:base', agent_config_paths=['AGENTS.md'])
+        path = self.session.root / 'automatic-runs' / (self.op['operation_id'] + '.json')
+        return path, path.read_bytes()
+
+    def replacement(self):
+        from pr_review.sessions import Store
+        from pr_review.storage import hash_file
+        candidate = Path(str(self.session.root) + '-history') / 'attempt-manual'
+        shutil.copytree(self.session.root, candidate)
+        manifest = read_json(candidate / 'manifest.json')
+        manifest.update(session_directory=str(self.session.root), status='running',
+                        attempt={'status': 'building', 'previous': str(self.session.path)},
+                        phases={'synthesis': {'status': 'completed',
+                                             'output_hash': hash_file(candidate / 'reviews/synthesis.json')}})
+        atomic_json(candidate / 'manifest.json', manifest)
+        (self.session.root / '.pending-review').symlink_to(candidate)
+        store = Store.__new__(Store)
+        store.root, store.path, store.manifest = self.session.root, candidate, manifest
+        return store
+
+    def test_manual_promotion_supersedes_automatic_outcome_and_preserves_history(self):
+        path, before = self.trust_stop()
+        store = self.replacement()
+        store.promote(['synthesis'])
+        store.manifest['status'] = 'complete'
+        automation.manual_completion(store)
+        store.save()
+        current = Session({'session': str(self.session.root)})
+        result = dispatch({'command': 'read', 'session': str(current.root)})['automation']
+        self.assertTrue(result['superseded'])
+        self.assertEqual(result['superseded_by'], current.id)
+        self.assertEqual(result['outcome'], 'needs_attention')
+        historical = Session({'session': str(current.root), 'generation': self.session.id})
+        self.assertNotIn('superseded', automation.summary(historical))
+        self.assertEqual(automation.summary(historical)['trusted_snapshot'], 'head:base')
+        self.assertEqual(path.read_bytes(), before)
+        # Existing completed replacements also work without the new boundary.
+        store.manifest.pop('superseded_automatic_runs')
+        store.save()
+        self.assertTrue(automation.summary(Session({'session': str(current.root)}))['superseded'])
+
+    def test_manual_completion_supersedes_a_pause_in_the_same_generation(self):
+        path, before = self.trust_stop()
+        automation.manual_completion(self.session)
+        atomic_json(self.session.path / 'manifest.json', self.session.manifest)
+        current = Session({'session': str(self.session.root)})
+        self.assertEqual(current.id, self.session.id)
+        self.assertTrue(automation.summary(current)['superseded'])
+        self.assertEqual(path.read_bytes(), before)
+        # A later automatic invocation remains actionable in that generation.
+        operation = {**self.op, 'operation_id': 'b' * 32}
+        later = automation.AutomaticRun(operation)
+        token = automation._active.set(later)
+        self.addCleanup(automation._active.reset, token)
+        later.bind(current)
+        automation.manual_completion(current)
+        later.finish('failed', 'New automatic failure')
+        self.assertNotIn('b' * 32, current.manifest['superseded_automatic_runs'])
+        self.assertEqual(automation.summary(current)['operation_id'], 'b' * 32)
+        self.assertNotIn('superseded', automation.summary(current))
+
+    def test_only_completed_manual_analysis_retires_automatic_trust(self):
+        from pr_review import pipeline, reviews
+        from pr_review.sessions import Store
+        self.trust_stop()
+        store = Store.__new__(Store)
+        store.root, store.path, store.manifest = self.session.root, self.session.path, self.session.manifest
+        store.worktree, store.active, store.dual = self.f.repo, None, False
+        store.configure = lambda *_: None
+        store.authenticate_live = lambda *_: None
+        store.snapshot = lambda pr: pr
+        store.trust = lambda *_: None
+        store.context = lambda *_: None
+        store.session = lambda: Session({'session': str(store.root)})
+        repo = SimpleNamespace(lock=self.session.pr_lock, cwd=self.f.repo, pr=7,
+                               identity='github.com/org/repo', name='org/repo', host='github.com', remote='origin',
+                               url=self.session.manifest['url'], pages=lambda *_: [], git=lambda *_: None,
+                               metadata=lambda: {'baseRefName': 'main', 'isDraft': False})
+        with patch.object(reviews.Repository, 'resolve', return_value=repo), \
+                patch.object(reviews, 'locate', return_value=(store.root, self.f.repo)), \
+                patch.object(reviews, 'capabilities', return_value={}), \
+                patch.object(reviews, 'command', return_value=SimpleNamespace(returncode=0, stdout='reviewer')), \
+                patch.object(reviews, 'Review', return_value=store), \
+                patch.object(pipeline, 'synthesis'), \
+                patch.object(pipeline, 'contributions', side_effect=[False, ApiError('analysis_failed', 'Failed'), True]):
+            reviews.execute({'pr': 7})
+            self.assertNotIn('superseded', automation.summary(store.session()))
+            with self.assertRaises(ApiError):
+                reviews.execute({'pr': 7})
+            self.assertNotIn('superseded', automation.summary(store.session()))
+            reviews.execute({'pr': 7})
+        self.assertTrue(automation.summary(store.session())['superseded'])
+
+    def test_pending_automatic_failure_remains_actionable_over_completed_review(self):
+        self.trust_stop()
+        store = self.replacement()
+        pending = Session({'session': str(store.root),
+                           'generation': automation.generation(store.path, store.manifest)})
+        self.run.bind(pending)
+        self.run.finish('needs_attention', 'Trust required', error_code='confirmation_required',
+                        trusted_snapshot='pending:base')
+        result = automation.summary(Session({'session': str(store.root)}))
+        self.assertEqual(result['generation'], pending.id)
+        self.assertEqual(result['trusted_snapshot'], 'pending:base')
+        self.assertNotIn('superseded', result)
+
     def test_system_refresh_is_not_manual_intervention(self):
         state = self.saved()
         with patch.object(publication, 'repository_operation'):

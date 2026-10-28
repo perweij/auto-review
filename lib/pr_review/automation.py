@@ -77,6 +77,18 @@ def observe(run):
         controller.bind(run)
 
 
+def manual_completion(run):
+    """Remember the automatic history superseded by successful manual analysis.
+
+    A manual retry can finish the very same generation that paused automatically.
+    Keep this boundary in the completed manifest, leaving saved outcomes intact.
+    The caller saves the manifest while holding the PR lock.
+    """
+    if not _active.get():
+        run.manifest['superseded_automatic_runs'] = sorted(
+            p.stem for p in (run.root / 'automatic-runs').glob('*.json'))
+
+
 def summary(session):
     files = list((session.root / 'automatic-runs').glob('*.json'))
     if session.path != session.current:
@@ -84,6 +96,14 @@ def summary(session):
     if not files:
         return None
     record = read_json(max(files, key=lambda p: p.stat().st_mtime_ns), {})
+    if session.path == session.current and session.manifest.get('status') == 'complete':
+        pending = session.pointer('.pending-review')
+        pending_id = generation(pending, read_json(pending / 'manifest.json', {})) if pending else None
+        # Older sessions have no explicit completion boundary. A record for an
+        # unfinished automatic replacement still belongs to the current view.
+        if (record.get('operation_id') in session.manifest.get('superseded_automatic_runs', [])
+                or record.get('generation') not in (session.id, pending_id)):
+            return {**record, 'superseded': True, 'superseded_by': session.id}
     if record.get('outcome') == 'running':
         from .operations import process_start
         op = read_json(state_root() / 'operations' / (record['operation_id'] + '.json'), {})

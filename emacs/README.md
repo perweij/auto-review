@@ -425,6 +425,8 @@ Reviews started with `pr-review PR --auto-publish` share these saved drafts.
 Opening one in a fresh Emacs session shows the last automatic outcome, current
 attention, and whether analysis itself is unfinished. A paused replacement is
 identified separately from the previous completed review still on display.
+After manual analysis completes, the earlier automatic outcome is marked
+superseded; its log stays available, and its old trust request is retired.
 Attention links reveal the affected finding and its exact reason; headings mark
 both correction requirements and findings requiring individual judgment.
 

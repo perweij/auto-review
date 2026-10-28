@@ -96,6 +96,11 @@ session/generation, affected comment IDs with reasons, receipt URLs, exit code,
 and guidance when finished. Dead running operations are reported as `interrupted`
 without rewriting saved data. Outcomes are `running`, `published`, `noop`,
 `needs_attention`, `partial`, `uncertain`, `failed`, and `interrupted`.
+When completed manual analysis supersedes the record, the current view adds
+`superseded: true` and `superseded_by` (the completed generation). Keep the saved
+outcome available as history, but do not offer its trust snapshot or present it
+as a current stop. Failures associated with a pending automatic replacement
+remain actionable. Historical generation views retain their original outcomes.
 The stop record is historical: derive current attention from unsuppressed,
 unpublished drafts' blockers, using ordinary blockers for individually staged
 comments and bulk blockers for unstaged comments. Do not treat an old stop record

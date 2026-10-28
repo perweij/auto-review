@@ -73,6 +73,7 @@
            (when catalogs `((catalogs . ,catalogs)))
            (when trusted-snapshot `((trusted_snapshot . ,trusted-snapshot))))
    (lambda (result)
+     (magit-auto-review--analysis-completed result)
      (if magit-auto-review--session
          (setq magit-auto-review--new-ready
                (not (equal magit-auto-review--generation (alist-get 'generation result))))
@@ -89,6 +90,19 @@
             "Review completed. g or N opens the latest results; previous drafts remain in h (history)."))
        (t "Review completed; this saved generation remains current."))))))
 
+(defun magit-auto-review--analysis-completed (result)
+  "Retire trust requests consumed by a successful analysis RESULT."
+  (setq magit-auto-review--run-settings nil magit-auto-review--followup-request nil)
+  (when (and (equal (alist-get 'status result) "complete")
+             (not magit-auto-review--history-view)
+             (not (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review))))
+    (when (alist-get 'automation magit-auto-review--review)
+      (setf (alist-get 'superseded (alist-get 'automation magit-auto-review--review)) t
+            (alist-get 'pending (alist-get 'analysis magit-auto-review--review)) nil)
+      (when (equal magit-auto-review--generation (alist-get 'generation result))
+        (setf (alist-get 'status (alist-get 'displayed (alist-get 'analysis magit-auto-review--review))) "complete"))
+      (unless magit-auto-review--editor (magit-auto-review--render)))))
+
 (defun magit-auto-review-trust-config ()
   "Confirm the exact agent-configuration snapshot reported by the backend."
   (interactive)
@@ -104,7 +118,10 @@
             (setq data (magit-auto-review--json (match-string-no-properties 0)))))))
     (unless data
       (when-let ((run (alist-get 'automation magit-auto-review--review)))
-        (when (equal (alist-get 'error_code run) "confirmation_required")
+        (when (and (not (magit-auto-review--true-p (alist-get 'superseded run)))
+                   (not magit-auto-review--history-view)
+                   (not (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review)))
+                   (equal (alist-get 'error_code run) "confirmation_required"))
           (setq data `((snapshot . ,(alist-get 'trusted_snapshot run))
                        (paths . ,(string-join (alist-get 'agent_config_paths run) "\n")))))))
     (unless data (user-error "No agent-configuration confirmation is pending; inspect L for the actual failure"))

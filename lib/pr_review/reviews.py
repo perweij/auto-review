@@ -363,6 +363,9 @@ def execute(request, *, confirm_trust=None):
                     pipeline.synthesis(run)
                     ready = pipeline.contributions(run)
                 run.manifest['status'] = 'complete' if ready else 'paused'
+                if ready:
+                    from .automation import manual_completion
+                    manual_completion(run)
                 run.save()
         except Cancelled as exc:
             if run.active:
