@@ -25,7 +25,7 @@ def manual_reason(state, *, completed_history=False):
         return 'A verdict was selected manually. Finish this review in Emacs.'
     # Fully handled history does not permanently prohibit a new generation.
     unsettled = [c for c in state['comments'] if c['status'] not in ('published', 'suppressed')]
-    if completed_history and not unsettled and state.get('mutation_tracking'):
+    if completed_history and not unsettled:
         return None
     if not state.get('mutation_tracking'):
         return 'Saved draft authorship is unknown. Finish this saved review in Emacs.'

@@ -324,10 +324,76 @@ class AutomationTest(unittest.TestCase):
 
     def test_legacy_saved_drafts_require_manual_completion(self):
         self.saved(lambda s: s.pop('mutation_tracking'))
+        with self.assertRaisesRegex(ApiError, 'unknown'):
+            self.run.before_analysis(self.session.root)
         result, posts = self.publish()
         self.assertEqual(result['exit_code'], 3)
         self.assertIn('unknown', result['reason'])
         self.assertFalse(posts)
+
+    def test_completed_legacy_history_allows_automatic_analysis(self):
+        initial = self.session.load()
+        initial.pop('mutation_tracking')
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        for statuses in (('published', 'published'), ('suppressed', 'suppressed'),
+                         ('published', 'suppressed'), ()):
+            with self.subTest(statuses=statuses):
+                state = copy.deepcopy(initial)
+                state['comments'] = state['comments'][:len(statuses)]
+                for comment, status in zip(state['comments'], statuses):
+                    comment['status'] = status
+                self.session.save(state)
+                before = self.session.file.read_bytes()
+                with patch.object(publication, 'gh', side_effect=AssertionError('No GitHub calls needed')):
+                    self.assertIsNone(self.run.before_analysis(self.session.root))
+                    automation.check_existing(self.session.root)
+                    automation.guard_replacement(self.session)
+                self.assertEqual(self.session.file.read_bytes(), before)
+
+    def test_completed_legacy_history_still_blocks_direct_publication(self):
+        state = self.session.load()
+        state.pop('mutation_tracking')
+        for comment in state['comments']:
+            comment['status'] = 'published'
+        self.session.save(state)
+        result, posts = self.publish()
+        self.assertEqual(result['exit_code'], 3)
+        self.assertIn('unknown', result['reason'])
+        self.assertFalse(posts)
+
+    def test_completed_legacy_history_preserves_unfinished_batch_guard(self):
+        state = self.session.load()
+        state.pop('mutation_tracking')
+        for comment in state['comments']:
+            comment['status'] = 'suppressed'
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        for status in sorted(automation.OUTSTANDING):
+            with self.subTest(status=status):
+                state['batches'] = [{'actions': [dict(id='pending', status=status, comment_ids=['p1'])]}]
+                self.session.save(state)
+                with self.assertRaisesRegex(ApiError, 'unfinished batch'):
+                    automation.check_existing(self.session.root)
+                with self.assertRaisesRegex(ApiError, 'unfinished batch'):
+                    automation.guard_replacement(self.session)
+                with patch.object(publication, 'recover') as recover:
+                    result = self.run.before_analysis(self.session.root)
+                recover.assert_called_once()
+                self.assertIn(result['outcome'], ('needs_attention', 'uncertain'))
+
+    def test_completed_legacy_history_preserves_selected_verdict_guard(self):
+        state = self.session.load()
+        state.pop('mutation_tracking')
+        state['verdict_requested'] = True
+        for comment in state['comments']:
+            comment['status'] = 'published'
+        for verdict in ('COMMENT', 'APPROVE', 'REQUEST_CHANGES'):
+            with self.subTest(verdict=verdict):
+                state['verdict'] = verdict
+                self.session.save(state)
+                with self.assertRaisesRegex(ApiError, 'verdict was selected manually'):
+                    self.run.before_analysis(self.session.root)
 
     def test_read_only_inspection_leaves_drafts_and_run_record_unchanged(self):
         self.saved(lambda s: s['comments'][0].update(classification='UNCERTAIN'))
