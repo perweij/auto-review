@@ -269,6 +269,64 @@ These are model instructions, not an enforced process timeout."
           (pcase (alist-get 'blocking assessment)
             ('t " · blocking") (:false " · non-blocking") (_ ""))))
 
+(defun magit-auto-review--attention-reasons (comment)
+  "Return outstanding reasons for inspecting COMMENT before publication."
+  (unless (member (alist-get 'status comment) '("published" "suppressed"))
+    ;; Individual staging is the user's decision on bulk-only restrictions.
+    (if (equal (alist-get 'status comment) "staged")
+        (alist-get 'blockers comment)
+      (or (alist-get 'bulk_blockers comment) (alist-get 'blockers comment)))))
+
+(defun magit-auto-review--insert-automatic-status ()
+  "Explain a saved automatic run and current recovery actions locally."
+  (when-let ((run (alist-get 'automation magit-auto-review--review)))
+    (let* ((analysis (alist-get 'analysis magit-auto-review--review))
+           (pending (alist-get 'pending analysis))
+           (displayed (alist-get 'displayed analysis))
+           (attention (cl-remove-if-not #'magit-auto-review--attention-reasons
+                                        (alist-get 'comments magit-auto-review--review))))
+      (insert (propertize (format "Automatic review: %s\n"
+                                 (pcase (alist-get 'outcome run)
+                                   ("running" "Running") ("published" "Publication confirmed")
+                                   ("noop" "Complete — nothing to publish") ("needs_attention" "Needs attention")
+                                   ("partial" "Partly published") ("uncertain" "Publication uncertain")
+                                   ("failed" "Failed") ("interrupted" "Interrupted") (_ "Saved outcome")))
+                          'face 'magit-section-heading))
+      (insert "Last automatic run: " (or (alist-get 'reason run) "No saved explanation.") "\n")
+      (when (equal (alist-get 'error_code run) "confirmation_required")
+        (insert "Agent configuration changed. Inspect the changes and L; T explicitly trusts the saved snapshot and resumes analysis.\n"))
+      (cond
+       (pending
+        (insert (propertize "Showing the previous completed review. A replacement analysis is unfinished; R r resumes it.\n" 'face 'warning)))
+       ((not (equal (alist-get 'status displayed) "complete"))
+        (insert (propertize "Analysis is unfinished; this is not a completed empty review. R r resumes saved work.\n" 'face 'warning))))
+      (when-let ((checked-head (alist-get 'head (alist-get 'checked magit-auto-review--review))))
+        (unless (equal checked-head (alist-get 'head (alist-get 'snapshot magit-auto-review--review)))
+          (insert (propertize "PR source changed since analysis. R r reviews the new snapshot; acknowledging a draft does not update its source.\n" 'face 'warning))))
+      (let* ((target (or pending displayed))
+             (discussion (alist-get 'discussion target)))
+        (when-let ((error (alist-get 'error discussion)))
+          (insert (propertize (concat "Discussion unavailable: " error "\n") 'face 'warning)))
+        (when (equal (alist-get 'contributions (alist-get 'phases target)) "needs_reassessment")
+          (insert "Discussion still challenges finding validity. Inspect L, then R r to retry analysis.\n")))
+      (if attention
+          (progn
+            (insert (format "Attention now: %d finding(s). Select a finding below to inspect it.\n" (length attention)))
+            (dolist (comment attention)
+              (let ((id (alist-get 'id comment)))
+                (insert-text-button (concat "  " (alist-get 'title comment))
+                                    'follow-link t
+                                    'action (lambda (_) (magit-auto-review--reveal-comment id)))
+                (insert " — " (string-join (magit-auto-review--attention-reasons comment) " ") "\n"))))
+        (when (equal (alist-get 'status displayed) "complete")
+          (insert "No outstanding draft corrections. Inspect your selection; P p publishes Staged.\n")))
+      (when (cl-some (lambda (batch)
+                      (cl-some (lambda (action) (member (alist-get 'status action) '("draft" "failed" "submitting" "ambiguous")))
+                               (alist-get 'actions batch)))
+                    (alist-get 'batches magit-auto-review--review))
+        (insert (propertize "Publication has unfinished actions. P opens publication and receipt recovery; confirmed posts stay Published.\n" 'face 'warning)))
+      (insert "L opens the saved automatic-run log. Opening this review does not resume or publish it.\n\n"))))
+
 (defun magit-auto-review--insert-comment (comment)
   "Insert COMMENT below its exact code anchor and existing discussion."
   (let* ((identity (alist-get 'id comment)) (context (alist-get 'context comment))
@@ -286,7 +344,7 @@ These are model instructions, not an enforced process timeout."
                 (or (alist-get 'path context) "Overall / unplaced") ": " (alist-get 'title comment)
                 (if (magit-auto-review--true-p (alist-get 'composing comment)) "  [new, unsaved]" "")
                 (if (magit-auto-review--true-p (alist-get 'override comment)) "  [manual placement]" "")
-                (if (alist-get 'blockers comment) "  [needs attention]" ""))
+                (if (magit-auto-review--attention-reasons comment) "  [needs attention]" ""))
          'face 'magit-auto-review-finding))
       (when-let ((assessments (alist-get 'finding_assessments comment)))
         (insert (propertize
@@ -338,7 +396,11 @@ These are model instructions, not an enforced process timeout."
       (when (equal (alist-get 'kind (alist-get 'placement comment)) "unplaced")
         (insert "  Press a to choose a code line, thread, or overall PR assessment.\n"))
       (when (and (not (alist-get 'blockers comment)) (alist-get 'bulk_blockers comment))
-        (insert (propertize "  Inspect and stage individually; excluded from bulk staging.\n" 'face 'shadow)))
+        (unless (member (alist-get 'status comment) '("staged" "published" "suppressed"))
+          (insert (propertize (concat "  " (string-join (alist-get 'bulk_blockers comment) " ")
+                                      "\n  Inspect, then s on this item to stage individually, or k to exclude.\n") 'face 'warning))))
+      (when (magit-auto-review--attention-reasons comment)
+        (insert "  e edits wording; a corrects placement. After inspecting changed discussion, i acknowledges it; then s stages.\n"))
       (when (alist-get 'evidence comment)
         (magit-insert-section (review-evidence identity t)
           (magit-insert-heading "Evidence and additional locations (l to visit)")
@@ -410,6 +472,7 @@ These are model instructions, not an enforced process timeout."
           (insert-text-button url 'follow-link t 'action (lambda (_) (browse-url url)))
           (insert "\n\n"))
         (magit-auto-review--insert-review-status)
+        (magit-auto-review--insert-automatic-status)
         (insert (propertize (format "Model suggestion: %s. Next review verdict: %s (v to choose).\n"
                                     (or (alist-get 'recommendation magit-auto-review--review)
                                         (if (equal (alist-get 'kind (alist-get 'coverage magit-auto-review--review)) "followup")

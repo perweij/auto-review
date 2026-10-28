@@ -28,6 +28,7 @@ opaque identities, not paths clients should interpret.
 | `discover` | `cwd`, optional `pr`, `repository` | Matching saved sessions in this Git common directory |
 | `pull-requests` | `cwd`, optional `repository` | Repository choices, cached PR list, last-check time, and matching saved sessions |
 | `read` | `session`, optional `generation` | Saved review, comments, contextual rows/threads, staging, last check, operations |
+| `review-log` | `session`, `operation_id` | Saved automatic-operation log as `{operation_id,text}`; operation must belong to the session |
 | `history` | `session` | Generations, commits, times, status, saved edits/document counts |
 | `diff` | `session`, `generation`, optional `path` | Reviewed changed files, hunks, and patches |
 | `file` | `session`, `generation`, `path`, optional `side`, `commit` | Immutable Git blob text and revision |
@@ -79,6 +80,33 @@ become unplaced. Human text is preserved. A new generation gets fresh drafts,
 with the preceding generation retained for explicit recovery.
 
 ## Review setup and metadata
+
+Reviewer `read` responses additionally expose `analysis` and `automation`.
+`analysis.displayed` describes the displayed generation; `analysis.pending` is
+the unfinished replacement, or null. Each includes `generation`, `status`,
+`attempt_status`, phase-name-to-status `phases`, discussion `complete`/`error`,
+and publication status. A first paused analysis need not have a pending pointer;
+check its displayed status instead of interpreting an empty comments array as
+completed analysis.
+
+`automation` is the latest saved automatic-run record for the session (or the
+selected historical generation), or null. Discovery descriptors also expose it.
+It includes outcome, reason, timestamps, operation/log identifiers, associated
+session/generation, affected comment IDs with reasons, receipt URLs, exit code,
+and guidance when finished. Dead running operations are reported as `interrupted`
+without rewriting saved data. Outcomes are `running`, `published`, `noop`,
+`needs_attention`, `partial`, `uncertain`, `failed`, and `interrupted`.
+The stop record is historical: derive current attention from unsuppressed,
+unpublished drafts' blockers, using ordinary blockers for individually staged
+comments and bulk blockers for unstaged comments. Do not treat an old stop record
+as proof that a resolved finding still needs attention.
+
+`review-log` reads only the log of an operation recorded for that session; callers
+cannot supply a filename. These fields and the command are additive to protocol 1.
+Reads and log navigation invoke neither models nor GitHub. Mutation authorship is
+backend-owned; an `actor` field in a protocol request cannot authorize automatic
+behavior. Automatic publication is an explicit CLI invocation, not a persisted
+setting or an implicit side effect of `run`.
 
 `settings` accepts `session`, or `cwd` plus optional `pr` and `repository`, and
 returns `{settings,session}`. It reads settings from a pending generation first,

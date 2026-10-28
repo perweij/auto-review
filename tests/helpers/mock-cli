@@ -18,6 +18,9 @@ fi
 if [[ $* == 'login status' || $* == 'auth status'* ]]; then
     [[ ${MOCK_AUTH_FAIL:-} != "$tool" ]]; exit
 fi
+if [[ $tool == codex && $1 == app-server || $tool == claude && $* == *'--input-format stream-json'* ]]; then
+    exec python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mock-model-discovery.py" "$tool"
+fi
 if [[ $tool == gh ]]; then
     if [[ -n ${MOCK_REQUIRE_GH_AUTH:-} ]]; then [[ ${GH_TOKEN:-} == fixture-secret-github ]]; fi
     if [[ $1 == repo ]]; then

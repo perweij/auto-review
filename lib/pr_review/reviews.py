@@ -213,7 +213,7 @@ class Review(Store):
             say('Warning: This PR changes agent configuration loaded by the models:\n' + '\n'.join(changed))
             if token != expected and not (confirm and confirm(changed)):
                 say(json.dumps(dict(confirmation_required='agent_configuration', snapshot=expected, paths='\n'.join(changed) + '\n')))
-                raise ApiError('confirmation_required', 'Agent configuration changes require interactive confirmation', snapshot=expected)
+                raise ApiError('confirmation_required', 'Agent configuration changes require interactive confirmation', snapshot=expected, paths=changed)
             self.manifest['agent_config_confirmed'] = True
             self.save()
 
@@ -308,6 +308,8 @@ def execute(request, *, confirm_trust=None):
     kind = 'followup' if threads else 'full'
     with cancellation_scope(), locked(repo.lock):
         root, worktree = locate(repo, request.get('session'))
+        from .automation import check_existing
+        check_existing(root)
         configuration = dict(settings.DEFAULTS)
         configuration.update({k: v for k, v in request.get('defaults', {}).items() if k in settings.DEFAULTS and v is not None})
         if root:

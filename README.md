@@ -98,6 +98,18 @@ The interactive menu lets you inspect, edit, and stage drafts before publication
 Fresh proposals start Unstaged; publication requires a preview and final `yes`.
 `--no-publish` generates and saves the review without opening that menu.
 
+For explicit unattended review and publication:
+
+```sh
+pr-review 123 --auto-publish --reviewers codex --codex-model gpt-6-luna --codex-effort medium --json
+```
+
+Automatic mode posts COMMENT feedback only. If any finding needs judgment or
+correction, the whole batch stops before posting; analysis and drafts remain
+available in Emacs with reasons and recovery actions. No new findings means no
+GitHub post. The JSON result and exit status distinguish completion, attention,
+partial publication, and uncertainty. See [automatic reviews](docs/manual.md#automatic-reviews).
+
 Incoming feedback and fixes use `pr-review owner`; see the
 [owner workflow](docs/manual.md#pr-owner-workflow). Run `pr-review --help` or
 `pr-review owner --help` for command options.

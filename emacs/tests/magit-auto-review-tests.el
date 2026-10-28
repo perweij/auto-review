@@ -325,6 +325,118 @@
    (should (equal (alist-get 'body (magit-auto-review--comment "p1")) "Human Body 1"))
    (should buffer-read-only)))
 
+(ert-deftest auto-review/automatic-handoff-in-fresh-buffer-uses-real-api ()
+  (let* ((fixture (with-temp-buffer
+                    (should (zerop (call-process "python3" nil t nil
+                                                  (expand-file-name "tests/helpers/api-fixture.py" auto-review-test-root)
+                                                  "--automatic")))
+                    (magit-auto-review--json (buffer-string))))
+         (process-environment (copy-sequence process-environment))
+         (magit-auto-review-executable (expand-file-name "bin/pr-review" auto-review-test-root)))
+    (unwind-protect
+        (progn
+          (setenv "XDG_STATE_HOME" (expand-file-name "state" (alist-get 'root fixture)))
+          (with-temp-buffer
+            (magit-auto-review-mode)
+            (setq default-directory (file-name-as-directory (alist-get 'repo fixture))
+                  magit-auto-review--session (alist-get 'session fixture))
+            (magit-auto-review-refresh)
+            (should (string-match-p "Attention now: 2" (buffer-string)))
+            (should (string-match-p "Finding 1  \\[needs attention\\]" (buffer-string)))
+            (goto-char (point-min))
+            (search-forward "  Finding 1")
+            (button-activate (button-at (1- (point))))
+            (should (equal (magit-auto-review--id) "p1"))
+            (should-not (oref (magit-current-section) hidden))
+            (magit-auto-review-stage)
+            (should (equal (alist-get 'status (magit-auto-review--comment "p1")) "staged"))
+            (should (string-match-p "Attention now: 1" (buffer-string)))
+            (magit-auto-review--mutate "placement" '(comment . "p2")
+                                       '(placement . ((kind . "inline") (path . "source.txt")
+                                                     (side . "RIGHT") (start_line . 2) (line . 2))))
+            (should (string-match-p "No outstanding draft corrections" (buffer-string)))
+            (save-window-excursion
+              (magit-auto-review-log)
+              (should (string-match-p "Saved automatic analysis progress" (buffer-string)))))
+          ;; A second buffer gets the same saved drafts and historical stop,
+          ;; without needing the original frontend's notices or progress.
+          (with-temp-buffer
+            (magit-auto-review-mode)
+            (setq magit-auto-review--session (alist-get 'session fixture))
+            (magit-auto-review-refresh)
+            (should (string-match-p "Last automatic run:" (buffer-string)))
+            (should (string-match-p "No outstanding draft corrections" (buffer-string)))
+            (should (equal (alist-get 'status (magit-auto-review--comment "p1")) "staged"))))
+      (delete-directory (alist-get 'root fixture) t)
+      (when (get-buffer "*Auto-review saved log*") (kill-buffer "*Auto-review saved log*")))))
+
+(ert-deftest auto-review/automatic-first-pause-is-not-an-empty-completed-review ()
+  (let* ((fixture (with-temp-buffer
+                    (should (zerop (call-process "python3" nil t nil
+                                                  (expand-file-name "tests/helpers/api-fixture.py" auto-review-test-root)
+                                                  "--automatic-paused")))
+                    (magit-auto-review--json (buffer-string))))
+         (process-environment (copy-sequence process-environment))
+         (magit-auto-review-executable (expand-file-name "bin/pr-review" auto-review-test-root)))
+    (unwind-protect
+        (progn
+          (setenv "XDG_STATE_HOME" (expand-file-name "state" (alist-get 'root fixture)))
+          (with-temp-buffer
+            (magit-auto-review-mode)
+            (setq magit-auto-review--session (alist-get 'session fixture))
+            (magit-auto-review-refresh)
+            (should (string-match-p "Analysis is unfinished" (buffer-string)))
+            (should (string-match-p "R r resumes saved work" (buffer-string)))
+            (should-not (string-match-p "No outstanding draft corrections" (buffer-string)))))
+      (delete-directory (alist-get 'root fixture) t))))
+
+(ert-deftest auto-review/automatic-pending-analysis-and-current-attention ()
+  (auto-review-test-buffer
+   (setf (alist-get 'automation magit-auto-review--review)
+         '((outcome . "needs_attention") (reason . "Analysis paused"))
+         (alist-get 'analysis magit-auto-review--review)
+         '((displayed . ((status . "complete")))
+           (pending . ((status . "paused") (phases . ((contributions . "needs_reassessment")))))))
+   (magit-auto-review--render)
+   (should (string-match-p "Showing the previous completed review" (buffer-string)))
+   (should (string-match-p "Discussion still challenges finding validity" (buffer-string)))))
+
+(ert-deftest auto-review/automatic-trust-resumes-from-saved-snapshot-in-fresh-buffer ()
+  (auto-review-test-buffer
+   (setf (alist-get 'automation magit-auto-review--review)
+         '((outcome . "needs_attention") (error_code . "confirmation_required")
+           (trusted_snapshot . "head:base") (agent_config_paths . ("AGENTS.md"))))
+   (setq magit-auto-review--run-settings nil)
+   (let (launched prompt)
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (request)
+                  (should (equal (alist-get 'command request) "settings"))
+                  '((settings . ((reviewers . ["codex"]) (codex_model . "saved-model"))))))
+               ((symbol-function 'yes-or-no-p) (lambda (text) (setq prompt text) t))
+               ((symbol-function 'magit-auto-review--launch-review)
+                (lambda (settings snapshot &optional _catalogs) (setq launched (list settings snapshot)))))
+       (magit-auto-review-trust-config))
+     (should (string-match-p "AGENTS.md" prompt))
+     (should (equal (cadr launched) "head:base"))
+     (should (equal (alist-get 'codex_model (car launched)) "saved-model")))))
+
+(ert-deftest auto-review/automatic-trust-prefers-a-newer-manual-retry ()
+  (auto-review-test-buffer
+   (setf (alist-get 'automation magit-auto-review--review)
+         '((error_code . "confirmation_required") (trusted_snapshot . "old:base")
+           (agent_config_paths . ("AGENTS.md"))))
+   (setq magit-auto-review--run-settings '((reviewers . ["codex"])))
+   (let ((log (get-buffer-create "*Auto-review progress*")) launched)
+     (with-current-buffer log
+       (let ((inhibit-read-only t))
+         (erase-buffer)
+         (insert "{\"confirmation_required\":\"agent_configuration\",\"snapshot\":\"new:base\",\"paths\":\"AGENTS.md\"}\n")))
+     (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t))
+               ((symbol-function 'magit-auto-review--launch-review)
+                (lambda (_settings snapshot &optional _catalogs) (setq launched snapshot))))
+       (magit-auto-review-trust-config))
+     (should (equal launched "new:base")))))
+
 (ert-deftest auto-review/empty-inline-body-can-be-edited ()
   (auto-review-test-buffer
    (let ((comment (magit-auto-review--comment "p1"))) (setf (alist-get 'body comment) ""))

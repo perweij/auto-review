@@ -69,7 +69,7 @@ def operation(owner=None):
     identity = uuid.uuid4().hex
     file = state_root() / 'operations' / (identity + '.json')
     log = file.with_suffix('.log')
-    record = dict(**process_identity(), status='running', log_path=str(log), **(owner or {}))
+    record = dict(**process_identity(), operation_id=identity, status='running', log_path=str(log), **(owner or {}))
     atomic_json(file, record)
     from .events import _sink
     downstream = _sink.get()
@@ -85,8 +85,9 @@ def operation(owner=None):
             with cancellation_scope():
                 emit('started', operation_id=identity, log_path=str(log))
                 with event_sink(progress):
-                    yield
-            record.update(status='stopped', exit_code=0)
+                    yield record
+            record.update(status='stopped' if record['status'] == 'running' else record['status'],
+                          exit_code=record.get('exit_code', 0))
         except BaseException as exc:
             record.update(status='cancelled' if isinstance(exc, Cancelled) else 'failed',
                           exit_code=exc.details.get('exit_code', 1) if isinstance(exc, ApiError) else 1)

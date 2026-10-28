@@ -68,7 +68,7 @@ def preview_comment(session, state, request):
     return {"review": review, "comment": comment["id"]}
 
 
-def mutate(session, state, request):
+def mutate(session, state, request, *, actor="manual"):
     operation = request.get("operation")
     changed, skipped = [], []
     if operation == "verdict":
@@ -152,6 +152,13 @@ def mutate(session, state, request):
             changed.append(identity)
     else:
         raise ApiError("invalid_request", "Unknown draft operation.")
+    # Actor is an internal argument, never a field accepted from a frontend.
+    # Recovered-text provenance has a separate purpose and remains unchanged.
+    for comment in state['comments']:
+        if comment['id'] in changed:
+            comment['mutation_actor'] = actor
+    if actor == 'manual' and (changed or operation == 'verdict'):
+        state['manual_intervention'] = True
     # A local change invalidates an earlier publication confirmation, without
     # discarding submitted receipts or ambiguous recovery information.
     state.pop("prepared", None)
