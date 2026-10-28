@@ -202,9 +202,10 @@
 
 (defun magit-auto-review-owner--batch-history-p (batch)
   "Whether BATCH is a finished result belonging under History."
-  (and (equal (alist-get 'status batch) "ready")
-       (not (magit-auto-review-owner--auto-pending-p batch))
-       (magit-auto-review-owner--batch-handled-p batch)))
+  (or (alist-get 'superseded_by batch)
+      (and (equal (alist-get 'status batch) "ready")
+           (not (magit-auto-review-owner--auto-pending-p batch))
+           (magit-auto-review-owner--batch-handled-p batch))))
 
 (defun magit-auto-review-owner--batch-resolved-p (batch)
   "Whether every item in BATCH has confirmed GitHub completion."
@@ -238,7 +239,8 @@
 
 (defun magit-auto-review-owner--batch-label (batch)
   "Describe BATCH's user-facing state without changing its saved status."
-  (cond ((magit-auto-review-owner--batch-history-p batch)
+  (cond ((alist-get 'superseded_by batch) "Superseded")
+        ((magit-auto-review-owner--batch-history-p batch)
          (if (magit-auto-review-owner--batch-resolved-p batch) "Resolved" "Done locally"))
         ((magit-auto-review--true-p (alist-get 'discussion_stale batch)) "Feedback changed")
         ((equal (alist-get 'status batch) "ready") "Verified")
@@ -257,17 +259,19 @@
 
 (defun magit-auto-review-owner--fix-conclusion (batch)
   "Describe BATCH's workflow result separately from process completion."
-  (if (equal (alist-get 'status batch) "ready")
+  (cond
+   ((alist-get 'superseded_by batch) "Unused batch superseded by newer verified fixes; no action needed.")
+   ((equal (alist-get 'status batch) "ready")
       (if (magit-auto-review--true-p (alist-get 'auto_commit batch))
           (if (magit-auto-review-owner--auto-pending-p batch)
               (magit-auto-review-owner--next-step batch)
             (concat (magit-auto-review-owner--auto-summary batch) " · " (magit-auto-review-owner--next-step batch)))
         (format "Fix verified · %d feedback item(s) · %s" (length (magit-auto-review-owner--verified-keys batch))
-                (magit-auto-review-owner--next-step batch)))
-    (format "Fix %s · %d/%d tasks complete · %s"
+                (magit-auto-review-owner--next-step batch))))
+   (t (format "Fix %s · %d/%d tasks complete · %s"
             (or (alist-get 'status batch) "stopped")
             (cl-count "complete" (alist-get 'tasks batch) :key (lambda (task) (alist-get 'status task)) :test #'equal)
-            (length (alist-get 'tasks batch)) (magit-auto-review-owner--brief (magit-auto-review-owner--pause-reason batch) 200))))
+            (length (alist-get 'tasks batch)) (magit-auto-review-owner--brief (magit-auto-review-owner--pause-reason batch) 200)))))
 
 (defun magit-auto-review-owner--next-step (batch)
   "Explain the next useful action for BATCH using saved state only."
@@ -283,6 +287,8 @@
                                                     (equal (alist-get 'batch r) (alist-get 'id batch))))
                                     (alist-get 'replies magit-auto-review-owner--view))))
     (cond
+     ((alist-get 'superseded_by batch)
+      "The same feedback was verified by newer fixes. No resume is needed; this unused batch is retained for inspection.")
      ((magit-auto-review-owner--batch-history-p batch)
       (if (magit-auto-review-owner--batch-resolved-p batch)
           "Finished: replies published and threads resolved. Saved reports and commit links remain available below."
@@ -343,7 +349,8 @@
               (magit-auto-review-owner--batch-commit-label batch))
       (if (magit-auto-review-owner--batch-history-p batch)
           'magit-auto-review-owner-item 'magit-auto-review-owner-attention))
-    (insert (if (magit-auto-review--true-p (alist-get 'auto_commit batch)) "Auto commit" "Manual commit") " · C-u r chooses completion mode\n")
+    (unless (alist-get 'superseded_by batch)
+      (insert (if (magit-auto-review--true-p (alist-get 'auto_commit batch)) "Auto commit" "Manual commit") " · C-u r chooses completion mode\n"))
     (insert (magit-auto-review-owner--next-step batch) "\n")
     (when (equal (alist-get 'status batch) "ready")
       (let* ((plan (alist-get 'commit_plan batch))
@@ -383,7 +390,8 @@
     (when-let ((summary (alist-get 'summary (alist-get 'review batch))))
       (insert "Result: " (magit-auto-review-owner--brief summary 160) "\n"))
     (when (alist-get 'error batch)
-      (insert "Last stop: " (magit-auto-review-owner--brief (alist-get 'error batch) 160) "\n"))
+      (insert (if (alist-get 'superseded_by batch) "Original stop (historical): " "Last stop: ")
+              (magit-auto-review-owner--brief (alist-get 'error batch) 160) "\n"))
     (dolist (attempt (alist-get 'attempts (alist-get 'commit_execution batch)))
       (insert (format "Commit %s · %s%s · artifacts: %s\n" (alist-get 'unit attempt) (alist-get 'status attempt)
                       (if (alist-get 'commit attempt) (concat " · " (alist-get 'commit attempt)) "")
@@ -763,6 +771,8 @@ With AUTOMATIC, also commit and stage replies."
   (interactive "P")
   (let ((batch (magit-auto-review-owner--batch-at-point)))
     (unless batch (user-error "Select one fix under Fixes, or its feedback; r does not resume a whole group"))
+    (when (alist-get 'superseded_by batch)
+      (user-error "This unused batch was superseded by newer verified fixes; no resume is needed"))
     (when (and (alist-get 'commit_match batch) (not choose-mode)
                (not (magit-auto-review-owner--auto-pending-p batch)))
       (user-error "This fix is already committed; m inspects it in Magit"))
@@ -1106,7 +1116,7 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
           (offer (and (magit-auto-review--true-p (alist-get 'is_resolved (car items)))
                       (magit-auto-review--true-p (alist-get 'can_unresolve (car items))))
                  "X" "Reopen this GitHub thread" #'magit-auto-review-owner-reopen))
-        (when (and batch (not ready) (not handled))
+        (when (and batch (not ready) (not handled) (not (alist-get 'superseded_by batch)))
           (offer t "r" "Resume fix" #'magit-auto-review-owner-resume)
           (offer t "A" "Adopt inspected edits and reverify" #'magit-auto-review-owner-adopt)
           (offer t "p" "Replan unfinished work" #'magit-auto-review-owner-replan)

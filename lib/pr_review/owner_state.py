@@ -166,6 +166,38 @@ def feedback_body(body):
         "", body).strip()
 
 
+def superseded_batches(state):
+    """Identify unused batches whose unchanged feedback has newer verification."""
+    feedback = {i["key"]: i for i in state.get("feedback", [])}
+    batches = state["batches"]
+    result = {}
+    for index, batch in enumerate(batches):
+        if (batch.get("status") not in ("paused", "interrupted") or not batch.get("items")
+                or any(batch.get(k) for k in ("attempts", "tasks", "plans", "plan_rejections",
+                                               "commit_execution", "integrity_failure"))
+                or batch.get("checkpoint", {}).get("label") != "batch baseline"):
+            continue
+        replacements = []
+        for key in batch["items"]:
+            item = feedback.get(key, {})
+            newer = next((b for b in reversed(batches[index + 1:]) if key in b["items"]), {})
+            expected = batch.get("fingerprints", {}).get(key)
+            if (not expected or item.get("missing") or item.get("fingerprint") != expected
+                    or newer.get("status") != "ready" or newer.get("integrity_failure")
+                    or newer.get("discussion_stale")
+                    or newer.get("commit_execution", {}).get("inspection_required")
+                    or newer.get("review", {}).get("complete") is not True
+                    or newer["review"].get("blocking")
+                    or key not in newer.get("verified_items", [])
+                    or newer.get("verified_fingerprints", {}).get(key) != expected):
+                break
+            if newer["id"] not in replacements:
+                replacements.append(newer["id"])
+        else:
+            result[batch["id"]] = replacements
+    return result
+
+
 class OwnerSession:
     def __init__(self, request):
         self.path = Path(require_text(request.get("session"), "session")).resolve()
@@ -202,6 +234,11 @@ class OwnerSession:
 
     def view(self, state=None):
         result = copy.deepcopy(state or self.load())
+        superseded = superseded_batches(result)
+        for batch in result["batches"]:
+            batch.pop("superseded_by", None)
+            if batch["id"] in superseded:
+                batch["superseded_by"] = superseded[batch["id"]]
         for item in result["feedback"]:
             for comment in item.get("comments", []):
                 comment["display_body"] = feedback_body(comment["body"])

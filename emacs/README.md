@@ -102,6 +102,11 @@ started, resume requires the batch's original settings, shown under
 **Verification and task details**. `T` trusts inspected repository agent
 configuration changes; it does not change model settings.
 
+An unused paused batch moves to History as **Superseded** when newer verified
+fixes cover all of its unchanged feedback. It no longer offers resume, and its
+original error remains inspectable. Batches with model attempts, saved work, or
+adopted changes stay visible for reconciliation.
+
 Unchanged replies confirmed by this owner's publication receipts do not mark
 the original feedback changed. A verified fix with a published commit-linked
 reply moves to History when its thread is resolved. New feedback or reopening

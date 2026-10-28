@@ -388,6 +388,28 @@
      (should (string-match-p "T applies only to agent-configuration trust" (buffer-string)))
      (should (string-match-p "Saved fix settings: claude / fable (medium)" (buffer-string))))))
 
+(ert-deftest owner/superseded-empty-batch-is-history-with-no-resume-action ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view)) (completed (car (alist-get 'batches view)))
+          (unused '((id . "unused") (status . "paused") (items . ("thread:T1" "thread:T2"))
+                    (superseded_by . ("b1")) (error . "HEAD changed; reconcile in Magit and start a new batch."))))
+     (setf (alist-get 'feedback view)
+           (mapcar (lambda (item)
+                     (setf (alist-get 'triage item) "handled" (alist-get 'attention item) :false)
+                     item)
+                   (alist-get 'feedback view)))
+     (setf (alist-get 'batches view) (list unused completed))
+     (magit-auto-review-owner--accept view)
+     (should (string-match-p "Fixes (0)" (buffer-string)))
+     (let ((section (owner-test-goto 'owner-batch "unused")))
+       (should (equal (oref (oref section parent) value) "history"))
+       (should (looking-at "Superseded ·"))
+       (should (eq (get-text-property (point) 'font-lock-face) 'magit-auto-review-owner-item)))
+     (should (string-match-p "No resume is needed" (magit-auto-review-owner--next-step unused)))
+     (should-not (assoc "r" (magit-auto-review-owner--menu-actions)))
+     (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (&rest _) (ert-fail "Must not start models"))))
+       (should-error (magit-auto-review-owner-resume) :type 'user-error)))))
+
 (ert-deftest owner/local-finding-does-not-open-a-github-reply-editor ()
   (owner-test-buffer
    (magit-auto-review-owner--accept (owner-test-local-view))

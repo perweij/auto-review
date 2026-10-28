@@ -171,7 +171,9 @@ def new_batch_head(session, state, remote):
         return head
     if not ancestor(session, head, remote):
         raise ApiError("diverged", "Owner and GitHub branches have different commits; use C-u m to reconcile in Magit, then start a new fix.")
-    if any(b["baseline"] == head and b["status"] != "ready" for b in state["batches"]):
+    from .owner_state import superseded_batches
+    superseded = superseded_batches(state)
+    if any(b["baseline"] == head and b["status"] != "ready" and b["id"] not in superseded for b in state["batches"]):
         raise ApiError("worktree_behind", "Owner worktree is behind GitHub with an unfinished batch; use C-u m to inspect and reconcile it before starting a new fix.")
     emit("progress", message=f"Owner worktree is behind GitHub; fast-forwarding {head[:12]} to {remote[:12]} before starting the new fix.")
     session.repo.git("merge", "--ff-only", "--no-squash", "--no-autostash", "--no-overwrite-ignore", remote, cwd=worktree)
