@@ -53,6 +53,10 @@ These are model instructions, not an enforced process timeout."
 (defvar-local magit-auto-review--process nil)
 (defvar-local magit-auto-review--operation nil)
 (defvar-local magit-auto-review--progress nil)
+(defvar-local magit-auto-review--frontend-log-context nil
+  "Session and automatic operation observed at the last frontend operation.
+Keep this context after completion or failure so L still selects its progress.
+A different automatic operation makes the saved log current again.")
 (defvar-local magit-auto-review--new-ready nil)
 (defvar-local magit-auto-review--target nil)
 (defvar-local magit-auto-review--repository nil)
@@ -329,7 +333,7 @@ These are model instructions, not an enforced process timeout."
                                (alist-get 'actions batch)))
                     (alist-get 'batches magit-auto-review--review))
         (insert (propertize "Publication has unfinished actions. P opens publication and receipt recovery; confirmed posts stay Published.\n" 'face 'warning)))
-      (insert "L opens the saved automatic-run log. Opening this review does not resume or publish it.\n\n"))))
+      (insert "L opens the saved automatic-run log or newer frontend progress. Opening this review does not resume or publish it.\n\n"))))
 
 (defun magit-auto-review--insert-comment (comment)
   "Insert COMMENT below its exact code anchor and existing discussion."

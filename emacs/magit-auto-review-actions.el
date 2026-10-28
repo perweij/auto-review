@@ -32,7 +32,10 @@
 (defun magit-auto-review--start (request callback)
   "Run explicit REQUEST asynchronously and deliver CALLBACK in this buffer."
   (when (process-live-p magit-auto-review--process) (user-error "An operation is already running; use the log or cancel command"))
-  (setq magit-auto-review--progress "Starting" magit-auto-review--operation nil)
+  (setq magit-auto-review--progress "Starting" magit-auto-review--operation nil
+        magit-auto-review--frontend-log-context
+        (list magit-auto-review--session
+              (alist-get 'operation_id (alist-get 'automation magit-auto-review--review))))
   (magit-auto-review--header)
   (setq magit-auto-review--process
         (magit-auto-review--async
@@ -147,18 +150,31 @@
 (defun magit-auto-review-log ()
   "Show operation and publication feedback; q returns to the review."
   (interactive)
-  (if-let ((operation (and (not (process-live-p magit-auto-review--process))
-                          (alist-get 'operation_id (alist-get 'automation magit-auto-review--review)))))
-      (let ((result (magit-auto-review--call (magit-auto-review--request "review-log" `(operation_id . ,operation)))))
-        (pop-to-buffer (get-buffer-create "*Auto-review saved log*"))
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert (alist-get 'text result)))
-        (special-mode)
-        (goto-char (point-max)))
-    (pop-to-buffer (get-buffer-create "*Auto-review progress*"))
-    (special-mode)
-    (goto-char (point-max))))
+  (let* ((operation (alist-get 'operation_id (alist-get 'automation magit-auto-review--review)))
+         (result (when (and operation
+                            (not (process-live-p magit-auto-review--process))
+                            (not (equal magit-auto-review--frontend-log-context
+                                        (list magit-auto-review--session operation))))
+                   (condition-case error
+                       (magit-auto-review--call (magit-auto-review--request "review-log" `(operation_id . ,operation)))
+                     (error
+                      (message "%s; showing frontend progress" (magit-auto-review--error-message error))
+                      nil)))))
+    (if result
+        (progn
+          (pop-to-buffer (get-buffer-create "*Auto-review saved log*"))
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert (alist-get 'text result)))
+          (special-mode)
+          (goto-char (point-max)))
+      (magit-auto-review--show-progress-log))))
+
+(defun magit-auto-review--show-progress-log ()
+  "Show frontend operation feedback at the end of the progress buffer."
+  (pop-to-buffer (get-buffer-create "*Auto-review progress*"))
+  (special-mode)
+  (goto-char (point-max)))
 
 (defun magit-auto-review-switch-current ()
   "Explicitly switch to the latest completed generation after resolving edits."

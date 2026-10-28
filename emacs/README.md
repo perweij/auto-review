@@ -434,7 +434,10 @@ Inspect uncertain findings or resolved/outdated discussions, then press `s` on
 the individual draft to accept it, or `k` to exclude it. Use `a` for placement,
 `e` for wording, and `i` after inspecting changed discussion. `R r` resumes saved
 analysis, `T` explicitly trusts a saved agent-configuration snapshot, and `L`
-opens the saved automatic-operation log through the backend. `P` provides
+opens the saved automatic-operation log through the backend, preferring progress
+from a newer operation started in this buffer even after it finishes or fails.
+If the saved log cannot be retrieved, `L` reports the error and opens frontend
+progress instead. `P` provides
 publication and recovery for uncertain/failed submissions. Confirmed posts remain
 Published. Opening or navigating the buffer performs no models or GitHub calls.
 
