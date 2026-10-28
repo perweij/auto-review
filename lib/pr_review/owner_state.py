@@ -114,6 +114,58 @@ def fingerprint(item, viewer=None):
     return digest([item["key"], comments])
 
 
+def feedback_fingerprint(item, state, viewer):
+    """Exclude only unchanged, confirmed replies published by this owner session."""
+    receipts = {r["receipt"]["id"]: r["receipt"] for r in state["replies"]
+                if r.get("status") == "published" and r.get("source") == item["key"]
+                and r.get("receipt", {}).get("id")
+                and r.get("target", {}).get("kind") == "reply"
+                and r["target"].get("root_id") == item.get("root_id")}
+    def own_receipt(comment):
+        receipt = receipts.get(comment.get("id"), {})
+        return (item.get("kind") == "thread" and comment.get("id") != item.get("root_id")
+                and comment.get("author", "").lower() == viewer.lower()
+                and receipt.get("user", {}).get("login", "").lower() == viewer.lower()
+                and comment.get("body") == receipt.get("body"))
+    return fingerprint({**item, "comments": [c for c in item.get("comments", []) if not own_receipt(c)]})
+
+
+def reconcile_resolved_feedback(state, items):
+    """Finish resolved, verified GitHub fixes; reopen them when evidence changes."""
+    latest = {key: batch for batch in state["batches"] for key in batch["items"]}
+    for item in items:
+        batch = latest.get(item["key"], {})
+        proof = None
+        if (item.get("kind") == "thread" and item.get("is_resolved") and not item.get("missing")
+                and batch.get("status") == "ready"
+                and not batch.get("integrity_failure")
+                and not batch.get("commit_execution", {}).get("inspection_required")
+                and batch.get("review", {}).get("complete") is True
+                and not batch["review"].get("blocking")
+                and item["key"] in batch.get("verified_items", [])
+                and batch.get("verified_fingerprints", {}).get(item["key"]) == item["fingerprint"]
+                and any(r.get("source") == item["key"] and r.get("batch") == batch["id"]
+                        and r.get("status") == "published" and r.get("commits")
+                        and r.get("fingerprint") == item["fingerprint"] for r in state["replies"])):
+            proof = {"batch": batch["id"], "fingerprint": item["fingerprint"]}
+        previous = item.pop("github_completion", None)
+        override = item.get("completion_override")
+        if proof:
+            item["github_completion"] = proof
+            if override != proof:
+                item.update(triage="handled", attention=False, queued=False, unread=False)
+        elif previous and override != previous and item["triage"] == "handled":
+            item.update(triage="attention", attention=True, unread=True)
+
+
+def feedback_body(body):
+    """Hide our standalone receipt markers without changing stored GitHub text."""
+    return re.sub(
+        r"(?m)^<!-- (?:pr-review generation=[^\s<>]+ head=[0-9a-f]{40,64}"
+        r"|pr-owner session=[0-9a-f]{24}) action=[^\s<>]+ -->[ \t]*(?:\r?\n[ \t]*)*\Z",
+        "", body).strip()
+
+
 class OwnerSession:
     def __init__(self, request):
         self.path = Path(require_text(request.get("session"), "session")).resolve()
@@ -150,6 +202,9 @@ class OwnerSession:
 
     def view(self, state=None):
         result = copy.deepcopy(state or self.load())
+        for item in result["feedback"]:
+            for comment in item.get("comments", []):
+                comment["display_body"] = feedback_body(comment["body"])
         result.update(session=str(self.path), revision=result.pop("sequence"))
         return result
 
@@ -200,17 +255,20 @@ def refresh(session, state):
         old = previous.pop(item["key"], {})
         if item["kind"] == "thread":
             item["diff_hunk"] = anchors.get(item["root_id"], {}).get("diff_hunk", "")
-        incoming = [c for c in item["comments"] if c["author"].lower() != viewer.lower() and c["body"].strip()]
-        actionable = any(c["body"].strip() for c in item["comments"])
+        incoming = [c for c in item["comments"] if c["author"].lower() != viewer.lower() and feedback_body(c["body"])]
+        actionable = any(feedback_body(c["body"]) for c in item["comments"])
         own_only = bool(actionable and not incoming)
         notification = fingerprint(item, viewer)
-        content = fingerprint(item)
-        if old.get("fingerprint") != content:
+        content = feedback_fingerprint(item, state, viewer)
+        if not old or feedback_fingerprint(old, state, viewer) != content:
             changed.add(item["key"])
         item.update(fingerprint=content, notification=notification,
                     triage=old.get("triage", "attention" if incoming else "available" if own_only else "handled"),
                     queued=old.get("queued", False), own_only=own_only,
                     unread=old.get("unread", bool(incoming)))
+        for field in ("github_completion", "completion_override"):
+            if field in old:
+                item[field] = old[field]
         # Older sessions kept own-only comments as non-actionable history.
         if own_only and "own_only" not in old and old.get("triage") == "handled" and not old.get("actionable"):
             item["triage"] = "available"
@@ -221,6 +279,9 @@ def refresh(session, state):
             latest.get(item["comments"][0]["author"].lower(), (None, None))[1] == item["key"])
         if item["change_requested"] and not old:
             item["triage"] = "attention"
+        if (not actionable and not item["change_requested"]
+                and any(c["body"].strip() for c in item["comments"])):
+            item.update(triage="handled", unread=False, queued=False)
         item["attention"] = item["triage"] == "attention" and bool(
             item["queued"] or item["unread"] or item["change_requested"] or
             (item["kind"] == "thread" and not item["is_resolved"]))
@@ -235,9 +296,13 @@ def refresh(session, state):
     for reply in state["replies"]:
         if reply["status"] != "published" and reply["source"] in changed:
             reply.update(status="unstaged", needs_attention="Discussion changed; inspect and acknowledge before staging.")
+    current = {i["key"]: i for i in items}
     for batch in state["batches"]:
-        if set(batch["items"]) & changed:
-            batch["discussion_stale"] = True
+        batch["discussion_stale"] = any(
+            key not in current or current[key].get("missing")
+            or current[key]["fingerprint"] != batch["fingerprints"].get(key)
+            for key in batch["items"])
+    reconcile_resolved_feedback(state, items)
     push_target = {"repository": target, "branch": branch}
     previous_target = state.get("push_target", {})
     if all(previous_target.get(k) == v for k, v in push_target.items()) and "remotes" in previous_target:

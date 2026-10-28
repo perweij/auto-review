@@ -35,8 +35,10 @@ def validate_plan(value, items):
         covered.extend(task["items"])
     if sorted(covered) != sorted(keys):
         raise ApiError("invalid_plan", "Plan must cover each selected feedback item exactly once.")
-    if any(dep not in found for task in tasks for dep in task["depends_on"]):
-        raise ApiError("invalid_plan", "Plan refers to an unknown prerequisite.")
+    unknown = [f"{task['id']} -> {dep}" for task in tasks for dep in task["depends_on"] if dep not in found]
+    if unknown:
+        raise ApiError("invalid_plan", "Unknown task prerequisites: " + "; ".join(unknown)
+                       + ". depends_on must use task IDs from this plan: " + ", ".join(found) + ".")
     ordered, done = [], set()
     while len(done) < len(found):
         ready = [t for t in found.values() if t["id"] not in done and set(t["depends_on"]) <= done]
@@ -177,6 +179,43 @@ def check_fresh(session, state, batch):
         raise ApiError("stale_discussion", "Selected feedback changed during the batch; inspect and replan unfinished work.")
 
 
+def plan_tasks(session, state, batch, keys):
+    items = session.items(state, keys)
+    rejected = batch.get("plan_rejections", [])
+    correction = {k: rejected[-1][k] for k in ("plan", "error")} if rejected else None
+    # Resume also explains a previous rejected plan, including pre-upgrade runs.
+    for attempt in reversed(batch["attempts"]):
+        if attempt.get("role") == "plan" and isinstance(attempt.get("result"), dict):
+            try:
+                validate_plan(attempt["result"], items)
+            except ApiError as exc:
+                correction = {"plan": attempt["result"], "error": str(exc)}
+            break
+    fingerprints = {i["key"]: i["fingerprint"] for i in items}
+    for number in range(3):
+        # Re-fetch context before every call; a correction cannot bypass freshness.
+        refresh(session, state)
+        if state["metadata"]["headRefOid"] != batch["remote_head"]:
+            raise ApiError("stale_source", "GitHub head changed during planning; reconcile before continuing.")
+        if any(i["fingerprint"] != fingerprints[i["key"]] for i in session.items(state, keys)):
+            raise ApiError("stale_discussion", "Selected feedback changed during planning; inspect and replan.")
+        data = context(session, state, batch, keys, batch["baseline"])
+        if correction:
+            data["plan_correction"] = correction
+        plan = models.invoke(session, state, batch, "plan", data)
+        try:
+            return plan, validate_plan(plan, items)
+        except ApiError as exc:
+            if exc.code != "invalid_plan":
+                raise
+            correction = {"plan": plan, "error": str(exc)}
+            batch.setdefault("plan_rejections", []).append({**copy.deepcopy(correction), "at": now()})
+            session.save(state)
+            if number == 2:
+                raise ApiError("invalid_plan", "Planning stopped after 3 invalid plans. " + str(exc)) from exc
+            emit("progress", message=f"Plan rejected: {exc} Requesting correction {number + 1}/2.")
+
+
 def execute(session, state, request):
     """Caller holds only the owner execution lock throughout inference."""
     if "auto_commit" in request and type(request["auto_commit"]) is not bool:
@@ -256,7 +295,12 @@ def execute(session, state, request):
                         if any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
                             task["status"] = "queued"
                 if batch["settings"] != state["settings"]:
-                    raise ApiError("settings_changed", "Restore the batch's saved provider settings before resuming it.")
+                    if batch.get("attempts") or batch.get("plans") or batch.get("tasks"):
+                        raise ApiError("settings_changed", "Model work has already started. Restore the batch's saved provider settings (shown in its details) before resuming it.")
+                    # Preflight may reject the initial choices before any model
+                    # work. Let that untouched batch use corrected settings.
+                    batch["settings"] = copy.deepcopy(state["settings"])
+                    session.save(state)
             else:
                 items = session.items(state, request.get("items"))
                 if any(not i["actionable"] for i in items):
@@ -280,9 +324,7 @@ def execute(session, state, request):
                 covered = {k for t in completed for k in t["items"]}
                 keys = [k for k in batch["items"] if k not in covered]
                 if keys:
-                    data = context(session, state, batch, keys, batch["baseline"])
-                    plan = models.invoke(session, state, batch, "plan", data)
-                    tasks = validate_plan(plan, session.items(state, keys))
+                    plan, tasks = plan_tasks(session, state, batch, keys)
                     prefix = f"p{len(batch['plans']) + 1}-"
                     for task in tasks:
                         task["id"] = prefix + task["id"]

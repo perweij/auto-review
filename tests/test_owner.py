@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_review.api import dispatch
 from pr_review.common import ApiError, atomic_json, digest, locked
 from pr_review.repository import Repository
-from pr_review.owner_state import OwnerSession
+from pr_review.owner_state import OwnerSession, feedback_body
 from pr_review import owner_commit, owner_completion, owner_fixes, owner_git, owner_providers, owner_publication
 from pr_review.providers import Runtime
 from pr_review.owner_cli import main as owner_cli
@@ -431,6 +431,174 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(view["replies"][0]["status"], "published")
         self.assertEqual(self.posts[0][1], "comments/999/replies")
 
+    def test_receipt_only_review_is_history_and_preserves_raw_body(self):
+        marker = f"<!-- pr-review generation=abc head={self.head} action=api-123 -->"
+        review = self.item("review:9", 9, "review")
+        review.update(state="COMMENTED")
+        review["comments"][0].update(author="author", body="\n\n" + marker)
+        self.feedback = [review]
+        # Simulate the state saved before receipt markers were recognized.
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        state["feedback"] = [{**copy.deepcopy(review), "actionable": True,
+                              "own_only": True, "triage": "available", "queued": True}]
+        session.save(state)
+        item = self.request("owner-refresh")["feedback"][0]
+        self.assertFalse(item["actionable"])
+        self.assertFalse(item["own_only"])
+        self.assertFalse(item["attention"])
+        self.assertEqual(item["triage"], "handled")
+        self.assertEqual(item["comments"][0]["display_body"], "")
+        self.assertEqual(item["comments"][0]["body"], "\n\n" + marker)
+        self.assertEqual(item["fingerprint"], digest([review["key"], review["comments"]]))
+        self.assertNotIn("display_body", session.load()["feedback"][0]["comments"][0])
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", items=[review["key"]])
+        self.assertEqual(caught.exception.code, "invalid_target")
+
+    def test_receipt_display_preserves_examples_and_other_html_comments(self):
+        marker = f"<!-- pr-review generation=abc head={self.head} action=api-123 -->"
+        for body in ("<!-- an ordinary HTML comment -->", "```html\n" + marker + "\n```",
+                     marker + "\nPlease investigate this marker."):
+            with self.subTest(body=body):
+                self.assertEqual(feedback_body(body), body)
+        self.assertEqual(feedback_body("Actual feedback\n\n" + marker + "\n"), "Actual feedback")
+        self.assertEqual(feedback_body("<!-- pr-owner session=" + "a" * 24 + " action=123 -->"), "")
+
+    def test_receipts_do_not_hide_real_feedback_or_change_request(self):
+        marker = f"<!-- pr-review generation=abc head={self.head} action=api-123 -->"
+        review = self.item("review:9", 9, "review")
+        review.update(state="CHANGES_REQUESTED")
+        review["comments"][0]["body"] = marker
+        self.feedback[0]["comments"][0]["body"] = "Please fix this\n\n" + marker
+        self.feedback.append(review)
+        items = {i["key"]: i for i in self.request("owner-refresh")["feedback"]}
+        self.assertTrue(items["thread:T1"]["actionable"])
+        self.assertEqual(items["thread:T1"]["comments"][0]["display_body"], "Please fix this")
+        self.assertTrue(items["review:9"]["change_requested"])
+        self.assertTrue(items["review:9"]["attention"])
+        self.assertFalse(items["review:9"]["actionable"])
+        self.assertEqual(items["review:9"]["comments"][0]["display_body"], "")
+
+    def test_failed_preflight_can_resume_with_corrected_settings(self):
+        with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")):
+            with self.assertRaises(ApiError):
+                self.fix()
+        batch = self.request("owner-read")["batches"][-1]
+        self.assertEqual(batch["attempts"], [])
+        self.assertEqual(batch["tasks"], [])
+        settings = copy.deepcopy(self.view["settings"])
+        settings["fix"]["model"] = "supported-fix"
+        settings["review"]["model"] = "supported-review"
+        self.request("owner-mutate", operation="settings", settings=settings)
+        view = self.request("owner-fix", batch=batch["id"])
+        self.assertEqual(len(view["batches"]), 1)
+        resumed = view["batches"][0]
+        self.assertEqual(resumed["id"], batch["id"])
+        self.assertEqual(resumed["settings"], settings)
+        self.assertEqual(resumed["baseline"], batch["baseline"])
+        self.assertEqual(resumed["items"], batch["items"])
+        self.assertEqual(resumed["status"], "ready")
+
+    def test_invalid_plan_is_corrected_before_any_fix_runs(self):
+        plans = []
+        def model(session, state, batch, role, context):
+            result = self.model(session, state, batch, role, context)
+            if role == "plan":
+                plans.append(copy.deepcopy(context))
+                if len(plans) < 3:
+                    result["tasks"][0]["depends_on"] = ["thread:T1"]
+            return result
+        with patch("pr_review.owner_providers.invoke", side_effect=model):
+            batch = self.fix()["batches"][-1]
+        self.assertEqual(batch["status"], "ready")
+        self.assertEqual([r for r, _ in self.calls], ["plan", "plan", "plan", "fix", "review", "review"])
+        self.assertEqual(len(batch["plan_rejections"]), 2)
+        self.assertIn("shared -> thread:T1", plans[1]["plan_correction"]["error"])
+        self.assertEqual(plans[1]["plan_correction"]["plan"]["tasks"][0]["depends_on"], ["thread:T1"])
+
+    def test_invalid_plan_retries_are_bounded_and_resume_gets_saved_error(self):
+        def invalid(session, state, batch, role, context):
+            self.assertEqual(role, "plan")
+            result = self.model(session, state, batch, role, context)
+            result["tasks"][0]["depends_on"] = ["thread:T1"]
+            return result
+        with patch("pr_review.owner_providers.invoke", side_effect=invalid), self.assertRaises(ApiError) as caught:
+            self.fix()
+        self.assertEqual(caught.exception.code, "invalid_plan")
+        batch = self.request("owner-read")["batches"][-1]
+        self.assertEqual(len(batch["plan_rejections"]), 3)
+        self.assertEqual(batch["status"], "paused")
+        self.assertEqual(batch["tasks"], [])
+        self.assertEqual(len(self.calls), 3)
+        self.assertFalse(self.git("status", "--porcelain", cwd=self.view["worktree"]))
+        self.request("owner-fix", batch=batch["id"])
+        self.assertIn("plan_correction", self.calls[3][1])
+        self.assertEqual(self.view["batches"][-1]["status"], "ready")
+
+    def test_old_rejected_plan_is_explained_when_resuming(self):
+        with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")), self.assertRaises(ApiError):
+            self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        plan = self.model(session, state, batch, "plan", {"feedback": state["feedback"]})
+        plan["tasks"][0]["depends_on"] = ["thread:T1"]
+        batch["attempts"].append({"role": "plan", "status": "complete", "result": plan})
+        session.save(state)
+        self.calls.clear()
+        self.request("owner-fix", batch=batch["id"])
+        self.assertEqual(self.calls[0][0], "plan")
+        self.assertIn("shared -> thread:T1", self.calls[0][1]["plan_correction"]["error"])
+
+    def test_plan_correction_stops_if_feedback_changes(self):
+        def invalid(*args):
+            result = self.model(*args)
+            result["tasks"][0]["depends_on"] = ["missing"]
+            self.feedback[0]["comments"][0]["body"] = "New requirements"
+            return result
+        with patch("pr_review.owner_providers.invoke", side_effect=invalid), self.assertRaises(ApiError) as caught:
+            self.fix()
+        self.assertEqual(caught.exception.code, "stale_discussion")
+        self.assertEqual([r for r, _ in self.calls], ["plan"])
+
+    def test_provider_failure_during_planning_is_not_retried(self):
+        with patch("pr_review.owner_providers.invoke", side_effect=ApiError("model_failed", "Provider failed")) as invoke:
+            with self.assertRaises(ApiError) as caught:
+                self.fix()
+        self.assertEqual(caught.exception.code, "model_failed")
+        self.assertEqual(invoke.call_count, 1)
+
+    def test_plan_correction_stops_if_pr_head_changes(self):
+        def invalid(*args):
+            result = self.model(*args)
+            result["tasks"][0]["depends_on"] = ["missing"]
+            self.metadata["headRefOid"] = "f" * 40
+            return result
+        with patch("pr_review.owner_providers.invoke", side_effect=invalid), self.assertRaises(ApiError) as caught:
+            self.fix()
+        self.assertEqual(caught.exception.code, "stale_source")
+        self.assertEqual([r for r, _ in self.calls], ["plan"])
+
+    def test_started_planning_keeps_saved_provider_settings(self):
+        def failed_plan(session, state, batch, role, context):
+            batch["attempts"].append({"role": role, "status": "failed"})
+            session.save(state)
+            raise ApiError("model_failed", "Planner failed")
+        with patch("pr_review.owner_providers.invoke", side_effect=failed_plan), self.assertRaises(ApiError):
+            self.fix()
+        batch = self.request("owner-read")["batches"][-1]
+        settings = copy.deepcopy(self.view["settings"])
+        settings["fix"]["model"] = "different"
+        self.request("owner-mutate", operation="settings", settings=settings)
+        with patch("pr_review.owner_providers.invoke") as invoke, self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", batch=batch["id"])
+        self.assertEqual(caught.exception.code, "settings_changed")
+        invoke.assert_not_called()
+        self.assertEqual(self.request("owner-read")["batches"][-1]["settings"], batch["settings"])
+        self.request("owner-mutate", operation="settings", settings=batch["settings"])
+        self.assertEqual(self.request("owner-fix", batch=batch["id"])["batches"][-1]["status"], "ready")
+
     def test_own_general_comment_can_be_queued_without_an_unread_alert(self):
         item = self.item("comment:999", 999, "comment")
         item["comments"][0]["author"] = "author"
@@ -796,6 +964,92 @@ class OwnerTest(unittest.TestCase):
         result = self.request("owner-publish", token=preview["token"])
         self.assertTrue(all(r["status"] == "published" for r in result["replies"]))
         self.assertEqual([p[1] for p in self.posts], ["comments/101/replies", "comments/102/replies"])
+
+    def publish_fix_with_thread_readback(self):
+        for item in self.feedback:
+            item["comments"][0]["author"] = "author"
+        self.request("owner-refresh")
+        self.fix()
+        self.commit_fix()
+        self.request("owner-associate")
+        preview = self.request("owner-prepare")
+        view = self.request("owner-publish", token=preview["token"])
+        for reply in view["replies"]:
+            receipt = reply["receipt"]
+            item = next(i for i in self.feedback if i["key"] == reply["source"])
+            item["comments"].append({"id": receipt["id"], "author": "author", "body": receipt["body"],
+                                     "url": receipt["html_url"], "created_at": "today", "updated_at": "today"})
+        return view
+
+    def test_confirmed_own_replies_do_not_stale_fix_and_resolved_items_finish(self):
+        view = self.publish_fix_with_thread_readback()
+        original = view["batches"][-1]["verified_fingerprints"]
+        # Simulate a refresh performed by the previous version.
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        state["batches"][-1]["discussion_stale"] = True
+        for item in state["feedback"]:
+            raw = next(i for i in self.feedback if i["key"] == item["key"])
+            item["comments"] = copy.deepcopy(raw["comments"])
+            item["fingerprint"] = digest([item["key"], item["comments"]])
+        session.save(state)
+        for item in self.feedback:
+            item["is_resolved"] = True
+        view = self.request("owner-refresh")
+        self.assertFalse(view["batches"][-1]["discussion_stale"])
+        for item in view["feedback"]:
+            self.assertEqual(item["fingerprint"], original[item["key"]])
+            self.assertEqual(len(item["comments"]), 2)  # Conversation text is retained.
+            self.assertEqual(item["triage"], "handled")
+            self.assertFalse(item["attention"])
+            self.assertIn("github_completion", item)
+
+    def test_resolved_completion_reopens_for_new_feedback_and_respects_manual_restore(self):
+        self.publish_fix_with_thread_readback()
+        self.feedback[0]["is_resolved"] = True
+        self.request("owner-refresh")
+        self.request("owner-mutate", operation="restore", items=["thread:T1"])
+        view = self.request("owner-refresh")
+        self.assertTrue(view["feedback"][0]["attention"])
+        self.assertEqual(view["feedback"][0]["triage"], "attention")
+        # A different automatically finished item must reopen for a new concern.
+        self.feedback[1]["is_resolved"] = True
+        self.request("owner-refresh")
+        self.feedback[1]["comments"].append({"id": 9999, "author": "reviewer", "body": "This still fails",
+                                           "url": "https://example.com/new", "created_at": "later", "updated_at": "later"})
+        view = self.request("owner-refresh")
+        self.assertTrue(view["feedback"][1]["attention"])
+        self.assertNotIn("github_completion", view["feedback"][1])
+        self.assertTrue(view["batches"][-1]["discussion_stale"])
+
+    def test_edited_own_receipt_is_a_real_feedback_change(self):
+        self.publish_fix_with_thread_readback()
+        self.feedback[0]["is_resolved"] = True
+        self.request("owner-refresh")
+        self.feedback[0]["comments"][-1]["body"] = "Actually, this needs more work"
+        view = self.request("owner-refresh")
+        self.assertTrue(view["batches"][-1]["discussion_stale"])
+        self.assertTrue(view["feedback"][0]["attention"])
+        self.assertNotIn("github_completion", view["feedback"][0])
+
+    def test_reopened_thread_returns_completed_fix_to_attention(self):
+        self.publish_fix_with_thread_readback()
+        self.feedback[0]["is_resolved"] = True
+        view = self.request("owner-refresh")
+        self.assertEqual(view["feedback"][0]["triage"], "handled")
+        self.feedback[0]["is_resolved"] = False
+        view = self.request("owner-refresh")
+        self.assertTrue(view["feedback"][0]["attention"])
+        self.assertEqual(view["feedback"][0]["triage"], "attention")
+        self.assertNotIn("github_completion", view["feedback"][0])
+        self.assertFalse(view["batches"][-1]["discussion_stale"])
+
+    def test_unrecognized_own_reply_is_not_filtered(self):
+        self.fix()
+        self.feedback[0]["comments"].append({"id": 9999, "author": "author", "body": "More investigation needed",
+                                           "url": "https://example.com/new", "created_at": "later", "updated_at": "later"})
+        view = self.request("owner-refresh")
+        self.assertTrue(view["batches"][-1]["discussion_stale"])
 
     def test_extra_changes_require_explicit_association(self):
         self.fix()
@@ -1514,6 +1768,16 @@ class OwnerTest(unittest.TestCase):
 
 
 class PlanTest(unittest.TestCase):
+    def test_feedback_enums_do_not_constrain_task_dependencies(self):
+        schema = owner_providers.output_schema("plan", ["thread:T1", "thread:T2"])
+        fields = schema["properties"]["tasks"]["items"]["properties"]
+        self.assertEqual(fields["items"]["items"]["enum"], ["thread:T1", "thread:T2"])
+        self.assertEqual(fields["depends_on"], {"type": "array", "items": {"type": "string"}})
+        self.assertEqual(fields["expected"]["items"]["properties"]["item"]["enum"], ["thread:T1", "thread:T2"])
+        self.assertNotIn("enum", owner_providers.PLAN["properties"]["tasks"]["items"]["properties"]["items"]["items"])
+        tasks = [self.task("t1", ["thread:T1"]), self.task("t2", ["thread:T2"], ["t1"])]
+        self.assertEqual(len(owner_fixes.validate_plan({"tasks": tasks}, [{"key": "thread:T1"}, {"key": "thread:T2"}])), 2)
+
     def task(self, identity, items, dependencies=()):
         return {"id": identity, "items": items, "depends_on": list(dependencies), "rationale": "Reason", "expected": [{"item": k, "outcome": "Result"} for k in items]}
 

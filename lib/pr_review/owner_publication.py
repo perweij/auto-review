@@ -39,6 +39,8 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
             issues.append({"item": key, "reason": "An explicit association differs from this fix; inspect its reply."})
             continue
         if not automatic and not all(workspace.ancestor(session, sha, remote) for sha in association["commits"]):
+            issues.append({"item": key, "kind": "awaiting_push",
+                           "reason": "Commit linked locally; push it, then associate again to create the reply."})
             continue
         repository = state["push_target"]["repository"]
         reason = None
@@ -52,9 +54,8 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
         if automatic and not existing and any(r["source"] == key and r["status"] != "published" for r in state["replies"]):
             reason = "An existing reply needs inspection; no duplicate was created."
         if reason:
-            if automatic:
-                issues.append({"item": key, "reason": reason})
-            elif not repository:
+            issues.append({"item": key, "reason": reason})
+            if not automatic and not repository:
                 raise ApiError("missing_head_repository", reason)
             continue
         body = "Fixed in " + ", ".join(f"[{sha[:12]}](https://{repository}/commit/{sha})" for sha in association["commits"]) + "."
@@ -80,8 +81,7 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
         extra = {"automatic": True, "awaiting_push": True, "push_confirmed": False,
                  "commit_repository": repository} if automatic else {}
         state["replies"].append(new_reply(item, body, batch=batch["id"], commits=association["commits"], status="staged", **extra))
-    if automatic:
-        batch["reply_issues"] = issues
+    batch["reply_issues"] = issues
     state.pop("prepared", None)
     return issues
 
