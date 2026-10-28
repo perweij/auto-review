@@ -30,7 +30,7 @@ def manual_reason(state, *, completed_history=False):
     if not state.get('mutation_tracking'):
         return 'Saved draft authorship is unknown. Finish this saved review in Emacs.'
     if state.get('manual_intervention') or state.get('documents') or any(
-            c.get('mutation_actor') == 'manual' or c.get('human_edited') or c.get('override')
+            c.get('human_edited') or c.get('override')
             or c.get('versions') or c.get('classification') == 'HUMAN' for c in state['comments']):
         return 'This review contains manual decisions. Finish it in Emacs.'
     return None
@@ -222,8 +222,7 @@ class AutomaticRun:
         try:
             publication.recover(session, state)
         except ApiError as exc:
-            from .processes import Cancelled
-            if isinstance(exc, Cancelled):
+            if exc.code == 'cancelled':
                 raise
             return self.finish('uncertain', str(exc), state)
         remaining = [a for a in actions(state) if a['status'] in OUTSTANDING]
@@ -276,8 +275,7 @@ class AutomaticRun:
                 try:
                     publication.repository_operation(session, 'validate', 'COMMENT')
                 except ApiError as exc:
-                    from .processes import Cancelled
-                    if isinstance(exc, Cancelled):
+                    if exc.code == 'cancelled':
                         raise
                     return self.finish('needs_attention', str(exc), state)
                 return self.finish('noop', 'Analysis completed; no new comments to publish.', state)
@@ -294,8 +292,7 @@ class AutomaticRun:
             try:
                 result = publication.publish(session, state, {'confirmation': prepared['confirmation']})
             except ApiError as exc:
-                from .processes import Cancelled
-                if isinstance(exc, Cancelled):
+                if exc.code == 'cancelled':
                     raise
                 result = {'complete': False, 'reason': str(exc)}
             if result['complete']:
