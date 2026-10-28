@@ -475,6 +475,122 @@ class AutomationTest(unittest.TestCase):
         with self.assertRaisesRegex(ApiError, 'manual decisions'):
             automation.guard_replacement(self.session)
 
+    def test_generation_guards_check_current_and_pending_manual_drafts(self):
+        self.saved()
+        store = self.replacement()
+        pending = Session({'session': str(store.root),
+                           'generation': automation.generation(store.path, store.manifest)})
+        state = pending.load()
+        state['comments'][0]['human_edited'] = True
+        pending.save(state)
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        with patch.object(publication, 'recover') as recover:
+            for check in (lambda: self.run.before_analysis(self.session.root),
+                          lambda: automation.check_existing(self.session.root)):
+                with self.assertRaisesRegex(ApiError, 'manual decisions'):
+                    check()
+            # Replacement guards inspect the current generation, not the candidate.
+            self.assertIsNone(automation.guard_replacement(self.session))
+            self.saved(lambda s: s['comments'][0].update(human_edited=True))
+            with self.assertRaisesRegex(ApiError, 'manual decisions'):
+                automation.guard_replacement(self.session)
+        recover.assert_not_called()
+
+    def test_generation_guards_skip_copied_and_absent_draft_ledgers(self):
+        clean = self.saved()
+        self.saved(lambda s: s['comments'][0].update(human_edited=True))
+        store = self.replacement()
+        self.session.save(clean)
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        for ledger in ('copied', 'absent'):
+            with self.subTest(ledger=ledger):
+                if ledger == 'absent':
+                    (store.path / 'publication/drafts.json').unlink()
+                    (store.path / 'publication/contributions.json').unlink()
+                before = {p: p.read_bytes() for p in (store.path / 'publication').iterdir()
+                          if p.is_file() and p.name != '.drafts.lock'}
+                with patch.object(publication, 'recover') as recover:
+                    self.assertIsNone(self.run.before_analysis(self.session.root))
+                    automation.check_existing(self.session.root)
+                    automation.guard_replacement(self.session)
+                recover.assert_not_called()
+                self.assertEqual(self.run.store.path, self.session.path)
+                self.assertEqual(before, {p: p.read_bytes() for p in (store.path / 'publication').iterdir()
+                                          if p.is_file() and p.name != '.drafts.lock'})
+
+    def test_generation_guard_recovers_and_checks_the_same_loaded_state(self):
+        load = Session.load
+        for manual_edit in (False, True):
+            with self.subTest(manual_edit=manual_edit):
+                state = self.saved()
+                state['batches'] = [{'actions': [dict(id='pending', status='ambiguous')]}]
+                self.session.save(state)
+                def recover(session, recovered):
+                    recovered['batches'][0]['actions'][0]['status'] = 'published'
+                    recovered['comments'][0]['human_edited'] = manual_edit
+                with patch.object(Session, 'load', autospec=True, side_effect=load) as loads, \
+                        patch.object(publication, 'recover', side_effect=recover) as recovery:
+                    if manual_edit:
+                        with self.assertRaisesRegex(ApiError, 'manual decisions'):
+                            self.run.before_analysis(self.session.root)
+                    else:
+                        self.assertIsNone(self.run.before_analysis(self.session.root))
+                self.assertEqual(loads.call_count, 1)
+                recovery.assert_called_once()
+                self.assertIs(self.run.state, recovery.call_args.args[1])
+                # Recovery in this test is deliberately in memory only.
+                self.assertEqual(automation.actions(self.session.load())[0]['status'], 'ambiguous')
+
+    def test_generation_guards_preserve_legacy_actions_without_contributions(self):
+        (self.session.path / 'publication/contributions.json').unlink()
+        atomic_json(self.session.path / 'publication/actions.json',
+                    [dict(id='pending', kind='review', event='COMMENT', status='failed')])
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        with patch.object(publication, 'recover') as recover:
+            for check in (lambda: automation.check_existing(self.session.root),
+                          lambda: automation.guard_replacement(self.session)):
+                with self.assertRaisesRegex(ApiError, 'unfinished batch'):
+                    check()
+            recover.assert_not_called()
+            result = self.run.before_analysis(self.session.root)
+        recover.assert_called_once()
+        self.assertEqual(result['outcome'], 'needs_attention')
+        self.assertEqual(automation.actions(recover.call_args.args[1])[0]['id'], 'pending')
+
+    def test_generation_preflight_recovers_pending_but_rechecks_do_not(self):
+        self.saved()
+        store = self.replacement()
+        pending = Session({'session': str(store.root),
+                           'generation': automation.generation(store.path, store.manifest)})
+        initial = pending.load()
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        cases = [('draft', False, None, 'needs_attention'),
+                 ('failed', True, None, 'partial'),
+                 ('submitting', False, None, 'uncertain'),
+                 ('ambiguous', False, None, 'uncertain'),
+                 ('failed', False, ApiError('network', 'Unavailable'), 'uncertain')]
+        for status, published, error, outcome in cases:
+            with self.subTest(status=status, published=published, error=error):
+                state = copy.deepcopy(initial)
+                batch = [dict(id='pending', status=status)]
+                if published:
+                    batch.insert(0, dict(id='posted', status='published'))
+                state['batches'] = [{'actions': batch}]
+                pending.save(state)
+                with patch.object(publication, 'recover', side_effect=error) as recover:
+                    with self.assertRaisesRegex(ApiError, 'unfinished batch'):
+                        automation.check_existing(self.session.root)
+                    recover.assert_not_called()
+                    result = self.run.before_analysis(self.session.root)
+                recover.assert_called_once()
+                self.assertEqual(recover.call_args.args[0].path, pending.path)
+                self.assertEqual(result['outcome'], outcome)
+                self.assertEqual(result['generation'], pending.id)
+
     def test_saved_log_is_session_scoped(self):
         self.run.bind(self.session)
         path = state_root() / 'operations' / ('a' * 32 + '.log')

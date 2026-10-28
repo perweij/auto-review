@@ -36,34 +36,55 @@ def manual_reason(state, *, completed_history=False):
     return None
 
 
-def guard_path(root, path):
-    """Caller holds the PR lock and this generation's draft lock."""
+def guard_path(root, path, *, controller=None):
+    """Return session, state, and any recovery stop under the PR and draft locks.
+
+    Only initial preflight supplies a controller to enable receipt recovery.
+    Replacement checks remain local, including the final promotion recheck.
+    """
     manifest = read_json(path / 'manifest.json', {})
     raw = read_json(path / 'publication/drafts.json')
     # A candidate can hold an unchanged copy of the preceding ledger. Check
     # the originating current generation instead of adopting that copy.
     if raw and raw.get('generation') != generation(path, manifest):
-        return
-    if not raw and not (path / 'publication/contributions.json').exists():
-        return
+        return None, None, None
+    if (not raw and not (path / 'publication/contributions.json').exists()
+            and not read_json(path / 'publication/actions.json', [])):
+        return None, None, None
     session = Session({'session': str(root), 'generation': generation(path, manifest)})
+    if controller:
+        controller.bind(session)
     state = session.load()
+    if controller:
+        controller.state = state
+        if any(a['status'] in OUTSTANDING for a in actions(state)):
+            result = controller.recover(session, state, 'Earlier publication has an unsent remainder. Finish it in Emacs.')
+            if result:
+                return session, state, result
     if any(a['status'] in OUTSTANDING for a in actions(state)):
         raise ApiError('automatic_handoff', 'Publication has an unfinished batch. Finish it in Emacs.')
     reason = manual_reason(state, completed_history=True)
     if reason:
         raise ApiError('automatic_handoff', reason)
+    return session, state, None
+
+
+def guard_generations(session, *, controller=None):
+    """Inspect current and pending generations while the caller holds the PR lock."""
+    for path in dict.fromkeys([session.current, session.pointer('.pending-review')]):
+        if path:
+            with locked(path / 'publication/.drafts.lock'):
+                _, _, result = guard_path(session.root, path, controller=controller)
+                if result:
+                    return result
+    return None
 
 
 def check_existing(root):
     """Called inside the analysis PR lock, before any replacement work."""
     if not _active.get() or not root:
         return
-    session = Session({'session': str(root)})
-    for path in dict.fromkeys([session.current, session.pointer('.pending-review')]):
-        if path:
-            with locked(path / 'publication/.drafts.lock'):
-                guard_path(session.root, path)
+    guard_generations(Session({'session': str(root)}))
 
 
 def guard_replacement(run):
@@ -214,23 +235,7 @@ class AutomaticRun:
         with locked(session.pr_lock):
             session = Session({'session': str(root)})
             self.bind(session)
-            for path in dict.fromkeys([session.current, session.pointer('.pending-review')]):
-                if not path:
-                    continue
-                manifest = read_json(path / 'manifest.json', {})
-                raw = read_json(path / 'publication/drafts.json')
-                if raw and raw.get('generation') != generation(path, manifest):
-                    continue
-                with locked(path / 'publication/.drafts.lock'):
-                    candidate = Session({'session': str(root), 'generation': generation(path, manifest)})
-                    self.bind(candidate)
-                    self.state = state = candidate.load()
-                    if any(a['status'] in OUTSTANDING for a in actions(state)):
-                        result = self.recover(candidate, state, 'Earlier publication has an unsent remainder. Finish it in Emacs.')
-                        if result:
-                            return result
-                    guard_path(session.root, path)
-        return None
+            return guard_generations(session, controller=self)
 
     def publish(self, session):
         self.bind(session)
