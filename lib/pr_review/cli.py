@@ -16,6 +16,8 @@ def parser():
     result.add_argument('-R', '--repo', dest='repository')
     result.add_argument('--no-publish', action='store_true', help='generate and retain reviews without opening the publication menu')
     result.add_argument('--auto-publish', action='store_true', help='analyse and publish COMMENT feedback without prompts; stop the whole batch if any finding needs attention')
+    result.add_argument('--suggested-changes', action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS,
+                        help='generate and separately verify self-contained GitHub code suggestions (default: off)')
     result.add_argument('--json', action='store_true', help='with --auto-publish, emit one JSON result on stdout and progress on stderr')
     result.add_argument('--resume', dest='session', help='explicit saved run, including an external state location')
     result.add_argument('--followup-thread', dest='followup_threads', action='append', default=[])

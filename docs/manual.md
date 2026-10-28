@@ -10,6 +10,7 @@ The [JSON API reference](api.md) describes the frontend/backend contract.
 - [Requirements and authentication setup](#requirements-and-authentication-setup)
 - [Running a review](#running-a-review)
 - [Automatic reviews](#automatic-reviews)
+- [Suggested changes](#suggested-changes)
 - [Configuration](#configuration)
 - [Live authentication checks](#live-authentication-checks)
 - [Verification policy](#verification-policy)
@@ -137,6 +138,75 @@ trust with `T`. Opening the buffer does not resume models or publish anything.
 Automatic run records live under the session's `automatic-runs/`, separately from
 generation drafts. Reports, drafts, generations, receipts, and prior run records
 are retained. A paused first analysis does not create an empty draft ledger.
+
+## Suggested changes
+
+Suggested changes are opt-in for both interactive and automatic reviews:
+
+```sh
+pr-review 123 --suggested-changes
+pr-review 123 --suggested-changes --auto-publish --json
+```
+
+The setting is saved with the review. Use `--no-suggested-changes` to disable
+it for subsequent analysis; existing saved drafts and history remain available.
+In Emacs reviewer setup, `R s` toggles suggestions, `R r` runs analysis, and
+`R P` explicitly runs analysis **and publishes automatically** as a COMMENT
+review. Automatic publication is never a saved default. These reviewer controls
+are separate from Owner mode's automatic fix-and-commit workflow.
+
+A suggestion replaces the exact inclusive line range attached to a new inline
+comment. The body explains the finding; a generated `suggestion` code fence
+contains the replacement. GitHub lets the PR owner inspect and apply it. The
+review tool itself does not commit or push the replacement.
+
+The first version supports one complete, independent fix per finding, within
+one contiguous RIGHT-side range of a single diff hunk. Multiline replacements
+and deletions are supported, including ranges in files already added by the PR.
+Thread replies, overall comments, combined findings, file creation/renaming,
+and fixes requiring coordinated changes elsewhere remain ordinary findings.
+Source must be regular UTF-8 text with LF endings and a final newline. Replacements
+containing a Markdown closing fence are rejected rather than published inaccurately.
+
+Generation follows discussion matching. Each proposed replacement then receives
+a **separate verification invocation**, using the configured processing provider,
+model, and effort. Verification runs against the exact replacement in an isolated
+checkout and follows the focused testing policy, even when synthesis uses `full`.
+Multiple active suggestions also receive a combined independence/interaction check.
+This adds model time and cost. Evidence explicitly distinguishes executed checks
+from acceptance by inspection; inspection-only acceptance requires a justification.
+Verification reduces risk but does not guarantee correctness.
+
+Both frontends show the exact target, before/after diff, evidence, and blockers:
+
+| Action | Emacs reviewer | Interactive CLI |
+| --- | --- | --- |
+| Inspect | Expand the finding | `i ID` |
+| Edit generated replacement | `S e`, then `C-c C-c` to save | `se ID` |
+| Verify active suggestions | `S v` | `sv` |
+| Remove suggestion, retain finding | `S k` | `sx ID` |
+
+Replacement text must retain its final newline; empty replacement text deletes
+the selected range. Editing explanation, replacement, or target unstages the draft
+and requires verification again. Stale editor saves retain the replacement buffer
+or CLI recovery file. Manual creation of suggestions is not supported yet. Raw
+suggestion fences pasted into ordinary bodies are blocked so they cannot bypass
+source checks and verification.
+
+An unsuitable complex fix can omit a suggestion without blocking its valid ordinary
+finding. An attached invalid, rejected, or uncertain suggestion blocks that comment;
+in automatic mode it blocks the **entire batch before publication**. Generation
+failures also remain visible and block publication. Resume interrupted analysis,
+edit and verify the replacement, remove the suggestion, or suppress the finding.
+If HEAD changed, rerun analysis against the new snapshot. Existing restrictions
+on automatic publication after manual intervention still apply: finish inspected
+manual changes interactively.
+
+Completed verification, candidates, evidence, and logs are retained with the saved
+review. Unchanged work is reused on resume, and publication receipts retain the
+existing retry and uncertain-submission recovery behavior. Repository tests use
+mocked GitHub APIs; validate actual GitHub rendering and application on a designated
+test PR before relying on unattended suggestions in a new deployment.
 
 ## Configuration
 

@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "properties": {
+    "reason": {
+      "type": "string"
+    },
+    "suggestion": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "RIGHT"
+                  ]
+                },
+                "start_line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "path",
+                "side",
+                "start_line",
+                "line"
+              ],
+              "additionalProperties": false
+            },
+            "original": {
+              "type": "string"
+            },
+            "replacement": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "original",
+            "replacement"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "reason",
+    "suggestion"
+  ],
+  "additionalProperties": false
+}

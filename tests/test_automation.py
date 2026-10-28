@@ -67,6 +67,33 @@ class AutomationTest(unittest.TestCase):
         state['comments'][0]['placement'] = dict(kind='reply', key='thread:test', root_id=88)
         self.session.save(state)
 
+    def test_invalid_suggestion_blocks_the_whole_batch_then_verified_payload_recovers(self):
+        from pr_review import suggestions
+        state = self.session.load()
+        comment = state['comments'][0]
+        target = self.session.git.anchor(comment['placement'])
+        comment['placement'] = target
+        comment['suggestion'] = dict(head=self.session.git.head, target=target,
+                                     original='first\n', replacement='fixed\n')
+        comment['suggestion_generation'] = {'status': 'generated'}
+        self.session.save(state)
+        github, posts = self.github_with_urls()
+        with patch.object(publication, 'repository_operation'), patch.object(publication, 'gh', side_effect=github):
+            result = self.automatic()
+        self.assertEqual(result['outcome'], 'needs_attention')
+        self.assertEqual(posts, [])
+        self.assertTrue(all(c['status'] == 'unstaged' for c in self.session.load()['comments']))
+        state = self.session.load()
+        comment = state['comments'][0]
+        comment['suggestion']['verification'] = dict(status='accepted', fingerprint=suggestions.identity(self.session, comment))
+        self.session.save(state)
+        with patch.object(publication, 'repository_operation'), patch.object(publication, 'gh', side_effect=github):
+            result = self.automatic()
+            self.assertEqual(result['outcome'], 'published')
+            self.assertEqual(self.automatic()['outcome'], 'noop')
+        self.assertEqual(len(posts), 1)
+        self.assertIn('```suggestion\nfixed\n```', posts[0][1]['comments'][0]['body'])
+
     def assert_saved_outcome(self, result):
         self.assertEqual(read_json(self.session.root / 'automatic-runs' / (result['operation_id'] + '.json')), result)
         operation = read_json(state_root() / 'operations' / (result['operation_id'] + '.json'))

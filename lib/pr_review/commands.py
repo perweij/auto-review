@@ -15,7 +15,7 @@ def comment_by_id(state, identity):
 
 def remember(comment):
     comment.setdefault("versions", []).append({"at": now(), **{k: copy.deepcopy(comment.get(k)) for k in
-        ("body", "placement", "override", "status", "provenance")}})
+        ("body", "placement", "override", "status", "provenance", "suggestion", "suggestion_generation", "suggestion_original_placement")}})
 
 
 def mutable(comment, state):
@@ -117,8 +117,20 @@ def mutate(session, state, request, *, actor="manual"):
         else:
             comment = new_comment(body, title, provenance=provenance)
             state["comments"].append(comment)
+        if request.get('document') is None:
+            saved = original if version is None else original['versions'][version]
+            for key in ('suggestion', 'suggestion_generation', 'suggestion_original_placement'):
+                if saved.get(key) is not None:
+                    comment[key] = copy.deepcopy(saved[key])
+                else:
+                    comment.pop(key, None)
+            if comment.get('suggestion'):
+                comment['placement'] = copy.deepcopy(saved['placement'])
+                comment['finding_ids'] = copy.deepcopy(original['finding_ids'])
+                comment['classification'] = original['classification']
+                comment['suggestion'].pop('verification', None)
         changed.append(comment["id"])
-    elif operation in ("stage", "unstage", "suppress", "restore", "edit", "placement", "automatic", "acknowledge"):
+    elif operation in ("stage", "unstage", "suppress", "restore", "edit", "placement", "automatic", "acknowledge", "suggestion-edit", "suggestion-remove"):
         ids = request.get("comments", [request.get("comment")])
         if not isinstance(ids, list) or not ids or len(ids) != len(set(ids)):
             raise ApiError("invalid_request", "Specify distinct comment IDs.")
@@ -143,11 +155,36 @@ def mutate(session, state, request, *, actor="manual"):
             elif operation == "acknowledge":
                 # Explicit individual inspection acknowledges fresh discussion; it does not stage.
                 comment.pop("needs_attention", None)
+            elif operation == 'suggestion-edit':
+                if not comment.get('suggestion'):
+                    raise ApiError('invalid_request', 'Select an existing generated suggestion.')
+                replacement = require_text(request.get('replacement'), 'replacement', empty=True)
+                remember(comment)
+                comment['suggestion']['replacement'] = replacement
+                comment['suggestion'].pop('verification', None)
+                comment['suggestion_generation'] = {'status': 'generated'}
+                comment.update(status='unstaged', human_edited=True)
+            elif operation == 'suggestion-remove':
+                remember(comment)
+                comment.pop('suggestion', None)
+                original = comment.pop('suggestion_original_placement', None)
+                if original:
+                    comment['placement'] = original
+                comment['suggestion_generation'] = {'status': 'removed', 'reason': 'Removed by reviewer; ordinary finding retained.'}
+                comment.update(status='unstaged', human_edited=True)
             else:
                 place = copy.deepcopy(comment["automatic"]) if operation == "automatic" else placement_for(session, state, request.get("placement"))
+                if comment.get('suggestion') and (place.get('kind') != 'inline' or place.get('side') != 'RIGHT'):
+                    raise ApiError('invalid_target', 'Remove the suggestion before moving this comment to an unsupported destination.')
                 if comment["placement"] != place or comment["override"] != (operation != "automatic"):
                     remember(comment)
                     comment.update(placement=place, override=operation != "automatic", status="unstaged")
+                    if comment.get('suggestion'):
+                        from .suggestions import source, lines
+                        comment['suggestion']['target'] = copy.deepcopy(place)
+                        comment['suggestion']['head'] = session.git.head
+                        comment['suggestion']['original'] = ''.join(lines(source(session, place['path']))[place['start_line'] - 1:place['line']])
+                        comment['suggestion'].pop('verification', None)
                     comment.pop("needs_attention", None)
             changed.append(identity)
     else:

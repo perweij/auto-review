@@ -185,7 +185,8 @@ class Session:
         atomic_json(self.file, state)
 
     def blockers(self, comment, state, *, bulk=False):
-        reasons = []
+        from .suggestions import blockers
+        reasons = blockers(self, comment, state, bulk=bulk)
         if comment.get("status") == "published":
             return ["Already published; create a follow-up instead."]
         if not comment.get("body", "").strip():
@@ -221,6 +222,11 @@ class Session:
         assessments = finding_assessments({} if self.manifest.get("analysis_kind") == "followup"
                                          else read_json(self.path / "reviews/synthesis.json", {}))
         for c in comments:
+            from .suggestions import preview, render
+            c['suggestion_preview'] = preview(c)
+            if c['suggestion_preview']:
+                c['suggestion_preview']['batch_verification'] = state.get('suggestion_batch', {})
+            c['publication_body'] = render(c)
             # Display metadata does not affect the draft revision, staging,
             # prepared publication, or any saved human wording.
             c.update(comment_assessment(c, assessments))

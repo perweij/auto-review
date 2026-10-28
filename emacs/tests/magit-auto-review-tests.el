@@ -1756,3 +1756,67 @@
             (with-current-buffer buffer
               (when magit-auto-review--editor (magit-auto-review--finish-edit)))
             (kill-buffer buffer)))))))
+
+(ert-deftest auto-review/suggestion-diff-and-inspection-evidence-are-visible ()
+  (auto-review-test-buffer
+   (setf (alist-get 'suggestion_preview (car (alist-get 'comments magit-auto-review--review)))
+         '((target . ((path . "source.txt") (start_line . 2) (line . 3)))
+           (diff . "--- original\n+++ replacement\n-old\n+fixed\n")
+           (verification . ((status . "accepted") (evidence . "Independent fix")
+                            (inspection_only_reason . "Text-only change")))
+           (batch_verification . ((status . "rejected") (evidence . "Interaction found")))))
+   (magit-auto-review--render)
+   (should (string-match-p "Suggested change · source.txt:2–3 · accepted" (buffer-string)))
+   (should (string-match-p "No executable checks run: Text-only change" (buffer-string)))
+   (should (string-match-p "Interaction found" (buffer-string)))
+   (should (eq (lookup-key magit-auto-review-mode-map "S") #'magit-auto-review-suggestion-menu))))
+
+(ert-deftest auto-review/suggestion-settings-are-opt-in-and-automatic-is-explicit ()
+  (let ((magit-auto-review-suggested-changes nil))
+    (should (eq (alist-get 'suggested_changes (magit-auto-review--default-settings)) :false)))
+  (let ((magit-auto-review-suggested-changes t))
+    (should (eq (alist-get 'suggested_changes (magit-auto-review--default-settings)) t)))
+  (should (transient-get-suffix 'magit-auto-review-setup-menu "s"))
+  (should (transient-get-suffix 'magit-auto-review-setup-menu "P")))
+
+(ert-deftest auto-review/automatic-action-uses-shared-controller ()
+  (auto-review-test-buffer
+   (let (request notified)
+     (cl-letf (((symbol-function 'magit-auto-review--start)
+                (lambda (r callback)
+                  (setq request r)
+                  (funcall callback '((outcome . "needs_attention") (reason . "Suggestion needs verification")))))
+               ((symbol-function 'magit-auto-review--notify) (lambda (text) (setq notified text))))
+       (magit-auto-review--launch-automatic-review '((suggested_changes . t)) nil))
+     (should (equal (alist-get 'command request) "automatic-review"))
+     (should (eq (alist-get 'suggested_changes request) t))
+     (should (string-match-p "needs_attention" notified))
+     (should-not magit-auto-review--run-settings))))
+
+(ert-deftest auto-review/suggestion-verification-and-removal-use-shared-backend ()
+  (auto-review-test-buffer
+   (auto-review-test-goto "p1")
+   (let (request)
+     (cl-letf (((symbol-function 'magit-auto-review--start)
+                (lambda (r _callback) (setq request r))))
+       (magit-auto-review-suggestion-verify))
+     (should (equal (alist-get 'command request) "verify-suggestions"))
+     (should (equal (alist-get 'revision request) "revision-1")))
+   (magit-auto-review-suggestion-remove)
+   (should (equal (alist-get 'operation (car auto-review-test-requests)) "suggestion-remove"))
+   (should (equal (alist-get 'comment (car auto-review-test-requests)) "p1"))))
+
+(ert-deftest auto-review/suggestion-stale-save-keeps-replacement-buffer ()
+  (let ((origin (generate-new-buffer " *suggestion-origin*")))
+    (unwind-protect
+        (with-temp-buffer
+          (magit-auto-review-suggestion-edit-mode)
+          (setq magit-auto-review--suggestion-origin origin
+                magit-auto-review--suggestion-request '((command . "mutate") (revision . "old")))
+          (insert "replacement\n")
+          (cl-letf (((symbol-function 'magit-auto-review--call)
+                     (lambda (_) (signal 'magit-auto-review-api-error '("Stale revision")))))
+            (should-error (magit-auto-review-suggestion-save) :type 'magit-auto-review-api-error))
+          (should (equal (buffer-string) "replacement\n"))
+          (should (buffer-modified-p)))
+      (kill-buffer origin))))

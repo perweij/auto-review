@@ -93,6 +93,24 @@
             "Review completed. g or N opens the latest results; previous drafts remain in h (history)."))
        (t "Review completed; this saved generation remains current."))))))
 
+(defun magit-auto-review--launch-automatic-review (settings catalogs)
+  "Run the shared automatic controller with explicit SETTINGS and CATALOGS."
+  (setq magit-auto-review--run-settings nil magit-auto-review--followup-request nil)
+  (magit-auto-review--start
+   (append (if magit-auto-review--session (magit-auto-review--request "automatic-review")
+             `((command . "automatic-review") (pr . ,magit-auto-review--target)
+               (cwd . ,default-directory) (repository . ,magit-auto-review--repository)))
+           settings `((catalogs . ,catalogs)))
+   (lambda (result)
+     (when (alist-get 'session result)
+       (setq magit-auto-review--session (alist-get 'session result)
+             magit-auto-review--new-ready t)
+       (unless (or magit-auto-review--editor magit-auto-review--history-view)
+         (magit-auto-review-refresh)))
+     (magit-auto-review--notify
+      (format "Automatic review %s: %s%s" (alist-get 'outcome result) (alist-get 'reason result)
+              (if (alist-get 'guidance result) (concat " " (alist-get 'guidance result)) ""))))))
+
 (defun magit-auto-review--analysis-completed (result)
   "Retire trust requests consumed by a successful analysis RESULT."
   (setq magit-auto-review--run-settings nil magit-auto-review--followup-request nil)
@@ -640,6 +658,76 @@
   "Build explanatory help for the section at point."
   (transient-parse-suffixes 'magit-auto-review-dispatch (magit-auto-review--context-help-lines)))
 
+(defvar-local magit-auto-review--suggestion-origin nil)
+(defvar-local magit-auto-review--suggestion-request nil)
+
+(defun magit-auto-review-suggestion-save ()
+  "Save replacement text using the original draft revision, retaining failed edits."
+  (interactive)
+  (unless (buffer-live-p magit-auto-review--suggestion-origin)
+    (user-error "The review buffer was closed; keep this replacement for recovery"))
+  (let* ((editor (current-buffer))
+         (origin magit-auto-review--suggestion-origin)
+         (request (append magit-auto-review--suggestion-request
+                          `((replacement . ,(buffer-substring-no-properties (point-min) (point-max))))))
+         (result (magit-auto-review--call request)))
+    (with-current-buffer origin
+      (magit-auto-review--accept (alist-get 'review result)))
+    (set-buffer-modified-p nil)
+    (quit-window nil)
+    (kill-buffer editor)
+    (pop-to-buffer origin)
+    (message "Replacement saved and unstaged. S v verifies before staging.")))
+
+(define-derived-mode magit-auto-review-suggestion-edit-mode text-mode "Suggestion"
+  "Edit an exact generated replacement.  Empty text deletes the selected range."
+  (setq-local header-line-format "Replacement only; retain final newline. C-c C-c saves; C-c C-k keeps buffer and returns."))
+(define-key magit-auto-review-suggestion-edit-mode-map (kbd "C-c C-c") #'magit-auto-review-suggestion-save)
+(define-key magit-auto-review-suggestion-edit-mode-map (kbd "C-c C-k") #'quit-window)
+
+(defun magit-auto-review-suggestion-edit ()
+  "Edit the selected generated replacement in a separate recovery buffer."
+  (interactive)
+  (magit-auto-review--require-current-draft)
+  (when (magit-auto-review--can-leave)
+    (magit-auto-review--editable)
+    (let* ((id (magit-auto-review--id))
+           (suggestion (alist-get 'suggestion (magit-auto-review--comment id)))
+           (origin (current-buffer))
+           (request (magit-auto-review--request "mutate" '(operation . "suggestion-edit") `(comment . ,id))))
+      (unless suggestion (user-error "Select a generated suggestion"))
+      (pop-to-buffer (generate-new-buffer "*Review suggestion replacement*"))
+      (magit-auto-review-suggestion-edit-mode)
+      (setq magit-auto-review--suggestion-origin origin magit-auto-review--suggestion-request request)
+      (insert (alist-get 'replacement suggestion))
+      (set-buffer-modified-p nil))))
+
+(defun magit-auto-review-suggestion-remove ()
+  "Remove the selected suggestion while keeping its ordinary finding."
+  (interactive)
+  (magit-auto-review--require-current-draft)
+  (when (magit-auto-review--can-leave)
+    (magit-auto-review--mutate "suggestion-remove" `(comment . ,(magit-auto-review--id)))))
+
+(defun magit-auto-review-suggestion-verify ()
+  "Verify active suggestions independently and together through the backend."
+  (interactive)
+  (when (magit-auto-review--can-leave)
+    (magit-auto-review--editable)
+    (magit-auto-review--start
+     (magit-auto-review--request "verify-suggestions")
+     (lambda (result)
+       (unless magit-auto-review--editor
+         (magit-auto-review--accept (alist-get 'review result)))
+       (magit-auto-review--notify "Suggestion verification finished. Inspect evidence and blockers before staging.")))))
+
+(transient-define-prefix magit-auto-review-suggestion-menu ()
+  "Inspect the displayed suggestion diff and manage its exact replacement."
+  ["Suggested changes"
+   ("e" "Edit generated replacement" magit-auto-review-suggestion-edit)
+   ("v" "Verify active suggestions (model)" magit-auto-review-suggestion-verify)
+   ("k" "Remove suggestion, retain finding" magit-auto-review-suggestion-remove)])
+
 (transient-define-prefix magit-auto-review-dispatch ()
   "Inspect, edit, stage, and publish contextual review comments."
   [:class transient-column :setup-children magit-auto-review--context-help]
@@ -648,6 +736,7 @@
     ("s" "Move to Staged" magit-auto-review-stage :if (lambda () (magit-auto-review--stage-context-p "unstaged")))
     ("u" "Move to Unstaged" magit-auto-review-unstage :if (lambda () (magit-auto-review--stage-context-p "staged")))
     ("e" "Edit displayed comment" magit-auto-review-edit :if magit-auto-review--draft-p)
+    ("S" "Suggested change: edit / verify / remove" magit-auto-review-suggestion-menu :if magit-auto-review--mutable-p)
     ("a" "Choose code/thread/overall attachment" magit-auto-review-placement :inapt-if (lambda () (not (magit-auto-review--draft-p))))
     ("k" "Exclude this draft from publication (Suppressed)" magit-auto-review-suppress :if (lambda () (and (magit-auto-review--draft-p) (magit-auto-review--status-p "unstaged" "staged"))))
     ("r" "Restore to Unstaged" magit-auto-review-restore :if (lambda () (magit-auto-review--stage-context-p "suppressed")))
@@ -679,6 +768,7 @@
     ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])
 
 (dolist (binding '(("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
+                   ("S" . magit-auto-review-suggestion-menu)
                    ("o" . magit-auto-review-send-to-owner)
                    ("B" . magit-auto-review-pull-requests)
                    ("C" . magit-auto-review-conversations)

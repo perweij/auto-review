@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "evidence": {
+      "type": "string"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "command",
+          "result",
+          "passed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "inspection_only_reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "accepted",
+    "evidence",
+    "checks",
+    "inspection_only_reason"
+  ],
+  "additionalProperties": false
+}

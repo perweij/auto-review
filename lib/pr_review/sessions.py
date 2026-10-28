@@ -8,7 +8,7 @@ from .common import ApiError, locked, now, read_json, state_root
 from .events import emit
 from .storage import hash_bytes, hash_file, pointer, write_json, sync_directory
 
-DIRECTORIES = ('context', 'prompts', 'reviews', 'publication', 'logs', 'discussion')
+DIRECTORIES = ('context', 'prompts', 'reviews', 'publication', 'logs', 'discussion', 'suggestions')
 
 
 def say(message):

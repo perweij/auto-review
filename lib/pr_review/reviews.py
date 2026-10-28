@@ -362,6 +362,9 @@ def execute(request, *, confirm_trust=None):
                         pipeline.independent(run, 'codex')
                     pipeline.synthesis(run)
                     ready = pipeline.contributions(run)
+                    if ready and configuration['suggested_changes']:
+                        from .suggestions import generate
+                        generate(run)
                 run.manifest['status'] = 'complete' if ready else 'paused'
                 if ready:
                     from .automation import manual_completion

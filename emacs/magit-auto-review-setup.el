@@ -8,6 +8,7 @@
 ;;; Code:
 (require 'magit-auto-review)
 (declare-function magit-auto-review--launch-review "magit-auto-review-actions" (settings &optional trusted-snapshot catalogs))
+(declare-function magit-auto-review--launch-automatic-review "magit-auto-review-actions" (settings catalogs))
 
 (defcustom magit-auto-review-reviewers '("claude" "codex")
   "Default enabled reviewers for new reviews."
@@ -98,7 +99,8 @@
     (codex_model . ,magit-auto-review-codex-model)
     (claude_effort . ,magit-auto-review-claude-effort)
     (codex_effort . ,magit-auto-review-codex-effort)
-    (synthesis_tests . ,magit-auto-review-synthesis-tests)))
+    (synthesis_tests . ,magit-auto-review-synthesis-tests)
+    (suggested_changes . ,(if magit-auto-review-suggested-changes t :false))))
 
 (defun magit-auto-review-run ()
   "Configure this review, then explicitly run or resume it."
@@ -232,6 +234,16 @@
     (magit-auto-review--setup-stop)
     (magit-auto-review--launch-review settings nil (magit-auto-review--catalogs-for-request))))
 
+(defun magit-auto-review-setup-submit-automatic ()
+  "Explicitly analyse and publish a COMMENT review without staging prompts."
+  (interactive)
+  (unless (magit-auto-review--setup-ready-p)
+    (user-error "Choose supported reviewer models and efforts first"))
+  (let ((settings (copy-tree magit-auto-review--setup-settings))
+        (catalogs (magit-auto-review--catalogs-for-request)))
+    (magit-auto-review--setup-stop)
+    (magit-auto-review--launch-automatic-review settings catalogs)))
+
 (defun magit-auto-review--catalogs-for-request ()
   "Encode metadata arrays explicitly for the JSON transport."
   (mapcar
@@ -286,13 +298,19 @@
     (lambda () (interactive) (magit-auto-review--choice-open 'processing_provider)) :transient t
     :inapt-if (lambda () (= (length (alist-get 'reviewers magit-auto-review--setup-settings)) 1)))
    ("t" (lambda () (magit-auto-review--setup-label 'synthesis_tests "Testing"))
-    (lambda () (interactive) (magit-auto-review--choice-open 'synthesis_tests)) :transient t)]
+    (lambda () (interactive) (magit-auto-review--choice-open 'synthesis_tests)) :transient t)
+   ("s" (lambda () (format "Suggested changes: %s"
+                           (if (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings)) "on" "off")))
+    (lambda () (interactive)
+      (setf (alist-get 'suggested_changes magit-auto-review--setup-settings)
+            (if (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings)) :false t))) :transient t)]
   [:class transient-column :setup-children magit-auto-review--setup-info]
   [:description (lambda () (format "PR #%s · %s"
                                   (or (alist-get 'pr magit-auto-review--review) magit-auto-review--target)
                                   (or (alist-get 'repository magit-auto-review--review)
                                       magit-auto-review--repository "current repository")))
    ("r" "Run/resume" magit-auto-review-setup-submit :inapt-if (lambda () (not (magit-auto-review--setup-ready-p))))
+   ("P" "Run and publish automatically (COMMENT)" magit-auto-review-setup-submit-automatic :inapt-if (lambda () (not (magit-auto-review--setup-ready-p))))
    ("g" "Refresh choices / retry" magit-auto-review-refresh-choices :transient t)
    ("q" "Cancel" transient-quit-one)])
 

@@ -39,6 +39,10 @@ the full-suite permission applies only to synthesis.
 These are model instructions, not an enforced process timeout."
   :type '(choice (const "focused") (const "full")) :group 'magit-auto-review)
 
+(defcustom magit-auto-review-suggested-changes nil
+  "Generate and separately verify self-contained GitHub suggestions in new reviews."
+  :type 'boolean :group 'magit-auto-review)
+
 (defface magit-auto-review-anchor '((t :inherit highlight :weight bold))
   "Exact lines to which the comment is attached." :group 'magit-auto-review)
 (defface magit-auto-review-finding '((t :inherit default :weight bold))
@@ -384,13 +388,34 @@ A different automatic operation makes the saved log current again.")
                     (if (magit-auto-review--true-p (alist-get 'composing comment)) "New unsaved" "Your draft"))
                   (if (equal (alist-get 'kind (alist-get 'placement comment)) "reply") " reply" " comment")))
         (unless (equal (alist-get 'status comment) "published")
-          (insert (propertize "Only this text is published from this item. e edits; k excludes this draft; ? explains.\n"
+          (insert (propertize "This text and any attached suggestion are published. e edits; k excludes; S manages suggestions.\n"
                               'face 'shadow)))
         (let ((start (point)))
           (insert (alist-get 'body comment))
           (put-text-property start (point) 'auto-review-body identity)
           ;; Empty drafts still have a stable insertion position.
           (insert (propertize "\n" 'auto-review-body-end identity 'rear-nonsticky t))))
+      (when-let ((suggestion (alist-get 'suggestion_preview comment)))
+        (let* ((target (alist-get 'target suggestion))
+               (verification (alist-get 'verification suggestion)))
+          (magit-insert-section (review-suggestion identity)
+            (magit-insert-heading
+             (format "Suggested change · %s:%s–%s · %s"
+                     (alist-get 'path target) (alist-get 'start_line target) (alist-get 'line target)
+                     (or (alist-get 'status verification) "verification required")))
+            (insert (alist-get 'diff suggestion) "\n"
+                    (or (alist-get 'evidence verification) "Use S v to verify active suggestions.") "\n")
+            (dolist (check (alist-get 'checks verification))
+              (insert (format "%s: %s\n" (alist-get 'command check) (alist-get 'result check))))
+            (when-let ((reason (alist-get 'inspection_only_reason verification)))
+              (unless (string-empty-p reason)
+                (insert "No executable checks run: " reason "\n")))
+            (when-let ((batch (alist-get 'batch_verification suggestion)))
+              (insert (format "Combined verification: %s. %s\n"
+                              (alist-get 'status batch) (or (alist-get 'evidence batch) ""))))
+            (insert "S e edits replacement; S v verifies; S k removes suggestion, retaining finding.\n"))))
+      (when-let ((reason (alist-get 'reason (alist-get 'suggestion_generation comment))))
+        (insert (propertize (concat "Suggestion: " reason "\n") 'face 'shadow)))
       (when after
         (insert "\n")
         (magit-auto-review--insert-code

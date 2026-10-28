@@ -4,7 +4,8 @@ from .state import Session, discover
 
 DEFAULTS = {"reviewers": ["claude", "codex"], "processing_provider": "claude",
             "claude_model": "fable", "codex_model": "gpt-6-astra",
-            "claude_effort": "high", "codex_effort": "high", "synthesis_tests": "focused"}
+            "claude_effort": "high", "codex_effort": "high", "synthesis_tests": "focused",
+            "suggested_changes": False}
 
 
 def from_manifest(manifest):
@@ -19,7 +20,9 @@ def from_manifest(manifest):
 
 
 def validate(settings):
-    result = {k: settings[k] for k in DEFAULTS}
+    result = {k: settings.get(k, default) for k, default in DEFAULTS.items()}
+    if type(result['suggested_changes']) is not bool:
+        raise ApiError('invalid_request', 'suggested_changes must be a boolean.')
     reviewers = result["reviewers"]
     if (not isinstance(reviewers, list) or not reviewers or
             any(p not in ("claude", "codex") for p in reviewers) or len(set(reviewers)) != len(reviewers)):

@@ -343,8 +343,22 @@ and the [roadmap](../docs/roadmap.md#interactive-owner-fixes) for planned intera
 `q` to cancel. `C-u R` opens the same menu. Saved reviews retain their own settings;
 new reviews use `magit-auto-review-reviewers`, `magit-auto-review-claude-model`,
 `magit-auto-review-codex-model`, the corresponding `*-effort` variables,
-`magit-auto-review-processing-provider`, and `magit-auto-review-synthesis-tests`.
+`magit-auto-review-processing-provider`, `magit-auto-review-synthesis-tests`,
+and `magit-auto-review-suggested-changes` (default nil).
 Menu changes do not alter these defaults.
+
+In reviewer setup, `s` toggles suggested changes. `r` runs analysis for inspection;
+`P` explicitly runs and publishes automatically as COMMENT, stopping the whole
+batch if any finding or attached suggestion needs attention. This publication
+choice is not saved as a default.
+
+Suggested changes appear with their replacement range, before/after diff, and
+verification evidence. Use `S e` to edit a generated replacement, `S v` to verify
+active suggestions, or `S k` to remove the suggestion while keeping the finding.
+The replacement editor uses `C-c C-c` to save; `C-c C-k` returns while retaining
+its buffer. Edits unstage the draft and require verification again. Failed or
+interrupted work is retained. See [suggested changes](../docs/manual.md#suggested-changes)
+for eligibility, verification cost, and recovery.
 
 Inside an individual review, `g` reloads that PR's saved results and `R r`
 reruns that same PR. To review another PR, use `B`, refresh the list with `g`,
