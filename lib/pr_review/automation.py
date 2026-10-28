@@ -112,10 +112,16 @@ class AutomaticRun:
         self.operation = operation
         self.store = None
         self.root = None
+        self.state = None
+        self.state_generation = None
         self.record = dict(operation_id=operation['operation_id'], log_path=operation['log_path'],
                            started_at=now(), outcome='running', affected=[], receipts=[])
 
     def bind(self, store):
+        identity = (store.root, generation(store.path, store.manifest))
+        if identity != self.state_generation:
+            self.state = None
+            self.state_generation = identity
         self.store, self.root = store, store.root
         self.operation.update(session=str(self.root), common=store.manifest['git_common_dir'],
                               pr=str(store.manifest['pr']))
@@ -132,7 +138,7 @@ class AutomaticRun:
         receipts = []
         if state:
             receipts = [c.get('receipt', {}).get('html_url') for c in state['comments'] if c.get('receipt')]
-            receipts += [a.get('result', {}).get('html_url') for a in actions(state) if a['status'] == 'published']
+            receipts += [a['result'].get('html_url') for a in actions(state) if a.get('result')]
         self.record.update(outcome=outcome, exit_code=fields.pop('exit_code', EXIT_CODES[outcome]), reason=reason,
                            finished_at=now(), receipts=sorted({u for u in receipts if u}),
                            guidance='Open this PR in Emacs. Inspect attention items; R r resumes analysis, P opens publication and recovery, L shows the saved log.', **fields)
@@ -143,8 +149,30 @@ class AutomaticRun:
         emit('progress', message=reason)
         return dict(self.record)
 
+    def interrupt(self, exit_code):
+        # A signal observed while leaving the operation cannot undo a result
+        # that was already confirmed and saved.
+        if self.record['outcome'] != 'running':
+            return dict(self.record)
+        state = self.state
+        remaining = [a for a in actions(state) if a['status'] in OUTSTANDING] if state else []
+        outcome = 'interrupted'
+        reason = 'Automatic review interrupted; saved work and publication intents are retained.'
+        if any(a['status'] in ('submitting', 'ambiguous') for a in remaining):
+            outcome = 'uncertain'
+            reason = 'Automatic review interrupted during publication; submission is uncertain. Inspect publication recovery in Emacs before retrying.'
+        elif remaining and (any(a['status'] == 'published' for a in actions(state))
+                            or any(c.get('receipt') for c in state['comments'])):
+            outcome = 'partial'
+            reason = 'Automatic review interrupted after confirmed publication; finish the unsent remainder in Emacs.'
+        affected = [{'id': a['id'], 'status': a['status'], 'comment_ids': a.get('comment_ids', [])}
+                    for a in remaining]
+        return self.finish(outcome, reason, state, affected=affected,
+                           exit_code=exit_code if outcome == 'interrupted' else EXIT_CODES[outcome])
+
     def recover(self, session, state, reason):
         """One read-back pass; never prepare or resend here."""
+        self.state = state
         try:
             publication.recover(session, state)
         except ApiError as exc:
@@ -175,9 +203,9 @@ class AutomaticRun:
                     continue
                 with locked(path / 'publication/.drafts.lock'):
                     candidate = Session({'session': str(root), 'generation': generation(path, manifest)})
-                    state = candidate.load()
+                    self.bind(candidate)
+                    self.state = state = candidate.load()
                     if any(a['status'] in OUTSTANDING for a in actions(state)):
-                        self.bind(candidate)
                         result = self.recover(candidate, state, 'Earlier publication has an unsent remainder. Finish it in Emacs.')
                         if result:
                             return result
@@ -188,7 +216,7 @@ class AutomaticRun:
         self.bind(session)
         with locked(session.pr_lock), locked(session.lock):
             session = Session({'session': str(session.root), 'generation': session.id})
-            state = session.load()
+            self.state = state = session.load()
             if (session.path != session.current or session.pointer('.pending-review')
                     or session.manifest.get('status') != 'complete'
                     or session.manifest.get('analysis_kind', 'full') != 'full'
@@ -275,8 +303,7 @@ def _execute(request, controller):
         return controller.publish(session)
     except (ApiError, OSError, ValueError, KeyboardInterrupt, EOFError) as exc:
         if isinstance(exc, Cancelled) or isinstance(exc, (KeyboardInterrupt, EOFError)):
-            return controller.finish('interrupted', 'Automatic review interrupted; saved work and publication intents are retained.',
-                                     exit_code=exc.details.get('exit_code', 130) if isinstance(exc, Cancelled) else 130)
+            return controller.interrupt(exc.details.get('exit_code', 130) if isinstance(exc, Cancelled) else 130)
         code = exc.code if isinstance(exc, ApiError) else 'execution_failed'
         attention = code in ('automatic_handoff', 'confirmation_required', 'stale_revision', 'historical',
                              'not_ready', 'incomplete_review', 'incomplete_discussion', 'integrity_failed', 'snapshot_changed',
@@ -303,5 +330,10 @@ def run(request):
         # result even when cancellation arrives during the final local writes.
         if controller is None:
             raise
-        return controller.finish('interrupted', 'Automatic review interrupted; saved work and publication intents are retained.',
-                                 exit_code=exc.details['exit_code'])
+        result = controller.interrupt(exc.details['exit_code'])
+        # operation() has already saved the signal's status and exit code.
+        # Keep its record consistent with the retained publication outcome.
+        operation.update(exit_code=result['exit_code'],
+                         status='cancelled' if result['outcome'] == 'interrupted' else 'stopped')
+        atomic_json(state_root() / 'operations' / (operation['operation_id'] + '.json'), operation)
+        return result

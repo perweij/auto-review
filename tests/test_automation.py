@@ -2,11 +2,13 @@
 import copy
 from pathlib import Path
 import shutil
+import signal
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, call, patch
 
 import test_api
-from pr_review import automation, publication
+from pr_review import automation, processes, publication
 from pr_review.application import dispatch
 from pr_review.commands import mutate
 from pr_review.common import ApiError, atomic_json, digest, read_json, state_root
@@ -37,6 +39,165 @@ class AutomationTest(unittest.TestCase):
         with patch.object(publication, 'repository_operation'), patch.object(publication, 'gh', side_effect=github):
             result = self.run.publish(self.session)
         return result, posts
+
+    def automatic(self, execute_error=None):
+        from pr_review import models, reviews, settings
+        from pr_review.repository import Repository
+        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock)
+        with patch.object(Repository, 'resolve', return_value=repo), \
+                patch('pr_review.sessions.locate', return_value=(self.session.root, self.f.repo)), \
+                patch.object(settings, 'resolve', return_value={'settings': settings.DEFAULTS}), \
+                patch.object(models, 'discover'), patch.object(models, 'validate_selection'), \
+                patch.object(reviews, 'execute', return_value=self.session, side_effect=execute_error):
+            return automation.run({'pr': 7})
+
+    def github_with_urls(self):
+        github, posts = self.f.fake_github()
+        def call(*args, **kwargs):
+            result = github(*args, **kwargs)
+            for receipt in result if isinstance(result, list) else [result]:
+                receipt['html_url'] = f"https://test/receipt/{receipt['id']}"
+            return result
+        return call, posts
+
+    def reply_then_review(self):
+        state = self.session.load()
+        state['discussion']['items'] = [dict(key='thread:test', kind='thread', root_id=88, can_reply=True)]
+        atomic_json(self.f.path / 'discussion/snapshot-a/discussion.json', state['discussion'])
+        state['comments'][0]['placement'] = dict(kind='reply', key='thread:test', root_id=88)
+        self.session.save(state)
+
+    def assert_saved_outcome(self, result):
+        self.assertEqual(read_json(self.session.root / 'automatic-runs' / (result['operation_id'] + '.json')), result)
+        operation = read_json(state_root() / 'operations' / (result['operation_id'] + '.json'))
+        self.assertEqual(operation['exit_code'], result['exit_code'])
+        self.assertEqual(operation['status'], 'cancelled' if result['outcome'] == 'interrupted' else 'stopped')
+
+    def test_late_cancellation_preserves_published_and_noop_records(self):
+        github, posts = self.github_with_urls()
+        finish = automation.AutomaticRun.finish
+        completed = []
+        def late_signal(controller, *args, **kwargs):
+            result = finish(controller, *args, **kwargs)
+            completed.append(copy.deepcopy(result))
+            processes._cancellation.get().request(signal.SIGTERM)
+            return result
+        for outcome in ('published', 'noop'):
+            with self.subTest(outcome=outcome), \
+                    patch.object(publication, 'repository_operation'), \
+                    patch.object(publication, 'gh', side_effect=github), \
+                    patch.object(automation.AutomaticRun, 'finish', autospec=True, side_effect=late_signal):
+                result = self.automatic()
+                self.assertEqual(result, completed[-1])
+                self.assertEqual(result['outcome'], outcome)
+                self.assertEqual(result['exit_code'], 0)
+                self.assertEqual(result['receipts'], ['https://test/receipt/200', 'https://test/receipt/300',
+                                                      'https://test/receipt/301'])
+                self.assert_saved_outcome(result)
+        self.assertEqual(len(completed), 2)
+        self.assertEqual(len(posts), 1)
+
+    def test_cancellation_during_submission_retains_confirmed_receipts(self):
+        self.reply_then_review()
+        github, posts = self.github_with_urls()
+        def cancel_review(session, endpoint, payload=None, **kwargs):
+            if endpoint == 'reviews' and payload is not None:
+                processes._cancellation.get().request(signal.SIGTERM)
+                processes._cancellation.get().check()
+            return github(session, endpoint, payload, **kwargs)
+        with patch.object(publication, 'repository_operation'), \
+                patch.object(publication, 'gh', side_effect=cancel_review):
+            result = self.automatic()
+        self.assertEqual(result['outcome'], 'uncertain')
+        self.assertEqual(result['exit_code'], 5)
+        self.assertEqual(result['receipts'], ['https://test/receipt/101'])
+        pending = automation.actions(self.session.load())[1]
+        self.assertEqual(result['affected'], [dict(id=pending['id'], status='ambiguous', comment_ids=['p2'])])
+        self.assertEqual(len(posts), 1)
+        self.assert_saved_outcome(result)
+
+    def test_cancellation_between_posts_reports_partial_with_unsent_remainder(self):
+        self.reply_then_review()
+        github, posts = self.github_with_urls()
+        def cancel_after_reply(session, operation, verdict='COMMENT'):
+            if operation == 'validate' and any(a['status'] == 'published' for a in automation.actions(session.load())):
+                processes._cancellation.get().request(signal.SIGINT)
+                processes._cancellation.get().check()
+        with patch.object(publication, 'repository_operation', side_effect=cancel_after_reply), \
+                patch.object(publication, 'gh', side_effect=github):
+            result = self.automatic()
+        self.assertEqual(result['outcome'], 'partial')
+        self.assertEqual(result['exit_code'], 4)
+        self.assertEqual(result['receipts'], ['https://test/receipt/101'])
+        pending = automation.actions(self.session.load())[1]
+        self.assertEqual(result['affected'], [dict(id=pending['id'], status='draft', comment_ids=['p2'])])
+        self.assertEqual(len(posts), 1)
+        self.assert_saved_outcome(result)
+
+    def test_cancellation_during_inline_receipt_lookup_keeps_parent_review_url(self):
+        github, posts = self.github_with_urls()
+        def cancel_lookup(session, endpoint, *args, **kwargs):
+            if endpoint == 'reviews/200/comments':
+                raise processes.Cancelled(signal.SIGTERM)
+            return github(session, endpoint, *args, **kwargs)
+        with patch.object(publication, 'repository_operation'), \
+                patch.object(publication, 'gh', side_effect=cancel_lookup):
+            result = self.automatic()
+        self.assertEqual(result['outcome'], 'uncertain')
+        self.assertEqual(result['receipts'], ['https://test/receipt/200'])
+        self.assertEqual(result['affected'][0]['status'], 'ambiguous')
+        self.assertEqual(len(posts), 1)
+        self.assert_saved_outcome(result)
+
+    def test_cancellation_during_recovery_preserves_state_and_does_not_resend(self):
+        initial = self.session.load()
+        for status, outcome, code in (('submitting', 'uncertain', 5), ('ambiguous', 'uncertain', 5),
+                                      ('failed', 'partial', 4)):
+            with self.subTest(status=status):
+                state = copy.deepcopy(initial)
+                state['batches'] = [{'actions': [dict(id='sent', kind='reply', status='ambiguous', comment_ids=['p1'],
+                                                     target={'root_id': 88}, marker='saved-marker', viewer='reviewer'),
+                                                dict(id='pending', kind='review', status=status, comment_ids=['p2'])]}]
+                self.session.save(state)
+                def recover_then_cancel(session, endpoint, *, pages):
+                    if endpoint == 'comments':
+                        return [dict(id=101, user={'login': 'reviewer'}, body='saved-marker', in_reply_to_id=88,
+                                     html_url='https://test/recovered')]
+                    raise processes.Cancelled(signal.SIGTERM)
+                with patch.object(publication, 'gh', side_effect=recover_then_cancel) as github:
+                    result = self.automatic()
+                self.assertEqual(result['outcome'], outcome)
+                self.assertEqual(result['exit_code'], code)
+                self.assertEqual(result['receipts'], ['https://test/recovered'])
+                self.assertEqual(result['affected'], [dict(id='pending', status=status, comment_ids=['p2'])])
+                self.assertEqual(github.call_args_list, [call(ANY, 'comments', pages=True), call(ANY, 'reviews', pages=True)])
+                self.assertEqual(self.session.load()['comments'][0]['receipt']['html_url'], 'https://test/recovered')
+                self.assert_saved_outcome(result)
+
+    def test_analysis_cancellation_retains_signal_exit_code(self):
+        result = self.automatic(execute_error=processes.Cancelled(signal.SIGHUP))
+        self.assertEqual(result['outcome'], 'interrupted')
+        self.assertEqual(result['exit_code'], 129)
+        self.assertEqual(result['receipts'], [])
+        self.assertEqual(result['affected'], [])
+        self.assert_saved_outcome(result)
+
+    def test_rebinding_generation_clears_old_publication_state(self):
+        self.run.bind(self.session)
+        state = self.session.load()
+        state['batches'] = [{'actions': [dict(id='old', status='ambiguous')]}]
+        self.run.state = state
+        self.run.bind(Session({'session': str(self.session.root)}))
+        self.assertIs(self.run.state, state)
+        # Analysis mutates its Store in place before observe() rebinds it.
+        store = SimpleNamespace(root=self.session.root, path=self.session.path, manifest=self.session.manifest)
+        self.run.bind(store)
+        store.path = self.session.path / 'new-generation'
+        self.run.bind(store)
+        result = self.run.interrupt(130)
+        self.assertIsNone(self.run.state)
+        self.assertEqual(result['outcome'], 'interrupted')
+        self.assertEqual(result['affected'], [])
 
     def generated_duplicates(self, *ids):
         file = self.f.path / 'publication/contributions.json'
