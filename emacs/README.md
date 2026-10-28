@@ -421,6 +421,32 @@ been replaced.
 
 ## Publish what is staged
 
+Reviews started with `pr-review PR --auto-publish` share these saved drafts.
+Opening one in a fresh Emacs session shows the last automatic outcome, current
+attention, and whether analysis itself is unfinished. A paused replacement is
+identified separately from the previous completed review still on display.
+After manual analysis completes, the earlier automatic outcome is marked
+superseded; its log stays available, and its old trust request is retired.
+Attention links reveal the affected finding and its exact reason; headings mark
+both correction requirements and findings requiring individual judgment.
+
+Inspect uncertain findings or resolved/outdated discussions, then press `s` on
+the individual draft to accept it, or `k` to exclude it. Use `a` for placement,
+`e` for wording, and `i` after inspecting changed discussion. `R r` resumes saved
+analysis, `T` explicitly trusts a saved agent-configuration snapshot, and `L`
+opens the saved automatic-operation log through the backend, preferring progress
+from a newer operation started in this buffer even after it finishes or fails.
+If the saved log cannot be retrieved, `L` reports the error and opens frontend
+progress instead. `P` provides
+publication and recovery for uncertain/failed submissions. Confirmed posts remain
+Published. Opening or navigating the buffer performs no models or GitHub calls.
+
+After manual decisions, finish publication here with `P p`. Automatic mode stops
+instead of publishing an unresolved batch or taking over unpublished manual work.
+Its historical stop message remains available while the current attention list
+updates as you resolve items. The automatic whole-batch rule does not restrict
+your deliberate manual staging selections.
+
 Expand Staged to inspect the exact wording in code/conversation context. The
 heading shows **your** verdict; the model suggestion is separate. `v` (also in
 `P`) opens a chooser for Comment, Request changes, or Approve. This is one overall

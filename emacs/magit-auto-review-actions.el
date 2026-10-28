@@ -32,7 +32,10 @@
 (defun magit-auto-review--start (request callback)
   "Run explicit REQUEST asynchronously and deliver CALLBACK in this buffer."
   (when (process-live-p magit-auto-review--process) (user-error "An operation is already running; use the log or cancel command"))
-  (setq magit-auto-review--progress "Starting" magit-auto-review--operation nil)
+  (setq magit-auto-review--progress "Starting" magit-auto-review--operation nil
+        magit-auto-review--frontend-log-context
+        (list magit-auto-review--session
+              (alist-get 'operation_id (alist-get 'automation magit-auto-review--review))))
   (magit-auto-review--header)
   (setq magit-auto-review--process
         (magit-auto-review--async
@@ -73,6 +76,7 @@
            (when catalogs `((catalogs . ,catalogs)))
            (when trusted-snapshot `((trusted_snapshot . ,trusted-snapshot))))
    (lambda (result)
+     (magit-auto-review--analysis-completed result)
      (if magit-auto-review--session
          (setq magit-auto-review--new-ready
                (not (equal magit-auto-review--generation (alist-get 'generation result))))
@@ -89,23 +93,50 @@
             "Review completed. g or N opens the latest results; previous drafts remain in h (history)."))
        (t "Review completed; this saved generation remains current."))))))
 
+(defun magit-auto-review--analysis-completed (result)
+  "Retire trust requests consumed by a successful analysis RESULT."
+  (setq magit-auto-review--run-settings nil magit-auto-review--followup-request nil)
+  (when (and (equal (alist-get 'status result) "complete")
+             (not magit-auto-review--history-view)
+             (not (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review))))
+    (when (alist-get 'automation magit-auto-review--review)
+      (setf (alist-get 'superseded (alist-get 'automation magit-auto-review--review)) t
+            (alist-get 'pending (alist-get 'analysis magit-auto-review--review)) nil)
+      (when (equal magit-auto-review--generation (alist-get 'generation result))
+        (setf (alist-get 'status (alist-get 'displayed (alist-get 'analysis magit-auto-review--review))) "complete"))
+      (unless magit-auto-review--editor (magit-auto-review--render)))))
+
 (defun magit-auto-review-trust-config ()
   "Confirm the exact agent-configuration snapshot reported by the backend."
   (interactive)
   (let ((buffer (get-buffer "*Auto-review progress*")) data)
-    (when buffer
+    ;; A review or follow-up retry launched in this buffer can have a newer
+    ;; snapshot than the historical CLI outcome.  Otherwise use the saved outcome.
+    (when (and buffer (or magit-auto-review--run-settings
+                          magit-auto-review--followup-request))
       (with-current-buffer buffer
         (save-excursion
           (goto-char (point-max))
           (when (re-search-backward "^{.*\"confirmation_required\".*}$" nil t)
             (setq data (magit-auto-review--json (match-string-no-properties 0)))))))
+    (unless data
+      (when-let ((run (alist-get 'automation magit-auto-review--review)))
+        (when (and (not (magit-auto-review--true-p (alist-get 'superseded run)))
+                   (not magit-auto-review--history-view)
+                   (not (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review)))
+                   (equal (alist-get 'error_code run) "confirmation_required"))
+          (setq data `((snapshot . ,(alist-get 'trusted_snapshot run))
+                       (paths . ,(string-join (alist-get 'agent_config_paths run) "\n")))))))
     (unless data (user-error "No agent-configuration confirmation is pending; inspect L for the actual failure"))
     (when (yes-or-no-p (format "Trust agent configuration at %s?\n%s" (alist-get 'snapshot data) (alist-get 'paths data)))
       (if magit-auto-review--followup-request
           (let ((request (copy-tree magit-auto-review--followup-request)))
             (setf (alist-get 'trusted_snapshot request) (alist-get 'snapshot data))
             (magit-auto-review--launch-followup request))
-        (unless magit-auto-review--run-settings (user-error "Open R and configure the review first"))
+        (unless magit-auto-review--run-settings
+          (setq magit-auto-review--run-settings
+                (alist-get 'settings (magit-auto-review--call
+                                      `((command . "settings") (session . ,magit-auto-review--session))))))
         (magit-auto-review--launch-review magit-auto-review--run-settings (alist-get 'snapshot data))))))
 
 (defun magit-auto-review-cancel-operation ()
@@ -119,6 +150,28 @@
 (defun magit-auto-review-log ()
   "Show operation and publication feedback; q returns to the review."
   (interactive)
+  (let* ((operation (alist-get 'operation_id (alist-get 'automation magit-auto-review--review)))
+         (result (when (and operation
+                            (not (process-live-p magit-auto-review--process))
+                            (not (equal magit-auto-review--frontend-log-context
+                                        (list magit-auto-review--session operation))))
+                   (condition-case error
+                       (magit-auto-review--call (magit-auto-review--request "review-log" `(operation_id . ,operation)))
+                     (error
+                      (message "%s; showing frontend progress" (magit-auto-review--error-message error))
+                      nil)))))
+    (if result
+        (progn
+          (pop-to-buffer (get-buffer-create "*Auto-review saved log*"))
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert (alist-get 'text result)))
+          (special-mode)
+          (goto-char (point-max)))
+      (magit-auto-review--show-progress-log))))
+
+(defun magit-auto-review--show-progress-log ()
+  "Show frontend operation feedback at the end of the progress buffer."
   (pop-to-buffer (get-buffer-create "*Auto-review progress*"))
   (special-mode)
   (goto-char (point-max)))
@@ -546,7 +599,7 @@
 
 (defun magit-auto-review--uncertain-publication-p ()
   "Whether publication recovery is relevant."
-  (cl-some (lambda (batch) (cl-some (lambda (action) (member (alist-get 'status action) '("submitting" "ambiguous")))
+  (cl-some (lambda (batch) (cl-some (lambda (action) (member (alist-get 'status action) '("submitting" "ambiguous" "failed")))
                                    (alist-get 'actions batch)))
            (alist-get 'batches magit-auto-review--review)))
 

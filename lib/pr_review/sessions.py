@@ -82,7 +82,7 @@ class Store:
             root = Path(tempfile.mkdtemp(prefix=f'pr-{repo.pr}-', dir=parent))
             self.manifest = dict(format_version=2, repository=repo.identity, pr=repo.pr, url=repo.url,
                 git_common_dir=str(repo.common), worktree=str(worktree), run_id=root.name, created_at=now(),
-                status='running', phases={}, publication={'status': 'not_published'}, warnings=[], generated_files=[], removed_environment={})
+                status='running', phases={}, publication={'status': 'not_published'}, warnings=[], generated_files=[], removed_environment={}, draft_mutations_tracked=True)
             self.root = self.path = root
             self.reset_directories(DIRECTORIES)
             self.save()
@@ -108,6 +108,8 @@ class Store:
                 self.finish_publication_reset()
         self.original_manifest = copy.deepcopy(self.manifest)
         self.original_prompts = {p.name.removesuffix('-prompt.txt'): p.read_bytes() for p in (self.path / 'prompts').glob('*-prompt.txt')}
+        from .automation import observe
+        observe(self)
 
     @property
     def current(self):
@@ -122,6 +124,8 @@ class Store:
     def save(self):
         self.manifest['updated_at'] = now()
         write_json(self.path / 'manifest.json', self.manifest)
+        from .automation import observe
+        observe(self)
 
     def reload(self):
         self.manifest = read_json(self.path / 'manifest.json', {})
@@ -154,6 +158,8 @@ class Store:
         # Copy under the same lock as draft saves: no half-written ledger, and
         # the last human edit stays attached to the generation it belongs to.
         with locked(previous / 'publication/.drafts.lock', wait=True):
+            from .automation import guard_replacement
+            guard_replacement(self)
             self.reload()
             self.pin(previous, self.manifest.get('snapshot', {}))
             history = Path(str(self.root) + '-history')
@@ -166,7 +172,7 @@ class Store:
                 else:
                     (candidate / name).mkdir()
             self.path = candidate
-            self.manifest.update(session_directory=str(self.root), attempt=dict(status='building', previous=str(previous)))
+            self.manifest.update(session_directory=str(self.root), attempt=dict(status='building', previous=str(previous)), draft_mutations_tracked=True)
             self.manifest.pop('publication_reset', None)
             for obj, key in ((self.manifest.get('discussion', {}), 'path'), (self.manifest.get('reassessment', {}), 'input'), (self.manifest.get('reassessment', {}), 'discussion')):
                 if isinstance(obj.get(key), str) and obj[key].startswith(str(previous) + '/'):
@@ -277,6 +283,8 @@ class Store:
             if record.get('status') != 'completed' or not path.is_file() or record.get('output_hash') != hash_file(path):
                 raise ApiError('incomplete_review', 'Replacement review is incomplete or changed; previous review remains current')
         with locked(self.current / 'publication/.drafts.lock', wait=True):
+            from .automation import guard_replacement
+            guard_replacement(self)
             self.manifest['attempt']['status'] = 'ready'
             self.save()
             pointer(self.root, '.current-review', self.path)

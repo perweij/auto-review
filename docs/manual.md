@@ -9,6 +9,7 @@ The [JSON API reference](api.md) describes the frontend/backend contract.
 
 - [Requirements and authentication setup](#requirements-and-authentication-setup)
 - [Running a review](#running-a-review)
+- [Automatic reviews](#automatic-reviews)
 - [Configuration](#configuration)
 - [Live authentication checks](#live-authentication-checks)
 - [Verification policy](#verification-policy)
@@ -69,6 +70,73 @@ Settings are retained per review, including testing policy and effort. Resume us
 the pending/current generation's settings unless explicitly overridden. Changing
 only the processing provider reuses compatible independent reports. Completed
 reviews and human edits remain available in history if a replacement fails.
+
+## Automatic reviews
+
+```sh
+pr-review 123 --auto-publish
+pr-review 123 --auto-publish --reviewers codex --codex-model gpt-6-luna --codex-effort medium --json
+pr-review 123 --auto-publish --resume /absolute/path/to/run --json
+```
+
+`--auto-publish` authorizes publication for this invocation only. It never opens
+a menu or asks a question, even on a terminal. Ordinary CLI and Emacs runs keep
+their explicit staging and confirmation workflow. The flag cannot be combined
+with `--no-publish` or `--followup-thread`; `--json` requires `--auto-publish`.
+Settings use backend defaults, saved pending/current settings, then explicit
+flags. Enabled providers' model/effort choices are validated from fresh metadata.
+
+The completed analysis must be current. Automatically suppressed duplicates and
+confirmed published comments are excluded; all remaining findings must pass bulk
+staging checks. An uncertain/revisit finding, resolved/outdated thread reply,
+missing/invalid placement, empty comment, partially covered finding, or changed
+discussion needing inspection stops the entire batch before staging. No findings,
+or only duplicates/already published findings, produces a successful no-op after
+freshness validation. No completion comment is posted.
+
+Eligible comments are staged and published with COMMENT only. Model approval or
+request-changes recommendations are not adopted. Saved manual verdicts and
+unpublished manual decisions require completion in Emacs. Older drafts with
+unknown mutation authorship also require Emacs; read-only inspection does not
+count as a manual decision. Completed historical manual work does not permanently
+prevent a later automatic generation.
+
+Inline comments form a review; thread replies are separate requests. A failure
+or a context change between requests can therefore leave partial publication.
+The automatic run reads receipts back once after a submission failure, but does
+not resend. Later automatic invocations also check outstanding intent before
+analysis and leave an unsent or uncertain remainder for Emacs. Confirmed comments
+and verdicts are not repeated to finish the remainder. Receipt-based duplicate
+prevention covers retries of the same generation; across new analysis generations,
+avoiding equivalent findings depends on model discussion matching.
+
+Progress goes to stderr. With `--json`, stdout contains one final object with
+`outcome`, `exit_code`, `reason`, `affected`, and `receipts`, plus available
+`session`, `generation`, `operation_id`, `log_path`, and recovery `guidance`.
+`affected` contains comment IDs and reasons. Trust failures also include
+`trusted_snapshot` and `agent_config_paths`; no blanket trust is inferred.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | `published` (including confirmed receipt recovery) or `noop` |
+| 1 | Execution failure |
+| 2 | Invalid command-line arguments |
+| 3 | Needs attention, including paused analysis or an unsent batch |
+| 4 | Confirmed partial publication with an unsent remainder |
+| 5 | Publication remains uncertain; takes precedence over partial success |
+| 128 + signal | Interrupted, for example 130 for Ctrl-C |
+
+Open the same PR in Emacs to continue. A persistent summary identifies the stop
+and links to affected findings. Inspect and individually stage with `s`, exclude
+with `k`, correct placement with `a`, or edit with `e`. For changed discussion,
+inspect it and acknowledge with `i` before staging. `R r` resumes incomplete
+analysis; `P` offers publication and receipt recovery; `L` reads the saved operation
+log. Agent-configuration failures retain the exact snapshot and paths for explicit
+trust with `T`. Opening the buffer does not resume models or publish anything.
+
+Automatic run records live under the session's `automatic-runs/`, separately from
+generation drafts. Reports, drafts, generations, receipts, and prior run records
+are retained. A paused first analysis does not create an empty draft ledger.
 
 ## Configuration
 

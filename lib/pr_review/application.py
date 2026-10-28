@@ -14,7 +14,7 @@ def dispatch(request):
     if operation == "capabilities":
         from .owner import COMMANDS
         return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup", *COMMANDS]}
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":
@@ -28,6 +28,9 @@ def dispatch(request):
     if operation == "run":
         return operations.run(request)
     session = Session(request)
+    if operation == 'review-log':
+        from .automation import review_log
+        return review_log(session, request)
     if operation == "followup":
         with locked(session.lock):
             session.check_write(request, session.load())

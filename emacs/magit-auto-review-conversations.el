@@ -6,6 +6,7 @@
 (require 'magit-auto-review)
 (declare-function magit-auto-review--compose-comment "magit-auto-review-actions" (title placement &optional body))
 (declare-function magit-auto-review--start "magit-auto-review-actions" (request callback))
+(declare-function magit-auto-review--analysis-completed "magit-auto-review-actions" (result))
 (declare-function magit-auto-review--mutable-p "magit-auto-review-actions" ())
 (defvar-local magit-auto-review--conversation-origin nil)
 (defvar-local magit-auto-review--followup-request nil)
@@ -189,6 +190,7 @@
   (setq magit-auto-review--followup-request (copy-tree request))
   (magit-auto-review--start
    request (lambda (result)
+             (magit-auto-review--analysis-completed result)
              (setq magit-auto-review--new-ready (not (equal magit-auto-review--generation (alist-get 'generation result))))
              (magit-auto-review--notify "Follow-up completed. g opens the assessments; earlier work remains in history."))))
 

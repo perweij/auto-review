@@ -36,7 +36,8 @@ def discover(request):
         session = Session({"session": str(file.parent)})
         sessions.append({"session": str(session.root), "repository": m["repository"], "pr": m["pr"],
                          "url": m.get("url"), "generation": session.id,
-                         "head": session.manifest.get("snapshot", {}).get("head"), "created_at": m.get("created_at")})
+                         "head": session.manifest.get("snapshot", {}).get("head"), "created_at": m.get("created_at"),
+                         "automation": session.automation_summary()})
     return {"sessions": sorted(sessions, key=lambda x: x.get("created_at") or "", reverse=True)}
 
 
@@ -132,7 +133,10 @@ class Session:
             classification = proposal.get("classification", basis.get("classification", "UNCERTAIN"))
             all_posted = bool(ids) and all(i in covered for i in ids)
             status = "published" if all_posted else "suppressed" if classification == "DUPLICATE" else "unstaged"
-            body = (basis if fresh else proposal).get("body_md") or "\n\n".join(f.get("body_md", "") for f in fs)
+            finding_body = "\n\n".join(f.get("body_md", "") for f in fs)
+            body = (basis if fresh else proposal).get("body_md") or finding_body
+            # Empty generated bodies (notably duplicates) use the same display fallback.
+            generated_body = basis.get("body_md", body) or finding_body
             comments.append({"id": proposal["id"], "title": "; ".join(f["title"] for f in fs) or "Review comment",
                              "body": body, "placement": placement, "automatic": copy.deepcopy(placement),
                              "override": False, "status": status, "classification": classification,
@@ -141,9 +145,10 @@ class Session:
                              "explanation": basis.get("explanation", ""),
                              "discussion_keys": basis.get("discussion_keys", []),
                              "partial_coverage": any(i in covered for i in ids) and not all_posted,
-                             "human_edited": body != basis.get("body_md", body), "versions": [], "receipt": None})
+                             "human_edited": body != generated_body, "versions": [], "receipt": None})
         recommendation = synthesis.get("recommendation") if self.manifest.get("analysis_kind") == "followup" else synthesis.get("recommendation", "COMMENT")
         return {"format_version": 1, "generation": self.id, "sequence": 0,
+                "mutation_tracking": bool(self.manifest.get('draft_mutations_tracked')),
                 "created_at": now_from_manifest(self.manifest), "comments": comments,
                 "verdict": "COMMENT",
                 "verdict_submitted": False, "verdict_requested": False, "batches": [] if fresh else import_legacy(self.path, self.git.head),
@@ -203,7 +208,9 @@ class Session:
         elif placement.get("kind") != "review":
             reasons.append("Choose a code location, thread, or explicit overall assessment.")
         if bulk and comment.get("classification") in ("REVISIT", "UNCERTAIN", "DUPLICATE"):
-            reasons.append("This comment requires individual judgment before staging.")
+            reasons.append({"REVISIT": "This finding revisits an existing discussion; inspect and stage individually or exclude it.",
+                            "UNCERTAIN": "This finding is uncertain; inspect and stage individually or exclude it.",
+                            "DUPLICATE": "This finding duplicates existing discussion; inspect it before restoring and staging individually."}[comment['classification']])
         if comment.get("needs_attention"):
             reasons.append(comment["needs_attention"])
         return reasons
@@ -239,6 +246,7 @@ class Session:
             context["participated"] = any(c.get("author", "").lower() == self.manifest.get("viewer", "").lower()
                                           for c in thread.get("comments", []))
         return {**state, "comments": comments, "thread_contexts": thread_contexts, "operations": active,
+                "automation": self.automation_summary(), "analysis": self.analysis_summary(),
                 "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
                              "threads": self.manifest.get("followup_threads", [])},
                 "review_status": workflow.status(self), "followup_assessments": workflow.assessments(self, state),
@@ -247,6 +255,21 @@ class Session:
                 "pending_generation": generation(pending, read_json(pending / "manifest.json", {})) if pending else None,
                 "repository": self.manifest["repository"], "pr": self.manifest["pr"], "url": self.manifest.get("url"),
                 "snapshot": self.manifest.get("snapshot"), "verdicts": self.verdicts(state)}
+
+    def automation_summary(self):
+        from .automation import summary
+        return summary(self)
+
+    def analysis_summary(self):
+        def describe(path):
+            m = read_json(path / 'manifest.json', {})
+            return dict(generation=generation(path, m), status=m.get('status'),
+                        attempt_status=m.get('attempt', {}).get('status'),
+                        phases={k: v.get('status') for k, v in m.get('phases', {}).items()},
+                        discussion={k: m.get('discussion', {}).get(k) for k in ('complete', 'error')},
+                        publication=m.get('publication', {}).get('status'))
+        pending = self.pointer('.pending-review')
+        return dict(displayed=describe(self.path), pending=describe(pending) if pending else None)
 
     def verdicts(self, state):
         pr = (state.get("checked") or {}).get("pr", read_json(self.path / "context/pr.json", {}))
