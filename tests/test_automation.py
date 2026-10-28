@@ -38,6 +38,15 @@ class AutomationTest(unittest.TestCase):
             result = self.run.publish(self.session)
         return result, posts
 
+    def generated_duplicates(self, *ids):
+        file = self.f.path / 'publication/contributions.json'
+        ledger = read_json(file)
+        for proposal in ledger['proposals']:
+            if proposal['id'] in ids:
+                proposal.update(classification='DUPLICATE', body_md='')
+                proposal['basis'].update(classification='DUPLICATE', body_md='')
+        atomic_json(file, ledger)
+
     def test_comment_publication_and_repeat_noop(self):
         result, posts = self.publish()
         self.assertEqual(result['outcome'], 'published')
@@ -79,13 +88,56 @@ class AutomationTest(unittest.TestCase):
             self.assertFalse(posts)
 
     def test_automatic_duplicates_and_empty_findings_are_noops(self):
-        self.saved(lambda s: [c.update(status='suppressed', classification='DUPLICATE') for c in s['comments']])
+        self.generated_duplicates('p1', 'p2')
+        comments = self.session.load()['comments']
+        self.assertEqual([c['body'] for c in comments], ['Comment 1', 'Comment 2'])
+        self.assertTrue(all(c['status'] == 'suppressed' and not c['human_edited'] for c in comments))
         result, posts = self.publish()
         self.assertEqual(result['outcome'], 'noop')
+        self.assertEqual(result['exit_code'], 0)
         self.assertFalse(posts)
         self.saved(lambda s: s.update(comments=[]))
         result, posts = self.publish()
         self.assertEqual(result['outcome'], 'noop')
+        self.assertFalse(posts)
+
+    def test_generated_duplicate_does_not_block_mixed_publication(self):
+        self.generated_duplicates('p1')
+        result, posts = self.publish()
+        self.assertEqual(result['outcome'], 'published')
+        self.assertEqual(result['exit_code'], 0)
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(len(posts[0][1]['comments']), 1)
+        self.assertEqual(posts[0][1]['comments'][0]['body'].split('\n\n<!--')[0], 'Comment 2')
+        duplicate, published = self.session.load()['comments']
+        self.assertEqual(duplicate['status'], 'suppressed')
+        self.assertFalse(duplicate['human_edited'])
+        self.assertEqual(published['status'], 'published')
+
+    def test_generated_duplicate_does_not_block_replacement_before_publication(self):
+        self.generated_duplicates('p1')
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        self.assertIsNone(self.run.before_analysis(self.session.root))
+        self.assertIsNone(automation.guard_replacement(self.session))
+        self.assertFalse(self.session.file.exists())
+
+    def test_edited_duplicate_still_requires_manual_completion(self):
+        self.generated_duplicates('p1')
+        file = self.f.path / 'publication/contributions.json'
+        ledger = read_json(file)
+        ledger['proposals'][0]['body_md'] = 'Human duplicate wording'
+        atomic_json(file, ledger)
+        state = self.saved()
+        self.assertTrue(state['comments'][0]['human_edited'])
+        self.assertEqual(self.session.load()['comments'][0]['body'], 'Human duplicate wording')
+        token = automation._active.set(self.run)
+        self.addCleanup(automation._active.reset, token)
+        with self.assertRaisesRegex(ApiError, 'manual decisions'):
+            automation.guard_replacement(self.session)
+        result, posts = self.publish()
+        self.assertEqual(result['exit_code'], 3)
+        self.assertIn('manual decisions', result['reason'])
         self.assertFalse(posts)
 
     def test_manual_mutations_and_verdict_prevent_noop_or_publication(self):

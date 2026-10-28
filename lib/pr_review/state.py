@@ -133,7 +133,10 @@ class Session:
             classification = proposal.get("classification", basis.get("classification", "UNCERTAIN"))
             all_posted = bool(ids) and all(i in covered for i in ids)
             status = "published" if all_posted else "suppressed" if classification == "DUPLICATE" else "unstaged"
-            body = (basis if fresh else proposal).get("body_md") or "\n\n".join(f.get("body_md", "") for f in fs)
+            finding_body = "\n\n".join(f.get("body_md", "") for f in fs)
+            body = (basis if fresh else proposal).get("body_md") or finding_body
+            # Empty generated bodies (notably duplicates) use the same display fallback.
+            generated_body = basis.get("body_md", body) or finding_body
             comments.append({"id": proposal["id"], "title": "; ".join(f["title"] for f in fs) or "Review comment",
                              "body": body, "placement": placement, "automatic": copy.deepcopy(placement),
                              "override": False, "status": status, "classification": classification,
@@ -142,7 +145,7 @@ class Session:
                              "explanation": basis.get("explanation", ""),
                              "discussion_keys": basis.get("discussion_keys", []),
                              "partial_coverage": any(i in covered for i in ids) and not all_posted,
-                             "human_edited": body != basis.get("body_md", body), "versions": [], "receipt": None})
+                             "human_edited": body != generated_body, "versions": [], "receipt": None})
         recommendation = synthesis.get("recommendation") if self.manifest.get("analysis_kind") == "followup" else synthesis.get("recommendation", "COMMENT")
         return {"format_version": 1, "generation": self.id, "sequence": 0,
                 "mutation_tracking": bool(self.manifest.get('draft_mutations_tracked')),
