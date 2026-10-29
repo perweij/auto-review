@@ -1,0 +1,101 @@
+{
+  "case": "J-feature-haiku-terra",
+  "model_retained": 11,
+  "independently_supported_behavioral": 8,
+  "supported_nonblocking_observations": 0,
+  "unmeasured_optimization_candidates": 0,
+  "unsubstantiated_or_refuted_claims": 3,
+  "unverified_retained": 2,
+  "refuted_retained": 1,
+  "model_rejected": 2,
+  "findings": [
+    {
+      "finding": "F1",
+      "issue": "R8",
+      "verdict": "supported_behavioral",
+      "evidence": "adjudication-c.json"
+    },
+    {
+      "finding": "F2",
+      "issue": "R9",
+      "verdict": "supported_behavioral_narrow_initial_fix_and_repair_allowance",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F3",
+      "issue": "R18",
+      "verdict": "unverified_reachable_trigger_and_end_to_end_wrong_push",
+      "evidence": "adjudication-e.json"
+    },
+    {
+      "finding": "F4",
+      "issue": "R20",
+      "verdict": "supported_behavioral_affected_batch",
+      "evidence": "adjudication-terra-strong.json"
+    },
+    {
+      "finding": "F5",
+      "issue": "R7",
+      "verdict": "supported_behavioral_narrow_known_publication_receipts",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F6",
+      "issue": "R14",
+      "verdict": "supported_behavioral",
+      "evidence": "adjudication-e-candidates.json"
+    },
+    {
+      "finding": "F7",
+      "issue": "R28",
+      "verdict": "unverified_permission_matcher_and_network_behavior",
+      "evidence": "Source alone does not establish the claimed CLI bypass; not exercised."
+    },
+    {
+      "finding": "F8",
+      "issue": "R11",
+      "verdict": "supported_behavioral_narrow_repository_routing",
+      "evidence": "adjudication-terra-strong.json"
+    },
+    {
+      "finding": "F9",
+      "issue": "R24",
+      "verdict": "model_rejected_unmeasured_performance_claim",
+      "evidence": "Synthesis rejects; not retained or counted."
+    },
+    {
+      "finding": "F10",
+      "issue": "R25",
+      "verdict": "terminal_failure_claim_refuted",
+      "evidence": "adjudication-terra-auth.json"
+    },
+    {
+      "finding": "F11",
+      "issue": "R27",
+      "verdict": "supported_behavioral",
+      "evidence": "adjudication-reopen.json"
+    },
+    {
+      "finding": "F12",
+      "issue": "R29",
+      "verdict": "model_rejected_maintenance_claim",
+      "evidence": "Synthesis rejects; no demonstrated loss of required verification evidence."
+    },
+    {
+      "finding": "F13",
+      "issue": "R30",
+      "verdict": "supported_behavioral_missing_adoption_but_final_review_retained",
+      "evidence": "adjudication-terra-strong.json"
+    }
+  ],
+  "qualifications": [
+    "F2 does not bypass review: queued tasks lose initial fixer invocation and separate repair allowance.",
+    "F5 is supported for known publication receipts. Blanket exclusion of all owner messages could conceal meaningful new feedback.",
+    "F8 is a supported routing edge case when repository context is absent, not general failure of explicit repository selection.",
+    "F13 is a distinct combined-repair failure: all tasks complete, so the task interruption guard does not apply. Plain resume lacks explicit adoption, but still performs combined review. It does not revive the refuted unreviewed-acceptance claim R22.",
+    "F3 stale mapping exists in source, but realistic PR-destination change and wrong push remain unverified.",
+    "F10 overlooks terminal failure detection by the shared process supervisor; earlier real-subprocess reproduction applies unchanged.",
+    "Synthesis used source inspection without executing focused tests; independent checks supplied the recovery and Emacs reproductions."
+  ],
+  "verification_audit": "terra-verification-audit.json"
+}

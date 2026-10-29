@@ -1,0 +1,493 @@
+{
+  "note": "Final assessment appearances include rejected and unsupported claims. Read per-case audit and historical_validation. Counts are not exhaustive recall; R26 is an evaluation-tool recovery observation, excluded from review counts.",
+  "cases": [
+    "A-main-single",
+    "B-feature-single",
+    "C-feature-synthesised",
+    "E-main-synthesised",
+    "F-main-two-codex",
+    "G-feature-two-codex",
+    "H-feature-two-claude",
+    "J-feature-haiku-terra"
+  ],
+  "issues": [
+    {
+      "issue": "R1",
+      "title": "Configuration trust misses ignored changes/deletion",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json"
+    },
+    {
+      "issue": "R2",
+      "title": "Uncertain reply rewritten during reassociation",
+      "observed_in_final": {
+        "A-main-single": true,
+        "B-feature-single": true,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": true,
+        "G-feature-two-codex": true,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json"
+    },
+    {
+      "issue": "R3",
+      "title": "Restored general feedback stays outside Attention",
+      "observed_in_final": {
+        "A-main-single": true,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json"
+    },
+    {
+      "issue": "R4",
+      "title": "Replanning leaves dangling dependency before adoption",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": true,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json"
+    },
+    {
+      "issue": "R5",
+      "title": "Closed PR accepts next reply POST after refresh",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": true,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": true,
+        "F-main-two-codex": true,
+        "G-feature-two-codex": true,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "confirmed_real_git"
+    },
+    {
+      "issue": "R6",
+      "title": "Preflight failure erases ready verification eligibility",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": true,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json",
+      "all_claude_audit": "supported_behavioral_only_unchanged_input_preflight"
+    },
+    {
+      "issue": "R7",
+      "title": "Own published reply invalidates remaining replies and batch",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "see evidence.json",
+      "all_claude_audit": "supported_behavioral_narrow_receipt_scope",
+      "haiku_terra_audit": "supported_behavioral_narrow_known_publication_receipts"
+    },
+    {
+      "issue": "R8",
+      "title": "Unrelated skip bypasses interrupted-task adoption gate",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": true,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "confirmed_real_git",
+      "all_claude_audit": "supported_behavioral",
+      "haiku_terra_audit": "supported_behavioral"
+    },
+    {
+      "issue": "R9",
+      "title": "Adoption removes queued task initial fixer stage",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "see evidence.json",
+      "all_claude_audit": "supported_behavioral_narrow_repair_allowance",
+      "haiku_terra_audit": "supported_behavioral_narrow_initial_fix_and_repair_allowance"
+    },
+    {
+      "issue": "R10",
+      "title": "Unrelated shared Git config change triggers integrity recovery",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json",
+      "all_claude_audit": "supported_design_tradeoff"
+    },
+    {
+      "issue": "R11",
+      "title": "Fork repository identity breaks remembered toolkit routing",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": true,
+        "F-main-two-codex": true,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "backend_reproduced_frontend_traced",
+      "all_claude_audit": "supported_behavioral_narrow_repository_routing",
+      "haiku_terra_audit": "supported_behavioral_narrow_repository_routing"
+    },
+    {
+      "issue": "R12",
+      "title": "Final-review prompt duplicates accumulated diff",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json",
+      "all_claude_audit": "supported_efficiency"
+    },
+    {
+      "issue": "R13",
+      "title": "Network owner operations lack frontend cancellation ID",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": true,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see evidence.json"
+    },
+    {
+      "issue": "R14",
+      "title": "Replanning retains unavailable feedback and revives explicit skips",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": true,
+        "F-main-two-codex": true,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "confirmed_real_git",
+      "all_claude_audit": "supported_behavioral",
+      "haiku_terra_audit": "supported_behavioral"
+    },
+    {
+      "issue": "R15",
+      "title": "Fix at root heading includes non-attention History items",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": true,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "confirmed_in_emacs"
+    },
+    {
+      "issue": "R16",
+      "title": "Ignored file paths are duplicated into state and model contexts",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": true,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "confirmed_overhead_not_measured_failure",
+      "all_claude_audit": "supported_efficiency"
+    },
+    {
+      "issue": "R17",
+      "title": "Dirty submodule contents are invisible to checkpoint identities",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": true,
+        "F-main-two-codex": true,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "confirmed_real_git"
+    },
+    {
+      "issue": "R18",
+      "title": "Configured push destination can become stale",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": true,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "unverified_trigger_and_end_to_end_failure",
+      "haiku_terra_audit": "unverified_reachable_trigger_and_end_to_end_wrong_push"
+    },
+    {
+      "issue": "R19",
+      "title": "Automatic repair proceeds despite reviewer clarification outcomes",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": true,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "confirmed_real_git_task_and_combined_review"
+    },
+    {
+      "issue": "R20",
+      "title": "Deleted feedback aborts commit association for surviving items",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "confirmed_real_git",
+      "all_claude_audit": "supported_behavioral_narrow_affected_batch",
+      "haiku_terra_audit": "supported_behavioral_affected_batch"
+    },
+    {
+      "issue": "R21",
+      "title": "Fresh checkpoint indexes may rehash unchanged tracked files",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "performance_candidate_not_measured",
+      "all_claude_audit": "unmeasured_performance_candidate"
+    },
+    {
+      "issue": "R22",
+      "title": "Failed checkpoints allegedly accept unreviewed final work",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "claim_refuted_by_real_git_owner_workflow",
+      "all_claude_audit": "unreviewed_final_acceptance_claim_refuted"
+    },
+    {
+      "issue": "R23",
+      "title": "Explicit recovery mutations persist before later validation fails",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "see independent adjudication; not a demonstrated correctness defect",
+      "all_claude_audit": "not_established_as_defect"
+    },
+    {
+      "issue": "R24",
+      "title": "Repeated freshness checks allegedly constitute a demonstrated performance defect",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "see independent adjudication; not a demonstrated correctness defect",
+      "all_claude_audit": "not_established_as_defect",
+      "haiku_terra_audit": "model_rejected_unmeasured_performance_claim"
+    },
+    {
+      "issue": "R25",
+      "title": "Owner auth preflight allegedly accepts terminal provider failures",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": true,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "terminal_failure_claim_refuted_by_actual_subprocess_supervisor",
+      "all_claude_audit": "terminal_error_claim_refuted",
+      "haiku_terra_audit": "terminal_failure_claim_refuted"
+    },
+    {
+      "issue": "R26",
+      "title": "Recovered verification setup failure still blocks suggestion acceptance",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": false
+      },
+      "historical_validation": "Observed in feature tool during evaluation; not a PR4 source defect"
+    },
+    {
+      "issue": "R27",
+      "title": "Reopening an owner buffer discards the freshly loaded view",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "confirmed_in_emacs",
+      "haiku_terra_audit": "supported_behavioral"
+    },
+    {
+      "issue": "R28",
+      "title": "Provider command patterns may permit remote push variants",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "unverified_provider_permission_matching_and_network_reachability",
+      "haiku_terra_audit": "unverified_permission_matcher_and_network_behavior"
+    },
+    {
+      "issue": "R29",
+      "title": "Duplicated task and combined repair policy allegedly loses required evidence",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "model_rejected_maintenance_claim_no_demonstrated_failure",
+      "haiku_terra_audit": "model_rejected_maintenance_claim"
+    },
+    {
+      "issue": "R30",
+      "title": "Failed combined repair resumes without explicit adoption",
+      "observed_in_final": {
+        "A-main-single": false,
+        "B-feature-single": false,
+        "C-feature-synthesised": false,
+        "E-main-synthesised": false,
+        "F-main-two-codex": false,
+        "G-feature-two-codex": false,
+        "H-feature-two-claude": false,
+        "J-feature-haiku-terra": true
+      },
+      "historical_validation": "confirmed_real_git_owner_api_mocked_provider_failure",
+      "haiku_terra_audit": "supported_behavioral_missing_adoption_but_final_review_retained"
+    }
+  ]
+}

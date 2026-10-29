@@ -179,6 +179,25 @@ class SuggestionTest(unittest.TestCase):
         self.assertEqual(c['suggestion']['verification']['status'], 'failed')
         self.assertIn('changed the proposed source', c['suggestion']['verification']['evidence'])
 
+    def test_successful_rerun_can_resolve_only_explicit_setup_failure(self):
+        checks = [dict(command='python check.py', result='Fixture setup could not create temporary files.',
+                       passed=False, failure_kind='setup', supersedes=None),
+                  dict(command='TMPDIR=$PWD/tmp python check.py', result='Using permitted scratch, all checks passed.',
+                       passed=True, failure_kind=None, supersedes=0)]
+        value = dict(accepted=True, evidence='Exact replacement passed the recovered check.',
+                     checks=checks, inspection_only_reason='')
+        c = self.attach()
+        with patch.object(s, 'invoke', return_value=(value, 'log')):
+            s.verify_comments(self.session, self.state, [c])
+        self.assertTrue(s.verified(self.session, c))
+        self.assertEqual(c['suggestion']['verification']['checks'], checks)
+        self.assertIn('supersedes setup check 1', self.inspect(c))
+        for first, second in (({'failure_kind': 'check'}, {}), ({'failure_kind': None}, {}),
+                              ({'passed': True, 'failure_kind': None}, {}), ({}, {'supersedes': 2}),
+                              ({}, {'supersedes': True}), ({}, {'passed': False}), ({}, {'supersedes': None})):
+            with self.subTest(first=first, second=second), self.assertRaises(ApiError):
+                s.verify_result({**value, 'checks': [{**checks[0], **first}, {**checks[1], **second}]})
+
     def test_combined_verification_and_overlap_block_bulk_staging(self):
         a, b = self.attach(), self.attach(1, start=2, end=2, replacement='other\n')
         with patch.object(s, 'invoke', return_value=(ACCEPT, 'log')) as model:

@@ -150,6 +150,9 @@ reviewer `discover`.
 (Reviewer by default); include it to save a repository preference. The shared
 `pull-requests` result includes `toolkit`, and its saved session descriptors
 belong to that selected toolkit. Owner selection never depends on PR authorship.
+Saving a preference without a repository requires exactly one GitHub repository
+among the remotes; otherwise `invalid_request` includes `repositories` to choose
+from. Frontends resolve the repository before reading or saving its preference.
 
 | Command | Request fields | Result/behavior |
 | --- | --- | --- |
@@ -436,6 +439,30 @@ Resume keeps the original baseline and, once model work starts, settings; change
 reconciliation and a new batch. Commit-only recovery instead recognizes its own
 recorded sequence. Unstaging code is a human operation. Integrity
 failures persist across retries until explicit adoption; records are retained.
+Skips must cover every interrupted task unless changes are adopted. A failed
+combined repair (`combined_repair_pending`) requires adoption, because no single
+task owns its partial changes. Adoption rechecks started work and preserves queued
+tasks' initial fixer stage. `clarify` outcomes never authorize an automatic repair,
+including legacy reports without an explicit assessment.
+
+Skipped tasks remain history across replanning and no longer invalidate active
+feedback freshness. Missing selected feedback must be explicitly skipped before
+the remaining work can be replanned. Completed tasks retained by a replacement
+plan do not retain dependencies on removed task IDs. An authentication/preflight
+failure on an unchanged ready batch preserves verification and records
+`preflight_error`; source, settings, discussion, and trust failures still block it.
+
+Owner checkpoints reject dirty initialized submodules with `dirty_submodule`:
+their uncommitted contents cannot be represented by a superproject tree. Files
+remain untouched. `ignored` contains at most 20 diagnostic paths and
+`ignored_count` records the full count. Provider context omits `task_diff` when it
+is identical to `batch_diff`; distinct empty task diffs remain present. Older
+checkpoint inventories are bounded when included in provider context.
+
+Association retains missing feedback as historical provenance and reports it in
+`reply_issues`, while processing surviving destinations. Publication rechecks
+that the PR is open before each send; closure preserves confirmed receipts and
+leaves remaining replies unsent.
 
 `owner-fix` emits standard `started`/`progress` events. Use shared `cancel` with
 the `operation_id` from `started`. Both adapters share process-group cancellation,
@@ -524,6 +551,15 @@ replacement becomes current, a stale editor retains its buffer text and must
 save it explicitly into a current draft.
 
 ## Explicit network and model operations
+
+Suggestion verification preserves each executed check's `command`, `result`, and
+`passed` fields. New reports also include `failure_kind` (`"setup"`, `"check"`, or
+null) and `supersedes` (the zero-based index of an earlier setup failure, or null).
+Only a passing rerun may supersede an earlier failed setup attempt; executed
+test failures cannot be superseded. Both records remain in the evidence. Legacy
+checks without these additive fields remain valid but their failures cannot be
+implicitly resolved. An accepted verification must have no unresolved failed
+checks, or have no executed checks and a justified `inspection_only_reason`.
 
 - `refresh`: fetch complete GitHub context, record last checked head/time,
   retain manual text/placement, and unstage affected comments if discussion

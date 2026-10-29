@@ -33,6 +33,11 @@ read-only checkout does not imply writable scratch. Do not relax sandbox policy
 or install dependencies to make tests run; report the specific limitation instead.
 
 These allowances limit verification commands, not the code assessment itself.
+For stateful recovery claims, attempt a focused reproduction when dependencies
+and permitted scratch are available, including the surrounding orchestration and
+shared error handling. Otherwise give a per-finding explanation for inspection-only
+evidence and its remaining uncertainty; read-only source alone is not proof that
+all checks are unavailable.
 If a check fails, times out, or needs unavailable dependencies, continue with the
 available evidence and finish the review. State which commands actually ran,
 their outcomes, and any verification gaps. Do not treat a timeout as a defect,

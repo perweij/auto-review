@@ -114,7 +114,9 @@
                 ((symbol-function 'magit-auto-review--call)
                  (lambda (request)
                    (push (alist-get 'command request) requests)
-                   '((sessions . nil)))))
+                   (if (equal (alist-get 'command request) "pull-requests")
+                       '((repository . "github.com/org/repo"))
+                     '((sessions . nil))))))
         (unwind-protect
             (progn
               (magit-auto-review 98761)
@@ -129,7 +131,7 @@
               (magit-auto-review 98761)
               (should (eq opened (current-buffer)))
               (magit-section-post-command-hook)
-              (should (equal requests '("discover" "toolkit" "discover" "toolkit"))))
+              (should (equal requests '("discover" "toolkit" "pull-requests" "discover" "toolkit" "pull-requests"))))
           (when (buffer-live-p opened) (kill-buffer opened)))))))
 
 (ert-deftest auto-review/failed-initial-read-keeps-a-usable-section ()
@@ -139,6 +141,7 @@
                 ((symbol-function 'magit-auto-review--call)
                  (lambda (request)
                    (pcase (alist-get 'command request)
+                     ("pull-requests" '((repository . "github.com/org/repo")))
                      ("toolkit" '((toolkit . "reviewer")))
                      ("discover" '((sessions . (((pr . 98762) (session . "/test/missing") (generation . "old"))))))
                      (_ (setq opened (current-buffer))

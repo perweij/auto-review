@@ -1,0 +1,101 @@
+{
+  "case": "H-feature-two-claude",
+  "model_retained": 15,
+  "independently_supported_behavioral": 7,
+  "supported_nonblocking_observations": 3,
+  "unmeasured_optimization_candidates": 1,
+  "unsubstantiated_or_refuted_claims": 4,
+  "findings": [
+    {
+      "finding": "F1",
+      "issue": "R7",
+      "verdict": "supported_behavioral_narrow_receipt_scope",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F3",
+      "issue": "R8",
+      "verdict": "supported_behavioral",
+      "evidence": "adjudication-c.json"
+    },
+    {
+      "finding": "F4",
+      "issue": "R9",
+      "verdict": "supported_behavioral_narrow_repair_allowance",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F5",
+      "issue": "R10",
+      "verdict": "supported_design_tradeoff",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F6",
+      "issue": "R11",
+      "verdict": "supported_behavioral_narrow_repository_routing",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F10",
+      "issue": "R12",
+      "verdict": "supported_efficiency",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F11",
+      "issue": "R14",
+      "verdict": "supported_behavioral",
+      "evidence": "adjudication-e-candidates.json"
+    },
+    {
+      "finding": "F12",
+      "issue": "R20",
+      "verdict": "supported_behavioral_narrow_affected_batch",
+      "evidence": "adjudication-deleted-association.json"
+    },
+    {
+      "finding": "F13",
+      "issue": "R6",
+      "verdict": "supported_behavioral_only_unchanged_input_preflight",
+      "evidence": "adjudication-c.json"
+    },
+    {
+      "finding": "F14",
+      "issue": "R16",
+      "verdict": "supported_efficiency",
+      "evidence": "adjudication-e-candidates.json"
+    },
+    {
+      "finding": "F15",
+      "issue": "R21",
+      "verdict": "unmeasured_performance_candidate",
+      "evidence": "Fresh-index mechanism source-visible; no measured large-repository failure."
+    },
+    {
+      "finding": "F2",
+      "issue": "R22",
+      "verdict": "unreviewed_final_acceptance_claim_refuted",
+      "evidence": "adjudication-failed-checkpoint.json"
+    },
+    {
+      "finding": "F7",
+      "issue": "R23",
+      "verdict": "not_established_as_defect",
+      "evidence": "Requested recovery mutations persist, but no rollback contract, unauthorized mutation or verification bypass established."
+    },
+    {
+      "finding": "F8",
+      "issue": "R24",
+      "verdict": "not_established_as_defect",
+      "evidence": "Full refresh preserves discussion freshness; no measured failure. Proposed head-only replacement loses required feedback checks."
+    },
+    {
+      "finding": "F9",
+      "issue": "R25",
+      "verdict": "terminal_error_claim_refuted",
+      "evidence": "adjudication-auth-claim.json"
+    }
+  ],
+  "qualification": "Several retained claims need narrower failure scenarios or safer corrections. In particular, do not ignore all owner messages, bypass repository selection, or preserve ready state after changed verification inputs."
+}

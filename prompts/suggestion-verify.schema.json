@@ -20,12 +20,31 @@
           },
           "passed": {
             "type": "boolean"
+          },
+          "failure_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "setup",
+              "check",
+              null
+            ]
+          },
+          "supersedes": {
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
           "command",
           "result",
-          "passed"
+          "passed",
+          "failure_kind",
+          "supersedes"
         ],
         "additionalProperties": false
       }

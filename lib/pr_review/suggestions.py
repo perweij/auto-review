@@ -235,14 +235,28 @@ def invoke(session, stage, context, cwd):
 
 
 def verify_result(value):
-    if (set(value) != {'accepted', 'evidence', 'checks', 'inspection_only_reason'}
+    if (not isinstance(value, dict) or set(value) != {'accepted', 'evidence', 'checks', 'inspection_only_reason'}
             or type(value['accepted']) is not bool or not isinstance(value['evidence'], str) or not value['evidence'].strip()
             or not isinstance(value['inspection_only_reason'], str) or not isinstance(value['checks'], list)
-            or any(not isinstance(c, dict) or set(c) != {'command', 'result', 'passed'}
+            or any(not isinstance(c, dict) or not {'command', 'result', 'passed'} <= set(c)
+                   or set(c) - {'command', 'result', 'passed', 'failure_kind', 'supersedes'}
                    or not all(isinstance(c[k], str) and c[k].strip() for k in ('command', 'result'))
                    or type(c['passed']) is not bool for c in value['checks'])):
         raise ApiError('invalid_suggestion', 'Verification returned invalid evidence; verify again or remove the suggestion.')
-    if value['accepted'] and (any(not c['passed'] for c in value['checks'])
+    superseded = set()
+    for index, check in enumerate(value['checks']):
+        kind = check.get('failure_kind')
+        previous = check.get('supersedes')
+        if (kind not in (None, 'setup', 'check') or (check['passed'] and kind is not None)):
+            raise ApiError('invalid_suggestion', 'Verification contains an inconsistent failure classification.')
+        if previous is not None:
+            if (not check['passed'] or type(previous) is not int or not 0 <= previous < index
+                    or value['checks'][previous]['passed']
+                    or value['checks'][previous].get('failure_kind') != 'setup'
+                    or previous in superseded):
+                raise ApiError('invalid_suggestion', 'Only a successful rerun can supersede an earlier setup failure.')
+            superseded.add(previous)
+    if value['accepted'] and (any(not c['passed'] and i not in superseded for i, c in enumerate(value['checks']))
                               or (not value['checks'] and not value['inspection_only_reason'].strip())):
         raise ApiError('invalid_suggestion', 'Acceptance requires passing checks or a justified inspection-only assessment.')
     if value['checks'] and value['inspection_only_reason'].strip():

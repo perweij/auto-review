@@ -1,0 +1,132 @@
+{
+  "snapshot": {
+    "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+    "base": "f7f0f2e2df548186b3b85d5f420ad0424af25655",
+    "pr": 4,
+    "historical_description": "empty",
+    "discussion": "withheld",
+    "ci": "not supplied"
+  },
+  "tools": {
+    "main": "0c83823045bf44193aca613a578fb3230f7b70e9",
+    "feature": "e9af5848a70bd6f5dd3f737836641ae68210f4fd"
+  },
+  "limits": {
+    "full_review_runs": 5,
+    "suggestion_continuations": 2,
+    "stage_timeout_seconds": 1800,
+    "additional_independent_codex_reviews": 2,
+    "additional_paired_syntheses": 3,
+    "additional_independent_claude_reviews": 1
+  },
+  "models": {
+    "codex": "gpt-6.1-sol",
+    "claude": "opus",
+    "effort": "high",
+    "processing_provider": "codex",
+    "synthesis_tests": "focused"
+  },
+  "cases": {
+    "A-main-single": {
+      "tool": "main",
+      "reviewers": "codex",
+      "status": "complete",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/A-main-single/result.json"
+    },
+    "B-feature-single": {
+      "tool": "feature",
+      "reviewers": "codex",
+      "status": "complete",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/B-feature-single/result.json"
+    },
+    "C-feature-synthesised": {
+      "tool": "feature",
+      "reviewers": "claude,codex",
+      "status": "complete",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/result.json"
+    },
+    "E-main-synthesised": {
+      "tool": "main",
+      "reviewers": "claude,codex",
+      "status": "complete",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/result.json"
+    },
+    "F-main-two-codex": {
+      "tool": "main",
+      "reviewers": "codex,codex",
+      "status": "complete",
+      "paired_with": "E-main-synthesised",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/F-main-two-codex/result.json"
+    },
+    "G-feature-two-codex": {
+      "tool": "feature",
+      "reviewers": "codex,codex",
+      "processing_provider": "codex",
+      "status": "complete",
+      "paired_with": "C-feature-synthesised",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/G-feature-two-codex/result.json"
+    },
+    "H-feature-two-claude": {
+      "tool": "feature",
+      "reviewers": "claude,claude",
+      "processing_provider": "claude",
+      "status": "complete",
+      "paired_with": "C-feature-synthesised",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/H-feature-two-claude/result.json"
+    },
+    "J-feature-haiku-terra": {
+      "tool": "feature",
+      "reviewers": "claude,codex",
+      "models": {
+        "codex": "gpt-6.1-terra",
+        "claude": "haiku",
+        "effort": "high",
+        "processing_provider": "codex"
+      },
+      "status": "complete",
+      "comparison_with": "C-feature-synthesised",
+      "exit_code": 0,
+      "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/J-feature-haiku-terra/result.json"
+    }
+  },
+  "notes": [
+    "Offline GitHub adapter returns frozen historical inputs and rejects writes.",
+    "Git mirror includes only initial PR head/base ancestry, without later fixes.",
+    "Subscription usage: provider dollar values are reported equivalents, not invoices.",
+    "Suggested-change continuation is paired with B; analysis must be reused.",
+    "Full-review runs use separate local state; provider prompt-cache reuse is not disabled and is reported.",
+    "Run A reported two independently reproduced defects and did not report reference R1.",
+    "Quality evidence is a partial reference set plus independent finding adjudication, not exhaustive recall.",
+    "D suggestion continuation overlaps late C synthesis; its wall time is not an isolated latency benchmark.",
+    "D collection follows promoted generation via .current-review; all cases completed with no publication.",
+    "User authorized one additional main synthesised run after pilot; same pinned revisions, frozen snapshot, models, and offline fixture. No suggestion continuation added.",
+    "E context hashes match all 12 C context files. Feature prompts additionally request stateful recovery coverage and document scratch-storage limits; branch comparison includes these instruction changes.",
+    "User requested two Codex reviewer control. F reuses E independent Codex report, adds one independent Codex review then Codex synthesis; same main snapshot and high effort.",
+    "E and F completed. F uses only Codex, reuses E independent report byte-for-byte, and adds one fresh independent review. All cases remain unpublished. Durable repository findings include historical status, current-branch verification pending, and reproduction source.",
+    "User authorized feature Codex+Codex and all-Claude controls, then suggestions on strongest saved result. G/H reuse corresponding C independent report; each adds one fresh independent review. H uses Claude for synthesis/matching as an all-Claude configuration; G uses Codex. Runs sequential; elapsed/usage incremental.",
+    "All authorized controls and continuations completed. I retained ten findings, five accepted patches and one verification blocker; no publication.",
+    "User-requested J completed: fresh Haiku + Terra high, 8 supported bugs, 3 retained claims not established; 670.13s. Chart regenerated with provider/model labels and category definitions."
+  ],
+  "continuation": {
+    "status": "complete",
+    "paired_with": "B-feature-single",
+    "exit_code": 0,
+    "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/D-feature-suggestions/result.json"
+  },
+  "status": "complete",
+  "comparison": "comparison.json",
+  "best_suggestions": {
+    "status": "complete",
+    "paired_with": "C-feature-synthesised",
+    "provider": "codex",
+    "exit_code": 0,
+    "result": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/I-best-suggestions/result.json"
+  }
+}

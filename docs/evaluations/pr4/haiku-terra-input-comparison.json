@@ -1,0 +1,19 @@
+{
+  "case": "J-feature-haiku-terra",
+  "baseline": "C-feature-synthesised",
+  "equal": true,
+  "context_sha256": {
+    "files.zlist": "30c8a0c7fc3b620a1e778e9f3eea080231b2d5c9a7e83df42f5f40909fa6d411",
+    "ci-actions-runs.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "pr-reviews.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "pr-discussion.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "ci-statuses.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "pr-comments.txt": "f488d810c3835a6bec63a39294d877b3c3588a210dc3583b83dc8c013e7462c0",
+    "agent-config-changes.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "diffstat.txt": "24890a61124307c9d123b5a281119f683e0fbd2bef3a74bacdec8f0b6340a7a4",
+    "pr.json": "d1928abd8bb098da5e2059c5afe951684ebef2d533c76954f6fa826c6096c098",
+    "pr-inline-comments.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "pr-view.txt": "da48674b9603737f78cba26fbc3f85bb1ff73c2f2cbfd94c85b819d00992d15e",
+    "pr.diff": "d564f29b00cfdaa660c7a43fff1d25c8804c653fd3a284b6f10375d7ef868946"
+  }
+}

@@ -1420,7 +1420,7 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual([role for role, _ in self.calls], ["plan", "fix", "review", "review", "review"])
         retry = self.calls[-2][1]
         self.assertIn("Real-Git fixture could not run", retry["previous_incomplete_review"]["blocking"])
-        self.assertIn("+fixed", retry["task_diff"])
+        self.assertIn("+fixed", retry.get("task_diff", retry["batch_diff"]))
         self.assertEqual(view["batches"][-1]["tasks"][0]["before"], before)
         prepared = self.request("owner-prepare-commit", batch=batch["id"])
         self.assertTrue(prepared["ready"])

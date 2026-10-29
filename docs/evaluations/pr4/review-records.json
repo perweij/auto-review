@@ -1,0 +1,2065 @@
+{
+  "note": "Provider findings include rejected and uncertain candidates. Read validity and evidence; do not treat every record as an open issue.",
+  "runs": [
+    {
+      "case": "A-main-single",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Keep replies awaiting publication recovery immutable during reassociation",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.py:74\u201378 updates an existing generated draft's commits and body without checking pending actions, unlike owner.py:89\u201393. For general feedback, a successfully posted reply is a separate timeline item, so refreshing does not change the source fingerprint checked at owner_publication.py:68\u201369. After a lost response and an amended exact commit, reassociation can rewrite the ambiguous draft. recover() then passes the old receipt to finish() at lines 149\u2013153, and lines 165\u2013168 mark the rewritten current reply Published. A bounded in-memory reproduction using production refresh, association, receipt validation, and recovery confirmed that the Published body referenced the replacement SHA while its receipt contained only the old wording. The broader inline-thread scenario was rejected because the posted reply changes the thread fingerprint.",
+          "blocking": true,
+          "body_md": "A generated timeline reply can have an `ambiguous` submission after GitHub accepted it but the response was lost. If the author amends/pushes an exact replacement commit and runs association before recovery, this branch rewrites the draft's commits and body. The original general-feedback fingerprint remains unchanged because the reply is a separate timeline comment. Recovery subsequently finds the old marker and marks the rewritten draft Published using the old receipt, reporting wording and a commit link that were never sent. Apply the pending-action immutability check before reassociation changes the reply, or recover an immutable submitted version separately from the editable draft.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 78,
+            "start_line": 74
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 78,
+              "start_line": 74
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 153,
+              "start_line": 149
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 168,
+              "start_line": 165
+            },
+            {
+              "path": "lib/pr_review/owner.py",
+              "side": "RIGHT",
+              "line": 93,
+              "start_line": 89
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Restore acknowledged general feedback to the Attention group",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner.py:78\u201380 sets restored triage to attention but computes visibility only from unread state, change_requested, or an unresolved thread. An acknowledged, deferred timeline comment therefore returns triage='attention' and attention=False; a bounded execution of production mutate() confirmed this. owner_state.py:218\u2013220 repeats the calculation during refresh. emacs/magit-auto-review-owner.el:171\u2013175 filters the Attention group on attention, leaving the restored item in History.",
+          "blocking": false,
+          "body_md": "After acknowledging an ordinary timeline comment, defer it and invoke Restore. Restore sets `triage='attention'`, but `unread` is false and the item has neither an outstanding change-request verdict nor an unresolved thread, so this calculation leaves `attention=False`. The comment stays in History, and refresh preserves that result. Make explicit restoration return acknowledged general feedback to Attention, with matching behavior in the refresh calculation.",
+          "primary_location": {
+            "path": "lib/pr_review/owner.py",
+            "side": "RIGHT",
+            "line": 80,
+            "start_line": 78
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner.py",
+              "side": "RIGHT",
+              "line": 80,
+              "start_line": 78
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 220,
+              "start_line": 218
+            },
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 175,
+              "start_line": 171
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 1
+    },
+    {
+      "case": "B-feature-single",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Preserve dependency references when replacing replanned tasks",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "At lib/pr_review/owner_fixes.py:221\u2013225, changed feedback requeues its completed task. Lines 249\u2013261 retain other completed tasks and replace the changed task with a newly prefixed ID, without updating retained depends_on references. Adoption at lines 203\u2013211 reactivates those retained tasks, and line 271 indexes the missing prerequisite. An in-memory execution reproduced a ready replanned batch containing p1-dependent -> p1-base alongside p2-base, followed by KeyError('p1-base') on adopt=True.",
+          "blocking": true,
+          "body_md": "If completed task B depends on A and only A's feedback changes, replanning replaces A with a new prefixed task but retains B's dependency on A's removed ID. The batch can become ready, yet later adopting manual changes reactivates B and crashes at the dependency lookup. Preserve a valid combined dependency graph by remapping references or replanning affected dependents; cover the replan-then-adopt recovery path.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 261,
+            "start_line": 256
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 261,
+              "start_line": 256
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 225,
+              "start_line": 221
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 211,
+              "start_line": 203
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 271,
+              "start_line": 270
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Keep uncertain replies immutable during commit reassociation",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "lib/pr_review/owner.py:89\u201393 protects pending replies during ordinary mutations, but owner_publication.associate at lines 75\u201378 checks only whether an existing reply is Published before replacing commits/body. For general feedback, a successful timeline response is a separate item and does not change the original source fingerprint. A narrowed in-memory reproduction reassociated an ambiguous commit-A reply to B, then recovered A's valid timeline receipt. owner_publication.finish at lines 165\u2013168 marked the commit-B body Published with the commit-A receipt.",
+          "blocking": true,
+          "body_md": "A generated timeline reply can have an ambiguous submission after GitHub accepts it but its response is lost. Reassociating that batch to a new commit currently rewrites the same unpublished reply, despite its pending action. Recovery then marks the rewritten body and commit Published using the receipt for the original post, corrupting the published record and making it immutable. Reject or defer association updates for replies referenced by submitting/ambiguous actions until recovery completes.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 78,
+            "start_line": 75
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 78,
+              "start_line": 75
+            },
+            {
+              "path": "lib/pr_review/owner.py",
+              "side": "RIGHT",
+              "line": 93,
+              "start_line": 89
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 168,
+              "start_line": 165
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Recheck the PR open state before every reply POST",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.prepare rejects non-OPEN PRs at lib/pr_review/owner_publication.py:124\u2013125. However, the per-reply refresh at lines 182\u2013186 validates only head identity and reply blockers before reaching the POST at lines 196\u2013197. A focused reproduction used real prepare/publish functions: preview and re-prepare saw OPEN, the next refresh saw CLOSED with the same head, and publication still reached one mocked POST.",
+          "blocking": true,
+          "body_md": "If the PR closes or merges after publication's second prepare, the per-reply refresh observes that state but execution still sends the reply when the head is unchanged. This bypasses the open-PR requirement already enforced during preparation and also affects the remainder of a partially published batch. Check metadata.state == OPEN after every pre-send refresh, before recording/sending another action, while retaining confirmed receipts.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 186,
+            "start_line": 182
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 182
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 125,
+              "start_line": 124
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 197,
+              "start_line": 196
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 3
+    },
+    {
+      "case": "C-feature-synthesised",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Keep uncertain replies immutable during reassociation",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.py:75\u201378 rewrites unpublished replies without checking submitting/ambiguous actions. recover()/finish() at lines 140\u2013168 attaches the original action receipt to that mutable draft. A focused reproduction recovered a Published draft claiming commit new while the receipt contained Fixed in old. Ordinary mutation already rejects uncertain replies in owner.py:91\u201395.",
+          "blocking": true,
+          "body_md": "Source: Codex. Confidence: High.\n\nIf a generated timeline reply succeeds remotely but its response is lost, reassociating an amended commit rewrites its pending body and commits. Recovery then marks that rewritten draft Published using the original receipt, misrepresenting what was posted. Freeze replies referenced by submitting or ambiguous actions until recovery and retain the exact submitted payload as history.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 78,
+            "start_line": 75
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 78,
+              "start_line": 75
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 168,
+              "start_line": 165
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Preserve verified history when resume fails before execution",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:247 can fail preflight before new inference; lines 286\u2013289 nevertheless overwrite ready with paused. owner_publication.py:27\u201332 accepts only ready batches. After a human commit, owner_fixes.py:186\u2013191 rejects resume and preserves eligibility only when status is still ready. The reproduction confirmed ready becoming paused with an unchanged final_tree and no model calls.",
+          "blocking": true,
+          "body_md": "Source: Codex. Confidence: High.\n\nAn authentication or discovery failure while resuming an unchanged ready batch removes its eligibility for commit association. Committing and pushing the previously verified tree then leaves association skipping the batch and resume rejecting changed HEAD. Preserve the accepted verification record until changed inputs or execution invalidate it; record preflight failure separately.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 289,
+            "start_line": 286
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 289,
+              "start_line": 286
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 191,
+              "start_line": 186
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 32,
+              "start_line": 27
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Recheck the PR's open state before each send",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "prepare() rejects non-OPEN state at owner_publication.py:124\u2013125, but the refreshed metadata inside publish() at lines 182\u2013186 is followed only by a HEAD comparison and reply blockers. A focused reproduction refreshed metadata to CLOSED and still recorded a timeline POST.",
+          "blocking": true,
+          "body_md": "Source: Codex. Confidence: High.\n\nIf the PR closes or merges after publication's initial re-preparation or between replies, the per-send refresh observes that state but still sends when HEAD is unchanged. Recheck OPEN before recording each submission intent and stop with confirmed receipts preserved and remaining drafts retained.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 186,
+            "start_line": 182
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 182
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 125,
+              "start_line": 124
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "title": "Prevent published owner replies from invalidating remaining replies",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_state.py:204\u2013208 uses fingerprint(item), including owner comments, for content dependency changes. Lines 226\u2013231 unstage dependent replies and mark batches stale. publish() refreshes before each reply at owner_publication.py:182 and blockers() rejects the old fingerprint at lines 108\u2013111. The reproduction added an owner comment and observed both invalidations.",
+          "blocking": true,
+          "body_md": "Source: Claude. Confidence: High.\n\nWith two staged replies to one thread, posting the first changes the fingerprint seen before the second, so the second is rejected as stale. Owner comments can also prevent later association of a verified batch. Exclude known self-publication receipts from dependency invalidation, or safely advance expected context while continuing to detect incoming changes.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 208,
+            "start_line": 204
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 208,
+              "start_line": 204
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 231,
+              "start_line": 226
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 111,
+              "start_line": 108
+            }
+          ]
+        },
+        {
+          "id": "F5",
+          "title": "Failed provider checkpoint allegedly accepts unreviewed partial edits",
+          "severity": "Medium",
+          "validity": "REJECTED",
+          "evidence": "The reproduction confirms owner_providers.py:145\u2013151 advances checkpoint before rejecting a nonzero result, while retaining attempt.before. However, owner_fixes.py:197\u2013202 gates interrupted tasks, the immutable batch baseline remains unchanged, and final_review() at lines 129\u2013143 receives the complete baseline-to-current diff via context() at lines 81\u201385. Partial edits do not become a successful verification merely by becoming a checkpoint.",
+          "blocking": false,
+          "body_md": "Source: Claude. Rejection confidence: High.\n\nThe checkpoint update is real, but the claimed unreviewed final acceptance is not established. Attempt history retains the previous tree, ordinary resume requires adoption or explicit skipping, and final review still assesses the full accumulated diff. The separate defect where an unrelated skip authorizes interrupted-task replay is retained as F6. No correction is required for the rejected acceptance claim.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F6",
+          "title": "Bind interrupted-task skips to the interrupted task",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "owner_fixes.py:197\u2013200 accepts any nonempty skip list. With interrupted t1, queued t2, and a current tree matching the saved checkpoint, the reproduction requested skip(t2) and observed fix(t1) executing again. Lines 201\u2013202 do stop newly changed, uncheckpointed crash edits, narrowing the original scenario.",
+          "blocking": true,
+          "body_md": "Source: Claude. Confidence: High.\n\nAfter a failed writer attempt whose resulting tree was captured, skipping an unrelated task satisfies the interrupted-task gate and replays the interrupted fixer. Require every interrupted writer task to be explicitly adopted or included in the skip selection. The existing worktree comparison protects uncheckpointed edits but does not validate which task the user authorized skipping.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 200,
+            "start_line": 197
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 200,
+              "start_line": 197
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 202,
+              "start_line": 201
+            },
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 151,
+              "start_line": 145
+            }
+          ]
+        },
+        {
+          "id": "F7",
+          "title": "Preserve the implementation stage for queued tasks during adoption",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "owner_fixes.py:207\u2013211 changes all non-skipped/non-blocked tasks to reviewing. run_task() at lines 88\u2013105 skips initial fixing for that status. The reproduction adopted interrupted t1 and observed never-run queued t2 receiving only review; if implementation is then requested, lines 113\u2013118 consume its single repair allowance.",
+          "blocking": true,
+          "body_md": "Source: Claude. Confidence: High.\n\nAdopting partial changes for an interrupted batch moves unrelated queued tasks directly to review. Those tasks lose their initial implementation stage; any first fix requested by review consumes their repair allowance. Reviews still prevent automatic unverified acceptance, but valid remaining work can pause prematurely. Preserve queued tasks and distinguish them from work requiring reverification.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 211,
+            "start_line": 207
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 211,
+              "start_line": 207
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 105,
+              "start_line": 88
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 118,
+              "start_line": 113
+            }
+          ]
+        },
+        {
+          "id": "F8",
+          "title": "Scope Git integrity checks to relevant shared configuration",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_git.py:84\u201385 hashes the complete shared config. A reproduction holding all other inputs constant changed only that config hash and obtained a different integrity identity. owner_providers.py:148\u2013149 and owner_fixes.py:193\u2013195 treat that difference as protected-state failure.",
+          "blocking": false,
+          "body_md": "Source: Claude. Confidence: High.\n\nA user updating unrelated branch configuration in another checkout can invalidate an owner operation because all worktrees share this config file. The operation then demands adoption and reverification despite unchanged owner source and relevant Git state. Compare relevant semantic settings or distinguish unrelated external changes. Retained as nonblocking because explicit recovery remains available.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 85,
+            "start_line": 84
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 85,
+              "start_line": 84
+            },
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 149,
+              "start_line": 148
+            }
+          ]
+        },
+        {
+          "id": "F9",
+          "title": "Resolve repository identity before looking up the remembered toolkit",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "owner_state.py:93\u2013101 uses identity None when remotes identify both a fork and base. pulls.py:71 uses an explicit repository key, while Forge routing at emacs/magit-auto-review.el:489\u2013490 and 506\u2013511 supplies none. The reproduction saved Owner for an explicit repository, read Reviewer through inferred lookup, and confirmed ambiguous numeric owner-open rejection.",
+          "blocking": true,
+          "body_md": "Source: Claude. Confidence: High.\n\nIn a fork checkout, Forge's unresolved repository lookup misses the Owner preference saved under the explicit base repository and can open Reviewer instead. Saving Owner under the ambiguous key instead leads numeric owner-open to reject the remotes. Resolve repository identity from Forge or use the repository chooser before routing, preserving offline owner opening and consistent preference keys.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 101,
+            "start_line": 93
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 101,
+              "start_line": 93
+            },
+            {
+              "path": "emacs/magit-auto-review.el",
+              "side": "RIGHT",
+              "line": 511,
+              "start_line": 506
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 51,
+              "start_line": 46
+            }
+          ]
+        },
+        {
+          "id": "F10",
+          "title": "Resume validation failures allegedly persist unauthorized adoption",
+          "severity": "Medium",
+          "validity": "REJECTED",
+          "evidence": "The reproduction confirms owner_fixes.py:203\u2013227 applies requested adoption before settings_changed, and lines 286\u2013289 save it. However, adoption was explicitly requested; tasks remain reviewing, settings validation still blocks execution, and task/final reviews remain mandatory before readiness. No all-or-nothing rollback contract for owner-fix or verification bypass was established.",
+          "blocking": false,
+          "body_md": "Source: Claude. Rejection confidence: Medium.\n\nThe saved intermediate state is real, but it records an explicitly authorized adoption in a durable multi-step workflow. Restoring the batch settings is still required before execution, and adopted work must pass review. The original claim does not demonstrate unauthorized changes or accepted invalid work. Earlier validation could improve error ergonomics, but no blocking correction follows from this evidence.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F11",
+          "title": "Repeated freshness collection allegedly causes demonstrated rate-limit failures",
+          "severity": "Low",
+          "validity": "REJECTED",
+          "evidence": "owner_fixes.py:161\u2013166 deliberately checks discussion changes as well as HEAD. owner_state.py:237 derives snapshot paths from metadata/discussion content, so unchanged refreshes reuse a path. Full collection overhead exists, but the proposed head-only replacement misses stale feedback and no measured runtime or rate-limit failure was supplied or reproduced.",
+          "blocking": false,
+          "body_md": "Source: Claude. Rejection confidence: High for the stated evidence gaps.\n\nRepeated collection is an optimization opportunity, not an established failure here. Head-only checks would weaken required discussion invalidation, and unchanged inputs do not create a distinct snapshot file on every refresh. No performance correction is required on the supplied evidence; optimize only while preserving discussion freshness.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F12",
+          "title": "Owner preflight allegedly accepts terminal provider failures",
+          "severity": "Low",
+          "validity": "REJECTED",
+          "evidence": "owner_providers.py:61 rejects nonzero runner results. processes.py:91\u201399 classifies turn.failed and is_error=true as terminal errors, and lines 245\u2013247 force a failure return code. A local subprocess emitting turn.failed returned 1. Missing/falsy is_error and generic recoverable errors differ from the reviewer's strict validator, but no failed authentication passing the exact-token and runner checks was demonstrated. Repeated fresh preflight is explicitly documented.",
+          "blocking": false,
+          "body_md": "Source: Claude. Rejection confidence: Medium.\n\nThe shared runner already rejects terminal failure events, falsifying that part of the claim. Validation strictness differs for incomplete or recoverable event streams, but this does not demonstrate failed authentication being accepted. Fresh probes on resume are documented behavior. A shared validator may reduce drift, but the report does not establish a blocking correctness defect.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F13",
+          "title": "Avoid sending the same combined diff twice",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:81\u201385 constructs batch_diff and task_diff independently. Final review at line 137 and planning at line 253 pass before=baseline. The reproduction confirmed identical diff fields. No actual context-limit failure or cost measurement was established.",
+          "blocking": false,
+          "body_md": "Source: Claude. Confidence: High.\n\nFinal-review prompts, and resumed planning prompts with accumulated changes, contain the full combined diff twice because before equals baseline. This adds unnecessary prompt size proportional to the patch. Omit task_diff when it equals batch_diff. This is a nonblocking efficiency issue.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 85,
+            "start_line": 81
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 85,
+              "start_line": 81
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 137,
+              "start_line": 137
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 253,
+              "start_line": 253
+            }
+          ]
+        },
+        {
+          "id": "F14",
+          "title": "Make network owner operations cancellable from Emacs",
+          "severity": "Medium",
+          "validity": "NEW",
+          "evidence": "emacs/magit-auto-review-owner.el:278\u2013287 starts asynchronous operations and learns cancellation IDs only from started events; lines 450\u2013452 require that ID. owner.py:41\u201360 dispatches refresh/prepare/publish/recover without operation(), unlike owner_fixes.py:171. The focused dispatch reproduction confirmed refresh emits no started event. The close guard at owner.el:67\u201371 also refuses buffer termination while the process runs.",
+          "blocking": true,
+          "body_md": "Source: New. Confidence: High from code tracing and backend reproduction; Emacs execution was not run.\n\nA slow GitHub refresh, preparation, publication, or recovery cannot be cancelled with K because these commands never register the operation ID K requires. The buffer close guard also refuses termination and directs the user to K. Register long owner operations with shared cancellation, or provide a safe process fallback that preserves uncertain publication intent and releases locks.",
+          "primary_location": {
+            "path": "emacs/magit-auto-review-owner.el",
+            "side": "RIGHT",
+            "line": 452,
+            "start_line": 450
+          },
+          "locations": [
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 452,
+              "start_line": 450
+            },
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 71,
+              "start_line": 67
+            },
+            {
+              "path": "lib/pr_review/owner.py",
+              "side": "RIGHT",
+              "line": 60,
+              "start_line": 41
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 8
+    },
+    {
+      "case": "E-main-synthesised",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Reject dirty initialized submodules before accepting checkpoints",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Source: Codex #1. owner_git.py:105-107 stages a superproject tree; dirty contents beneath an unchanged submodule gitlink are not represented. admin() at lines 81-93 does not inspect submodule worktrees. owner_providers.py:148-149 consequently accepts such read-only-role edits and omits fixer edits from final_tree. Scenario: an initialized submodule file changes without a submodule HEAD change. Code-traced; no runtime submodule fixture was run.",
+          "blocking": true,
+          "body_md": "An initialized submodule can have modified files while retaining the same gitlink SHA. These checkpoints and the admin digest then remain unchanged, allowing planner/reviewer writes to pass and omitting fixer changes from saved diffs. Reject dirty initialized submodules, including nested ones, or capture and validate their contents recursively. Source: Codex. Confidence: high from code tracing.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 107,
+            "start_line": 105
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 107,
+              "start_line": 105
+            },
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 83,
+              "start_line": 81
+            },
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 149,
+              "start_line": 148
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Exclude removed and explicitly skipped feedback from replanning",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "Sources: Codex #2 and Claude #1. owner_state.py:222-231 retains missing items and marks dependent batches stale; items() at 156-161 rejects them. owner_fixes.py:249-253 excludes only completed items, and line 263 requests all original items again. A production-function mock reproduced invalid_target with one missing item, replan=True, and its task explicitly skipped. Skip processing actually precedes the stale check, contrary to Claude's ordering claim. Manual commit/reconciliation remains possible.",
+          "blocking": true,
+          "body_md": "When selected feedback is deleted, refresh retains it as missing. Replanning still includes it even after its task is explicitly skipped, so context construction raises invalid_target before independent tasks continue; the full-batch fingerprint update has the same problem. Preserve skips/removal history and build planning/fingerprint selections from available active items. Source: Both. Confidence: high; reproduced with in-memory mocks.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 253,
+            "start_line": 249
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 253,
+              "start_line": 249
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 263,
+              "start_line": 262
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 161,
+              "start_line": 156
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 231,
+              "start_line": 222
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Resolve repository identity before reading the remembered toolkit",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Sources: Codex #3 and Claude #5. Forge opening at magit-auto-review.el:490 omits repository. The added lookup at 508 passes that omission to owner_state.toolkit(); lines 90-101 leave identity unset with distinct fork/upstream remotes. An in-memory preference-store reproduction saved Owner under an explicit identity and received Reviewer from the unscoped lookup.",
+          "blocking": true,
+          "body_md": "In a fork/upstream checkout, selecting Owner in the PR list saves a repository-scoped preference, but opening that PR through Forge supplies no repository and reads a different preference key. It silently opens Reviewer. Resolve or select the repository before preference lookup and pass the same identity to the selected toolkit. Source: Both. Confidence: high; preference mismatch reproduced.",
+          "primary_location": {
+            "path": "emacs/magit-auto-review.el",
+            "side": "RIGHT",
+            "line": 511,
+            "start_line": 508
+          },
+          "locations": [
+            {
+              "path": "emacs/magit-auto-review.el",
+              "side": "RIGHT",
+              "line": 511,
+              "start_line": 508
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 101,
+              "start_line": 90
+            },
+            {
+              "path": "emacs/magit-auto-review.el",
+              "side": "RIGHT",
+              "line": 491,
+              "start_line": 484
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "title": "Owner replies invalidate verification fingerprints",
+          "severity": "Medium",
+          "validity": "REJECTED",
+          "evidence": "Source: Claude #2. owner_state.py:110-114 distinguishes complete conversation fingerprints from viewer-filtered notifications; lines 206-231 invalidate assessments on content changes. owner_publication.py:68-69 refuses automatic drafts from changed verification context. The mock confirmed that an owner reply changes the full fingerprint while leaving the notification unchanged. The documented changed-discussion policy supports this conservative invalidation; the observed behavior alone does not demonstrate the claimed defect.",
+          "blocking": false,
+          "body_md": "Rejected as a blanket defect. Owner messages intentionally remain verification context while being excluded from self-notifications. Refusing to reuse an assessment after that context changes is consistent with the documented policy. Excluding every owner-authored message could also miss changes in agreed scope. Source: Claude. Confidence: high in observed behavior and the policy distinction.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F5",
+          "title": "Restrict bulk selection to explicit feedback groups",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Source: Claude #3. magit-auto-review-owner.el:88-104 selects all matching descendants within the current section without validating group type. The root at 154 encloses attention and history feedback, and line 235 defaults point to point-min. Therefore root selection includes actionable deferred/handled items. Full Emacs verification failed because Magit was missing; an isolated harness failed before assertion. Classification rests on source tracing.",
+          "blocking": true,
+          "body_md": "At the initial root heading, this descendant scan selects feedback across the entire buffer, including hidden Deferred/History items. Pressing f can start fixes for those items, and triage commands can affect them all. Allow bulk selection only on explicit eligible groups, otherwise raise the existing selection error. Source: Claude. Confidence: high from code tracing; full Magit behavior was not runtime verified.",
+          "primary_location": {
+            "path": "emacs/magit-auto-review-owner.el",
+            "side": "RIGHT",
+            "line": 95,
+            "start_line": 92
+          },
+          "locations": [
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 95,
+              "start_line": 92
+            },
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 155,
+              "start_line": 154
+            },
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 235,
+              "start_line": 234
+            }
+          ]
+        },
+        {
+          "id": "F6",
+          "title": "Owner opening requires explicit repository selection with ambiguous remotes",
+          "severity": "Medium",
+          "validity": "REJECTED",
+          "evidence": "Source: Claude #4. owner_state.py:42-55 deliberately rejects distinct remote identities before Repository.resolve(). The API and implementation promise no network access on owner-open, while --repo, repository selection, and PR URLs provide disambiguation. A mock confirmed invalid_request without calling the resolver. The reviewer's gh repo view fallback would violate the owner's offline-open contract.",
+          "blocking": false,
+          "body_md": "Rejected: refusing ambiguous local repository identity is consistent with offline owner opening and explicit repository selection. The supplied scenario has supported --repo/URL/list-selection alternatives. An unconditional network fallback is not an appropriate correction. This does not resolve the separate preference-key mismatch in F3. Source: Claude.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F7",
+          "title": "Avoid copying ignored-path inventories into repeated prompts",
+          "severity": "Low",
+          "validity": "MODIFIED",
+          "evidence": "Source: Claude #6. owner_git.py:110-111 places the full ignored-file inventory in each checkpoint. owner_fixes.py:81-85 includes complete completed-task records in provider context, including before/after checkpoints; owner_providers.py:132 serializes that context. A small reproduction observed an ignored filename twice in one completed task's prompt data. Large inventories consequently amplify payloads, but no actual latency or model-limit failure was measured, and transient checkpoints do not necessarily enlarge persisted session state.",
+          "blocking": false,
+          "body_md": "Completed-task context includes before/after checkpoints with full ignored-file lists, so large dependency/build inventories are repeatedly serialized into state and downstream model prompts. Store inventories once by reference or summarize them, and omit them from provider context. Source: Claude. Confidence: high for duplication; performance and token-limit consequences remain unmeasured.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 111,
+            "start_line": 110
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 111,
+              "start_line": 110
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 85,
+              "start_line": 81
+            },
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 132,
+              "start_line": 132
+            }
+          ]
+        },
+        {
+          "id": "F8",
+          "title": "Publishing performs repeated complete refreshes",
+          "severity": "Low",
+          "validity": "REJECTED",
+          "evidence": "Source: Claude #7. owner_publication.py:175-186 performs preparation and a refresh/fetch per reply. The repeated calls are real, but they revalidate account, discussion, permissions, and head immediately before writes. No measured rate-limit, timeout, or latency failure was supplied or reproduced. A head-only replacement would omit required discussion checks.",
+          "blocking": false,
+          "body_md": "Rejected as a demonstrated defect. Per-send freshness checks intentionally protect external writes. The extra initial refresh may be optimizable, but call count alone does not establish a failure, and checking only the head would weaken existing safeguards. Source: Claude.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F9",
+          "title": "Saved push mapping may diverge from the refreshed target",
+          "severity": "Medium",
+          "validity": "UNVERIFIED",
+          "evidence": "Source: Claude #8. owner_git.py:70-74 configures branch tracking only when configured_target is absent. A mock with an old configured branch and a new push_target confirmed no configuration writes. However, no supported live PR-head repository/branch transition or resulting wrong Git/Magit push was established. Existing tests explicitly preserve later manual configuration; push behavior can also refuse a mismatched destination.",
+          "blocking": false,
+          "body_md": "Conditional risk: if GitHub reports a different head repository/branch after initial setup, the displayed target can differ from the saved branch mapping. The one-time guard is confirmed, but a reachable end-to-end wrong-push scenario is unverified. Prefer surfacing the mismatch for explicit reconciliation while preserving human overrides. Source: Claude. Confidence: high in conditional code behavior, low in the claimed push failure.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 74,
+            "start_line": 70
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 74,
+              "start_line": 70
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 236,
+              "start_line": 232
+            }
+          ]
+        },
+        {
+          "id": "F10",
+          "title": "Require skips to cover interrupted tasks before continuing",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "Source: Claude #9. owner_fixes.py:197-200 lets any nonempty skip list bypass interruption handling; lines 212-217 validate only that listed tasks exist. With t1 fixing, t2 skipped, no adoption, and a current tree equal to the saved checkpoint, the production execute() mock launched fix/review for t1. run_task() at 91-97 resets its before checkpoint. Earlier attempt artifacts remain, narrowing the original record-loss claim.",
+          "blocking": true,
+          "body_md": "A nonempty skip list bypasses the interruption gate even when it names only an unrelated task. If the current tree matches the saved checkpoint, the interrupted fixer is restarted without adoption and its task-level before checkpoint is reset. Validate skips first and require each interrupted task to be skipped or explicitly adopted. Source: Claude. Confidence: high; restart reproduced with mocks.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 200,
+            "start_line": 197
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 200,
+              "start_line": 197
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 217,
+              "start_line": 212
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 97,
+              "start_line": 91
+            }
+          ]
+        },
+        {
+          "id": "F11",
+          "title": "Fix and resume repeat provider preflight and freshness checks",
+          "severity": "Low",
+          "validity": "REJECTED",
+          "evidence": "Source: Claude #10. owner_fixes.py:247 invokes preflight on each operation; owner_providers.py:31-64 performs metadata/capability/authentication checks. The README explicitly documents fresh metadata and live probes for every fix operation. check_fresh() and its task-loop calls protect against discussion changes between tasks. No accidental call outside an explicitly requested fix operation or demonstrated failure was established.",
+          "blocking": false,
+          "body_md": "Rejected as a defect: repeated preflight is explicitly documented behavior, and task freshness checks guard against intervening discussion changes. Session caching would change that policy and requires its own invalidation design; the supplied cost/latency concern was not demonstrated as a failure. Source: Claude.",
+          "primary_location": null,
+          "locations": []
+        },
+        {
+          "id": "F12",
+          "title": "Recheck PR state before every reply send",
+          "severity": "Medium",
+          "validity": "NEW",
+          "evidence": "Source: New. owner_publication.py:124-125 checks OPEN only during preparation. The send loop at 182-186 refreshes metadata but checks only head equality; it then creates an action and posts at 197. A focused mock changed metadata to CLOSED during the loop refresh while preserving the head, and production publish() still issued one send and recorded a published receipt. No live GitHub request was made.",
+          "blocking": true,
+          "body_md": "If the PR closes after preparation or between replies without changing its head, the next refresh reports CLOSED but this loop still sends the reply. Recheck the refreshed PR state before each action/POST, preserving confirmed receipts and stopping the remainder when it is no longer OPEN. Source: New. Confidence: high; the client write attempt was reproduced with mocks.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 186,
+            "start_line": 182
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 182
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 125,
+              "start_line": 124
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 197,
+              "start_line": 195
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 6
+    },
+    {
+      "case": "F-main-two-codex",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Reject dirty submodules before accepting checkpoints",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_git.py:105-107 snapshots a superproject tree; admin() at 78-93 does not inspect submodule state. owner_providers.py:145-149 accepts unchanged tree/admin values. Editing files inside an initialized submodule without changing its HEAD leaves the gitlink unchanged, so provider-introduced edits evade verification and are absent from final_tree. Initial clean() only catches preexisting dirt. Established by code tracing; no real-submodule runtime check ran.",
+          "blocking": true,
+          "body_md": "**Source: Codex A. Confidence: high from code tracing.** A provider can edit files inside an initialized submodule without changing its gitlink. These checkpoints omit that content, and the administrative digest does not inspect nested repositories. Planner/reviewer writes can therefore pass integrity checks, and fixer changes disappear from saved diffs and `final_tree`. Recursively reject dirty submodules before accepting checkpoints, or explicitly capture and verify their contents. The initial clean-worktree check does not catch edits introduced during a provider invocation.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 107,
+            "start_line": 105
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 107,
+              "start_line": 105
+            },
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 93,
+              "start_line": 78
+            },
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 149,
+              "start_line": 145
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Preserve skips and exclude unavailable feedback when replanning",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "owner_fixes.py:249-253 excludes only completed items from replanning; line 261 replaces other tasks, and line 263 requires all original feedback again. owner_state.py:156-161 rejects missing items retained by refresh at 222-231. A focused execution reproduced invalid_target for deleted skipped feedback. A separate completed execution with extant feedback and skip=['a'] showed the planner receiving ['a','b'] and execution running both.",
+          "blocking": true,
+          "body_md": "**Source: Codex A. Confidence: high.** When selected feedback disappears during a paused batch, `replan` still includes it and raises `invalid_target`, even if its task was explicitly skipped. The same selection/replacement logic also revives skipped feedback that still exists. Preserve explicit skips and their dependency effects, exclude unavailable/skipped items from executable planning, and update fingerprints without requiring deleted items at line 263. This expands the original deleted-feedback finding with a reproduced skip/replan interaction.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 253,
+            "start_line": 249
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 253,
+              "start_line": 249
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 263,
+              "start_line": 261
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 161,
+              "start_line": 156
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 231,
+              "start_line": 222
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Resolve the repository before looking up its toolkit",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "magit-auto-review.el:479-488 opens Forge PRs without passing a repository; 508-511 queries toolkit before resolving it. owner_state.py:90-107 infers identity only for a single unique remote and otherwise reads a key containing None. An in-memory call to the actual toolkit function with upstream/fork remotes returned Owner for the explicit repository and Reviewer for the unscoped request.",
+          "blocking": false,
+          "body_md": "**Source: Codex A. Confidence: high.** In an upstream/fork checkout, selecting Owner through the PR list saves a repository-scoped preference. Opening a PR through Forge passes no repository here, so the backend reads a different preference key and defaults to Reviewer. Resolve and pass the Forge repository identity before this lookup. Single-remote inference works; the explicitly scoped PR-list entry point also remains a workaround.",
+          "primary_location": {
+            "path": "emacs/magit-auto-review.el",
+            "side": "RIGHT",
+            "line": 511,
+            "start_line": 508
+          },
+          "locations": [
+            {
+              "path": "emacs/magit-auto-review.el",
+              "side": "RIGHT",
+              "line": 511,
+              "start_line": 508
+            },
+            {
+              "path": "emacs/magit-auto-review.el",
+              "side": "RIGHT",
+              "line": 488,
+              "start_line": 479
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 107,
+              "start_line": 90
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "title": "Freeze replies while their submissions remain uncertain",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.py:75-78 rewrites unpublished generated replies without checking pending actions. owner.py:89-93 provides that guard for ordinary mutations. Recovery at owner_publication.py:149-153 calls finish() at 165-168, which marks the current reply Published. An in-memory association/recovery reproduced a Published reply linking commit B with commits=['B'] whose attached receipt still contained the submitted 'Fixed in A.' body.",
+          "blocking": true,
+          "body_md": "**Source: Codex B. Confidence: high.** If a reply mentioning A was accepted but its response was lost, reassociating the verified fix with amended commit B rewrites the reply despite its ambiguous action. Recovery can then attach A's receipt and mark the B wording Published. Apply the pending-action immutability guard before changing generated replies, or require recovery first, so published bodies and commit provenance describe the actual submission.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 78,
+            "start_line": 75
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 78,
+              "start_line": 75
+            },
+            {
+              "path": "lib/pr_review/owner.py",
+              "side": "RIGHT",
+              "line": 93,
+              "start_line": 89
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 168,
+              "start_line": 165
+            }
+          ]
+        },
+        {
+          "id": "F5",
+          "title": "Recheck that the PR is open before each submission",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.py:124-125 rejects closed PRs during prepare(), including the second preparation at line 176. The per-reply loop at 182-186 refreshes metadata but checks only the head and reply blockers before recording/sending another action. An in-memory execution observed a POST attempt after refresh set metadata.state to CLOSED while the head stayed unchanged. Live GitHub acceptance was not tested.",
+          "blocking": true,
+          "body_md": "**Source: Codex B. Confidence: high for the client-side failure.** A PR can close or merge after the second preparation or between replies without changing its head SHA. This refresh observes that state, but the loop still records and sends the next action because it only checks the head and reply blockers. Recheck `metadata.state == 'OPEN'` before every action is recorded/sent, preserving confirmed receipts and requiring a fresh preview for any remainder.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 186,
+            "start_line": 182
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 182
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 125,
+              "start_line": 124
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 4
+    },
+    {
+      "case": "G-feature-two-codex",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Freeze uncertain replies during commit reassociation",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Source: Both (Codex A comment 1; Codex B comment 2). owner_publication.py:75-78 changes an unpublished reply's commit list and generated body without checking submitting/ambiguous actions; owner.py:89-93 has that guard only for direct mutations. owner_publication.py:149-168 recovers the original marker and marks the current reply Published by ID. Reproduction: an ambiguous timeline reply for commit A was reassociated to B, then recovered with A's receipt; its published body/commits described B while its receipt described A. Confidence: High.",
+          "blocking": true,
+          "body_md": "A generated timeline reply can succeed remotely while its response is lost. Reassociating an amended, pushed commit before recovery rewrites the ambiguous reply's commits and body here. Its original feedback fingerprint is unchanged, so the update proceeds. `recover()` subsequently finds the original receipt and marks the rewritten reply Published, recording a commit claim that was never posted. Apply the submitting/ambiguous-action immutability guard before changing the reply or its effective association, and preserve the submitted snapshot until recovery completes.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 78,
+            "start_line": 75
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 78,
+              "start_line": 75
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 168,
+              "start_line": 165
+            },
+            {
+              "path": "lib/pr_review/owner.py",
+              "side": "RIGHT",
+              "line": 93,
+              "start_line": 89
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Preserve accepted verification when resume fails before execution",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Source: Codex A comment 2. owner_fixes.py:247 performs preflight after selecting an existing ready batch; lines 286-289 overwrite its status on any exception. owner_publication.py:27-33 permits only ready batches. The changed-HEAD preservation branch at owner_fixes.py:186-191 applies only while status remains ready. A focused reproduction asserted no plan/fix/review invocation, observed ready -> paused on preflight failure, then changed-HEAD rejection and association skipping the batch after a simulated human commit. Confidence: High.",
+          "blocking": true,
+          "body_md": "Resuming an unchanged ready batch while discovery/authentication is unavailable changes its status to Paused even though no plan/fix/review invocation or content change invalidated the accepted verification. If the user then commits and pushes that verified tree, automatic association skips the batch, explicit association rejects it, and resume fails because HEAD changed. Preserve the accepted verification independently of the latest execution failure, or retain readiness when the failure occurred before anything invalidated the verified result.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 289,
+            "start_line": 286
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 289,
+              "start_line": 286
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 191,
+              "start_line": 186
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 247,
+              "start_line": 246
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 33,
+              "start_line": 27
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Recheck open-PR state before every reply submission",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Source: Codex A comment 3. owner_publication.py:124-125 rejects closed PRs during prepare, but lines 182-186 refresh metadata and check only head and reply blockers before sending. A two-reply in-memory reproduction observed refresh states OPEN, OPEN, OPEN, CLOSED with unchanged head and still recorded two successful timeline sends, both marked Published. Confidence: High.",
+          "blocking": true,
+          "body_md": "If the PR closes or merges after preparation or between replies, this refresh observes its new state but publication continues when HEAD is unchanged. Remaining timeline comments are sent and marked Published despite the open-PR restriction in `prepare()`. Check the refreshed PR state before recording each submission intent and sending; retain already confirmed receipts and leave the remaining drafts available for inspection.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 186,
+            "start_line": 182
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 182
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 125,
+              "start_line": 124
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "title": "Pause on clarification before automatic repair",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "Source: Codex B comment 1. owner_fixes.py:52-65 accepts clarification outcomes independently of complete; successful() at lines 68-69 rejects them. The task repair predicate at lines 113-118 and combined predicate at lines 148-152 nevertheless allow complete=true plus blockers without excluding clarify. Schema-valid focused reproductions produced review -> fix at both checkpoints for a clarification requiring a human decision. Confidence: High.",
+          "blocking": true,
+          "body_md": "A review with `complete=true`, blocking findings, and a `clarify` outcome still launches the writable fixer through this condition. The equivalent combined-review condition has the same omission. Consequently automation can make further source edits while a required human decision remains unresolved. Exclude clarification outcomes from both automatic-repair predicates and persist the paused/needs-attention state before returning.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 118,
+            "start_line": 113
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 118,
+              "start_line": 113
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 152,
+              "start_line": 148
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 69,
+              "start_line": 68
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 4
+    },
+    {
+      "case": "H-feature-two-claude",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Staleness fingerprint includes owner's own comments; multi-reply publication aborts and batches go stale",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_state.py:205 `content = fingerprint(item)` is not viewer-filtered; lines 206-207 add the key to `changed`, which unstages unpublished replies (226-228) and marks batches stale (229-231). owner_publication.py:181-186 refreshes before each reply, and blockers() (108-111) raises on a fingerprint mismatch. Reproduced: two staged replies on thread:T1 \u2192 publish posts 1, raises stale_discussion; statuses ['published','unstaged'].",
+          "blocking": true,
+          "body_md": "`fingerprint(item)` (owner_state.py:205) includes the viewer's own comments, so every reply the owner publishes marks the thread changed. In `publish`, the second staged reply on the same thread is unstaged and `blockers()` raises `stale_discussion` partway through a confirmed publication. Batches containing the item also become `discussion_stale`. Use the viewer-filtered `notification` fingerprint for invalidation and staleness.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 207,
+            "start_line": 205
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 207,
+              "start_line": 205
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 181
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 111,
+              "start_line": 108
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "invoke() sets batch checkpoint to post-run tree before checking returncode/result",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_providers.py:147 `batch[\"checkpoint\"] = after` precedes the integrity check (148), the returncode check (150) and result validation (152-164). On a failed or timed-out fix, the partial tree becomes the checkpoint; on resume, owner_fixes.py:201 (`snapshot != checkpoint`) does not fire, so with --skip the partial edits are silently carried forward. Code trace; the harness mocks invoke.",
+          "blocking": true,
+          "body_md": "A fix attempt that fails or times out after editing files has its partial tree adopted as `batch[\"checkpoint\"]` (owner_providers.py:147) before any success checks. This bypasses the `worktree_changed` explicit-adopt gate on resume. With `--skip`, unreviewed partial edits flow into later tasks and `final_tree`, and they are hidden from the re-run task's `task_diff`. Assign the checkpoint only after all checks pass.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_providers.py",
+            "side": "RIGHT",
+            "line": 151,
+            "start_line": 145
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 151,
+              "start_line": 145
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 202,
+              "start_line": 201
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Interrupted-task gate accepts any non-empty --skip",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:199 `if not request.get(\"adopt\") and not request.get(\"skip\")` only checks that skip is truthy; the interrupted task (status fixing/repairing) stays unskipped and run_task (88-94) re-launches a fix on the current checkpoint. Combined with F2, this replays on top of partial edits.",
+          "blocking": false,
+          "body_md": "`--skip p1-other` satisfies the interrupted-task guard even when a different task (`p1-t1`) is the one in `fixing`. That task is then re-run without adopt or skip, contradicting the documented 'do not blindly replay a partially applied task' rule. Require every `fixing`/`repairing` task to be in `skip`, or require `adopt`.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 200,
+            "start_line": 197
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 200,
+              "start_line": 197
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "title": "Adopt converts never-run queued tasks to review-only",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:207-211 sets every task not skipped/blocked (including queued) to status 'reviewing' with implementation 'Manually adopted changes'; run_task (91) skips the fix for 'reviewing' tasks. A no_change, non-blocking review marks them complete without implementation.",
+          "blocking": false,
+          "body_md": "When adopting after an interrupt, queued tasks that never ran are moved to `reviewing` with the summary \"Manually adopted changes\", so the fix role is never invoked for them. They either 'complete' with nothing implemented or use up their single repair. Only move tasks that were started (or that have `before`) to review, and keep `queued` tasks queued.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 211,
+            "start_line": 203
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 211,
+              "start_line": 203
+            }
+          ]
+        },
+        {
+          "id": "F5",
+          "title": "admin() hashes entire shared .git/config, causing false integrity failures",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_git.py:84 hashes session.repo.common/'config'. Any user config write (push -u, remote add) or a later configure_push write changes the identity \u2192 integrity_failed in invoke (owner_providers.py:95) and execute (owner_fixes.py:194). The PR's own test test_fork_missing_and_ambiguous_remotes_are_explicit must pass adopt=True after adding remotes.",
+          "blocking": false,
+          "body_md": "Hashing the entire shared `.git/config` into the admin identity flags unrelated user config writes as provider tampering, forcing adopt-and-reverify. Hash only the keys that matter (`branch.<owner-branch>.*`, `core.hooksPath`, `include*`, `core.fsmonitor`).",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 85,
+            "start_line": 84
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 85,
+              "start_line": 84
+            }
+          ]
+        },
+        {
+          "id": "F6",
+          "title": "Toolkit choice / owner-open break with multiple remotes and nil repository",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_state.py:93-101 stores the toolkit under digest([common, None]) when there are several remotes; pulls.py looks up the explicit repository. emacs/magit-auto-review.el:490 calls --open-pr with nil repository from Forge; :508 queries toolkit with nil. owner_state.py:50-51 raises 'Choose a repository' for nil identity with >1 remote.",
+          "blocking": false,
+          "body_md": "In fork checkouts (origin plus upstream), the Forge entry passes a nil repository. `toolkit()` then reads and writes a `None`-keyed record that differs from the one the PR list uses, and `owner-open` raises 'Choose a repository'. Resolve the repository the same way as the reviewer path before the toolkit lookup.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 101,
+            "start_line": 92
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 101,
+              "start_line": 92
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 51,
+              "start_line": 50
+            },
+            {
+              "path": "emacs/magit-auto-review.el",
+              "side": "RIGHT",
+              "line": 512,
+              "start_line": 506
+            }
+          ]
+        },
+        {
+          "id": "F7",
+          "title": "Resume mutations applied before settings/staleness validation",
+          "severity": "Low",
+          "validity": "MODIFIED",
+          "evidence": "owner_fixes.py:203-218 applies adopt/skip/requeue before the settings_changed (226-227) and stale_discussion (219-220) raises; the except handler (286-290) saves. The persisted state equals the user's explicit request, and the next resume re-validates the snapshot, admin identity and settings, so impact is limited.",
+          "blocking": false,
+          "body_md": "`execute()` mutates the batch for adopt/skip/replan and then may raise `settings_changed`/`stale_discussion`, and the handler persists the half-applied request. Impact is low because the persisted change is what the user asked for and safety checks repeat on the next resume. Still, validate before mutating.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 227,
+            "start_line": 203
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 227,
+              "start_line": 203
+            }
+          ]
+        },
+        {
+          "id": "F8",
+          "title": "Full discussion refresh before every task and every published reply",
+          "severity": "Low",
+          "validity": "MODIFIED",
+          "evidence": "owner_fixes.py:161-166 check_fresh \u2192 refresh before each task and twice after the loop (275, 283); owner_publication.py:182 refresh per reply. refresh (owner_state.py:170-187) does gh pr view + REST PR + /user + paginated lists + GraphQL. Modified: context snapshots are content-addressed (line 237), so new files appear only on change, and the double PR read is a deliberate consistency check.",
+          "blocking": false,
+          "body_md": "Every task and every published reply triggers a full PR plus discussion download (several REST pages and GraphQL calls), which adds latency and rate-limit pressure on busy PRs. Consider a cheap head-SHA check between tasks and one full refresh at the boundaries.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 166,
+            "start_line": 161
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 166,
+              "start_line": 161
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 181
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 187,
+              "start_line": 170
+            }
+          ]
+        },
+        {
+          "id": "F9",
+          "title": "Owner preflight duplicates and drifts from reviewer auth-probe validation; re-runs paid probes",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_providers.py:59-60 accepts falsy is_error, while reviews.py:165 requires `is_error is False`; the Codex check (56-57) does not reject 'error'/'turn.failed' events as reviews.py:166 does. preflight is called on every execute (owner_fixes.py:247).",
+          "blocking": false,
+          "body_md": "`preflight()` re-implements the reviewer's live auth-probe validation with weaker checks (`not is_error` vs `is False`; no Codex `error`/`turn.failed` rejection) and launches paid probes on every `owner-fix` call. Share one helper and cache a successful preflight per batch or settings.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_providers.py",
+            "side": "RIGHT",
+            "line": 62,
+            "start_line": 55
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 62,
+              "start_line": 55
+            }
+          ]
+        },
+        {
+          "id": "F10",
+          "title": "batch_diff and task_diff duplicated when before == baseline",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:81-85 always computes both; the plan (253) and final_review (137) pass batch['baseline'] as before, making them byte-identical.",
+          "blocking": false,
+          "body_md": "The plan and final-review prompts contain the full combined diff twice because `task_diff` equals `batch_diff` when `before == baseline`. Omit `task_diff` in that case.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 85,
+            "start_line": 81
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 85,
+              "start_line": 81
+            }
+          ]
+        },
+        {
+          "id": "F11",
+          "title": "Missing feedback re-marked changed on every refresh; batches cannot recover",
+          "severity": "High",
+          "validity": "CONFIRMED",
+          "evidence": "owner_state.py:222-225 re-adds every previously missing item to `changed` each refresh (they persist in state['feedback']). Batches stay discussion_stale; replan calls session.items on batch items (owner_fixes.py:263 / context at 253), which raises invalid_target for missing keys (owner_state.py:160-161). Reproduced: after dropping thread:T2, stale stays True across refreshes and `owner-fix --replan` \u2192 invalid_target.",
+          "blocking": true,
+          "body_md": "Once any feedback item is deleted, every later refresh puts it back in `changed`, so its batches are `discussion_stale` forever. Resume needs `--replan`, and replan fails in `session.items` with 'Feedback is no longer available'. The batch can never finish, and a new batch requires a clean worktree. Flag only the transition into missing, and let replan skip or withdraw missing items.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 225,
+            "start_line": 222
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 225,
+              "start_line": 222
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 263,
+              "start_line": 248
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 161,
+              "start_line": 160
+            }
+          ]
+        },
+        {
+          "id": "F12",
+          "title": "associate aborts for all ready batches when any associated item is missing",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.py:67 `item = session.items(state, [key])[0]` raises invalid_target for a missing key inside the loop over all batches/associations. Reproduced: ready batch, commit pushed, associate OK (2 replies); drop one item \u2192 associate raises 'Feedback is no longer available; refresh first.'",
+          "blocking": true,
+          "body_md": "A single deleted feedback item makes every `owner-associate` call fail, even for unrelated ready batches, and refreshing cannot clear it. Skip and report associations whose source is missing instead of raising.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 69,
+            "start_line": 67
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 69,
+              "start_line": 67
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 43,
+              "start_line": 43
+            }
+          ]
+        },
+        {
+          "id": "F13",
+          "title": "execute() error handler demotes a 'ready' batch to 'paused'",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:286-290 sets status 'paused' on any exception once batch is bound; only the HEAD-changed path (189-191) is protected. CLI resume defaults to the latest batch (owner_cli.py:67). Reproduced: ready batch + new comment \u2192 resume \u2192 stale_discussion \u2192 status 'paused' \u2192 associate --batch rejects 'Choose a batch with a successful combined review'.",
+          "blocking": true,
+          "body_md": "Resuming a `ready` batch (CLI `resume` defaults to the latest batch) that hits any error, such as a new comment, a settings change or a network failure, rewrites its status to `paused`. `associate` then refuses it, and a successful resume re-runs the paid final review. Preserve `ready`/`final_tree` when no new work started, or refuse to resume ready batches without an explicit reverify.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 290,
+            "start_line": 286
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 290,
+              "start_line": 286
+            },
+            {
+              "path": "lib/pr_review/owner_cli.py",
+              "side": "RIGHT",
+              "line": 69,
+              "start_line": 66
+            }
+          ]
+        },
+        {
+          "id": "F14",
+          "title": "Checkpoints store full ignored-file list, propagated into state and model prompts",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_git.py:110-111 lists all ignored files into every checkpoint; grep shows 'ignored' is never read. Task before/after checkpoints are included in context()['completed_tasks'] (owner_fixes.py:85) and json-dumped into every prompt (owner_providers.py:132).",
+          "blocking": false,
+          "body_md": "Every checkpoint records `ls-files --others --ignored`, which is unused, and it propagates into session.json, protocol views and (through `completed_tasks`) every plan, fix and review prompt. After a fix model installs dependencies or builds, this can be tens of thousands of paths. Drop the field and send trimmed task summaries.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 111,
+            "start_line": 110
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 111,
+              "start_line": 110
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 85,
+              "start_line": 85
+            }
+          ]
+        },
+        {
+          "id": "F15",
+          "title": "Checkpoint rehashes the entire worktree each call",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_git.py:105-106 runs `read-tree HEAD` into a fresh temp index (no stat cache), then `add -A`, so git must hash every file; invoke takes two checkpoints per provider call. Magnitude not measured.",
+          "blocking": false,
+          "body_md": "Each checkpoint builds a stat-less temp index, so `git add -A` re-hashes the whole worktree, at least twice per provider call. Seed the temp index from a copy of the worktree's real index to reuse the stat data.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 107,
+            "start_line": 105
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 107,
+              "start_line": 105
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 5
+    },
+    {
+      "case": "J-feature-haiku-terra",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "Require skipping the interrupted task before resuming",
+          "severity": "High",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:197\u2013200 accepts any nonempty skip list; lines 267\u2013280 subsequently run the still-fixing task. Skipping unrelated task B therefore restarts interrupted task A without adoption.",
+          "blocking": true,
+          "body_md": "A nonempty `skip` list bypasses the interruption guard even when it does not include the interrupted task. Require each interrupted task to be explicitly skipped, or require adoption before resuming it. Source: Codex. Confidence: high.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 199,
+            "start_line": 197
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 199,
+              "start_line": 197
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "title": "Leave unstarted tasks queued when adopting partial work",
+          "severity": "High",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:207\u2013211 marks all non-skipped, non-blocked tasks reviewing, including queued tasks. run_task at lines 95\u2013106 then bypasses their fix invocation; a nonblocking no_change review can lead to ready status.",
+          "blocking": true,
+          "body_md": "Adopting an interrupted early task also changes never-started tasks to `reviewing`, so their planned fixes can be omitted. Reverify affected tasks while retaining queued tasks for execution. Source: Codex. Confidence: high.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 211,
+            "start_line": 207
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 211,
+              "start_line": 207
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "title": "Flag an obsolete configured push target",
+          "severity": "High",
+          "validity": "CONFIRMED",
+          "evidence": "owner_state.py:228\u2013233 refreshes push_target; owner_git.py:69\u201374 does not update or flag an existing configured_target. A push using the saved branch mapping can target the previous repository or branch.",
+          "blocking": true,
+          "body_md": "When the PR head destination changes, the displayed target changes but the existing Git push mapping remains. Detect the mismatch and require explicit reconciliation, preserving deliberate user configuration. Source: Codex. Confidence: high for the stale mapping; push behavior depends on Git settings.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_git.py",
+            "side": "RIGHT",
+            "line": 74,
+            "start_line": 69
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_git.py",
+              "side": "RIGHT",
+              "line": 74,
+              "start_line": 69
+            },
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 233,
+              "start_line": 228
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "title": "Do not let missing feedback block other associations",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_publication.py:61\u201368 looks up every pushed saved association; owner_state.py:158\u2013164 rejects missing items. A deleted previously associated item aborts processing of other items in the batch.",
+          "blocking": true,
+          "body_md": "A deleted historical feedback item makes association of remaining valid items fail. Preserve the historical association, but skip or flag the unavailable destination and continue processing the others. Source: Claude. Confidence: high.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 67,
+            "start_line": 61
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 67,
+              "start_line": 61
+            }
+          ]
+        },
+        {
+          "id": "F5",
+          "title": "Avoid invalidating verified work and staged replies on the owner's own comments",
+          "severity": "Medium",
+          "validity": "MODIFIED",
+          "evidence": "owner_state.py:204\u2013209 uses fingerprint(item) including viewer comments. owner_publication.py:67\u201369 silently skips a mismatched verified item; lines 181\u2013186 refresh before each reply, so posting one of two replies to a thread can invalidate the second.",
+          "blocking": true,
+          "body_md": "The owner's own reply changes the full discussion fingerprint. This can suppress a fixed-in draft after verification or interrupt a prepared multi-reply publication after the first reply. Distinguish known owner-authored changes or safely rebase remaining confirmed replies. Source: Claude. Confidence: high from code tracing; live propagation was not tested.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 209,
+            "start_line": 204
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 209,
+              "start_line": 204
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 69,
+              "start_line": 67
+            },
+            {
+              "path": "lib/pr_review/owner_publication.py",
+              "side": "RIGHT",
+              "line": 186,
+              "start_line": 181
+            }
+          ]
+        },
+        {
+          "id": "F6",
+          "title": "Permit replanning around deleted feedback",
+          "severity": "Medium",
+          "validity": "CONFIRMED",
+          "evidence": "owner_fixes.py:249\u2013263 sends original missing keys to context/session.items and later rebuilds fingerprints from all batch items. owner_state.py:158\u2013164 rejects those keys, including when their task was skipped.",
+          "blocking": true,
+          "body_md": "A deleted selected item prevents replanning the rest of a batch because missing items are still required in planner context and fingerprint rebuilding. Retain it as history and provide an explicit exclusion path for active work. Source: Claude. Confidence: high.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 253,
+            "start_line": 249
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 253,
+              "start_line": 249
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 263,
+              "start_line": 262
+            }
+          ]
+        },
+        {
+          "id": "F7",
+          "title": "Provider command restrictions may not prevent remote pushes",
+          "severity": "High",
+          "validity": "UNVERIFIED",
+          "evidence": "owner_providers.py:75\u201383 supplies command-pattern denials, and owner_git.py:78\u201394 fingerprints local administrative state rather than remote branches. Whether git -C or git -c variants bypass the installed Claude permission matcher and have network access was not tested.",
+          "blocking": false,
+          "body_md": "The local integrity check cannot detect a remote push, so the safety of the cited command variants depends on provider permission matching and network restrictions. Verify those behaviors and enforce the no-push boundary independently if they permit the commands. Source: Claude. Confidence: insufficient to establish the claimed bypass.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_providers.py",
+            "side": "RIGHT",
+            "line": 79,
+            "start_line": 75
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 79,
+              "start_line": 75
+            }
+          ]
+        },
+        {
+          "id": "F8",
+          "title": "Toolkit selection without a repository can be stored under a null identity",
+          "severity": "Low",
+          "validity": "MODIFIED",
+          "evidence": "owner_state.py:94\u2013105 writes a null-identity key when multiple remote identities exist; pulls.py:62\u201374 subsequently reads a repository-specific key. The standard PR-list frontend prompts for a repository first at magit-auto-review-pulls.el:89\u201392, limiting the reported scenario.",
+          "blocking": false,
+          "body_md": "When toolkit selection is invoked without repository context in a multi-remote checkout, the choice is stored under a key that repository-specific lookup does not read. Require a repository choice or define a consistent fallback. Source: Claude. Confidence: high for backend behavior; ordinary frontend reachability is limited.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_state.py",
+            "side": "RIGHT",
+            "line": 105,
+            "start_line": 94
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_state.py",
+              "side": "RIGHT",
+              "line": 105,
+              "start_line": 94
+            }
+          ]
+        },
+        {
+          "id": "F9",
+          "title": "Repeated refreshes may increase API usage",
+          "severity": "Low",
+          "validity": "REJECTED",
+          "evidence": "owner_fixes.py:161\u2013166 refreshes between tasks and around final review, and owner_publication.py:181\u2013186 refreshes before each submission. No rate-limit failure or latency measurement was supplied, and these checks protect freshness.",
+          "blocking": false,
+          "body_md": "Repeated network reads are present, but the report does not establish a user-impacting performance defect or an equivalent safe reduction. Source: Claude. Confidence: high in the observed calls; impact unverified.",
+          "primary_location": null,
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 162,
+              "start_line": 161
+            }
+          ]
+        },
+        {
+          "id": "F10",
+          "title": "Validate the final provider authentication result",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "owner_providers.py:55\u201361 accepts any matching success event, while reviews.py:165\u2013166 checks the last Claude result and rejects Codex error and turn.failed events. A zero-exit stream with success followed by failure can pass the owner probe.",
+          "blocking": false,
+          "body_md": "Owner preflight can accept an earlier success even if later events indicate failure. Apply the existing reviewer's final-result and error-event validation. Source: Claude. Confidence: high for the validation gap; occurrence of such provider streams is unverified.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_providers.py",
+            "side": "RIGHT",
+            "line": 60,
+            "start_line": 55
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 60,
+              "start_line": 55
+            }
+          ]
+        },
+        {
+          "id": "F11",
+          "title": "Refresh the owner view when reopening an existing buffer",
+          "severity": "Low",
+          "validity": "CONFIRMED",
+          "evidence": "magit-auto-review-owner.el:264\u2013271 obtains a fresh view but accepts it only inside the new-mode branch. If another process updates the session, reopening retains the old revision until explicit reload.",
+          "blocking": false,
+          "body_md": "Reopening an existing owner buffer discards the freshly returned view, leaving stale display and revision. Accept the returned view on reopen so subsequent actions use current state. Source: Claude. Confidence: high.",
+          "primary_location": {
+            "path": "emacs/magit-auto-review-owner.el",
+            "side": "RIGHT",
+            "line": 271,
+            "start_line": 267
+          },
+          "locations": [
+            {
+              "path": "emacs/magit-auto-review-owner.el",
+              "side": "RIGHT",
+              "line": 271,
+              "start_line": 267
+            }
+          ]
+        },
+        {
+          "id": "F12",
+          "title": "Duplicated combined-review repair policy",
+          "severity": "Low",
+          "validity": "REJECTED",
+          "evidence": "owner_fixes.py:113\u2013123 and 148\u2013156 have separate repair handling, but owner_providers.py:136\u2013167 records attempts and results. The reported difference does not demonstrate an incorrect outcome.",
+          "blocking": false,
+          "body_md": "The two repair paths duplicate policy, but the cited difference in report storage does not establish a functional bug. Source: Claude. Confidence: high for the code distinction; no demonstrated failure.",
+          "primary_location": null,
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 152,
+              "start_line": 148
+            }
+          ]
+        },
+        {
+          "id": "F13",
+          "title": "Require adoption after a failed combined repair",
+          "severity": "High",
+          "validity": "NEW",
+          "evidence": "owner_providers.py:145\u2013151 advances batch.checkpoint before checking a failed process. During final_review at owner_fixes.py:148\u2013152 all tasks can already be complete; execute's exception handler pauses the batch, and its resume guard at lines 197\u2013202 does not identify the failed combined repair when the snapshot matches the advanced checkpoint.",
+          "blocking": true,
+          "body_md": "If a combined-review repair edits files and then fails after checkpointing, a plain resume can proceed to combined review without the explicit adoption required for partial work. Persist the combined repair's interrupted state and require an explicit recovery decision. Source: New. Confidence: high for the traced failure path.",
+          "primary_location": {
+            "path": "lib/pr_review/owner_providers.py",
+            "side": "RIGHT",
+            "line": 150,
+            "start_line": 145
+          },
+          "locations": [
+            {
+              "path": "lib/pr_review/owner_providers.py",
+              "side": "RIGHT",
+              "line": 150,
+              "start_line": 145
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 152,
+              "start_line": 148
+            },
+            {
+              "path": "lib/pr_review/owner_fixes.py",
+              "side": "RIGHT",
+              "line": 202,
+              "start_line": 197
+            }
+          ]
+        }
+      ],
+      "recommendation": "REQUEST_CHANGES",
+      "blocking_findings": 7
+    },
+    {
+      "case": "E-main-synthesised",
+      "report": "claude-independent.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "10 findings, most severe first:\n\n1. `lib/pr_review/owner_state.py:222`: On every refresh, each feedback item that has disappeared is added to `changed`, so any batch holding it gets `discussion_stale` again. `session.items()` also rejects missing items, so that batch can never be resumed or replanned.\n\n   Failure scenario: A reviewer deletes one comment selected in a running batch. On the next resume, `check_fresh` raises stale_discussion. With `replan: true`, line 263 of owner_fixes.py (and `context()`/`final_review`) calls `session.items(state, batch['items'])`, which raises invalid_target ('Feedback is no longer available'). Skipping the task doesn't help because the stale check runs first. The batch is stuck with uncommitted fixes in the worktree, and `clean()` blocks starting a new batch.\n\n2. `lib/pr_review/owner_publication.py:68`: Staleness and verified fingerprints use the content fingerprint, which includes the owner's own comments. Any reply the owner publishes marks the batch stale and silently stops the 'Fixed in' reply for that item.\n\n   Failure scenario: The batch reaches ready with `verified_fingerprints` saved. The owner composes and publishes a manual reply on thread A (its comments change, so `fingerprint` changes; `notification`, which excludes the viewer, does not). The owner then commits and pushes and runs associate: `item['fingerprint'] != batch['verified_fingerprints'][A]` hits `continue`, so no fixed-in draft is created and no error is shown. The same owner reply also sets `discussion_stale` on an in-progress batch (owner_state.py:206/230), which forces a replan and requeues completed tasks.\n\n3. `emacs/magit-auto-review-owner.el:92`: When point is on the root section, `--selected` treats the root as the containing group and returns every feedback section in the buffer, including hidden Deferred/History items.\n\n   Failure scenario: Render leaves point at `point-min`, which is the root heading. Opening the owner buffer and pressing `f` starts a fix batch for every actionable item, including ones already handled or deferred. Pressing `h`, `k`, `i` or `V` likewise changes triage for every feedback item instead of raising 'Choose an item or its group'.\n\n4. `lib/pr_review/owner_state.py:50`: `local_repository` refuses to resolve the repository when the checkout has more than one GitHub remote. Unlike the reviewer's `Repository.resolve`, it has no `gh repo view` fallback, so the usual fork layout (origin = fork, upstream = base) fails.\n\n   Failure scenario: In a fork checkout with origin and upstream remotes, `pr-review owner 123` or opening a PR from Forge via `magit-auto-review` (which passes no repository) fails with 'Choose a repository from this checkout's remotes'. Only an explicit -R works, even though reviewer mode opens the same PR fine.\n\n5. `lib/pr_review/owner_state.py:101`: The saved toolkit choice is keyed by `digest([common, identity])`, and identity is None whenever the caller passes no repository and the checkout has several remotes. Choices saved with and without a repository therefore go to different files.\n\n   Failure scenario: In a multi-remote checkout the user picks Owner in the PR list, which saves it under key github.com/o/r. Opening a PR via `magit-auto-review` from Forge calls `--open-pr` without a repository, reads the None key, gets 'reviewer' and opens the reviewer buffer instead of the owner toolkit.\n\n6. `lib/pr_review/owner_git.py:110`: Every checkpoint stores the full per-file list of ignored paths. That list is copied into batch, task and attempt records, rewritten (with fsync) on every `save()`, sent in every view, and included in model prompts through `completed_tasks`.\n\n   Failure scenario: In a repo with node_modules or build output, `ls-files --others --ignored` lists more than 100k files. Each checkpoint (before/after for every invoke, resume, diff --current) adds that list several times, so session.json grows to tens of MB. Every save and Emacs refresh slows down, and `context()` puts the lists into the planner/fixer/reviewer prompt, which can exceed model limits. Use `--directory` or store only a hash.\n\n7. `lib/pr_review/owner_publication.py:182`: `publish()` calls `prepare()`, which does a full refresh and fetch, then does another full refresh and `fetch_head` for each reply, starting with the first one right after prepare.\n\n   Failure scenario: Publishing N staged replies runs N+1 full refreshes. Each one makes about six GitHub calls (gh pr view, pulls API, user, three paginated comment endpoints, GraphQL thread pages) plus a git fetch. Publishing 10 replies makes about 70 or more API calls and waits on them in sequence, which risks rate limits. The first iteration could reuse the prepare snapshot, and later ones could just check the head.\n\n8. `lib/pr_review/owner_git.py:70`: `configure_push` writes branch remote/merge/pushRemote only once (it is guarded by `configured_target`), so the tracking config is never updated after the PR head repository or branch changes.\n\n   Failure scenario: The PR author renames the head branch, or GitHub reports a different head repository. `refresh` updates `push_target`, but `branch.pr-owner/N.merge` still points to the old branch. Pushing from Magit in the owner worktree then sends the fixes to the old or wrong destination, while the buffer shows the new push target.\n\n9. `lib/pr_review/owner_fixes.py:199`: The interrupted-task gate is bypassed by any non-empty `skip` list, even one that names an unrelated task, so the interrupted fixing or repairing task is silently restarted without the required adopt.\n\n   Failure scenario: Task t1 is interrupted mid-fix (status 'fixing'). The user resumes with `--skip p1-t3`, which is unrelated. The check `not adopt and not skip` passes, t1 still has status 'fixing', and `run_task` runs a fresh fix with `before` reset to the current checkpoint, losing the record of the interrupted attempt instead of asking for inspection.\n\n10. `lib/pr_review/owner_fixes.py:247`: Every `owner-fix` or resume runs `models.preflight`, which runs `--help` and a live authentication model probe for each provider. On top of that, `check_fresh` does a full GitHub refresh before every task.\n\n    Failure scenario: Resuming a batch after a trust prompt or a pause, or a batch with many tasks, makes repeated live model probes (extra cost and delay up to `auth_timeout` each) and one full discussion refetch per task. Cache the preflight per settings for the session, and check freshness only at the head and fingerprint level.\n"
+    },
+    {
+      "case": "E-main-synthesised",
+      "report": "codex.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "Git diff and file inspection identified three defects. A bounded `python3 -B` mock reproduction confirmed the recovery and toolkit-routing failures; submodule behavior was assessed by code tracing, without runtime verification. No live provider or GitHub tests ran, and the final Git status was clean.\n\nFull review comments:\n\n- [P2] Reject dirty submodules before accepting checkpoints \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/auto-review-review-pr-4/lib/pr_review/owner_git.py:105-107\n  For an initialized submodule, editing files without changing its HEAD leaves the gitlink SHA unchanged, so these commands produce the same superproject tree. `admin()` likewise checks only superproject state. Consequently, `owner_providers.invoke()` can accept planner/reviewer writes inside submodules, while fixer changes there disappear from checkpoint diffs and `final_tree`. Reject dirty submodules or capture their contents separately before accepting the checkpoint.\n\n- [P2] Allow replanning past deleted feedback \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/auto-review-review-pr-4/lib/pr_review/owner_fixes.py:249-253\n  If selected feedback is deleted while a batch is paused, refresh retains it as `missing` and requires replanning. However, these keys still include the missing item even when its task was explicitly skipped, so `context()` calls `session.items()` and raises `invalid_target` before independent remaining tasks can run. Handle removed feedback and preserve explicit skips when constructing the renewed plan and updating fingerprints, so the batch remains resumable.\n\n- [P2] Resolve the repository before looking up its toolkit \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/auto-review-review-pr-4/emacs/magit-auto-review.el:508-511\n  In a checkout with both fork and upstream remotes, choosing Owner in the PR list saves the preference under an explicit repository identity. Opening that PR through Forge calls this function without a repository; `toolkit()` cannot infer a unique identity and reads a different preference key, defaulting back to Reviewer. Pass or resolve the Forge repository identity before this lookup so the supported entry point honors the remembered selection."
+    },
+    {
+      "case": "F-main-two-codex",
+      "report": "codex.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "Two publication defects were confirmed with a bounded in-memory reproduction: uncertain submissions can acquire misleading published state, and publication can continue after PR closure. Live GitHub behavior and repository test suites were not exercised.\n\nFull review comments:\n\n- [P2] Freeze replies while their submissions remain uncertain \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/F-main-two-codex/auto-review-review-pr-4/lib/pr_review/owner_publication.py:75-78\n  If a reply for commit A was accepted but its response was lost, amending and pushing commit B followed by `owner-associate` rewrites that reply\u2019s commits and generated body despite its ambiguous action. `recover()` can then find A\u2019s receipt and mark the rewritten B reply Published, incorrectly representing what was posted. Apply the pending-action immutability check used by `mutate()` before updating these replies, or recover them first.\n\n- [P2] Recheck that the PR is open before each submission \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/F-main-two-codex/auto-review-review-pr-4/lib/pr_review/owner_publication.py:182-186\n  If the PR closes or merges after preparation, including between replies, this refresh records the new state but publication checks only the head SHA. Closing normally leaves that SHA unchanged, so publication continues; timeline comments can still be accepted on closed PRs despite `prepare()` explicitly prohibiting this. Revalidate `metadata.state == \"OPEN\"` before recording and sending each action."
+    },
+    {
+      "case": "F-main-two-codex",
+      "report": "codex-a.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "Git diff and file inspection identified three defects. A bounded `python3 -B` mock reproduction confirmed the recovery and toolkit-routing failures; submodule behavior was assessed by code tracing, without runtime verification. No live provider or GitHub tests ran, and the final Git status was clean.\n\nFull review comments:\n\n- [P2] Reject dirty submodules before accepting checkpoints \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/auto-review-review-pr-4/lib/pr_review/owner_git.py:105-107\n  For an initialized submodule, editing files without changing its HEAD leaves the gitlink SHA unchanged, so these commands produce the same superproject tree. `admin()` likewise checks only superproject state. Consequently, `owner_providers.invoke()` can accept planner/reviewer writes inside submodules, while fixer changes there disappear from checkpoint diffs and `final_tree`. Reject dirty submodules or capture their contents separately before accepting the checkpoint.\n\n- [P2] Allow replanning past deleted feedback \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/auto-review-review-pr-4/lib/pr_review/owner_fixes.py:249-253\n  If selected feedback is deleted while a batch is paused, refresh retains it as `missing` and requires replanning. However, these keys still include the missing item even when its task was explicitly skipped, so `context()` calls `session.items()` and raises `invalid_target` before independent remaining tasks can run. Handle removed feedback and preserve explicit skips when constructing the renewed plan and updating fingerprints, so the batch remains resumable.\n\n- [P2] Resolve the repository before looking up its toolkit \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/E-main-synthesised/auto-review-review-pr-4/emacs/magit-auto-review.el:508-511\n  In a checkout with both fork and upstream remotes, choosing Owner in the PR list saves the preference under an explicit repository identity. Opening that PR through Forge calls this function without a repository; `toolkit()` cannot infer a unique identity and reads a different preference key, defaulting back to Reviewer. Pass or resolve the Forge repository identity before this lookup so the supported entry point honors the remembered selection."
+    },
+    {
+      "case": "G-feature-two-codex",
+      "report": "codex.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "Inspection covered backend/frontend execution, resume/adoption, association, and publication recovery. Ran the requested git diff and a 30-second-bounded, bytecode-disabled Python mock reproduction; it exited 0 and confirmed both defects. The checkout remained clean; real Git/provider/GitHub integration and Emacs execution remain unverified.\n\nFull review comments:\n\n- [P2] Pause on clarification before starting automatic repair \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/G-feature-two-codex/auto-review-review-pr-4/lib/pr_review/owner_fixes.py:113-118\n  When a review returns `complete=true`, blocking findings, and a `clarify` outcome, this condition still launches the fixer instead of pausing for user input. This affects both task reviews and the equivalent combined-review repair condition, allowing further source edits while requirements remain unresolved. Exclude clarification outcomes from automatic repair at both checkpoints.\n\n- [P2] Freeze uncertain replies before reassociating commits \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/G-feature-two-codex/auto-review-review-pr-4/lib/pr_review/owner_publication.py:75-78\n  If a reply submission succeeds but its response is lost, reassociating an amended commit can change this reply's body and commits while its action remains ambiguous. Subsequent `recover()` finds the original receipt and marks the modified reply Published, falsely showing the new commit claim as sent and making it immutable. Reject changes to replies with submitting or ambiguous actions, as local reply mutations already do, until recovery completes."
+    },
+    {
+      "case": "G-feature-two-codex",
+      "report": "codex-a.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "Focused in-memory reproductions confirmed publication-integrity and historical-recovery defects. Stateful backend and frontend paths were inspected, but end-to-end Git/GitHub/provider and Emacs execution remain unverified.\n\nFull review comments:\n\n- [P2] Keep uncertain replies immutable during reassociation \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/auto-review-review-pr-4/lib/pr_review/owner_publication.py:75-78\n  If a generated timeline reply succeeds remotely but its response is lost, reassociating an amended commit before recovery rewrites the pending reply's commits and body. Unlike inline replies, timeline replies do not change the original feedback's fingerprint, so this update proceeds. `recover()` then marks the rewritten draft Published using the old receipt, displaying a commit claim that was never posted. Reject reassociation of replies referenced by submitting or ambiguous actions until recovery completes.\n\n- [P2] Preserve verified history when resume fails before execution \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/auto-review-review-pr-4/lib/pr_review/owner_fixes.py:286-289\n  Resuming an unchanged ready batch while model discovery or authentication is unavailable changes its status to Paused, even though no provider ran or verified content changed. If the user subsequently commits and pushes that verified tree, `associate()` skips the batch because it is no longer ready, while another resume fails because HEAD changed. Preserve the previous verified result when failure occurs before new execution invalidates it.\n\n- [P2] Recheck the PR's open state before each send \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/auto-review-review-pr-4/lib/pr_review/owner_publication.py:182-186\n  If the PR closes or merges after preparation or between replies, this refresh observes the new state but only HEAD is checked before sending. With an unchanged head, remaining timeline replies are still posted and marked Published, bypassing `prepare()`'s explicit open-PR restriction. Check the refreshed PR state before recording each submission intent and stop with the remaining drafts retained."
+    },
+    {
+      "case": "H-feature-two-claude",
+      "report": "claude-independent.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "10 findings, most severe first:\n\n1. `lib/pr_review/owner_state.py:225`: Feedback that was already marked missing stays in state['feedback'] and is added to `changed` again on every refresh, so any batch containing it is marked discussion_stale every time, and replanning then fails because session.items rejects missing keys.\n\n   Failure scenario: A reviewer deletes one comment that belongs to batch B. Every later refresh (including check_fresh before each task and before final review) puts that key back in `changed` and sets B.discussion_stale=True. Resume then raises stale_discussion. Resume with --replan calls context()/session.items with the missing key and raises invalid_target ('Feedback is no longer available'). Batch B can never become ready, even when its other tasks are complete, and unpublished replies to the key are unstaged again on every refresh.\n\n2. `lib/pr_review/owner_publication.py:67`: associate calls session.items(state, [key]) for every stored association; that call raises for any missing item, so a single deleted feedback item aborts association for every ready batch.\n\n   Failure scenario: A batch is ready and its exact commit has been pushed. One verified comment is then deleted on GitHub and refresh marks it missing. Every owner-associate (automatic or explicit, any batch) raises invalid_target 'Feedback is no longer available; refresh first'. Refreshing doesn't help, so no 'Fixed in' replies can be generated for the remaining items.\n\n3. `lib/pr_review/owner_fixes.py:286`: The catch-all handler in execute() sets batch.status to 'paused' on any error, which turns an already 'ready' batch into one that associate no longer accepts.\n\n   Failure scenario: A batch is ready and not yet committed. The user presses r/T, or runs CLI `resume`, which defaults to the latest batch. check_fresh raises stale_discussion (a new comment arrived), or settings_changed, worktree_changed or a network error occurs. The except block sets status='paused' and saves. associate now rejects the batch ('Choose a batch with a successful combined review'), and the verified final_tree association is lost unless a full re-review is run.\n\n4. `lib/pr_review/owner_state.py:205`: Staleness uses a content fingerprint that includes the viewer's own comments, so publishing one owner reply changes that thread's fingerprint. Later replies to the same thread in the same publish loop then fail, and batches containing the item are marked stale.\n\n   Failure scenario: Two replies to thread A are staged: a composed reply and an auto 'Fixed in' reply. publish posts the first, then the per-reply refresh puts A in `changed`. The second reply is unstaged with needs_attention, and blockers() raises stale_discussion partway through publication. Every batch containing A also gets discussion_stale=True from the owner's own reply. The viewer-filtered `notification` fingerprint already exists and should be used for this check.\n\n5. `lib/pr_review/owner_providers.py:147`: batch['checkpoint'] is updated to the post-run tree before returncode and result checks, so partial edits from a fix that failed or timed out (run returns 124 and does not raise) become the accepted checkpoint without an explicit adopt.\n\n   Failure scenario: A fix attempt times out after half-editing files. invoke saves after-tree as batch.checkpoint, then raises model_failed. On resume the 'worktree_changed ... explicitly adopt' guard passes because snapshot == checkpoint. With --skip, or when the task is re-run, the partial edits are kept silently, and the re-run task's task_diff no longer shows them.\n\n6. `lib/pr_review/owner_fixes.py:199`: The interrupted-task guard accepts any non-empty --skip, even when the skipped task is not the interrupted one.\n\n   Failure scenario: Task t2 is in 'fixing' (interrupted) and the user runs `resume --skip p1-t3`. The guard passes because skip is truthy. t2 is never adopted or skipped and is re-run from the current checkpoint as if nothing happened, bypassing the documented 'adopt and reverify or explicitly skip it' requirement.\n\n7. `lib/pr_review/owner_git.py:110`: Every checkpoint stores the full list of ignored files, which is never read. That list is copied into attempts, tasks, batch state, every protocol view, and model prompts via context()['completed_tasks'].\n\n   Failure scenario: In a repo with node_modules or build output, each checkpoint records tens of thousands of paths. session.json is rewritten on every save (dozens per batch), each Emacs request returns the whole state, and completed task records (before/after checkpoints) are JSON-dumped into every plan/fix/review prompt. This bloats tokens and cost and can exceed the 4 MB protocol and model limits. The field should be dropped, or completed_tasks should include only id/items/outcomes.\n\n8. `lib/pr_review/owner_git.py:105`: checkpoint builds a fresh temporary index from `read-tree HEAD`, which has no stat cache, so `git add -A` re-reads and re-hashes every file in the worktree on every checkpoint.\n\n   Failure scenario: invoke takes two checkpoints per provider call, plus resume and diff --current, so a batch with several tasks and repairs hashes the whole repository 10+ times. On large repos each checkpoint takes seconds to minutes. Copying the worktree's real index (git rev-parse --git-path index) into the temp file first would let git reuse stat data.\n\n9. `lib/pr_review/owner_state.py:170`: refresh fetches the same PR twice (`gh pr view` via repo.metadata and REST pulls/N), plus /user and the full paginated discussion and GraphQL, and it is called before every task, twice around final review, and once per reply during publish.\n\n   Failure scenario: A 5-task batch makes about 8 full refreshes, and publishing 10 replies makes 11 or more, each with 4+ REST pages and GraphQL calls. This multiplies latency and API rate-limit use. Head and branch data could be taken from a single PR request, and the discussion re-fetch limited to points where freshness actually matters.\n\n10. `lib/pr_review/owner_state.py:101`: The toolkit choice is stored under digest([common, identity]), where identity is None when the request has no repository and the checkout has more than one remote. Choices made from such a buffer are then never seen by list_pulls, which always looks them up by the explicit repository.\n\n    Failure scenario: In a fork checkout with origin and upstream remotes, the user runs magit-auto-review (repository nil) and selects 'Owner' with M. It is saved under (common, None). The pull-request list calls toolkit with repository='github.com/o/r', reads a different file, shows 'Reviewer', and opens reviewer buffers, so the remembered toolkit is inconsistent.\n"
+    },
+    {
+      "case": "H-feature-two-claude",
+      "report": "claude-a.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "10 findings, most severe first:\n\n1. `lib/pr_review/owner_state.py:205`: The staleness fingerprint includes the owner's own comments. Every reply the owner publishes makes the feedback item look changed: refresh marks it changed, other unpublished replies on it are unstaged, and batches containing it are flagged discussion_stale.\n\n   Failure scenario: Two replies are staged on the same thread, for example a human reply and a 'Fixed in' reply. publish() posts the first one. The loop then calls refresh(), the thread's fingerprint changes because of that reply, and the second reply is set to unstaged with needs_attention. blockers() then raises stale_discussion, so only half of a confirmed publication goes out. The same thing happens if the owner replies on a thread after verification: the ready batch becomes discussion_stale, and associate() silently skips the 'Fixed in' reply because item.fingerprint != verified_fingerprints. Using the viewer-excluding `notification` fingerprint for invalidation would avoid this.\n\n2. `lib/pr_review/owner_providers.py:147`: invoke() moves batch['checkpoint'] to the post-run tree before it checks the provider's return code, the integrity identity, and the result. A failed fix attempt's partial edits therefore become the accepted baseline.\n\n   Failure scenario: A Claude fix hits its budget or exits non-zero after editing files. checkpoint is set to the partial tree and model_failed is raised. On resume with --skip for that task, snapshot == checkpoint, so the 'worktree_changed' inspect/adopt gate never fires. The skipped task's unreviewed partial edits are carried into later task diffs and into final_tree.\n\n3. `lib/pr_review/owner_fixes.py:199`: The interrupted-task gate accepts any non-empty skip list, even one that does not include the interrupted task. The interrupted fix is then re-run without the user inspecting or adopting its state.\n\n   Failure scenario: Task p1-t1 is interrupted while 'fixing' and p1-t2 is unrelated. The user resumes with --skip p1-t2. The check passes, p1-t1 still has status 'fixing', and run_task launches a fresh fix on top of whatever the crashed attempt left. That bypasses the 'adopt and reverify or explicitly skip it' contract.\n\n4. `lib/pr_review/owner_fixes.py:211`: Adopt moves every task that is not skipped or blocked to 'reviewing' with implementation 'Manually adopted changes'. That includes queued tasks that never ran, so the fix role is never invoked for them.\n\n   Failure scenario: The batch is interrupted during t1 while t2 and t3 are still queued. The user presses A to adopt t1's partial edits. t2 and t3 skip implementation and go straight to review. Their outcomes are whatever the reviewer says about untouched code ('no_change' counts as successful), or they burn their single repair on what should have been the first fix.\n\n5. `lib/pr_review/owner_git.py:84`: admin() hashes the whole shared .git/config into the integrity identity. Any unrelated config write by the user is reported as the provider tampering with protected Git state.\n\n   Failure scenario: While a fix model runs for several minutes, the user pushes another branch with -u from Magit in the main checkout, which writes branch.X.remote/merge into the shared config. On resume, configure_push may also write the branch config for a newly matching remote. invoke() then raises integrity_failed ('Provider changed protected owner state'), sets batch.integrity_failure, and requires explicit adopt. Hashing only owner-relevant keys (branch.<owner-branch>.*, core.hooksPath, includes) would avoid the false alarm.\n\n6. `lib/pr_review/owner_state.py:50`: local_repository() and toolkit() require exactly one distinct remote identity when no repository is passed. Fork checkouts (origin = fork, upstream = base), the typical PR-owner setup, therefore cannot open an owner session from the Forge entry, and their toolkit choice is stored under a None identity.\n\n   Failure scenario: magit-auto-review calls --open-pr with a nil repository. toolkit() computes digest([common, None]), which is a different key from the one list_pulls and select-toolkit use with an explicit repository, so the user's 'Owner' choice is ignored. Even when owner mode is chosen, owner-open with a nil repository raises 'Choose a repository from this checkout's remotes'. The reviewer path instead falls back to `gh repo view`.\n\n7. `lib/pr_review/owner_fixes.py:227`: On resume, adopt/skip/replan changes are applied to the batch (checkpoint, task statuses, git_admin, queued resets) before the settings_changed and stale_discussion checks. The except handler then saves the half-applied state.\n\n   Failure scenario: The user runs adopt with changed provider settings. The checkpoint is replaced, tasks move to 'reviewing', and integrity_failure is cleared. Then settings_changed is raised and the except handler persists all of it as 'paused'. A later plain resume runs on adopted state that the rejected request was never meant to commit.\n\n8. `lib/pr_review/owner_fixes.py:161`: check_fresh() does a full refresh before every task and twice more after the loop. Each refresh runs gh pr view, a REST PR read, a /user read, all paginated comments, GraphQL threads, a state save, and a context snapshot write. publish() repeats a full refresh and fetch for every reply.\n\n   Failure scenario: A 10-task batch makes about 13 full discussion downloads plus 13 new context/*.json files. A PR with hundreds of comments is slow and can hit rate limits. Comparing only the head SHA via `gh pr view --json headRefOid` between tasks, with one full refresh at the start and end, would do the same job.\n\n9. `lib/pr_review/owner_providers.py:31`: preflight() reimplements the reviewer's live auth-probe validation (Session.authenticate_live in reviews.py), and the copy has drifted. It also re-runs `--help`, model discovery, and live paid probes on every fix and resume.\n\n   Failure scenario: The Codex check here does not reject 'error' or 'turn.failed' events, and the Claude check accepts any falsy is_error instead of `is False`, so a probe the reviewer rejects can pass here. Each resume or trust-confirm also launches new probe model calls and app-server model listings, one provider at a time. Share a single probe-validation helper and cache a successful preflight per batch.\n\n10. `lib/pr_review/owner_fixes.py:84`: context() always sends both batch_diff (baseline..checkpoint) and task_diff (before..checkpoint). The planner and the final review pass before=batch['baseline'], so the two diffs are byte-identical.\n\n    Failure scenario: On a large accumulated batch, the final-review and plan prompts carry the full combined diff twice. That doubles prompt tokens and cost and can push the prompt past context limits. Omit task_diff when before == baseline.\n"
+    },
+    {
+      "case": "J-feature-haiku-terra",
+      "report": "claude-independent.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "9 findings, most severe first:\n\n1. `lib/pr_review/owner_publication.py:67`: associate() re-reads every saved association's feedback with session.items(), which raises invalid_target once that feedback is marked missing, so every later owner-associate call for the batch fails.\n\n   Failure scenario: A batch fixed comment C and C was associated. The reviewer deletes C, refresh marks it missing (owner_state.py:222-225). The user then runs `pr-review owner 4 associate --batch B --commit SHA` to link a new split commit. The loop at line 61-67 calls session.items(state, [C]), which raises 'Feedback is no longer available', so no association in the batch can be updated.\n\n2. `lib/pr_review/owner_publication.py:68`: The content fingerprint includes the viewer's own comments, so the owner's own published reply changes it; associate() then silently skips the fixed-in reply and publish() can abort partway through.\n\n   Failure scenario: After verification the owner posts a manual reply on thread T. refresh() recomputes T's fingerprint from all comments (owner_state.py:205), so item fingerprint != verified_fingerprints[T]. associate() hits `continue` at lines 68-69 and generates no fixed-in reply for T, with no error. Separately, if two replies are staged for T, publishing the first triggers refresh(); the second then fails blockers() (owner_publication.py:110) with stale_discussion after one reply is already posted.\n\n3. `lib/pr_review/owner_fixes.py:253`: Replanning or resuming a batch that contains feedback deleted on GitHub raises invalid_target, because context()/session.items() and the line 263 fingerprint rebuild both reject missing items, so the batch can never be replanned.\n\n   Failure scenario: Batch B has items [A, B]. B is deleted on GitHub, so refresh() sets batch.discussion_stale. A plain resume is refused with stale_discussion (line 220). `owner-fix --batch B --replan` reaches context(..., keys) at line 253 (or line 263 if B was in a completed task) and raises 'Feedback is no longer available; refresh first' on every attempt. The only way forward is a new batch.\n\n4. `lib/pr_review/owner_providers.py:78`: The fix role keeps Bash and the git denylist is prefix-matched, so `git push` variants are not blocked, and admin() does not detect a remote push.\n\n   Failure scenario: A fix agent runs `git -C <owner worktree> push origin HEAD:<PR head branch>` or `git -c k=v push ...`. Neither matches `Bash(git push:*)`, so the push is allowed. admin() only fingerprints HEAD, refs, index and config, so the post-run integrity check passes and unverified commits land on the PR branch. README.md states that the application never commits or pushes as part of fixing.\n\n5. `lib/pr_review/owner_state.py:94`: toolkit() re-implements the remote-scan and normalize logic from local_repository() and Repository.resolve(), and with multiple remotes it silently keys the toolkit choice under a null repository.\n\n   Failure scenario: Three copies of remote discovery now exist (owner_state.py:46-52, owner_state.py:94-98, repository.py:94-97) and they already disagree. In a checkout with two remotes, `M` invoked with no repository in scope writes the toolkit under digest([common, None]). list_pulls() later reads digest([common, 'o/r']), so the Owner choice is lost and the PR list shows Reviewer.\n\n6. `lib/pr_review/owner_providers.py:59`: The owner auth preflight checks differ from the reviewer's: the Claude check accepts any success result event, and the Codex check does not reject error or turn.failed events, unlike reviews.py:165-166.\n\n   Failure scenario: A provider stream containing a successful result followed by an error or failed turn passes owner preflight. The owner then starts a paid fix batch with a provider whose final state is failing, while the reviewer path would reject the same probe.\n\n7. `emacs/magit-auto-review-owner.el:270`: magit-auto-review-owner-open adopts the freshly returned view only when it creates the buffer, so reopening an existing owner buffer discards the new view and keeps the old revision.\n\n   Failure scenario: The user refreshes the owner session from the terminal, then reopens the same PR with B/RET. The buffer still shows the pre-refresh snapshot, and magit-auto-review-owner--view keeps the old revision. The next action (for example stage or fix) sends that revision and fails with stale_revision, which the user cannot diagnose from the buffer.\n\n8. `lib/pr_review/owner_fixes.py:275`: check_fresh() runs a full refresh before every task, and execute() adds two more at the end. Each refresh makes about seven GitHub calls and rewrites a context snapshot.\n\n   Failure scenario: A 10-task batch performs about 13 full refreshes (1 at start, 10 before tasks, 2 at the end), roughly 90 API calls, where one fetch between tasks would do. Publishing repeats the refresh once per reply (owner_publication.py:182), so large batches are slow and can hit GitHub rate limits.\n\n9. `lib/pr_review/owner_fixes.py:148`: final_review() duplicates the repair-once and clarify-to-paused policy from run_task() (lines 113-123) in a slightly different form.\n\n   Failure scenario: The two copies already diverge: run_task persists the implementation report for a repair, while final_review's repair path does not, and both edit the repairs counter separately. A change to the repair budget or clarify handling must be made in both places, and one can be missed.\n"
+    },
+    {
+      "case": "J-feature-haiku-terra",
+      "report": "codex.md",
+      "kind": "independent_candidates_not_final_adjudication",
+      "text": "Interrupted-batch recovery can replay partial work without adoption or bypass unstarted fixes, and push configuration can remain pointed at an obsolete PR destination. Review used Git diff and source inspection commands to trace execution, publication, and recovery; no tests were run, so live provider, GitHub, and frontend behavior remain unverified.\n\nFull review comments:\n\n- [P1] Require skipping the interrupted task before resuming \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/J-feature-haiku-terra/auto-review-review-pr-4/lib/pr_review/owner_fixes.py:197-200\n  When a fixer is interrupted, supplying any nonempty `skip` list bypasses the interruption guard, even if it names a different task. The interrupted task remains in `fixing` or `repairing` state and `run_task` launches the fixer again against its retained partial changes, without the explicit adoption or skip required for recovery. Check that each interrupted task is actually skipped, or require adoption before continuing.\n\n- [P2] Leave unstarted tasks queued when adopting partial work \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/J-feature-haiku-terra/auto-review-review-pr-4/lib/pr_review/owner_fixes.py:207-211\n  When a batch has multiple tasks and an early task is interrupted, `--adopt` changes every non-skipped, non-blocked task to `reviewing`, including tasks that were still queued and never had a fixer run. Those tasks then go straight to review instead of executing their planned fixes; a nonblocking `no_change` review can allow the batch to become ready without performing the requested work. Preserve queued tasks and reverify only tasks whose work was actually adopted.\n\n- [P2] Flag an obsolete configured push target \u2014 /workspaces/proj/auto-review-evaluations/pr4-20261029/runs/J-feature-haiku-terra/auto-review-review-pr-4/lib/pr_review/owner_git.py:69-74\n  If the PR head repository or branch changes after initial setup, refresh updates `push_target`, but this guard leaves the branch's previously configured remote and merge ref intact. The owner view can therefore show the new destination while a normal Git or Magit push still targets the old one. Detect a mismatch with `configured_target` and require explicit reconciliation rather than silently retaining the obsolete mapping."
+    }
+  ]
+}

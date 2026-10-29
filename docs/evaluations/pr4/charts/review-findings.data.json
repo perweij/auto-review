@@ -1,0 +1,56 @@
+{
+  "source": "../comparison.json",
+  "selection": "All five configurations use the same feature tool revision. Other revision runs and suggestion continuations are excluded to avoid mixing implementations or counting the same review twice.",
+  "category_definitions": {
+    "Bug": "Demonstrated incorrect behavior or a broken intended workflow.",
+    "Observation": "Supported design or efficiency concern, without an established failure.",
+    "Not established": "Insufficient evidence, an unmeasured claim, or a refuted finding."
+  },
+  "rows": [
+    {
+      "case": "B-feature-single",
+      "review_configuration": "OpenAI \u00b7 Sol \u00d7 1",
+      "synthesis": "Direct review",
+      "supported_bugs": 3,
+      "supported_observations": 0,
+      "not_established": 0,
+      "retained_comments": 3
+    },
+    {
+      "case": "G-feature-two-codex",
+      "review_configuration": "OpenAI \u00b7 Sol \u00d7 2",
+      "synthesis": "Synthesis: OpenAI \u00b7 Sol",
+      "supported_bugs": 4,
+      "supported_observations": 0,
+      "not_established": 0,
+      "retained_comments": 4
+    },
+    {
+      "case": "C-feature-synthesised",
+      "review_configuration": "Anthropic \u00b7 Opus + OpenAI \u00b7 Sol",
+      "synthesis": "Synthesis: OpenAI \u00b7 Sol",
+      "supported_bugs": 8,
+      "supported_observations": 2,
+      "not_established": 0,
+      "retained_comments": 10
+    },
+    {
+      "case": "H-feature-two-claude",
+      "review_configuration": "Anthropic \u00b7 Opus \u00d7 2",
+      "synthesis": "Synthesis: Anthropic \u00b7 Opus",
+      "supported_bugs": 7,
+      "supported_observations": 3,
+      "not_established": 5,
+      "retained_comments": 15
+    },
+    {
+      "case": "J-feature-haiku-terra",
+      "review_configuration": "Anthropic \u00b7 Haiku + OpenAI \u00b7 Terra",
+      "synthesis": "Synthesis: OpenAI \u00b7 Terra",
+      "supported_bugs": 8,
+      "supported_observations": 0,
+      "not_established": 3,
+      "retained_comments": 11
+    }
+  ]
+}

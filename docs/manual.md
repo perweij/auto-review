@@ -181,6 +181,12 @@ This adds model time and cost. Evidence explicitly distinguishes executed checks
 from acceptance by inspection; inspection-only acceptance requires a justification.
 Verification reduces risk but does not guarantee correctness.
 
+A setup failure can be resolved by a successful rerun within the same verification
+budget and permitted environment. Both attempts remain visible, with the rerun
+identifying the setup check it supersedes. An executed failing test cannot be
+superseded this way; unresolved failures still block acceptance. Older saved
+verification failures require an explicit new verification, not automatic acceptance.
+
 Both frontends show the exact target, before/after diff, evidence, and blockers:
 
 | Action | Emacs reviewer | Interactive CLI |
@@ -529,6 +535,23 @@ HEAD, Git operations in progress, local changes, and genuinely diverged branches
 require inspection in Magit. Ignored files are never overwritten by this update.
 Agent-configuration changes return
 the exact diff and a token for explicit `--trust-agent-config TOKEN`.
+
+Skipping an unrelated task cannot authorize replay of an interrupted fixer.
+Adopting partial work preserves the initial fix step for tasks that have not yet
+started. A failed combined repair also requires explicit adoption before review
+can continue. If selected feedback was deleted, skip its affected task, then replan
+the remaining work; skipped tasks stay in history. A failed authentication probe
+does not discard an otherwise unchanged, verified fix.
+
+In Emacs, `f` or `C-u f` at the root heading selects only actionable Attention
+items. Select another item or group explicitly to fix feedback outside Attention.
+`K` also cancels an active fetch or publication operation; saved progress and
+uncertain publication intents remain available for recovery. Repository selection
+precedes toolkit selection when the checkout has multiple GitHub repositories.
+
+Owner checkpoints cannot include uncommitted contents inside submodules. If one
+is dirty, inspect and commit or reconcile it before continuing. The contents are
+preserved. Ignored-file diagnostics show a bounded sample and total count.
 
 Exact association recognizes either the whole verified patch with the baseline
 as sole parent, or the recorded sequence of logical trees with matching parents.

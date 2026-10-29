@@ -51,6 +51,8 @@ def inspect(comment):
         print(verification.get('evidence', ''))
         for check in verification.get('checks', []):
             print(check['command'] + ': ' + check['result'])
+            if check.get('supersedes') is not None:
+                print(f"  supersedes setup check {check['supersedes'] + 1}")
         if verification.get('inspection_only_reason'):
             print('No executable checks run: ' + verification['inspection_only_reason'])
         batch = suggestion.get('batch_verification', {})

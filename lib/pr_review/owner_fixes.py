@@ -7,7 +7,7 @@ from .common import ApiError, now
 from .events import emit
 from .operations import operation
 from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit
-from .owner_state import refresh, superseded_batches
+from .owner_state import refresh, superseded_batches, active_feedback_keys
 
 
 def validate_plan(value, items):
@@ -86,6 +86,10 @@ def successful(value):
     return value["complete"] and not value["blocking"] and all(o["status"] != "clarify" for o in value["outcomes"])
 
 
+def repairable(value):
+    return value['complete'] and value['blocking'] and all(o['status'] != 'clarify' for o in value['outcomes'])
+
+
 def implementation_ready(session, state, task):
     report = task["implementation"]
     if not report["complete"] or any(o["status"] == "clarify" for o in report["outcomes"]):
@@ -96,10 +100,19 @@ def implementation_ready(session, state, task):
 
 
 def context(session, state, batch, keys, before):
+    batch_diff = workspace.diff(session, batch["baseline"], batch["checkpoint"]["tree"])
+    task_diff = workspace.diff(session, before, batch["checkpoint"]["tree"])
+    completed = copy.deepcopy([t for t in batch['tasks'] if t['status'] == 'complete'])
+    # Older saved tasks can contain an unbounded inventory of ignored files.
+    for task in completed:
+        for field in ('before', 'after'):
+            snapshot = task.get(field, {})
+            if 'ignored' in snapshot:
+                snapshot.setdefault('ignored_count', len(snapshot['ignored']))
+                snapshot['ignored'] = snapshot['ignored'][:20]
     return {"feedback": session.items(state, keys), "baseline": batch["baseline"],
-            "batch_diff": workspace.diff(session, batch["baseline"], batch["checkpoint"]["tree"]),
-            "task_diff": workspace.diff(session, before, batch["checkpoint"]["tree"]),
-            "completed_tasks": [t for t in batch["tasks"] if t["status"] == "complete"]}
+            "batch_diff": batch_diff, **({'task_diff': task_diff} if task_diff != batch_diff else {}),
+            "completed_tasks": completed}
 
 
 def run_task(session, state, batch, task):
@@ -140,7 +153,7 @@ def run_task(session, state, batch, task):
             task["status"] = "complete"
             session.save(state)
             return True
-        if not batch.get("verify_only") and review["complete"] and review["blocking"] and task["repairs"] < 1:
+        if not batch.get("verify_only") and repairable(review) and task["repairs"] < 1:
             task["repairs"] += 1  # Persist before launching; crashes do not grant extra repairs.
             task["status"] = "repairing"
             session.save(state)
@@ -180,14 +193,17 @@ def final_review(session, state, batch):
                     task["verification_superseded"] = True
             owner_commit_plan.update(session, batch, batch["baseline"])
             return
-        if not batch.get("verify_only") and review["complete"] and review["blocking"] and batch["repairs"] < 1:
+        if not batch.get("verify_only") and repairable(review) and batch["repairs"] < 1:
             batch["repairs"] += 1
+            batch['combined_repair_pending'] = True
             session.save(state)
             data["review_findings"] = review
             result = validate_result(models.invoke(session, state, batch, "fix", data), keys)
             if not result["complete"] or any(o["status"] == "clarify" for o in result["outcomes"]):
                 batch["status"] = "paused"
                 return
+            batch.pop('combined_repair_pending', None)
+            session.save(state)
             continue
         batch["status"] = "paused"
         return
@@ -249,6 +265,7 @@ def execute(session, state, request):
     with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "kind": "owner-fix"}):
         batch = None
         completing = False
+        preserve_ready = False
         try:
             # Refresh before creating a worktree; failure leaves existing source untouched.
             refresh(session, state)
@@ -292,24 +309,34 @@ def execute(session, state, request):
                 if (batch.get("integrity_failure") or batch.get("git_admin", identity) != identity) and not request.get("adopt"):
                     raise ApiError("integrity_failed", "Protected state changed; inspect Git and source changes, then explicitly adopt and reverify.")
                 snapshot = workspace.checkpoint(session, state, "resume")
-                if orphaned or batch.get("status") == "running" or any(t["status"] in ("fixing", "repairing") for t in batch["tasks"]):
+                skip = request.get('skip', [])
+                if not isinstance(skip, list) or any(t not in {x['id'] for x in batch['tasks']} for t in skip):
+                    raise ApiError('invalid_request', 'Choose existing tasks to skip.')
+                interrupted = {t['id'] for t in batch['tasks'] if t['status'] in ('fixing', 'repairing')}
+                # Older versions did not persist a combined-repair marker.
+                last = batch['attempts'][-1] if batch['attempts'] else {}
+                if (last.get('role') == 'fix' and last.get('status') in ('failed', 'interrupted') and not last.get('adopted_at')
+                        and batch['tasks'] and all(t['status'] in ('complete', 'skipped') for t in batch['tasks'])):
+                    batch['combined_repair_pending'] = True
+                if orphaned or batch.get('combined_repair_pending') or batch.get("status") == "running" or interrupted:
                     batch["status"] = "interrupted"
-                    if not request.get("adopt") and not request.get("skip"):
-                        raise ApiError("interrupted_task", "Inspect the interrupted task, then adopt and reverify or explicitly skip it.")
+                    if not request.get('adopt') and (batch.get('combined_repair_pending') or not interrupted or not interrupted <= set(skip)):
+                        raise ApiError('interrupted_task', 'Inspect retained changes, then adopt and reverify; task skips must cover every interrupted task. A failed combined repair requires adoption.')
                 if snapshot["tree"] != batch["checkpoint"]["tree"] and not request.get("adopt"):
                     raise ApiError("worktree_changed", "Inspect partial/manual changes, then explicitly adopt and reverify.")
                 if request.get("adopt"):
                     batch["checkpoint"] = snapshot
                     batch["git_admin"] = identity
                     batch.pop("integrity_failure", None)
+                    batch.pop('combined_repair_pending', None)
+                    for attempt in batch['attempts']:
+                        if attempt.get('role') == 'fix' and attempt.get('status') in ('failed', 'interrupted'):
+                            attempt.setdefault('adopted_at', now())
                     for task in batch["tasks"]:
-                        if task["status"] not in ("skipped", "blocked"):
+                        if task["status"] not in ("queued", "skipped", "blocked"):
                             task.setdefault("before", {"tree": batch["baseline"]})
                             task.setdefault("implementation", {"summary": "Manually adopted changes"})
                             task.update(status="reviewing", verification_superseded=True)
-                skip = request.get("skip", [])
-                if not isinstance(skip, list) or any(t not in {x["id"] for x in batch["tasks"]} for t in skip):
-                    raise ApiError("invalid_request", "Choose existing tasks to skip.")
                 for task in batch["tasks"]:
                     if task["id"] in skip:
                         task["status"] = "skipped"
@@ -317,9 +344,9 @@ def execute(session, state, request):
                     if not request.get("replan"):
                         raise ApiError("stale_discussion", "Feedback changed; inspect it and explicitly replan unfinished work.")
                     # Completed outcomes with changed source feedback must also be reconsidered.
-                    current = {i["key"]: i["fingerprint"] for i in state["feedback"]}
+                    current = {i["key"]: i["fingerprint"] for i in state["feedback"] if not i.get('missing')}
                     for task in batch["tasks"]:
-                        if any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
+                        if task['status'] != 'skipped' and any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
                             task["status"] = "queued"
                 if batch["settings"] != state["settings"]:
                     if batch.get("attempts") or batch.get("plans") or batch.get("tasks"):
@@ -345,10 +372,15 @@ def execute(session, state, request):
                 state["batches"].append(batch)
                 session.save(state)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
+            # Only an unchanged, already verified batch survives a failed auth
+            # probe. Source/feedback/settings/trust guards above still invalidate.
+            preserve_ready = batch['status'] == 'ready' and not any(request.get(k) for k in ('adopt', 'replan', 'skip'))
             models.preflight(session, state)
+            preserve_ready = False
+            batch.pop('preflight_error', None)
             if not batch["tasks"] or request.get("replan"):
-                completed = [t for t in batch["tasks"] if t["status"] == "complete"]
-                covered = {k for t in completed for k in t["items"]}
+                retained = [t for t in batch["tasks"] if t["status"] in ('complete', 'skipped')]
+                covered = {k for t in retained for k in t["items"]}
                 keys = [k for k in batch["items"] if k not in covered]
                 if keys:
                     plan, tasks = plan_tasks(session, state, batch, keys)
@@ -357,9 +389,13 @@ def execute(session, state, request):
                         task["id"] = prefix + task["id"]
                         task["depends_on"] = [prefix + dep for dep in task["depends_on"]]
                     batch["plans"].append({"at": now(), "previous_tasks": copy.deepcopy(batch["tasks"]), "plan": plan})
-                    batch["tasks"] = completed + tasks
+                    retained_ids = {t['id'] for t in retained}
+                    for task in retained:
+                        task['depends_on'] = [dep for dep in task['depends_on'] if dep in retained_ids]
+                    batch["tasks"] = retained + tasks
                 batch["discussion_stale"] = False
-                batch["fingerprints"] = {i["key"]: i["fingerprint"] for i in session.items(state, batch["items"])}
+                active = active_feedback_keys(batch)
+                batch["fingerprints"] = {i["key"]: i["fingerprint"] for i in session.items(state, active)} if active else {}
             batch["status"] = "running"
             batch.pop("error", None)
             session.save(state)
@@ -387,6 +423,9 @@ def execute(session, state, request):
             return session.view(state)
         except BaseException as exc:
             if batch is not None and not completing:
-                batch.update(status="interrupted" if getattr(exc, "code", None) == "cancelled" else "paused", error=str(exc))
+                if preserve_ready:
+                    batch['preflight_error'] = str(exc)
+                else:
+                    batch.update(status="interrupted" if getattr(exc, "code", None) == "cancelled" else "paused", error=str(exc))
                 session.save(state)
             raise

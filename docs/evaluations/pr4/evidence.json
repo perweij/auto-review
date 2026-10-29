@@ -1,0 +1,1228 @@
+{
+  "reference-issues.json": {
+    "reference_issues": [
+      {
+        "id": "R1",
+        "title": "Agent configuration trust ignores files excluded from the Git checkpoint",
+        "baseline": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+        "later_fix": "03db750c0b83f56bacd147c6d24bcb7e9227a68d",
+        "location": "lib/pr_review/owner_git.py:142",
+        "scenarios": [
+          "Ignored local agent configuration can be added or edited without changing the tree-based trust token.",
+          "Deleting the last changed configuration can empty paths and skip reapproval."
+        ],
+        "status": "confirmed using real temporary Git repository against initial source; no model invocation"
+      }
+    ],
+    "limitations": [
+      "This is a partial reference set, not an exhaustive ground truth.",
+      "Later enhancement commits are not automatically counted as defects in the initial PR.",
+      "Do not expose this file or future fix commits to model review inputs."
+    ]
+  },
+  "adjudication.json": [
+    {
+      "case": "A-main-single",
+      "finding": "F2",
+      "verdict": "confirmed",
+      "evidence": "Real owner API acknowledge/defer/restore leaves general feedback attention=False, including after refresh."
+    },
+    {
+      "case": "A-main-single",
+      "finding": "F1",
+      "verdict": "confirmed",
+      "evidence": "Real Git amend + owner association/recovery marks new commit wording Published with a receipt containing only old commit wording. Timeline refresh includes the posted receipt as a separate feedback item."
+    },
+    {
+      "case": "B-feature-single",
+      "finding": "F2",
+      "verdict": "confirmed",
+      "same_issue_as": "A-main-single/F1",
+      "evidence": "Covered by the real Git amendment and receipt-recovery reproduction above."
+    },
+    {
+      "case": "B-feature-single",
+      "finding": "F3",
+      "verdict": "confirmed",
+      "evidence": "The real owner publication API sends one mocked timeline POST after its per-reply refresh sees CLOSED; preview and re-prepare saw OPEN."
+    },
+    {
+      "case": "B-feature-single",
+      "finding": "F1",
+      "verdict": "confirmed",
+      "evidence": "Real owner Git/session workflow replans changed prerequisite feedback, retains a dangling dependency in a ready batch, then raises KeyError when adopting manual changes."
+    }
+  ],
+  "adjudication-c.json": [
+    {
+      "candidate": "Preserve verified history when resume fails before execution",
+      "verdict": "confirmed",
+      "evidence": "A ready batch becomes paused after mocked preflight failure with no additional provider invocations. Committing and pushing the verified tree then produces no associated replies, and resume fails with stale_source. Real owner API and temporary Git repository."
+    },
+    {
+      "candidate": "Skipping unrelated task bypasses interrupted-task adoption gate",
+      "verdict": "confirmed",
+      "evidence": "Two independent planned tasks; first fixer records edits then is cancelled. Resuming with only second task skipped reruns interrupted first fixer without explicit adoption. Real owner API and Git fixture."
+    }
+  ],
+  "adjudication-c-remaining.json": [
+    {
+      "finding": "F4",
+      "verdict": "confirmed",
+      "evidence": "Real owner publication of two replies to one thread sends only first. Fixture reflects its receipt in discussion; next refresh unstages second and marks verified batch stale."
+    },
+    {
+      "finding": "F7",
+      "verdict": "confirmed_narrowed",
+      "evidence": "Adoption of interrupted first task sends never-run queued second task directly to review without initial fixer. Review remains; source confirms its first requested fix then uses repair allowance."
+    },
+    {
+      "finding": "F8",
+      "verdict": "confirmed_behavior_design_tradeoff",
+      "evidence": "Changing only branch.unrelated.description in real shared Git config makes ready-batch resume fail integrity_failed. Recoverable conservative guard; count separately from correctness defects."
+    },
+    {
+      "finding": "F9",
+      "verdict": "backend_reproduced_frontend_traced",
+      "evidence": "Real fork/upstream remotes produce mismatched inferred versus explicit toolkit preference; numeric owner-open without identity rejects ambiguity. Forge routing inspected in source, not executed in Emacs."
+    },
+    {
+      "finding": "F13",
+      "verdict": "confirmed_efficiency",
+      "evidence": "Actual final-review context in real Git fixture repeats a nonempty accumulated diff in batch_diff and task_diff. No measured bill or context-limit failure."
+    },
+    {
+      "finding": "F14",
+      "verdict": "backend_reproduced_frontend_traced",
+      "evidence": "Owner refresh emits no started operation event; frontend K requires operation ID and close guard points to K. Actual Emacs process cancellation not executed."
+    }
+  ],
+  "adjudication-e-candidates.json": [
+    {
+      "candidate": "Deleted selected feedback blocks batch resume/replan/skip",
+      "verdict": "confirmed",
+      "evidence": "Real owner API after ready fixture: ordinary resume stale_discussion; replan and replan+skip invalid_target; new batch dirty_worktree. Existing verified changes retained but normal recovery controls cannot continue this batch."
+    },
+    {
+      "candidate": "Ignored file lists copied into state and model context",
+      "verdict": "confirmed_overhead_not_measured_failure",
+      "evidence": "Real Git fixture with 200 ignored files stores all 200 paths in checkpoint, task after snapshot, owner view and final-review context. Establishes linear prompt/state growth, not an observed context-limit or performance failure."
+    },
+    {
+      "candidate": "Root heading fix includes History feedback",
+      "verdict": "confirmed_in_emacs",
+      "evidence": "check_root_selection.el loads frozen source and owner fixture in Emacs 30.1. f at owner-root selects attention T1/T2 plus non-attention History comment:3. See root-selection.log."
+    }
+  ],
+  "adjudication-submodule.json": {
+    "candidate": "Dirty submodule contents are invisible to checkpoint and admin identities",
+    "verdict": "confirmed",
+    "evidence": "Initialized real local submodule before checkpoint, then edited its nested tracked file without changing gitlink HEAD. Before/after superproject checkpoint tree and admin identity are equal; checkpoint diff is empty while git status reports dirty vendor. No live models/GitHub used."
+  },
+  "suggestion-adjudication.json": {
+    "patches_loaded_together": true,
+    "results": [
+      {
+        "suggestion": "p2",
+        "result": "passed",
+        "evidence": "Pending reassociation rejected; subsequent recovery retains matching old body and receipt after real Git amendment."
+      },
+      {
+        "suggestion": "p3",
+        "result": "passed",
+        "evidence": "PR closes during per-reply refresh; publish raises closed_pr and sends no mocked POST."
+      }
+    ]
+  },
+  "adjudication-e.json": [
+    {
+      "finding": "F1",
+      "issue": "R17",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication-submodule.json"
+    },
+    {
+      "finding": "F2",
+      "issue": "R14",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication-e-candidates.json"
+    },
+    {
+      "finding": "F3",
+      "issue": "R11",
+      "verdict": "backend_reproduced_frontend_traced",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F5",
+      "issue": "R15",
+      "verdict": "confirmed_in_emacs",
+      "evidence": "root-selection.log"
+    },
+    {
+      "finding": "F7",
+      "issue": "R16",
+      "verdict": "confirmed_overhead_not_measured_failure",
+      "evidence": "adjudication-e-candidates.json"
+    },
+    {
+      "finding": "F10",
+      "issue": "R8",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication-c.json"
+    },
+    {
+      "finding": "F12",
+      "issue": "R5",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication.json"
+    },
+    {
+      "finding": "F9",
+      "issue": "R18",
+      "verdict": "unverified_trigger_and_end_to_end_failure",
+      "evidence": "Conditional behavior is visible, but a supported PR-head transition and resulting wrong push have not been established."
+    }
+  ],
+  "adjudication-f.json": [
+    {
+      "finding": "F1",
+      "issue": "R17",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication-submodule.json"
+    },
+    {
+      "finding": "F2",
+      "issue": "R14",
+      "verdict": "confirmed_real_git_and_expanded_skip_case",
+      "evidence": "adjudication-e-candidates.json; adjudication-skip-replan.json"
+    },
+    {
+      "finding": "F3",
+      "issue": "R11",
+      "verdict": "backend_reproduced_frontend_traced",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F4",
+      "issue": "R2",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication.json"
+    },
+    {
+      "finding": "F5",
+      "issue": "R5",
+      "verdict": "confirmed_real_git",
+      "evidence": "adjudication.json"
+    }
+  ],
+  "adjudication-skip-replan.json": {
+    "finding": "F-main-two-codex/F2",
+    "issue": "R14",
+    "verdict": "confirmed_expanded_scope",
+    "evidence": "Real owner workflow with two independent completed tasks. Explicitly skip first task while requesting replan; planner receives its still-present feedback and its fixer runs again under a new task ID. No feedback deletion or provider/GitHub calls needed."
+  },
+  "adjudication-clarification.json": [
+    {
+      "scope": "task",
+      "verdict": "confirmed",
+      "fixer_calls": 2,
+      "evidence": "Real owner workflow with a review reporting complete=true, blocking concerns and clarify outcomes calls the fixer again instead of pausing first. Temporary real Git; model/GitHub responses mocked."
+    },
+    {
+      "scope": "combined",
+      "verdict": "confirmed",
+      "fixer_calls": 2,
+      "evidence": "Real owner workflow with a review reporting complete=true, blocking concerns and clarify outcomes calls the fixer again instead of pausing first. Temporary real Git; model/GitHub responses mocked."
+    }
+  ],
+  "adjudication-g.json": [
+    {
+      "finding": "F1",
+      "issue": "R2",
+      "verdict": "confirmed",
+      "evidence": "adjudication.json"
+    },
+    {
+      "finding": "F2",
+      "issue": "R6",
+      "verdict": "confirmed",
+      "evidence": "adjudication-c.json"
+    },
+    {
+      "finding": "F3",
+      "issue": "R5",
+      "verdict": "confirmed",
+      "evidence": "adjudication.json"
+    },
+    {
+      "finding": "F4",
+      "issue": "R19",
+      "verdict": "confirmed",
+      "evidence": "adjudication-clarification.json"
+    }
+  ],
+  "adjudication-deleted-association.json": {
+    "candidate": "Deleted verified feedback aborts association for remaining valid feedback",
+    "verdict": "confirmed_real_git",
+    "evidence": "Ready two-item batch, real exact commit and mocked push, then first source comment deleted. Two association attempts separated by refresh both raise invalid_target; no reply is generated for surviving thread T2. No live provider or GitHub calls."
+  },
+  "adjudication-failed-checkpoint.json": {
+    "case": "H-feature-two-claude",
+    "finding": "F2",
+    "verdict": "unreviewed_final_acceptance_claim_refuted",
+    "evidence": "Captured failed-fixer checkpoint does not permit ordinary resume: interrupted_task is raised. After explicitly skipping that task, the combined reviewer receives its retained partial edits in the full baseline diff. Rejecting them leaves batch paused with no final_tree. Real Git and owner API; external providers/GitHub mocked.",
+    "distinction": "Checkpoint advancement is real but is not successful verification. Unrelated-skip authorization is a separate supported defect (R8)."
+  },
+  "adjudication-auth-claim.json": {
+    "case": "H-feature-two-claude",
+    "finding": "F9",
+    "verdict": "terminal_failure_acceptance_claim_refuted",
+    "evidence": "Real local subprocess emits terminal error event then exits normally; shared supervisor returns failure, which owner preflight rejects. Different strictness for missing is_error/generic recoverable errors remains a design observation, not a demonstrated auth bypass.",
+    "results": [
+      {
+        "provider": "codex",
+        "returncode": 1,
+        "reason": "codex_turn_failed"
+      },
+      {
+        "provider": "claude",
+        "returncode": 1,
+        "reason": "model_result_error"
+      }
+    ]
+  },
+  "adjudication-h.json": {
+    "case": "H-feature-two-claude",
+    "model_retained": 15,
+    "independently_supported_behavioral": 7,
+    "supported_nonblocking_observations": 3,
+    "unmeasured_optimization_candidates": 1,
+    "unsubstantiated_or_refuted_claims": 4,
+    "findings": [
+      {
+        "finding": "F1",
+        "issue": "R7",
+        "verdict": "supported_behavioral_narrow_receipt_scope",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F3",
+        "issue": "R8",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-c.json"
+      },
+      {
+        "finding": "F4",
+        "issue": "R9",
+        "verdict": "supported_behavioral_narrow_repair_allowance",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F5",
+        "issue": "R10",
+        "verdict": "supported_design_tradeoff",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F6",
+        "issue": "R11",
+        "verdict": "supported_behavioral_narrow_repository_routing",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F10",
+        "issue": "R12",
+        "verdict": "supported_efficiency",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F11",
+        "issue": "R14",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-e-candidates.json"
+      },
+      {
+        "finding": "F12",
+        "issue": "R20",
+        "verdict": "supported_behavioral_narrow_affected_batch",
+        "evidence": "adjudication-deleted-association.json"
+      },
+      {
+        "finding": "F13",
+        "issue": "R6",
+        "verdict": "supported_behavioral_only_unchanged_input_preflight",
+        "evidence": "adjudication-c.json"
+      },
+      {
+        "finding": "F14",
+        "issue": "R16",
+        "verdict": "supported_efficiency",
+        "evidence": "adjudication-e-candidates.json"
+      },
+      {
+        "finding": "F15",
+        "issue": "R21",
+        "verdict": "unmeasured_performance_candidate",
+        "evidence": "Fresh-index mechanism source-visible; no measured large-repository failure."
+      },
+      {
+        "finding": "F2",
+        "issue": "R22",
+        "verdict": "unreviewed_final_acceptance_claim_refuted",
+        "evidence": "adjudication-failed-checkpoint.json"
+      },
+      {
+        "finding": "F7",
+        "issue": "R23",
+        "verdict": "not_established_as_defect",
+        "evidence": "Requested recovery mutations persist, but no rollback contract, unauthorized mutation or verification bypass established."
+      },
+      {
+        "finding": "F8",
+        "issue": "R24",
+        "verdict": "not_established_as_defect",
+        "evidence": "Full refresh preserves discussion freshness; no measured failure. Proposed head-only replacement loses required feedback checks."
+      },
+      {
+        "finding": "F9",
+        "issue": "R25",
+        "verdict": "terminal_error_claim_refuted",
+        "evidence": "adjudication-auth-claim.json"
+      }
+    ],
+    "qualification": "Several retained claims need narrower failure scenarios or safer corrections. In particular, do not ignore all owner messages, bypass repository selection, or preserve ready state after changed verification inputs."
+  },
+  "best-suggestion-adjudication.json": {
+    "python_patches_loaded_together": true,
+    "results": [
+      {
+        "suggestion": "p1",
+        "result": "passed",
+        "evidence": "Uncertain reassociation rejected and receipt recovery preserves original commit wording after real Git amendment."
+      },
+      {
+        "suggestion": "p3",
+        "result": "passed",
+        "evidence": "Per-send CLOSED refresh stops before POST and removes obsolete preparation."
+      },
+      {
+        "suggestion": "p5",
+        "result": "passed",
+        "evidence": "Skipping unrelated queued task no longer replays interrupted fixer."
+      },
+      {
+        "suggestion": "p6",
+        "result": "passed",
+        "evidence": "Explicit adoption reviews interrupted task but still invokes initial fixer for unrelated queued task."
+      },
+      {
+        "suggestion": "p9",
+        "result": "passed",
+        "evidence": "Combined review omits duplicate task_diff; a distinct empty task diff is retained for the queued task."
+      },
+      {
+        "suggestion": "p10",
+        "result": "passed",
+        "evidence": "Actual Emacs function signals an owned Python subprocess; real shared cancellation_scope stops its child and returns Cancelled. Existing registered-operation API and idle-error branches also pass.",
+        "limitation": "This isolates frontend routing and subprocess cancellation; live GitHub uncertain-publication recovery was not exercised by this check."
+      }
+    ],
+    "emacs_patch": "check_cancel_suggestion.el and cancellation_fixture.py"
+  },
+  "suggestion-retention.json": {
+    "case": "I-best-suggestions",
+    "paired_with": "C-feature-synthesised",
+    "exit_code": 0,
+    "elapsed_seconds": 1394.27,
+    "session": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw",
+    "incremental_time_only": true,
+    "analysis_reused": true,
+    "matching_reused": true,
+    "ordinary_comments_preserved": true,
+    "findings": 14,
+    "comment_count_before": 10,
+    "comment_count_after": 10,
+    "generated": 6,
+    "omitted": 4,
+    "individually_accepted": [
+      "p1",
+      "p3",
+      "p5",
+      "p6",
+      "p9"
+    ],
+    "individual_verification_failed": [
+      "p10"
+    ],
+    "accepted_subset_batch": {
+      "status": "accepted",
+      "fingerprint": "33538834fa35161ee7b6c49e50ca01967b146ed332a7cf87ece425fd7c9f47c0",
+      "members": [
+        "0a96fa6a96af8f4aafb463bf91255db0a1229a9e200b7c4e6b4e33d5e04c6bce",
+        "7f4b03d5b12ca1c831e268c9ebaee1a9b6d6d728b0a23c5044a4e57ffda4726f",
+        "8aa803484f7e126ab5164c0375ab965101b263558d71e437014a21a1f9f58bce",
+        "5971cd9b9539940383972bcd9619f8b83d1f01a2e97b6e631d99667cf6b01324",
+        "a4cf0c13ba96af2661372d05c0981510537ac3e48c649b8dfb8e21d6cee3738d"
+      ],
+      "at": "2026-10-29T12:59:40+00:00",
+      "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/8fe9ea4b96bc4f78a2846de320a7dc8c",
+      "accepted": true,
+      "evidence": "All five exact replacements match the supplied suggestions and require no companion edits. p1 blocks reassociation before mutation for submitting/ambiguous actions; recovery preserves the original payload, commits, and receipt. p3 stops on CLOSED/MERGED before submission intent, retaining confirmed receipts and unsent drafts. p5 requires skips covering every interrupted writer task while preserving changed-tree protection. p6 preserves queued tasks' initial fixer invocation and repair allowance. p9 removes duplicate diff fields while retaining distinct task diffs; the provider consumer does not require task_diff. Focused checks covered all 4 publication subsets and all 8 fixes/context subsets, including baseline controls reproducing the original problems. Code tracing found no dependency between the two groups, establishing independence across combined subsets. No regressions were found. Existing Git-backed tests were not run because they commit to other checkouts; checks used mocked external operations. HEAD and index remain unchanged; only an untracked verification script was added.",
+      "checks": [
+        {
+          "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B .verification_suggestions.py publication",
+          "result": "Passed: uncertain-submission recovery, subsequent reassociation, closure before first/second sends, receipt retention, OPEN controls, and baseline reproductions across 4 subsets.",
+          "passed": true
+        },
+        {
+          "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B .verification_suggestions.py resume",
+          "result": "Passed: interrupted-task skip coverage, changed-tree protection, adoption, queued initial fixing, repair allowance, and baseline reproductions across 8 subsets.",
+          "passed": true
+        },
+        {
+          "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B .verification_suggestions.py context",
+          "result": "Passed: duplicate and empty duplicate omission, distinct task-diff preservation, and unchanged remaining context across 8 subsets.",
+          "passed": true
+        },
+        {
+          "command": "timeout --signal=TERM --kill-after=5s 60s git diff --check HEAD",
+          "result": "Exit 0; no whitespace errors.",
+          "passed": true
+        },
+        {
+          "command": "timeout --signal=TERM --kill-after=5s 60s git diff --cached --exit-code HEAD; git rev-parse HEAD; git status --short",
+          "result": "Index matches HEAD; HEAD remains f5e0321ca179d4c4a434ec456cb404b3cedd7486. Status contains the two supplied modified files and the untracked verification script.",
+          "passed": true
+        }
+      ],
+      "inspection_only_reason": ""
+    },
+    "automatic_publication_ready": false,
+    "publication": "not attempted; offline adapter rejects writes",
+    "limitation": "Continuation of saved analysis tests retention without rerunning discovery. It does not measure stochastic variation in fresh reviews with suggestions enabled.",
+    "verification_recovery_observation": {
+      "issue": "R26",
+      "reason": "Verifier reported an initial temporary-directory setup failure, then passing checks after setting TMPDIR. The application rejects accepted=true when any recorded check failed. The finding and proposed patch remain saved; automatic publication remains blocked.",
+      "raw_verifier_result": {
+        "accepted": true,
+        "evidence": "p10 is fixed without companion edits. The fallback sends SIGTERM to the active backend; api.dispatch already installs cancellation handling that stops subprocesses and unwinds locks. Publication saves intent before sending and retains it as ambiguous on cancellation. Focused checks exercised the exact Emacs cancellation function and async callbacks for refresh, prepare, publish, and recovery. All subprocesses were reaped, locks released, and drafts/uncertain intent retained. Existing operation-ID cancellation also passed. Full Magit integration was not run because Magit is unavailable.",
+        "checks": [
+          {
+            "command": "timeout --signal=TERM --kill-after=5s 15s emacs --batch --eval '(progn (princ (format \"Emacs %s\\n\" emacs-version)) (dolist (feature (quote (magit transient))) (princ (format \"%s: %s\\n\" feature (locate-library (symbol-name feature))))))'",
+            "result": "Emacs 30.1 and Transient available; Magit unavailable.",
+            "passed": true
+          },
+          {
+            "command": "timeout --signal=TERM --kill-after=5s 60s python3 .verification-p10/check.py",
+            "result": "Setup failed before tests: ERT attempted cache creation under read-only /tmp.",
+            "passed": false
+          },
+          {
+            "command": "TMPDIR=\"$PWD/.verification-p10\" timeout --signal=TERM --kill-after=5s 60s python3 .verification-p10/check.py",
+            "result": "Passed all six focused Emacs tests and four backend cleanup/state assertions using mocked GitHub calls. Completed in approximately 1.3 seconds.",
+            "passed": true
+          },
+          {
+            "command": "timeout --signal=TERM --kill-after=5s 10s git diff HEAD --stat; timeout --signal=TERM --kill-after=5s 10s git status --short; timeout --signal=TERM --kill-after=5s 10s git diff --cached --exit-code",
+            "result": "Only the supplied tracked change and untracked verification artifacts remain; index unchanged.",
+            "passed": true
+          }
+        ],
+        "inspection_only_reason": ""
+      },
+      "saved_verification": {
+        "status": "failed",
+        "fingerprint": "8a6b757ce6cbcbaf329a9a1307c5f8750dfa43ab1a33fd5ee2961c61ba3db2c2",
+        "evidence": "Acceptance requires passing checks or a justified inspection-only assessment."
+      },
+      "independent_check": "best-suggestion-adjudication.json; Emacs cancellation passed independent process/routing checks, not live GitHub publication."
+    },
+    "comments": [
+      {
+        "id": "p1",
+        "title": "Keep uncertain replies immutable during reassociation",
+        "body": "In `owner_publication.py:75\u201378`, reassociation rewrites unpublished replies even when an action is submitting or ambiguous. If a generated timeline reply was posted but its response was lost, reassociating an amended commit changes the draft; recovery then marks that changed draft Published using the original payload's receipt. Freeze replies with uncertain submissions until recovery and preserve the exact submitted payload as publication history.",
+        "finding_ids": [
+          "F1"
+        ],
+        "suggestion_generation": {
+          "status": "generated",
+          "reason": "Reject reassociation before any mutation while submissions are uncertain. The existing action journal retains the exact submitted payload, and recovery preserves the original draft as published history. In-memory checks passed for both uncertain statuses and recovery.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/1313765908e34ed9beb53194980994a6",
+          "fingerprint": "363fe1fc2d4414e911d87fe3648b9fab279e130095c19ace67f27012bff5e492"
+        },
+        "suggestion_original_placement": {
+          "kind": "inline",
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 78,
+          "start_line": 75
+        },
+        "suggestion": {
+          "target": {
+            "kind": "inline",
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 22,
+            "start_line": 22,
+            "commit": "f5e0321ca179d4c4a434ec456cb404b3cedd7486"
+          },
+          "original": "    refresh(session, state)\n",
+          "replacement": "    if any(a[\"status\"] in (\"submitting\", \"ambiguous\") for a in state[\"actions\"]):\n        raise ApiError(\"uncertain_publication\", \"Recover uncertain replies before reassociating commits.\")\n    refresh(session, state)\n",
+          "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+          "verification": {
+            "status": "accepted",
+            "fingerprint": "0a96fa6a96af8f4aafb463bf91255db0a1229a9e200b7c4e6b4e33d5e04c6bce",
+            "at": "2026-10-29T12:45:24+00:00",
+            "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/3e8544d904dc40509420d7f192bfb60e",
+            "accepted": true,
+            "evidence": "p1 is fully fixed. The guard blocks submitting and ambiguous actions before reassociation changes state. Recovery retains the original body, commit and receipt; later reassociation preserves published replies. Existing imports and action payload storage suffice; no companion edit is needed. Focused checks reproduced HEAD's corruption and verified the replacement. Coverage limitation: existing owner integration tests were not run because their setup commits and changes Git configuration.",
+            "checks": [
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B .verification-p1.py",
+                "result": "Passed all 6 focused tests, covering both uncertain statuses, thread/timeline replies, automatic/explicit association, receipt/no-receipt recovery, publication history, human wording and ordinary draft generation. HEAD reproduction confirmed the original defect.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s git diff --check",
+                "result": "Exit 0; no whitespace errors.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s git status --short",
+                "result": "Only the supplied tracked change and untracked verification artifact .verification-p1.py.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s git diff HEAD -- lib/pr_review/owner_publication.py",
+                "result": "Confirmed the exact supplied two-line guard remains the sole tracked change.",
+                "passed": true
+              }
+            ],
+            "inspection_only_reason": ""
+          }
+        }
+      },
+      {
+        "id": "p2",
+        "title": "Preserve verified history when resume fails before execution",
+        "body": "The exception handler in `owner_fixes.py:286\u2013289` changes a ready batch to paused even when resume fails during discovery or authentication before execution. If the user then commits and pushes the previously verified tree, association skips the paused batch and another resume rejects the changed HEAD. Preserve the accepted verification record and association eligibility until execution or changed inputs invalidate them; record the preflight failure separately.",
+        "finding_ids": [
+          "F2"
+        ],
+        "suggestion_generation": {
+          "status": "omitted",
+          "reason": "Keep the finding. A ready-status guard alone could preserve invalid verification after adoption or replanning. The complete fix requires tracking preflight versus execution, invalidating changed inputs, recording preflight failures separately, and companion regression tests; it is unsuitable for a standalone suggested change.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/755677b2e9164bd0b3f76943b55eb5ed",
+          "fingerprint": "56c71fc61f460d6c3b51fc6eeb9852c945ef94bf170c362b8ca6e3d07af695fa"
+        }
+      },
+      {
+        "id": "p3",
+        "title": "Recheck the PR's open state before each send",
+        "body": "Preparation rejects closed PRs, but the refresh before each send in `owner_publication.py:182\u2013186` checks only HEAD afterward. If the PR closes or merges after preparation or between replies, publication can observe that state and still POST with an unchanged HEAD. Recheck OPEN before recording each submission intent, preserving confirmed receipts and retaining unsent drafts when stopping.",
+        "finding_ids": [
+          "F3"
+        ],
+        "suggestion_generation": {
+          "status": "generated",
+          "reason": "Check OPEN immediately after each refresh and clear the prepared confirmation before stopping. In-memory validation confirmed CLOSED and MERGED stop publication while preserving confirmed receipts and unsent drafts.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/6ab8e5fa43e244d28c5c13285655f3ef",
+          "fingerprint": "ff933b480c88ca52ab2e6ced856cd16a23070c6ca517e54144230af2da8ec4f9"
+        },
+        "suggestion_original_placement": {
+          "kind": "inline",
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 186,
+          "start_line": 182
+        },
+        "suggestion": {
+          "target": {
+            "kind": "inline",
+            "path": "lib/pr_review/owner_publication.py",
+            "side": "RIGHT",
+            "line": 182,
+            "start_line": 182,
+            "commit": "f5e0321ca179d4c4a434ec456cb404b3cedd7486"
+          },
+          "original": "        refresh(session, state)\n",
+          "replacement": "        refresh(session, state)\n        if state[\"metadata\"][\"state\"] != \"OPEN\":\n            state.pop(\"prepared\", None)\n            session.save(state)\n            raise ApiError(\"closed_pr\", \"Publishing owner replies requires an open PR.\")\n",
+          "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+          "verification": {
+            "status": "accepted",
+            "fingerprint": "7f4b03d5b12ca1c831e268c9ebaee1a9b6d6d728b0a23c5044a4e57ffda4726f",
+            "at": "2026-10-29T12:47:18+00:00",
+            "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/0d5e6be1912b428eaca432993ed985bc",
+            "accepted": true,
+            "evidence": "p3 is fully addressed: each refreshed non-OPEN state stops publication before recording another submission intent, clears confirmation, and preserves confirmed receipts and unsent drafts. Sixteen focused scenarios passed using real refresh, preparation, publication, persistence, and receipt validation with simulated external responses. Both reply types, CLOSED/MERGED transitions, continued OPEN publication, and HEAD-change protection were covered. No companion edit is required. The tracked diff remains exactly the supplied replacement. Existing owner tests were not run because their fixtures create prohibited Git commits; no live services were used.",
+            "checks": [
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B .verification/p3_publication_check.py",
+                "result": "Exit 0; all 16 scenarios passed in approximately 0.14 seconds. No external processes ran.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 10s git diff --check",
+                "result": "Exit 0; no whitespace errors.",
+                "passed": true
+              }
+            ],
+            "inspection_only_reason": ""
+          }
+        }
+      },
+      {
+        "id": "p4",
+        "title": "Prevent published owner replies from invalidating remaining replies",
+        "body": "The content fingerprint in `owner_state.py:204\u2013208` includes owner replies. With two staged replies to one thread, publishing the first changes the fingerprint on the next refresh, unstages the second, and causes its publication blockers to reject the old fingerprint. This can also invalidate a verified batch's association fingerprints. Exclude known self-publication receipts from dependency invalidation, or safely advance the expected context while preserving detection of incoming changes.",
+        "finding_ids": [
+          "F4"
+        ],
+        "suggestion_generation": {
+          "status": "omitted",
+          "reason": "Keep the finding. A safe fix needs receipt-aware fingerprint handling and companion regression tests covering successive replies, verified batch associations, and concurrent incoming changes. Existing publication mocks never add posted replies to fetched discussion, so they cannot validate this behavior. This is unsuitable for a standalone suggested change.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/062fe7e2631e4281ac6c048f6d260e5e",
+          "fingerprint": "d0f01e65a73fcfc9b7524e9cfec1b00c8f56eaba8182ecdebdb07c6485dca973"
+        }
+      },
+      {
+        "id": "p5",
+        "title": "Bind interrupted-task skips to the interrupted task",
+        "body": "In `owner_fixes.py:197\u2013200`, skipping unrelated task t2 satisfies the interrupted-task gate for t1. When the current tree matches the saved checkpoint, such as after a failed provider attempt whose resulting tree was captured, t1's fixer runs again without adoption or an explicit skip of t1. Require adoption or a skip covering every interrupted writer task. The separate worktree comparison protects uncheckpointed edits but does not validate this authorization.",
+        "finding_ids": [
+          "F6"
+        ],
+        "suggestion_generation": {
+          "status": "generated",
+          "reason": "A single-range fix requires the skip list to cover every fixing or repairing task unless adoption is requested. The candidate parses and passes nine in-memory authorization cases.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/0327c061be8047fcb97a190b9e9ee0dc",
+          "fingerprint": "0394ba4af992cff5e1c58343c30cfc982bd6040eb71231af6830e368789948e2"
+        },
+        "suggestion_original_placement": {
+          "kind": "inline",
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 200,
+          "start_line": 197
+        },
+        "suggestion": {
+          "target": {
+            "kind": "inline",
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 200,
+            "start_line": 199,
+            "commit": "f5e0321ca179d4c4a434ec456cb404b3cedd7486"
+          },
+          "original": "                    if not request.get(\"adopt\") and not request.get(\"skip\"):\n                        raise ApiError(\"interrupted_task\", \"Inspect the interrupted task, then adopt and reverify or explicitly skip it.\")\n",
+          "replacement": "                    if not request.get(\"adopt\") and (\n                            not isinstance(request.get(\"skip\"), list) or not request[\"skip\"]\n                            or any(t[\"status\"] in (\"fixing\", \"repairing\") and t[\"id\"] not in request[\"skip\"]\n                                   for t in batch[\"tasks\"])):\n                        raise ApiError(\"interrupted_task\", \"Inspect all interrupted tasks, then adopt and reverify or explicitly skip each one.\")\n",
+          "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+          "verification": {
+            "status": "accepted",
+            "fingerprint": "8aa803484f7e126ab5164c0375ab965101b263558d71e437014a21a1f9f58bce",
+            "at": "2026-10-29T12:49:18+00:00",
+            "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/0b57925a196640b5b8410920f438c77d",
+            "accepted": true,
+            "evidence": "p5 is fully fixed: without adoption, the skip list must cover every task marked fixing or repairing. Focused execution checks confirmed that unrelated or partial skips cannot replay interrupted writers, including after a checkpointed provider failure. Full skips, adoption, dependency blocking, invalid-task validation, and worktree-change protection remain functional. No companion edit is required. Coverage: Git and provider operations were mocked; existing owner tests were not run because their fixtures create commits. Only the supplied tracked change and an untracked verification artifact are present.",
+            "checks": [
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B .p5-verification.py",
+                "result": "Passed all 8 focused tests, including fixing/repairing skip-validation subcases; exit 0.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s git diff --check HEAD",
+                "result": "No whitespace errors; exit 0.",
+                "passed": true
+              }
+            ],
+            "inspection_only_reason": ""
+          }
+        }
+      },
+      {
+        "id": "p6",
+        "title": "Preserve the implementation stage for queued tasks during adoption",
+        "body": "Adoption in `owner_fixes.py:207\u2013211` changes every non-skipped/non-blocked task to reviewing, including queued tasks that have never run. Those tasks bypass their initial fixer invocation; if review requests implementation, that first fix consumes the single repair allowance. Reviews still gate readiness, but remaining work can pause prematurely. Preserve queued tasks' implementation stage and distinguish them from work needing reverification.",
+        "finding_ids": [
+          "F7"
+        ],
+        "suggestion_generation": {
+          "status": "generated",
+          "reason": "Excluding queued tasks from adoption preserves their initial fixer invocation and repair allowance while retaining reverification for previously started tasks.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/c790f65eafed4d57935b5f123aaf9cdf",
+          "fingerprint": "57fc6dfdbec1774bb2aff465bb4d3a69ca8402b58d79b7089c53e1a77c84b502"
+        },
+        "suggestion_original_placement": {
+          "kind": "inline",
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 211,
+          "start_line": 207
+        },
+        "suggestion": {
+          "target": {
+            "kind": "inline",
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 208,
+            "start_line": 208,
+            "commit": "f5e0321ca179d4c4a434ec456cb404b3cedd7486"
+          },
+          "original": "                        if task[\"status\"] not in (\"skipped\", \"blocked\"):\n",
+          "replacement": "                        if task[\"status\"] not in (\"queued\", \"skipped\", \"blocked\"):\n",
+          "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+          "verification": {
+            "status": "accepted",
+            "fingerprint": "5971cd9b9539940383972bcd9619f8b83d1f01a2e97b6e631d99667cf6b01324",
+            "at": "2026-10-29T12:50:42+00:00",
+            "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/e465a2adc1544d0a8e16940f007b1083",
+            "accepted": true,
+            "evidence": "p6 is fully fixed by the exact one-line replacement. Queued tasks retain their initial fixer invocation and their separate repair allowance. Started tasks still undergo reverification; verification-only behavior and dependency blocking remain intact. No companion edit is required. Six focused in-memory tests passed using the actual execution path with external effects mocked. Existing owner tests were not run because their setup creates repositories and commits. Tracked files were left unchanged; .verification_p6.py remains as a test artifact.",
+            "checks": [
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=lib python3 .verification_p6.py",
+                "result": "6 tests passed: initial fix ordering, retained repair allowance, pause after exhausted repair, started-task reverification, verification-only behavior, and skipped-prerequisite blocking. Exit 0.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 10s git diff HEAD --check",
+                "result": "No whitespace errors. Exit 0.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 10s git diff HEAD --stat; timeout --signal=TERM --kill-after=5s 10s git status --short",
+                "result": "Only the supplied one-line tracked change and the untracked verification script are present. Exit 0.",
+                "passed": true
+              }
+            ],
+            "inspection_only_reason": ""
+          }
+        }
+      },
+      {
+        "id": "p7",
+        "title": "Scope Git integrity checks to relevant shared configuration",
+        "body": "As a nonblocking improvement, narrow the shared-config integrity check in `owner_git.py:84\u201385`. Updating unrelated branch configuration from another checkout changes the identity even when owner source and relevant Git state are unchanged, requiring adoption and reverification. Compare owner-relevant semantic settings or distinguish unrelated external configuration changes.",
+        "finding_ids": [
+          "F8"
+        ],
+        "suggestion_generation": {
+          "status": "omitted",
+          "reason": "Keep the finding. Narrowing this integrity check requires defining which Git settings remain protected and adding regression tests showing that unrelated branch changes are ignored while owner branch, remote, and hook settings remain protected. That safety-sensitive change is unsuitable for a self-contained single-range suggestion.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/75f952298524417e940a6728c34a4885",
+          "fingerprint": "ba9e3d0ecb973eda42bdb42837699934b55a2a4bbc60e8233a5456a08363a647"
+        }
+      },
+      {
+        "id": "p8",
+        "title": "Resolve repository identity before looking up the remembered toolkit",
+        "body": "With origin pointing to a fork and upstream to the base repository, `owner_state.py:93\u2013101` uses a null repository identity for an unspecified toolkit lookup. Forge supplies no repository, so it can miss the Owner preference saved for the explicit base repository and route to Reviewer. Saving Owner under the ambiguous key instead leads numeric owner-open to reject the remotes. Resolve the repository from Forge context or the existing chooser, then use that identity consistently for lookup and opening while preserving offline owner opening.",
+        "finding_ids": [
+          "F9"
+        ],
+        "suggestion_generation": {
+          "status": "omitted",
+          "reason": "Keep the finding. A complete fix requires resolving repository identity before toolkit lookup/save and passing that identity through Forge routing to owner opening, with regression coverage for fork/upstream ambiguity and offline opening. Changing toolkit lookup alone leaves numeric owner-open ambiguous; the coordinated changes are unsuitable for one self-contained suggestion.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/f0d9186938de4de182be3ad2b8d6a688",
+          "fingerprint": "6138057f123d250126c9f09a1a4a75bba481f6f56b3223d0bf7002be67aa2c2d"
+        }
+      },
+      {
+        "id": "p9",
+        "title": "Avoid sending the same combined diff twice",
+        "body": "As a nonblocking efficiency improvement, avoid including the same accumulated patch twice in `owner_fixes.py:81\u201385`. Final review passes the baseline as before, making batch_diff and task_diff identical; resumed planning can do the same with a nonempty patch. Omit task_diff when it duplicates batch_diff or reference the common diff once.",
+        "finding_ids": [
+          "F13"
+        ],
+        "suggestion_generation": {
+          "status": "generated",
+          "reason": "The provider serializes context directly and does not require task_diff. This self-contained change omits identical diffs while preserving distinct task diffs. Syntax and equal, distinct, and empty diff cases were verified in memory.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/3b987ae8788c48c895c44468996f7d01",
+          "fingerprint": "f4534aeacf392c962385ad50a1e544b262b92f6ce7ff167f0dd9c090928d3fb4"
+        },
+        "suggestion_original_placement": {
+          "kind": "inline",
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 85,
+          "start_line": 81
+        },
+        "suggestion": {
+          "target": {
+            "kind": "inline",
+            "path": "lib/pr_review/owner_fixes.py",
+            "side": "RIGHT",
+            "line": 85,
+            "start_line": 82,
+            "commit": "f5e0321ca179d4c4a434ec456cb404b3cedd7486"
+          },
+          "original": "    return {\"feedback\": session.items(state, keys), \"baseline\": batch[\"baseline\"],\n            \"batch_diff\": workspace.diff(session, batch[\"baseline\"], batch[\"checkpoint\"][\"tree\"]),\n            \"task_diff\": workspace.diff(session, before, batch[\"checkpoint\"][\"tree\"]),\n            \"completed_tasks\": [t for t in batch[\"tasks\"] if t[\"status\"] == \"complete\"]}\n",
+          "replacement": "    data = {\"feedback\": session.items(state, keys), \"baseline\": batch[\"baseline\"],\n            \"batch_diff\": workspace.diff(session, batch[\"baseline\"], batch[\"checkpoint\"][\"tree\"]),\n            \"completed_tasks\": [t for t in batch[\"tasks\"] if t[\"status\"] == \"complete\"]}\n    task_diff = workspace.diff(session, before, batch[\"checkpoint\"][\"tree\"])\n    if task_diff != data[\"batch_diff\"]:\n        data[\"task_diff\"] = task_diff\n    return data\n",
+          "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+          "verification": {
+            "status": "accepted",
+            "fingerprint": "a4cf0c13ba96af2661372d05c0981510537ac3e48c649b8dfb8e21d6cee3738d",
+            "at": "2026-10-29T12:52:12+00:00",
+            "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/216cc47a3a234bc985809293e821b49e",
+            "accepted": true,
+            "evidence": "p9 fully fixes duplicate patch inclusion: identical diffs appear only as batch_diff, while distinct task_diff values remain present. Consumers serialize this context directly without requiring task_diff. Focused checks covered duplicate and empty diffs, distinct task changes, JSON serialization, task review, and final review. No regression or companion edit was identified. Existing owner workflow tests were skipped because their setup creates commits and other checkouts. Tracked source remained unchanged from the supplied candidate.",
+            "checks": [
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s python3 -B p9-verification.py",
+                "result": "Passed all 3 focused tests, including comparison against HEAD behavior across six diff cases. Used in-memory mocks; no providers executed.",
+                "passed": true
+              },
+              {
+                "command": "timeout --signal=TERM --kill-after=5s 60s bash -c 'git status --short && git diff HEAD -- lib/pr_review/owner_fixes.py && git diff --check HEAD'",
+                "result": "Confirmed the supplied replacement remains the only tracked change; whitespace check passed. Only added artifact: p9-verification.py.",
+                "passed": true
+              }
+            ],
+            "inspection_only_reason": ""
+          }
+        }
+      },
+      {
+        "id": "p10",
+        "title": "Make network owner operations cancellable from Emacs",
+        "body": "Owner refresh, prepare, publish, and recovery run asynchronously but do not enter the operation wrapper that emits the ID required by K in `magit-auto-review-owner.el:450\u2013452`. A slow or stalled GitHub operation therefore cannot use that cancellation path, while the buffer close guard also refuses termination and directs the user to K. Register these operations with shared cancellation, or provide a safe process-cancellation fallback that preserves uncertain publication intent and releases locks. Backend dispatch was reproduced; actual Emacs cancellation was traced but not executed.",
+        "finding_ids": [
+          "F14"
+        ],
+        "suggestion_generation": {
+          "status": "generated",
+          "reason": "The API already handles SIGTERM cooperatively, stops children, preserves uncertain publication intent, and unwinds locks. A fallback targeting the live owned process fixes this in one range. The cancellation branches passed in-memory Emacs checks.",
+          "log_path": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw/suggestions/9206ca66c14b40a0b48c3b7acd82109b",
+          "fingerprint": "55036433a743bf211cc3a0bd9e52f036b05bef10139345840c20144b64fbea11"
+        },
+        "suggestion_original_placement": {
+          "kind": "inline",
+          "path": "emacs/magit-auto-review-owner.el",
+          "side": "RIGHT",
+          "line": 452,
+          "start_line": 450
+        },
+        "suggestion": {
+          "target": {
+            "kind": "inline",
+            "path": "emacs/magit-auto-review-owner.el",
+            "side": "RIGHT",
+            "line": 452,
+            "start_line": 450,
+            "commit": "f5e0321ca179d4c4a434ec456cb404b3cedd7486"
+          },
+          "original": "(defun magit-auto-review-owner-cancel () \"Cancel the owned provider operation.\" (interactive)\n  (unless magit-auto-review-owner--operation (user-error \"No cancellable provider operation\"))\n  (magit-auto-review--call `((command . \"cancel\") (operation_id . ,magit-auto-review-owner--operation))))\n",
+          "replacement": "(defun magit-auto-review-owner-cancel () \"Cancel the active owner operation.\" (interactive)\n  (cond\n   (magit-auto-review-owner--operation\n    (magit-auto-review--call `((command . \"cancel\") (operation_id . ,magit-auto-review-owner--operation))))\n   ((process-live-p magit-auto-review-owner--process)\n    (signal-process magit-auto-review-owner--process 'SIGTERM))\n   (t (user-error \"No owner operation is running\"))))\n",
+          "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+          "verification": {
+            "status": "failed",
+            "fingerprint": "8a6b757ce6cbcbaf329a9a1307c5f8750dfa43ab1a33fd5ee2961c61ba3db2c2",
+            "evidence": "Acceptance requires passing checks or a justified inspection-only assessment."
+          }
+        }
+      }
+    ]
+  },
+  "adjudication-j.json": {
+    "case": "J-feature-haiku-terra",
+    "model_retained": 11,
+    "independently_supported_behavioral": 8,
+    "supported_nonblocking_observations": 0,
+    "unmeasured_optimization_candidates": 0,
+    "unsubstantiated_or_refuted_claims": 3,
+    "unverified_retained": 2,
+    "refuted_retained": 1,
+    "model_rejected": 2,
+    "findings": [
+      {
+        "finding": "F1",
+        "issue": "R8",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-c.json"
+      },
+      {
+        "finding": "F2",
+        "issue": "R9",
+        "verdict": "supported_behavioral_narrow_initial_fix_and_repair_allowance",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F3",
+        "issue": "R18",
+        "verdict": "unverified_reachable_trigger_and_end_to_end_wrong_push",
+        "evidence": "adjudication-e.json"
+      },
+      {
+        "finding": "F4",
+        "issue": "R20",
+        "verdict": "supported_behavioral_affected_batch",
+        "evidence": "adjudication-terra-strong.json"
+      },
+      {
+        "finding": "F5",
+        "issue": "R7",
+        "verdict": "supported_behavioral_narrow_known_publication_receipts",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F6",
+        "issue": "R14",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-e-candidates.json"
+      },
+      {
+        "finding": "F7",
+        "issue": "R28",
+        "verdict": "unverified_permission_matcher_and_network_behavior",
+        "evidence": "Source alone does not establish the claimed CLI bypass; not exercised."
+      },
+      {
+        "finding": "F8",
+        "issue": "R11",
+        "verdict": "supported_behavioral_narrow_repository_routing",
+        "evidence": "adjudication-terra-strong.json"
+      },
+      {
+        "finding": "F9",
+        "issue": "R24",
+        "verdict": "model_rejected_unmeasured_performance_claim",
+        "evidence": "Synthesis rejects; not retained or counted."
+      },
+      {
+        "finding": "F10",
+        "issue": "R25",
+        "verdict": "terminal_failure_claim_refuted",
+        "evidence": "adjudication-terra-auth.json"
+      },
+      {
+        "finding": "F11",
+        "issue": "R27",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-reopen.json"
+      },
+      {
+        "finding": "F12",
+        "issue": "R29",
+        "verdict": "model_rejected_maintenance_claim",
+        "evidence": "Synthesis rejects; no demonstrated loss of required verification evidence."
+      },
+      {
+        "finding": "F13",
+        "issue": "R30",
+        "verdict": "supported_behavioral_missing_adoption_but_final_review_retained",
+        "evidence": "adjudication-terra-strong.json"
+      }
+    ],
+    "qualifications": [
+      "F2 does not bypass review: queued tasks lose initial fixer invocation and separate repair allowance.",
+      "F5 is supported for known publication receipts. Blanket exclusion of all owner messages could conceal meaningful new feedback.",
+      "F8 is a supported routing edge case when repository context is absent, not general failure of explicit repository selection.",
+      "F13 is a distinct combined-repair failure: all tasks complete, so the task interruption guard does not apply. Plain resume lacks explicit adoption, but still performs combined review. It does not revive the refuted unreviewed-acceptance claim R22.",
+      "F3 stale mapping exists in source, but realistic PR-destination change and wrong push remain unverified.",
+      "F10 overlooks terminal failure detection by the shared process supervisor; earlier real-subprocess reproduction applies unchanged.",
+      "Synthesis used source inspection without executing focused tests; independent checks supplied the recovery and Emacs reproductions."
+    ],
+    "verification_audit": "terra-verification-audit.json"
+  },
+  "adjudication-reopen.json": {
+    "case": "J-feature-haiku-terra",
+    "candidate": "Haiku-7",
+    "verdict": "confirmed_in_emacs",
+    "evidence": "Actual frozen owner-open executed in Emacs with mocked backend responses: first open adopts revision 3, second open fetches revision 4 but keeps displayed and request revision 3. Explicit refresh adopts revision 4. Backend revision guard source rejects mismatched requests.",
+    "reproduction": "check_reopen.el",
+    "limitation": "Backend response mocked; no live GitHub call."
+  },
+  "adjudication-combined-repair.json": {
+    "case": "J-feature-haiku-terra",
+    "finding": "F13",
+    "verdict": "confirmed_missing_explicit_adoption_for_failed_combined_repair",
+    "evidence": "With real owner API and Git, complete all tasks, fail combined review, then simulate combined fixer writing a partial file and recording its checkpoint before failure, as owner_providers.invoke does. Batch pauses with every task complete. Plain resume without adopt reaches combined review and becomes ready if that review accepts the partial diff.",
+    "qualification": "This is a missing explicit recovery decision, not bypassing final verification. The resumed combined reviewer receives the retained partial changes. Mocked provider/GitHub; checkpoint/error sequence mirrors actual provider source.",
+    "counts": {
+      "combined": 2,
+      "failed_repair": 1,
+      "resumed_review": 1
+    }
+  },
+  "terra-verification-audit.json": {
+    "case": "J-feature-haiku-terra",
+    "updated_at": "2026-10-29T14:27:43.507720+00:00",
+    "supported_behavioral_findings": 8,
+    "rerun_backend_cases": 7,
+    "earlier_emacs_case": 1,
+    "reviewed_snapshot": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+    "source_matches_reviewed_worktree": {
+      "lib/pr_review/owner_fixes.py": "e949a2ecb3081699435519e383c4e95bbb0db53a26cdec3824a2b48693cbe0d7",
+      "lib/pr_review/owner_providers.py": "7acf5e9f68903eaab94ff69e6721e6beba2ab75884fb2980404c09388d6cc5af",
+      "lib/pr_review/owner_publication.py": "3044b2c9fca28736f410598bf4f32bace857cef7d22dfba72d4c6e6a779ed94a",
+      "lib/pr_review/owner_state.py": "1961bda77bfbeb7e829a9b28d5ca6a52f48f875336600e1d6fa4f46a538f86d9",
+      "lib/pr_review/processes.py": "07fa7bf7522a41c26bc3006cead659b6e0a296d6b9d1ac5933498df4ff567e89",
+      "emacs/magit-auto-review-owner.el": "c6cf525d4be213efd3897408d465e089b85f7772270f483f96ccfda543819800"
+    },
+    "checks": [
+      {
+        "finding": "F1",
+        "issue": "R8",
+        "claim": "Skipping an unrelated task restarts the interrupted fixer without adoption",
+        "result": "rerun_passed",
+        "evidence": "adjudication-c.json"
+      },
+      {
+        "finding": "F2",
+        "issue": "R9",
+        "claim": "Adoption skips the initial fixer for queued tasks",
+        "result": "rerun_passed",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F4",
+        "issue": "R20",
+        "claim": "Deleted saved feedback blocks association of a surviving item",
+        "result": "exact_scenario_rerun_passed",
+        "evidence": "adjudication-terra-strong.json"
+      },
+      {
+        "finding": "F5",
+        "issue": "R7",
+        "claim": "A known published reply invalidates the remaining staged reply",
+        "result": "rerun_passed",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F6",
+        "issue": "R14",
+        "claim": "Deleted selected feedback prevents replan even with skip",
+        "result": "rerun_passed",
+        "evidence": "adjudication-e-candidates.json"
+      },
+      {
+        "finding": "F8",
+        "issue": "R11",
+        "claim": "Toolkit saved without repository context is lost after choosing a repository",
+        "result": "exact_backend_rerun_passed_frontend_source_traced",
+        "evidence": "adjudication-terra-strong.json"
+      },
+      {
+        "finding": "F11",
+        "issue": "R27",
+        "claim": "Reopening an owner buffer discards the newly fetched revision",
+        "result": "earlier_emacs_execution_passed",
+        "evidence": "adjudication-reopen.json"
+      },
+      {
+        "finding": "F13",
+        "issue": "R30",
+        "claim": "Failed combined repair resumes without an explicit adoption decision",
+        "result": "actual_wrapper_and_subprocess_rerun_passed",
+        "evidence": "adjudication-terra-strong.json"
+      }
+    ],
+    "excluded": [
+      {
+        "finding": "F3",
+        "issue": "R18",
+        "status": "unverified realistic trigger and wrong-push result"
+      },
+      {
+        "finding": "F7",
+        "issue": "R28",
+        "status": "unverified provider permission matcher and network access"
+      },
+      {
+        "finding": "F10",
+        "issue": "R25",
+        "status": "refuted terminal failure after success",
+        "evidence": "adjudication-terra-auth.json"
+      }
+    ],
+    "limits": [
+      "Backend checks use real Git and actual application state transitions. GitHub responses and model outputs are simulated, not live service integration tests.",
+      "The stronger combined-repair check uses the real provider wrapper and a real local process that edits a file and exits 1; it does not call a model.",
+      "The container was recreated. Current Emacs rerun failed because the executable and dependencies were lost. Its prior passing execution and reproduction source remain saved. Do not describe this as a fresh Emacs pass.",
+      "F8 backend behavior is executed; frontend selection ordering remains source-traced.",
+      "F2 still reviews queued tasks; F13 still reviews retained edits. Neither establishes acceptance of unreviewed code.",
+      "F5 supports receipt-aware handling, not ignoring arbitrary owner-authored discussion.",
+      "These are defects in the historical PR4 snapshot, not confirmed open defects on current branches."
+    ],
+    "terra_verification": {
+      "policy": "Focused verification allows code tracing, a small reproduction, or a selected existing test; no minimum executed test count.",
+      "actual": "Terra reported source inspection only, with no tests/builds/linters/provider/network checks. It referred to the read-only checkout and sufficient code tracing.",
+      "interpretation": "No attempted verification command or demonstrated setup failure explains the omission. Read-only checkout alone does not establish that all focused checks were impossible. The prompt allowed the model to choose source tracing.",
+      "future_option": "For stateful recovery claims, require a focused executable check where feasible, or explicit evidence-based justification and UNVERIFIED status when material uncertainty remains. Do not require a broad test suite."
+    },
+    "counts_changed": false
+  },
+  "adjudication-terra-strong.json": [
+    {
+      "finding": "F13",
+      "issue": "R30",
+      "verdict": "reproduced_with_actual_provider_wrapper_and_failing_subprocess",
+      "evidence": "Actual owner_providers.invoke runs a local subprocess that writes a file then exits 1. The real wrapper checkpoints that file, persists its failed attempt, and raises model_failed. All tasks remain complete. Plain resume without adopt reaches combined review and becomes ready when the mocked reviewer accepts the diff.",
+      "qualification": "Final verification is not bypassed: the resumed combined review receives the partial file. Failure is missing explicit adoption/recovery decision, not acceptance of unreviewed code.",
+      "counts": {
+        "combined_reviews": 2,
+        "failed_processes": 1,
+        "retained_diff_reviewed": 1
+      }
+    },
+    {
+      "finding": "F8",
+      "issue": "R11",
+      "verdict": "exact_backend_scenario_reproduced",
+      "evidence": "Real two-remote repository. Saving Owner without a repository succeeds; either subsequent explicit repository lookup returns Reviewer. Saving after resolving a repository persists Owner correctly. Frontend selector gathers repository from the current buffer and invokes toolkit before opening the PR list; nil context can reach this edge case.",
+      "qualification": "Explicit repository selection works. This is not a universal multi-remote failure; frontend ordering is source-traced, backend behavior executed."
+    },
+    {
+      "finding": "F4",
+      "issue": "R20",
+      "verdict": "exact_saved_association_scenario_reproduced",
+      "evidence": "After a real committed fix and successful initial association of both items, delete T1. Explicitly associate only surviving T2 to the existing pushed commit; saved T1 association causes invalid_target. GitHub push/discussion are mocked."
+    }
+  ],
+  "adjudication-terra-auth.json": {
+    "case": "J-feature-haiku-terra",
+    "finding": "F10",
+    "issue": "R25",
+    "verdict": "refuted_for_terminal_failure_after_success",
+    "evidence": "Actual owner preflight and process supervisor run real local subprocesses emitting success followed by a terminal failure, then exiting zero. Both Codex and Claude streams are rejected. Catalog/help/probe command mocked; no external providers called.",
+    "results": [
+      {
+        "provider": "codex",
+        "events": [
+          {
+            "type": "turn.completed",
+            "usage": {}
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "fixture terminal failure"
+            }
+          }
+        ],
+        "outcome": "authentication_failed"
+      },
+      {
+        "provider": "claude",
+        "events": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "PR_REVIEW_AUTH_OK"
+          },
+          {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "result": "fixture terminal failure"
+          }
+        ],
+        "outcome": "authentication_failed"
+      }
+    ]
+  }
+}

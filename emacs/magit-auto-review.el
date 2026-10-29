@@ -406,7 +406,9 @@ A different automatic operation makes the saved log current again.")
             (insert (alist-get 'diff suggestion) "\n"
                     (or (alist-get 'evidence verification) "Use S v to verify active suggestions.") "\n")
             (dolist (check (alist-get 'checks verification))
-              (insert (format "%s: %s\n" (alist-get 'command check) (alist-get 'result check))))
+              (insert (format "%s: %s\n" (alist-get 'command check) (alist-get 'result check)))
+              (when (integerp (alist-get 'supersedes check))
+                (insert (format "  Supersedes setup check %d\n" (1+ (alist-get 'supersedes check))))))
             (when-let ((reason (alist-get 'inspection_only_reason verification)))
               (unless (string-empty-p reason)
                 (insert "No executable checks run: " reason "\n")))
@@ -599,8 +601,23 @@ Ask which session to open when more than one matches.  Discovery is local."
                (name (completing-read "Saved review: " choices nil t)))
           (cdr (assoc name choices)))))))
 
+(defun magit-auto-review--toolkit-repository (directory repository)
+  "Resolve REPOSITORY before reading or saving a toolkit for DIRECTORY."
+  (or repository
+      (let* ((result (magit-auto-review--call `((command . "pull-requests") (cwd . ,directory))))
+             (choices (alist-get 'repositories result)))
+        (or (alist-get 'repository result)
+            (and choices (completing-read "Repository: " choices nil t))
+            (user-error "Choose a checkout with a GitHub remote or saved review")))))
+
 (defun magit-auto-review--open-pr (directory number &optional repository)
   "Open NUMBER using the remembered toolkit for DIRECTORY and REPOSITORY."
+  (setq repository
+        (magit-auto-review--toolkit-repository
+         directory (or repository
+                       (and (stringp number)
+                            (string-match "\\`https://\\([^/]+/[^/]+/[^/]+\\)/pull/[0-9]+/?\\'" number)
+                            (match-string 1 number)))))
   (let ((choice (magit-auto-review--call `((command . "toolkit") (cwd . ,directory) (repository . ,repository)))))
     (if (equal (alist-get 'toolkit choice) "owner")
         (progn (require 'magit-auto-review-owner)
@@ -612,12 +629,13 @@ Ask which session to open when more than one matches.  Discovery is local."
   (interactive)
   (let* ((directory (or (magit-toplevel) default-directory))
          (number magit-auto-review--target)
-         (repository magit-auto-review--repository)
+         (repository (magit-auto-review--toolkit-repository directory magit-auto-review--repository))
          (choice (completing-read "Toolkit: " '("Reviewer" "Owner") nil t)))
     (magit-auto-review--call `((command . "toolkit") (cwd . ,directory)
                               (repository . ,repository) (toolkit . ,(downcase choice))))
     (if number (magit-auto-review--open-pr directory number repository)
-      (magit-auto-review-pull-requests directory))))
+      (let ((magit-auto-review--repository repository))
+        (magit-auto-review-pull-requests directory)))))
 
 (define-key magit-auto-review-mode-map (kbd "M") #'magit-auto-review-select-toolkit)
 
