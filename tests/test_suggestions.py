@@ -124,6 +124,21 @@ class SuggestionTest(unittest.TestCase):
                 c.update(body=body, placement=placement)
                 self.assertIn('raw suggestion fence', '\n'.join(s.blockers(self.session, c, self.state)))
 
+    def test_html_blocks_cannot_absorb_the_rendered_suggestion_fence(self):
+        c = self.attach()
+        for body in ('<?php', '   <?processing', '<!DOCTYPE', '<![CDATA[',
+                     'Explanation\n<!DECLARATION\nmore text', '<!-- open', '<script>open',
+                     '```python\nunclosed', '```bad`info\n<?php\n```'):
+            with self.subTest(body=body), self.assertRaises(ApiError):
+                c['body'] = body
+                s.validate(self.session, c)
+        for body in ('Use a closed example:\n```html\n<?php\n<!DOCTYPE\n<![CDATA[\n<!--\n<script>\n```',
+                     '~~~html\n<?processing\n~~~', 'Ordinary explanation with `code`.'):
+            with self.subTest(body=body):
+                c['body'] = body
+                s.validate(self.session, c)
+                self.assertIn('\n\n```suggestion\ncorrected\n```\n', s.render(c))
+
     def test_verification_is_separate_isolated_and_reused(self):
         c = self.attach()
         def verify(session, stage, context, cwd):

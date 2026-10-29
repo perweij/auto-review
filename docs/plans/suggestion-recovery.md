@@ -4,7 +4,7 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: implement package 5.
+or temporary artifacts. Current step: investigate and implement package 6 guidance.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -80,7 +80,7 @@ turn into a saved validation failure or change the selected publication batch.
 
 ### 4. Coherent historical recovery — F7
 
-Status: complete. All 66 suggestion/API tests passed, including restored anchors,
+Status: complete (`68f9ded`). All 66 suggestion/API tests passed, including restored anchors,
 fresh-copy evidence, existing destination/document recovery, and cross-generation
 ID collisions. Semantics: same-comment/current-generation
 recovery restores saved placement and suggestion together. Another destination
@@ -102,7 +102,9 @@ require fresh verification. Ordinary text/document recovery remains supported.
 
 ### 5. Markdown edge cases — F5
 
-Status: pending.
+Status: complete. Validation rejects GFM block types 3–5 outside code fences,
+permits closed fenced HTML examples, and respects backtick info-string rules.
+All 81 suggestion/automation tests passed. GitHub UI rendering was not tested.
 
 Reproduction: validation accepts unclosed `<?`, `<!DOCTYPE`, and `<![CDATA[` HTML
 blocks, which can consume the appended fence under GFM parsing rules. Live GitHub

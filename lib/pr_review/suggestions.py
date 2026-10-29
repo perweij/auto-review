@@ -65,17 +65,27 @@ def validate(session, comment):
     if original == replacement:
         raise ApiError('invalid_suggestion', 'Suggestion makes no change.')
     fence = None
+    unsafe_html = False
     for line in comment['body'].splitlines():
         match = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
-        if match:
+        if fence is not None:
+            if match:
+                delimiter, rest = match.groups()
+                if delimiter[0] == fence[0] and len(delimiter) >= len(fence) and not rest.strip():
+                    fence = None
+            continue
+        if match and (match[1][0] == '~' or '`' not in match[2]):
             delimiter, rest = match.groups()
-            if fence is None:
-                fence = delimiter
-            elif delimiter[0] == fence[0] and len(delimiter) >= len(fence) and not rest.strip():
-                fence = None
-    if (fence or '<!--' in comment['body']
-            or re.search(r'(?i)<(?:script|style|pre|textarea)\b', comment['body'])
-            or re.search(r'(?im)^\s*<(?:div|table)\b', comment['body'])):
+            fence = delimiter
+            continue
+        # GFM HTML blocks 3–5 end at ?>, >, or ]]>, not a blank line.
+        # Reject HTML outside code fences; closed examples cannot absorb the
+        # appended suggestion. Backtick info strings cannot contain backticks.
+        if ('<!--' in line or re.search(r'(?i)<(?:script|style|pre|textarea)\b', line)
+                or re.search(r'(?i)^\s*<(?:div|table)\b', line)
+                or re.search(r'^ {0,3}<(?:\?|![A-Z]|!\[CDATA\[)', line)):
+            unsafe_html = True
+    if fence or unsafe_html:
         raise ApiError('invalid_suggestion', 'Close Markdown fences and remove HTML blocks before attaching a suggestion.')
     return target
 
