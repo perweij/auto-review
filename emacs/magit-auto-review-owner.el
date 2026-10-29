@@ -747,8 +747,14 @@
   "Plan, fix, and review selected feedback.
 With AUTOMATIC, also commit and stage replies."
   (interactive "P")
-  (let ((keys (cl-remove-if-not (lambda (k) (magit-auto-review--true-p (alist-get 'actionable (magit-auto-review-owner--feedback k))))
-                                (magit-auto-review-owner--selected 'owner-feedback))))
+  (let* ((root (and (not (use-region-p)) (magit-current-section)
+                    (eq (oref (magit-current-section) type) 'owner-root)))
+         (keys (cl-remove-if-not
+                (lambda (k)
+                  (let ((item (magit-auto-review-owner--feedback k)))
+                    (and (magit-auto-review--true-p (alist-get 'actionable item))
+                         (or (not root) (magit-auto-review--true-p (alist-get 'attention item))))))
+                (magit-auto-review-owner--selected 'owner-feedback))))
     (unless keys (user-error "No actionable feedback in this selection"))
     (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-fix" `(items . ,(vconcat keys))
                                    `(auto_commit . ,(if automatic t :false))))))
@@ -1015,9 +1021,13 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
     (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-thread-state" `(item . ,(car keys)) `(resolved . ,(if resolved t :false))))))
 (defun magit-auto-review-owner-resolve () "Resolve the selected GitHub thread." (interactive) (magit-auto-review-owner--thread t))
 (defun magit-auto-review-owner-reopen () "Reopen the selected GitHub thread." (interactive) (magit-auto-review-owner--thread nil))
-(defun magit-auto-review-owner-cancel () "Cancel the owned provider operation." (interactive)
-  (unless magit-auto-review-owner--operation (user-error "No cancellable provider operation"))
-  (magit-auto-review--call `((command . "cancel") (operation_id . ,magit-auto-review-owner--operation))))
+(defun magit-auto-review-owner-cancel () "Cancel the active owner operation." (interactive)
+  (cond
+   (magit-auto-review-owner--operation
+    (magit-auto-review--call `((command . "cancel") (operation_id . ,magit-auto-review-owner--operation))))
+   ((process-live-p magit-auto-review-owner--process)
+    (signal-process magit-auto-review-owner--process 'SIGTERM))
+   (t (user-error "No owner operation is running"))))
 (defun magit-auto-review-owner-trust () "Inspect and explicitly authorize changed agent configuration." (interactive)
   (unless magit-auto-review-owner--trust (user-error "No agent-configuration trust request"))
   (let ((patch magit-auto-review-owner--trust-diff)

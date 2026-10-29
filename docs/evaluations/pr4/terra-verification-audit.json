@@ -1,0 +1,108 @@
+{
+  "case": "J-feature-haiku-terra",
+  "updated_at": "2026-10-29T14:27:43.507720+00:00",
+  "supported_behavioral_findings": 8,
+  "rerun_backend_cases": 7,
+  "earlier_emacs_case": 1,
+  "reviewed_snapshot": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+  "source_matches_reviewed_worktree": {
+    "lib/pr_review/owner_fixes.py": "e949a2ecb3081699435519e383c4e95bbb0db53a26cdec3824a2b48693cbe0d7",
+    "lib/pr_review/owner_providers.py": "7acf5e9f68903eaab94ff69e6721e6beba2ab75884fb2980404c09388d6cc5af",
+    "lib/pr_review/owner_publication.py": "3044b2c9fca28736f410598bf4f32bace857cef7d22dfba72d4c6e6a779ed94a",
+    "lib/pr_review/owner_state.py": "1961bda77bfbeb7e829a9b28d5ca6a52f48f875336600e1d6fa4f46a538f86d9",
+    "lib/pr_review/processes.py": "07fa7bf7522a41c26bc3006cead659b6e0a296d6b9d1ac5933498df4ff567e89",
+    "emacs/magit-auto-review-owner.el": "c6cf525d4be213efd3897408d465e089b85f7772270f483f96ccfda543819800"
+  },
+  "checks": [
+    {
+      "finding": "F1",
+      "issue": "R8",
+      "claim": "Skipping an unrelated task restarts the interrupted fixer without adoption",
+      "result": "rerun_passed",
+      "evidence": "adjudication-c.json"
+    },
+    {
+      "finding": "F2",
+      "issue": "R9",
+      "claim": "Adoption skips the initial fixer for queued tasks",
+      "result": "rerun_passed",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F4",
+      "issue": "R20",
+      "claim": "Deleted saved feedback blocks association of a surviving item",
+      "result": "exact_scenario_rerun_passed",
+      "evidence": "adjudication-terra-strong.json"
+    },
+    {
+      "finding": "F5",
+      "issue": "R7",
+      "claim": "A known published reply invalidates the remaining staged reply",
+      "result": "rerun_passed",
+      "evidence": "adjudication-c-remaining.json"
+    },
+    {
+      "finding": "F6",
+      "issue": "R14",
+      "claim": "Deleted selected feedback prevents replan even with skip",
+      "result": "rerun_passed",
+      "evidence": "adjudication-e-candidates.json"
+    },
+    {
+      "finding": "F8",
+      "issue": "R11",
+      "claim": "Toolkit saved without repository context is lost after choosing a repository",
+      "result": "exact_backend_rerun_passed_frontend_source_traced",
+      "evidence": "adjudication-terra-strong.json"
+    },
+    {
+      "finding": "F11",
+      "issue": "R27",
+      "claim": "Reopening an owner buffer discards the newly fetched revision",
+      "result": "earlier_emacs_execution_passed",
+      "evidence": "adjudication-reopen.json"
+    },
+    {
+      "finding": "F13",
+      "issue": "R30",
+      "claim": "Failed combined repair resumes without an explicit adoption decision",
+      "result": "actual_wrapper_and_subprocess_rerun_passed",
+      "evidence": "adjudication-terra-strong.json"
+    }
+  ],
+  "excluded": [
+    {
+      "finding": "F3",
+      "issue": "R18",
+      "status": "unverified realistic trigger and wrong-push result"
+    },
+    {
+      "finding": "F7",
+      "issue": "R28",
+      "status": "unverified provider permission matcher and network access"
+    },
+    {
+      "finding": "F10",
+      "issue": "R25",
+      "status": "refuted terminal failure after success",
+      "evidence": "adjudication-terra-auth.json"
+    }
+  ],
+  "limits": [
+    "Backend checks use real Git and actual application state transitions. GitHub responses and model outputs are simulated, not live service integration tests.",
+    "The stronger combined-repair check uses the real provider wrapper and a real local process that edits a file and exits 1; it does not call a model.",
+    "The container was recreated. Current Emacs rerun failed because the executable and dependencies were lost. Its prior passing execution and reproduction source remain saved. Do not describe this as a fresh Emacs pass.",
+    "F8 backend behavior is executed; frontend selection ordering remains source-traced.",
+    "F2 still reviews queued tasks; F13 still reviews retained edits. Neither establishes acceptance of unreviewed code.",
+    "F5 supports receipt-aware handling, not ignoring arbitrary owner-authored discussion.",
+    "These are defects in the historical PR4 snapshot, not confirmed open defects on current branches."
+  ],
+  "terra_verification": {
+    "policy": "Focused verification allows code tracing, a small reproduction, or a selected existing test; no minimum executed test count.",
+    "actual": "Terra reported source inspection only, with no tests/builds/linters/provider/network checks. It referred to the read-only checkout and sufficient code tracing.",
+    "interpretation": "No attempted verification command or demonstrated setup failure explains the omission. Read-only checkout alone does not establish that all focused checks were impossible. The prompt allowed the model to choose source tracing.",
+    "future_option": "For stateful recovery claims, require a focused executable check where feasible, or explicit evidence-based justification and UNVERIFIED status when material uncertainty remains. Do not require a broad test suite."
+  },
+  "counts_changed": false
+}

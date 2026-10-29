@@ -1,0 +1,16 @@
+{
+  "recorded_at": "2026-10-29T12:03:59.830235+00:00",
+  "cases": [
+    "G-feature-two-codex",
+    "H-feature-two-claude"
+  ],
+  "reuse_from": "C-feature-synthesised",
+  "independence": "Fresh reviewer finishes before saved report is copied into its session.",
+  "selection": "Select strongest supported behavioral coverage; retain overhead observations separately. Do not choose solely by raw draft count. Record reasoning before suggestion continuation.",
+  "suggestions": "One continuation of selected saved analysis; compare analysis/matching bytes, finding IDs and ordinary finding bodies before/after; no publication.",
+  "confounds": [
+    "One sample per configuration.",
+    "H changes both reviewer pair and synthesis/matching provider.",
+    "Reused reviewer time/usage excluded from new incremental measurements."
+  ]
+}

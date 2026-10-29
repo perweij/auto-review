@@ -1,0 +1,27 @@
+[
+  {
+    "finding": "F13",
+    "issue": "R30",
+    "verdict": "reproduced_with_actual_provider_wrapper_and_failing_subprocess",
+    "evidence": "Actual owner_providers.invoke runs a local subprocess that writes a file then exits 1. The real wrapper checkpoints that file, persists its failed attempt, and raises model_failed. All tasks remain complete. Plain resume without adopt reaches combined review and becomes ready when the mocked reviewer accepts the diff.",
+    "qualification": "Final verification is not bypassed: the resumed combined review receives the partial file. Failure is missing explicit adoption/recovery decision, not acceptance of unreviewed code.",
+    "counts": {
+      "combined_reviews": 2,
+      "failed_processes": 1,
+      "retained_diff_reviewed": 1
+    }
+  },
+  {
+    "finding": "F8",
+    "issue": "R11",
+    "verdict": "exact_backend_scenario_reproduced",
+    "evidence": "Real two-remote repository. Saving Owner without a repository succeeds; either subsequent explicit repository lookup returns Reviewer. Saving after resolving a repository persists Owner correctly. Frontend selector gathers repository from the current buffer and invokes toolkit before opening the PR list; nil context can reach this edge case.",
+    "qualification": "Explicit repository selection works. This is not a universal multi-remote failure; frontend ordering is source-traced, backend behavior executed."
+  },
+  {
+    "finding": "F4",
+    "issue": "R20",
+    "verdict": "exact_saved_association_scenario_reproduced",
+    "evidence": "After a real committed fix and successful initial association of both items, delete T1. Explicitly associate only surviving T2 to the existing pushed commit; saved T1 association causes invalid_target. GitHub push/discussion are mocked."
+  }
+]

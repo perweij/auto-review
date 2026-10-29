@@ -1,0 +1,621 @@
+{
+  "format_version": 1,
+  "updated_at": "2026-10-29T14:56:41.132288+00:00",
+  "purpose": "Historical review findings and evaluation-tool recovery observations to triage against current branches before repair; this is not a list of confirmed current bugs.",
+  "pr": 4,
+  "reviewed_head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+  "reviewed_base": "f7f0f2e2df548186b3b85d5f420ad0424af25655",
+  "tool_revisions": {
+    "main": "0c83823045bf44193aca613a578fb3230f7b70e9",
+    "feature": "e9af5848a70bd6f5dd3f737836641ae68210f4fd"
+  },
+  "models": {
+    "codex": "gpt-6.1-sol",
+    "claude": "opus",
+    "effort": "high",
+    "processing_provider": "codex",
+    "synthesis_tests": "focused"
+  },
+  "cases": {
+    "A-main-single": {
+      "tool": "main",
+      "reviewers": "codex",
+      "models": null,
+      "status": "complete",
+      "paired_with": null
+    },
+    "B-feature-single": {
+      "tool": "feature",
+      "reviewers": "codex",
+      "models": null,
+      "status": "complete",
+      "paired_with": null
+    },
+    "C-feature-synthesised": {
+      "tool": "feature",
+      "reviewers": "claude,codex",
+      "models": null,
+      "status": "complete",
+      "paired_with": null
+    },
+    "E-main-synthesised": {
+      "tool": "main",
+      "reviewers": "claude,codex",
+      "models": null,
+      "status": "complete",
+      "paired_with": null
+    },
+    "F-main-two-codex": {
+      "tool": "main",
+      "reviewers": "codex,codex",
+      "models": null,
+      "status": "complete",
+      "paired_with": "E-main-synthesised"
+    },
+    "G-feature-two-codex": {
+      "tool": "feature",
+      "reviewers": "codex,codex",
+      "models": null,
+      "status": "complete",
+      "paired_with": "C-feature-synthesised"
+    },
+    "H-feature-two-claude": {
+      "tool": "feature",
+      "reviewers": "claude,claude",
+      "models": null,
+      "status": "complete",
+      "paired_with": "C-feature-synthesised"
+    },
+    "J-feature-haiku-terra": {
+      "tool": "feature",
+      "reviewers": "claude,codex",
+      "models": {
+        "codex": "gpt-6.1-terra",
+        "claude": "haiku",
+        "effort": "high",
+        "processing_provider": "codex"
+      },
+      "status": "complete",
+      "paired_with": null
+    }
+  },
+  "evaluation_artifacts": "/workspaces/proj/auto-review-evaluations/pr4-20261029",
+  "related_files": [
+    "comparison.json",
+    "evidence.json",
+    "review-records.json",
+    "reproductions.json",
+    "coverage-matrix.json",
+    "suggestion-retention.json",
+    "current-branch-triage.json"
+  ],
+  "issues": [
+    {
+      "id": "R1",
+      "title": "Configuration trust misses ignored changes/deletion",
+      "observed_in": [],
+      "reference": "reference-check.log",
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "already_fixed_verified"
+      },
+      "next_action": "No additional repair needed on this feature branch; regression verified. Main has not been revalidated.",
+      "known_followup": {
+        "commit": "03db750c0b83f56bacd147c6d24bcb7e9227a68d",
+        "present_in_main": true,
+        "present_in_feature": true,
+        "note": "Later trust repair is present in both histories. Current behavior has not been revalidated by this evaluation."
+      },
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R1"
+    },
+    {
+      "id": "R2",
+      "title": "Uncertain reply rewritten during reassociation",
+      "observed_in": [
+        "A-main-single/F1",
+        "B-feature-single/F2",
+        "C-feature-synthesised/F1",
+        "F-main-two-codex/Codex-B-1",
+        "F-main-two-codex/F4",
+        "G-feature-two-codex/F1"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "already_fixed_verified"
+      },
+      "next_action": "No additional repair needed on this feature branch; regression verified. Main has not been revalidated.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R2"
+    },
+    {
+      "id": "R3",
+      "title": "Restored general feedback stays outside Attention",
+      "observed_in": [
+        "A-main-single/F2"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "already_fixed_verified"
+      },
+      "next_action": "No additional repair needed on this feature branch; regression verified. Main has not been revalidated.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R3"
+    },
+    {
+      "id": "R4",
+      "title": "Replanning leaves dangling dependency before adoption",
+      "observed_in": [
+        "B-feature-single/F1"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R4"
+    },
+    {
+      "id": "R5",
+      "title": "Closed PR accepts next reply POST after refresh",
+      "observed_in": [
+        "B-feature-single/F3",
+        "C-feature-synthesised/F3",
+        "E-main-synthesised/F12",
+        "F-main-two-codex/Codex-B-2",
+        "F-main-two-codex/F5",
+        "G-feature-two-codex/F3"
+      ],
+      "historical_validation": "confirmed_real_git",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R5"
+    },
+    {
+      "id": "R6",
+      "title": "Preflight failure erases ready verification eligibility",
+      "observed_in": [
+        "C-feature-synthesised/F2",
+        "G-feature-two-codex/F2",
+        "H-feature-two-claude/F13"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R6"
+    },
+    {
+      "id": "R7",
+      "title": "Own published reply invalidates remaining replies and batch",
+      "observed_in": [
+        "C-feature-synthesised/F4",
+        "H-feature-two-claude/F1",
+        "J-feature-haiku-terra/F5",
+        "J-feature-haiku-terra/Haiku-2"
+      ],
+      "scope_note": "E rejected blanket invalidation of assessments after arbitrary owner messages. C retained the narrower defect where known self-publication receipts invalidate remaining replies. Preserve external/incoming context checks; do not ignore all owner-authored changes.",
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "already_fixed_verified"
+      },
+      "next_action": "No additional repair needed on this feature branch; regression verified. Main has not been revalidated.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R7"
+    },
+    {
+      "id": "R8",
+      "title": "Unrelated skip bypasses interrupted-task adoption gate",
+      "observed_in": [
+        "C-feature-synthesised/F6",
+        "E-main-synthesised/F10",
+        "H-feature-two-claude/F3",
+        "J-feature-haiku-terra/F1",
+        "J-feature-haiku-terra/Terra-1"
+      ],
+      "historical_validation": "confirmed_real_git",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R8"
+    },
+    {
+      "id": "R9",
+      "title": "Adoption removes queued task initial fixer stage",
+      "observed_in": [
+        "C-feature-synthesised/F7",
+        "H-feature-two-claude/F4",
+        "J-feature-haiku-terra/F2",
+        "J-feature-haiku-terra/Terra-2"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R9"
+    },
+    {
+      "id": "R10",
+      "title": "Unrelated shared Git config change triggers integrity recovery",
+      "observed_in": [
+        "C-feature-synthesised/F8",
+        "H-feature-two-claude/F5"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "retain_conservative_guard"
+      },
+      "next_action": "Retain conservative integrity recovery unless a proven narrower guard is designed.",
+      "category": "nonblocking_overhead_or_design_tradeoff",
+      "current_branch_triage": "current-branch-triage.json#R10"
+    },
+    {
+      "id": "R11",
+      "title": "Fork repository identity breaks remembered toolkit routing",
+      "observed_in": [
+        "C-feature-synthesised/F9",
+        "E-main-synthesised/F3",
+        "F-main-two-codex/Codex-A-3",
+        "F-main-two-codex/F3",
+        "H-feature-two-claude/F6",
+        "J-feature-haiku-terra/F8",
+        "J-feature-haiku-terra/Haiku-5"
+      ],
+      "historical_validation": "backend_reproduced_frontend_traced",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R11"
+    },
+    {
+      "id": "R12",
+      "title": "Final-review prompt duplicates accumulated diff",
+      "observed_in": [
+        "C-feature-synthesised/F13",
+        "H-feature-two-claude/F10"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "nonblocking_overhead_or_design_tradeoff",
+      "current_branch_triage": "current-branch-triage.json#R12"
+    },
+    {
+      "id": "R13",
+      "title": "Network owner operations lack frontend cancellation ID",
+      "observed_in": [
+        "C-feature-synthesised/F14"
+      ],
+      "historical_validation": "reproduced_or_source_traced; see evidence and source assessments",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R13"
+    },
+    {
+      "id": "R14",
+      "title": "Replanning retains unavailable feedback and revives explicit skips",
+      "observed_in": [
+        "E-main-synthesised/F2",
+        "F-main-two-codex/Codex-A-2",
+        "F-main-two-codex/F2",
+        "H-feature-two-claude/F11",
+        "J-feature-haiku-terra/F6",
+        "J-feature-haiku-terra/Haiku-3"
+      ],
+      "historical_validation": "confirmed_real_git",
+      "expanded_scenario": "F synthesis expanded the deleted-feedback issue: replan also recreates an explicitly skipped task whose feedback still exists. Independently reproduced with two tasks and real Git.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R14"
+    },
+    {
+      "id": "R15",
+      "title": "Fix at root heading includes non-attention History items",
+      "observed_in": [
+        "E-main-synthesised/F5"
+      ],
+      "historical_validation": "confirmed_in_emacs",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R15"
+    },
+    {
+      "id": "R16",
+      "title": "Ignored file paths are duplicated into state and model contexts",
+      "observed_in": [
+        "E-main-synthesised/F7",
+        "H-feature-two-claude/F14"
+      ],
+      "historical_validation": "confirmed_overhead_not_measured_failure",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "nonblocking_overhead_or_design_tradeoff",
+      "current_branch_triage": "current-branch-triage.json#R16"
+    },
+    {
+      "id": "R17",
+      "title": "Dirty submodule contents are invisible to checkpoint identities",
+      "observed_in": [
+        "E-main-synthesised/F1",
+        "F-main-two-codex/Codex-A-1",
+        "F-main-two-codex/F1"
+      ],
+      "historical_validation": "confirmed_real_git",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R17"
+    },
+    {
+      "id": "R18",
+      "title": "Configured push destination can become stale",
+      "observed_in": [
+        "E-main-synthesised/F9",
+        "J-feature-haiku-terra/F3",
+        "J-feature-haiku-terra/Terra-3"
+      ],
+      "historical_validation": "unverified_trigger_and_end_to_end_failure",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "unverified_no_behavior_change"
+      },
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R18"
+    },
+    {
+      "id": "R19",
+      "title": "Automatic repair proceeds despite reviewer clarification outcomes",
+      "observed_in": [
+        "G-feature-two-codex/Codex-B-1",
+        "G-feature-two-codex/F4"
+      ],
+      "historical_validation": "confirmed_real_git_task_and_combined_review",
+      "evidence": "adjudication-clarification.json",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R19"
+    },
+    {
+      "id": "R20",
+      "title": "Deleted feedback aborts commit association for surviving items",
+      "observed_in": [
+        "H-feature-two-claude/Claude-B-2",
+        "H-feature-two-claude/F12",
+        "J-feature-haiku-terra/F4",
+        "J-feature-haiku-terra/Haiku-1"
+      ],
+      "historical_validation": "confirmed_real_git",
+      "scope_note": "Reproduced automatic association for the affected batch. An explicitly selected unaffected batch is not shown to fail.",
+      "evidence": "adjudication-deleted-association.json",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R20"
+    },
+    {
+      "id": "R21",
+      "title": "Fresh checkpoint indexes may rehash unchanged tracked files",
+      "observed_in": [
+        "H-feature-two-claude/Claude-B-8",
+        "H-feature-two-claude/F15"
+      ],
+      "historical_validation": "performance_candidate_not_measured",
+      "scope_note": "Fresh-index mechanism is source-visible; no large-repository latency failure or safe optimization established.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "unverified_no_behavior_change"
+      },
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "category": "nonblocking_overhead_or_design_tradeoff",
+      "current_branch_triage": "current-branch-triage.json#R21"
+    },
+    {
+      "id": "R22",
+      "title": "Failed checkpoints allegedly accept unreviewed final work",
+      "observed_in": [
+        "H-feature-two-claude/F2"
+      ],
+      "historical_validation": "claim_refuted_by_real_git_owner_workflow",
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "refuted_or_unsubstantiated_no_repair"
+      },
+      "category": "refuted_or_unsubstantiated_claim",
+      "current_branch_triage": "current-branch-triage.json#R22"
+    },
+    {
+      "id": "R23",
+      "title": "Explicit recovery mutations persist before later validation fails",
+      "observed_in": [
+        "H-feature-two-claude/F7"
+      ],
+      "historical_validation": "see independent adjudication; not a demonstrated correctness defect",
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "refuted_or_unsubstantiated_no_repair"
+      },
+      "category": "refuted_or_unsubstantiated_claim",
+      "current_branch_triage": "current-branch-triage.json#R23"
+    },
+    {
+      "id": "R24",
+      "title": "Repeated freshness checks allegedly constitute a demonstrated performance defect",
+      "observed_in": [
+        "H-feature-two-claude/F8",
+        "J-feature-haiku-terra/F9",
+        "J-feature-haiku-terra/Haiku-8"
+      ],
+      "historical_validation": "see independent adjudication; not a demonstrated correctness defect",
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "refuted_or_unsubstantiated_no_repair"
+      },
+      "category": "refuted_or_unsubstantiated_claim",
+      "current_branch_triage": "current-branch-triage.json#R24"
+    },
+    {
+      "id": "R25",
+      "title": "Owner auth preflight allegedly accepts terminal provider failures",
+      "observed_in": [
+        "H-feature-two-claude/F9",
+        "J-feature-haiku-terra/F10",
+        "J-feature-haiku-terra/Haiku-6"
+      ],
+      "historical_validation": "terminal_failure_claim_refuted_by_actual_subprocess_supervisor",
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "refuted_or_unsubstantiated_no_repair"
+      },
+      "category": "refuted_or_unsubstantiated_claim",
+      "current_branch_triage": "current-branch-triage.json#R25"
+    },
+    {
+      "id": "R26",
+      "title": "Recovered verification setup failure still blocks suggestion acceptance",
+      "observed_in": [
+        "I-best-suggestions/p10 verification"
+      ],
+      "historical_validation": "Observed in feature tool during evaluation; not a PR4 source defect",
+      "scope_note": "Conservative behavior matches current validator contract. Candidate workflow/schema improvement, not evidence the proposed code patch is wrong.",
+      "current_status": {
+        "main": "not_applicable_no_suggestion_feature_at_pinned_revision",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "evidence": "suggestion-retention.json",
+      "category": "evaluation_tool_recovery_observation",
+      "current_branch_triage": "current-branch-triage.json#R26"
+    },
+    {
+      "id": "R27",
+      "title": "Reopening an owner buffer discards the freshly loaded view",
+      "observed_in": [
+        "J-feature-haiku-terra/F11",
+        "J-feature-haiku-terra/Haiku-7"
+      ],
+      "historical_validation": "confirmed_in_emacs",
+      "evidence": "adjudication-reopen.json",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "already_fixed_verified"
+      },
+      "next_action": "No additional repair needed on this feature branch; regression verified. Main has not been revalidated.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R27"
+    },
+    {
+      "id": "R28",
+      "title": "Provider command patterns may permit remote push variants",
+      "observed_in": [
+        "J-feature-haiku-terra/F7",
+        "J-feature-haiku-terra/Haiku-4"
+      ],
+      "historical_validation": "unverified_provider_permission_matching_and_network_reachability",
+      "evidence": "adjudication-j.json",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "unverified_no_behavior_change"
+      },
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R28"
+    },
+    {
+      "id": "R29",
+      "title": "Duplicated task and combined repair policy allegedly loses required evidence",
+      "observed_in": [
+        "J-feature-haiku-terra/F12",
+        "J-feature-haiku-terra/Haiku-9"
+      ],
+      "historical_validation": "model_rejected_maintenance_claim_no_demonstrated_failure",
+      "evidence": "adjudication-j.json",
+      "category": "refuted_or_unsubstantiated_claim",
+      "next_action": "Preserve historical evidence; require a concrete current-branch reproduction before proposing a repair.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "refuted_or_unsubstantiated_no_repair"
+      },
+      "current_branch_triage": "current-branch-triage.json#R29"
+    },
+    {
+      "id": "R30",
+      "title": "Failed combined repair resumes without explicit adoption",
+      "observed_in": [
+        "J-feature-haiku-terra/F13"
+      ],
+      "historical_validation": "confirmed_real_git_owner_api_mocked_provider_failure",
+      "evidence": "adjudication-combined-repair.json",
+      "scope_note": "Distinct from R22: missing explicit adoption after failed combined repair, not bypassing final verification.",
+      "current_status": {
+        "main": "needs_verification",
+        "feat/suggested-changes": "fixed_in_working_tree"
+      },
+      "next_action": "Review and commit the validated feature-branch repair. Main has not been revalidated; see current-branch-triage.json.",
+      "category": "behavioral_issue_or_candidate",
+      "current_branch_triage": "current-branch-triage.json#R30"
+    }
+  ],
+  "triage_rules": [
+    "Use stable issue IDs to group observations across runs.",
+    "Keep historical validation separate from current-branch status.",
+    "Recheck main and feat/suggested-changes; a later commit may already repair an issue.",
+    "Retain rejected/modified findings and their rationale in review-records.json.",
+    "Do not automatically turn a performance hypothesis or conservative safety tradeoff into a blocking defect."
+  ]
+}

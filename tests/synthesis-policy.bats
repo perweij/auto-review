@@ -15,7 +15,7 @@ assert_focused_independent_reviews() {
 }
 
 @test "focused policy reaches both independent reviewers and synthesis while resume reuses all stages" {
-    run_review --claude-model haiku --codex-model gpt-6-luna; assert_success
+    run_review --claude-model haiku --codex-model gpt-6-luna --processing-provider claude; assert_success
     saved=$(run_directory)
     manifest_is '.phases.synthesis.testing_policy=="focused"'
     assert_focused_independent_reviews "$saved"
@@ -29,7 +29,7 @@ assert_focused_independent_reviews() {
 }
 
 @test "full-suite opt-in changes synthesis only and preserves completed drafts through failure" {
-    run_review; assert_success
+    run_review --processing-provider claude; assert_success
     previous=$(run_directory)
     printf 'Human wording worth preserving\n' > "$previous/publication/review-body.md"
     hashes=$(sha256sum "$previous/reviews/synthesis.json" "$previous/publication/review-body.md")

@@ -1,0 +1,32 @@
+{
+  "note": "Approximate elapsed between adjacent model-stage start timestamps; includes transition bookkeeping. Reused independent stages omitted from paired cases.",
+  "cases": {
+    "C-feature-synthesised": {
+      "claude": 361.0,
+      "codex": 387.0,
+      "synthesis": 970.0
+    },
+    "E-main-synthesised": {
+      "claude": 485.0,
+      "codex": 550.0,
+      "synthesis": 847.0
+    },
+    "F-main-two-codex": {
+      "codex": 345.0,
+      "synthesis": 458.0
+    },
+    "G-feature-two-codex": {
+      "codex": 271.0,
+      "synthesis": 567.0
+    },
+    "H-feature-two-claude": {
+      "claude": 438.0,
+      "synthesis": 289.0
+    },
+    "J-feature-haiku-terra": {
+      "claude": 499.0,
+      "codex": 39.0,
+      "synthesis": 104.0
+    }
+  }
+}

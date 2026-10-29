@@ -1,0 +1,25 @@
+{
+  "selected_case": "C-feature-synthesised",
+  "recorded_at": "2026-10-29T12:36:25.894933+00:00",
+  "criterion": "Supported behavioral coverage first; distinguish observations, unverified risks and refuted claims.",
+  "comparison": {
+    "C-feature-synthesised": {
+      "supported_behavioral": 8,
+      "supported_nonblocking_observations": 2
+    },
+    "G-feature-two-codex": {
+      "supported_behavioral": 4
+    },
+    "H-feature-two-claude": {
+      "model_retained": 15,
+      "supported_behavioral": 7,
+      "supported_nonblocking_observations": 3,
+      "unmeasured_optimization": 1,
+      "unsubstantiated_or_refuted": 4
+    }
+  },
+  "reason": "C has the largest supported behavioral set in this pilot; H raw count is inflated by unsupported claims and additional optimization observations. No assertion of general model superiority.",
+  "expected_findings_before": 14,
+  "expected_comments_before": 10,
+  "continuation": "Native feature CLI --suggested-changes --resume; analysis/matching reuse and all ordinary finding identities/text checked."
+}

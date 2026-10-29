@@ -175,7 +175,9 @@ if [[ ${MOCK_ADAPT:-} == 1 ]]; then
 fi
 
 stage=claude
-if [[ $* == *followup.schema.json* || $* == *suggested_reply* ]]; then stage=followup
+if [[ $* == *suggestion-verify.schema.json* || $* == *inspection_only_reason* ]]; then stage=suggestion-verify
+elif [[ $* == *suggestions.schema.json* || $* == *'"replacement"'* ]]; then stage=suggestions
+elif [[ $* == *followup.schema.json* || $* == *suggested_reply* ]]; then stage=followup
 elif [[ $tool == codex && $* == *contributions.schema.json* ]]; then stage=contributions
 elif [[ $tool == codex && $* == *synthesis.schema.json* ]]; then stage=synthesis
 elif [[ $tool == codex ]]; then stage=codex
@@ -194,7 +196,7 @@ if [[ $stage == claude ]]; then
         [[ ! -f $directory/reviews/codex.md ]] || exit 8
     done
 fi
-if [[ $stage == synthesis || $stage == contributions || $stage == followup ]]; then cat > "$FIXTURE/$stage-stdin"; else
+if [[ $stage == synthesis || $stage == contributions || $stage == followup || $stage == suggestions || $stage == suggestion-verify ]]; then cat > "$FIXTURE/$stage-stdin"; else
     # Independent invocations must receive EOF, even with interactive parent stdin.
     [[ -z $(cat) ]] || exit 9
 fi
@@ -274,6 +276,9 @@ elif [[ $stage == claude ]]; then
 elif [[ $stage == followup ]]; then
     if [[ -f $FIXTURE/followup-model.json ]]; then result=$(cat "$FIXTURE/followup-model.json")
     else result='{"assessments":[{"thread_key":"thread:T1","outcome":"ADDRESSED","evidence":"Current implementation persists the retry key.","limitations":"Code tracing only; no tests run.","suggested_reply":""}]}'; fi
+    jq -nc --argjson result "$result" '{type:"result",subtype:"success",is_error:false,structured_output:$result}' | emit_structured
+elif [[ $stage == suggestions || $stage == suggestion-verify ]]; then
+    result=$(cat "$FIXTURE/$stage-model.json")
     jq -nc --argjson result "$result" '{type:"result",subtype:"success",is_error:false,structured_output:$result}' | emit_structured
 elif [[ $stage == synthesis ]]; then
     if [[ ${MOCK_SCHEMA_INVALID:-} == 1 ]]; then echo '{"type":"result","subtype":"success","structured_output":{"recommendation":"MAYBE"}}' | emit_structured

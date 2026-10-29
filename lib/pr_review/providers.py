@@ -80,7 +80,8 @@ def review_command(settings, runtime, stage, directory, base_ref):
         args += ["--append-system-prompt", text(f"synthesis-testing-{policy}.txt")]
     args += ["--output-format", "stream-json", "--verbose", "--include-partial-messages",
              "--json-schema", text(stage + ".schema.json"), "--disallowed-tools", *DENIED_TOOLS]
-    directories = {"synthesis": ["context", "reviews"], "contributions": ["discussion", "reviews"],
+    directories = {"suggestions": [], "suggestion-verify": [],
+                   "synthesis": ["context", "reviews"], "contributions": ["discussion", "reviews"],
                    "followup": ["discussion", "reviews", "context"]}[stage]
     if stage == "synthesis" and (directory / "reviews/reassessment-input.json").is_file():
         directories += ["discussion"]

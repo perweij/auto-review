@@ -3,6 +3,9 @@
 GUIX ?= guix
 GUIX_CHANNELS ?=
 
+# Checks must not populate the checkout with interpreter caches.
+export PYTHONDONTWRITEBYTECODE = 1
+
 check: check-backend
 
 check-backend: lint test test-api
@@ -16,10 +19,9 @@ check-guix:
 	GUIX="$(GUIX)" bash tests/check-guix.sh "$(GUIX_CHANNELS)"
 
 lint:
-	shellcheck -x tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh
-	python3 -m compileall -q lib/pr_review
-	python3 -m py_compile bin/pr-review
-	@for file in tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.sh; do bash -n "$$file" || exit; done
+	shellcheck -x tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh emacs/tests/run.sh
+	python3 -c 'from pathlib import Path; [compile(p.read_bytes(), str(p), "exec") for p in [Path("bin/pr-review"), *Path("lib/pr_review").rglob("*.py")]]'
+	@for file in tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.sh emacs/tests/run.sh; do bash -n "$$file" || exit; done
 
 test:
 	bats tests/*.bats

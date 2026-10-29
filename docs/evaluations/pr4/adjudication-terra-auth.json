@@ -1,0 +1,43 @@
+{
+  "case": "J-feature-haiku-terra",
+  "finding": "F10",
+  "issue": "R25",
+  "verdict": "refuted_for_terminal_failure_after_success",
+  "evidence": "Actual owner preflight and process supervisor run real local subprocesses emitting success followed by a terminal failure, then exiting zero. Both Codex and Claude streams are rejected. Catalog/help/probe command mocked; no external providers called.",
+  "results": [
+    {
+      "provider": "codex",
+      "events": [
+        {
+          "type": "turn.completed",
+          "usage": {}
+        },
+        {
+          "type": "turn.failed",
+          "error": {
+            "message": "fixture terminal failure"
+          }
+        }
+      ],
+      "outcome": "authentication_failed"
+    },
+    {
+      "provider": "claude",
+      "events": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "result": "PR_REVIEW_AUTH_OK"
+        },
+        {
+          "type": "result",
+          "subtype": "error_during_execution",
+          "is_error": true,
+          "result": "fixture terminal failure"
+        }
+      ],
+      "outcome": "authentication_failed"
+    }
+  ]
+}

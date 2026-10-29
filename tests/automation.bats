@@ -11,9 +11,10 @@ anchored_findings() {
       body_md:"Check the arithmetic.",primary_location:{path:"source.txt",side:"RIGHT",start_line:2,line:2},locations:[]}]' > "$FIXTURE/findings.json"
 }
 
-@test "automatic review publishes COMMENT once and repeats as a no-op" {
+@test "economical automatic review publishes COMMENT once and repeats as a no-op" {
     anchored_findings
-    auto_review; assert_success
+    auto_review --economical; assert_success
+    manifest_is '.configuration.claude_model=="haiku" and .configuration.codex_model=="gpt-6.1-terra" and .configuration.processing_provider=="codex"'
     jq -e '.outcome=="published" and .exit_code==0 and (.receipts|length)>0 and .session and .log_path' <<< "$output"
     jq -e '.event=="COMMENT" and (.comments|length)==1' "$FIXTURE/api-payload.json"
     [ "$(cat "$FIXTURE/post-count")" = 1 ]

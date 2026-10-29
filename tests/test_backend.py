@@ -38,7 +38,16 @@ class LegacyBytesTest(unittest.TestCase):
         self.run = SimpleNamespace(path=self.path, manifest=manifest, original_manifest=copy.deepcopy(manifest),
             settings=manifest['configuration'], tools=manifest['tools'], dual=True, save=lambda: None,
             original_prompts={stage: (self.path / f'prompts/{stage}-prompt.txt').read_bytes() for stage in ('synthesis', 'contributions')})
+        # Byte-compatibility tests replay the frozen invocation, not today's
+        # instructions. New review prompts must invalidate those cached results.
+        commands = {c['stage']: c['argv'] for c in read_json(self.path / 'logs/commands.json')}
+        self.run.command = lambda stage: copy.deepcopy(commands[stage])
+
+    def test_current_review_instructions_invalidate_legacy_reviewer_results(self):
         self.run.command = lambda stage: providers.review_command(self.run.settings, providers.Runtime(), stage, self.path, 'refs/pr-review/7/base')
+        for stage, name in [('claude', 'claude-independent.md'), ('codex', 'codex.md'), ('synthesis', 'synthesis.json')]:
+            with self.subTest(stage=stage):
+                self.assertFalse(cache.reusable(self.run, stage, self.path / 'reviews' / name, cache.inputs(self.run, stage)))
 
     def test_original_cache_bytes_and_validated_reuse_for_every_stage(self):
         for stage, name in [('claude','claude-independent.md'), ('codex','codex.md'), ('synthesis','synthesis.json'), ('contributions','contributions.json')]:

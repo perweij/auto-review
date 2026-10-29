@@ -118,6 +118,17 @@ def admin(session, state):
 
 def checkpoint(session, state, label):
     validate(session, state)
+    # A superproject tree records submodule commits, not edits inside them.
+    # Refuse such edits rather than certifying a checkpoint that omits them.
+    entries = session.repo.git('ls-files', '--stage', '-z', cwd=state['worktree']).stdout.split('\0')
+    for entry in entries:
+        if not entry.startswith('160000 '):
+            continue
+        name = entry.split('\t', 1)[1]
+        module = Path(state['worktree']) / name
+        if (module / '.git').exists() and session.repo.git(
+                'status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none', cwd=module).stdout:
+            raise ApiError('dirty_submodule', f'Cannot snapshot uncommitted changes inside submodule {name}. Inspect and commit or reconcile them before continuing; retained files were not changed.')
     with tempfile.TemporaryDirectory(prefix="index-", dir=session.path) as temporary:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(temporary) / "index"), "GIT_OPTIONAL_LOCKS": "0"}
         def git(*args):
@@ -131,7 +142,9 @@ def checkpoint(session, state, label):
     ref = f"refs/pr-owner/{digest(str(session.path))[:24]}/checkpoints/{uuid.uuid4().hex}"
     session.repo.git("update-ref", ref, tree)
     ignored = session.repo.git("ls-files", "--others", "--ignored", "--exclude-standard", "-z", cwd=state["worktree"]).stdout.split("\0")
-    return {"tree": tree, "ref": ref, "label": label, "at": now(), "ignored": [p for p in ignored if p]}
+    ignored = [p for p in ignored if p]
+    return {"tree": tree, "ref": ref, "label": label, "at": now(),
+            "ignored": ignored[:20], "ignored_count": len(ignored)}
 
 
 def pin_commit(session, sha):

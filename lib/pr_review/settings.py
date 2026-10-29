@@ -2,24 +2,38 @@
 from .common import ApiError, read_json
 from .state import Session, discover
 
-DEFAULTS = {"reviewers": ["claude", "codex"], "processing_provider": "claude",
-            "claude_model": "fable", "codex_model": "gpt-6-astra",
-            "claude_effort": "high", "codex_effort": "high", "synthesis_tests": "focused"}
+DEFAULTS = {"reviewers": ["claude", "codex"], "processing_provider": "codex",
+            "claude_model": "opus", "codex_model": "gpt-6.1-sol",
+            "claude_effort": "high", "codex_effort": "high", "synthesis_tests": "focused",
+            "suggested_changes": False}
+
+# Manifests predating explicit configuration used these settings. New defaults
+# must not silently change their providers or invalidate resumable work.
+LEGACY_DEFAULTS = {**DEFAULTS, "processing_provider": "claude",
+                   "claude_model": "fable", "codex_model": "gpt-6-astra"}
+
+ECONOMICAL = {"reviewers": ["claude", "codex"], "processing_provider": "codex",
+              "claude_model": "haiku", "codex_model": "gpt-6.1-terra",
+              "claude_effort": "high", "codex_effort": "high"}
+EXPENSIVE = {**ECONOMICAL, "claude_model": "fable", "codex_model": "gpt-6-astra"}
+PRESETS = {"economical": ECONOMICAL, "expensive": EXPENSIVE}
 
 
 def from_manifest(manifest):
     models = manifest.get("models", {})
-    result = dict(DEFAULTS)
+    result = dict(LEGACY_DEFAULTS)
     result["synthesis_tests"] = manifest.get("phases", {}).get("synthesis", {}).get("testing_policy", "focused")
     for provider in ("claude", "codex"):
-        result[provider + "_model"] = models.get(provider) or DEFAULTS[provider + "_model"]
+        result[provider + "_model"] = models.get(provider) or LEGACY_DEFAULTS[provider + "_model"]
         result[provider + "_effort"] = models.get(provider + "_effort", models.get("effort", "high"))
     result.update(manifest.get("configuration", {}))
     return result
 
 
 def validate(settings):
-    result = {k: settings[k] for k in DEFAULTS}
+    result = {k: settings.get(k, default) for k, default in DEFAULTS.items()}
+    if type(result['suggested_changes']) is not bool:
+        raise ApiError('invalid_request', 'suggested_changes must be a boolean.')
     reviewers = result["reviewers"]
     if (not isinstance(reviewers, list) or not reviewers or
             any(p not in ("claude", "codex") for p in reviewers) or len(set(reviewers)) != len(reviewers)):
@@ -38,10 +52,24 @@ def validate(settings):
     return result
 
 
-def resolve(request):
+def initial_settings(request):
+    """Expand new-review defaults consistently for CLI and API entry points."""
     settings = dict(DEFAULTS)
     defaults = request.get("defaults", {})
     settings.update({k: v for k, v in defaults.items() if k in DEFAULTS and v is not None})
+    for name in PRESETS:
+        if type(request.get(name, False)) is not bool:
+            raise ApiError('invalid_request', f'{name} must be a boolean.')
+    selected = [name for name in PRESETS if request.get(name)]
+    if len(selected) > 1:
+        raise ApiError('invalid_request', 'Choose economical or expensive, not both.')
+    if selected:
+        settings.update(PRESETS[selected[0]])
+    return settings
+
+
+def resolve(request):
+    settings = initial_settings(request)
     session_path = request.get("session")
     if not session_path and request.get("pr"):
         matches = discover({**request, "pr": str(request["pr"]).rstrip("/").split("/")[-1]})["sessions"]

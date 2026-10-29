@@ -13,8 +13,8 @@ def dispatch(request):
         return owner_dispatch(request)
     if operation == "capabilities":
         from .owner import COMMANDS
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "cancel", "adapt", "thread-state", "followup", *COMMANDS]}
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review"],
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "thread-state", "followup", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":
@@ -27,7 +27,19 @@ def dispatch(request):
         return operations.cancel(request)
     if operation == "run":
         return operations.run(request)
+    if operation == 'automatic-review':
+        from .automation import run
+        if request.get('followup_threads') or request.get('no_publish'):
+            raise ApiError('invalid_request', 'Automatic publication requires a full review.')
+        if request.get('session'):
+            session = Session(request)
+            request = {**request, 'pr': session.manifest['pr'], 'repository': session.manifest['repository'],
+                       'cwd': publication.checkout(session)}
+        return run(request)
     session = Session(request)
+    if operation == 'verify-suggestions':
+        from .suggestions import verify_operation
+        return verify_operation(session, request)
     if operation == 'review-log':
         from .automation import review_log
         return review_log(session, request)

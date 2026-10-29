@@ -110,6 +110,11 @@ available in Emacs with reasons and recovery actions. No new findings means no
 GitHub post. The JSON result and exit status distinguish completion, attention,
 partial publication, and uncertainty. See [automatic reviews](docs/manual.md#automatic-reviews).
 
+Add `--suggested-changes` to opt into independently verified GitHub code
+suggestions for small, self-contained fixes. In Emacs reviewer setup, `R s`
+toggles suggestions and `R P` starts an automatic COMMENT review. See
+[suggested changes](docs/manual.md#suggested-changes) for inspection and recovery.
+
 Incoming feedback and fixes use `pr-review owner`; see the
 [owner workflow](docs/manual.md#pr-owner-workflow). Run `pr-review --help` or
 `pr-review owner --help` for command options.

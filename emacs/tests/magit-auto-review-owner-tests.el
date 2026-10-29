@@ -957,4 +957,69 @@
        (with-current-buffer "*PR Owner progress*"
          (should (string-suffix-p (concat "Owner operation stopped: " reason "\n") (buffer-string))))))))
 
+(ert-deftest owner/root-fixes-only-attention-feedback ()
+  (owner-test-buffer
+   (goto-char (point-min))
+   (let (request)
+     (cl-letf (((symbol-function 'magit-auto-review-owner--start)
+                (lambda (value &optional _callback) (setq request value))))
+       (magit-auto-review-owner-fix t))
+     (should (equal (alist-get 'items request) ["thread:T1" "thread:T2"]))
+     (should (eq (alist-get 'auto_commit request) t)))))
+
+(ert-deftest owner/reopening-adopts-current-view ()
+  (save-window-excursion
+    (let ((view (owner-test-view)) buffer)
+      (unwind-protect
+          (cl-letf (((symbol-function 'magit-auto-review--call) (lambda (_) (copy-tree view))))
+            (magit-auto-review-owner-open "/tmp/" 7 "github.com/org/repo")
+            (setq buffer (current-buffer))
+            (setf (alist-get 'revision view) 44)
+            (magit-auto-review-owner-open "/tmp/" 7 "github.com/org/repo")
+            (should (= (alist-get 'revision magit-auto-review-owner--view) 44))
+            (should (= (alist-get 'revision (magit-auto-review-owner--request "owner-mutate")) 44)))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest owner/cancel-network-operation-signals-owned-process ()
+  (with-temp-buffer
+    (let* ((process (make-process :name "owner-cancel-fixture" :noquery t :connection-type 'pipe
+                                  :command '("python3" "-c" "import time; time.sleep(30)")))
+           (magit-auto-review-owner--process process)
+           (magit-auto-review-owner--operation nil))
+      (unwind-protect
+          (progn
+            (magit-auto-review-owner-cancel)
+            (let ((deadline (+ (float-time) 3)))
+              (while (and (process-live-p process) (< (float-time) deadline))
+                (accept-process-output process 0.05)))
+            (should-not (process-live-p process))
+            (should (eq (process-status process) 'signal)))
+        (when (process-live-p process) (delete-process process))))))
+
+(ert-deftest owner/cancel-provider-uses-operation-id-and-idle-errors ()
+  (let ((magit-auto-review-owner--operation "owned") request)
+    (cl-letf (((symbol-function 'magit-auto-review--call) (lambda (r) (setq request r))))
+      (magit-auto-review-owner-cancel))
+    (should (equal (alist-get 'operation_id request) "owned")))
+  (let ((magit-auto-review-owner--operation nil) (magit-auto-review-owner--process nil))
+    (should-error (magit-auto-review-owner-cancel) :type 'user-error)))
+
+(ert-deftest owner/toolkit-selection-resolves-repository-before-saving ()
+  (with-temp-buffer
+    (let ((magit-auto-review--repository nil) (magit-auto-review--target nil) saved displayed)
+      (cl-letf (((symbol-function 'magit-toplevel) (lambda () "/repo/"))
+                ((symbol-function 'magit-auto-review--call)
+                 (lambda (request)
+                   (pcase (alist-get 'command request)
+                     ("pull-requests" '((repositories . ("github.com/fork/repo" "github.com/parent/repo"))))
+                     ("toolkit" (setq saved request))
+                     (_ (ert-fail "Unexpected API command")))))
+                ((symbol-function 'completing-read)
+                 (lambda (prompt &rest _) (if (equal prompt "Repository: ") "github.com/parent/repo" "Owner")))
+                ((symbol-function 'magit-auto-review-pull-requests)
+                 (lambda (&optional _) (setq displayed magit-auto-review--repository))))
+        (magit-auto-review-select-toolkit))
+      (should (equal (alist-get 'repository saved) "github.com/parent/repo"))
+      (should (equal displayed "github.com/parent/repo")))))
+
 ;;; magit-auto-review-owner-tests.el ends here

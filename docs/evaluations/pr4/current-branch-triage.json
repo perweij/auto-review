@@ -1,0 +1,322 @@
+{
+  "branch": "feat/suggested-changes",
+  "baseline": "e9af5848a70bd6f5dd3f737836641ae68210f4fd",
+  "status": "complete",
+  "scope": "Consolidate all evaluation findings against this branch; repair demonstrated current failures and bounded efficiency/recovery issues. No model runs or GitHub writes.",
+  "steps": [
+    {
+      "name": "Current-state regressions and already-fixed checks",
+      "status": "complete"
+    },
+    {
+      "name": "Owner recovery and publication fixes",
+      "status": "complete"
+    },
+    {
+      "name": "Git checkpoints and bounded prompt context",
+      "status": "complete"
+    },
+    {
+      "name": "Frontend selection/cancellation and toolkit identity",
+      "status": "complete"
+    },
+    {
+      "name": "Explicit recovery of suggestion setup checks",
+      "status": "complete"
+    },
+    {
+      "name": "Focused tests, full backend/frontend checks, final ledger",
+      "status": "complete"
+    }
+  ],
+  "issues": [
+    {
+      "id": "R1",
+      "title": "Configuration trust misses ignored changes/deletion",
+      "status": "already_fixed_verified",
+      "checks": [
+        "tests/test_owner_trust.py: ignored additions/edits, last ignored file deletion, tracked deletion, and pre-launch enforcement"
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "Uncertain reply rewritten during reassociation",
+      "status": "already_fixed_verified",
+      "checks": [
+        "tests/test_owner_recovery.py:test_uncertain_reply_keeps_submitted_payload_during_reassociation"
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "Restored general feedback stays outside Attention",
+      "status": "already_fixed_verified",
+      "checks": [
+        "tests/test_owner_recovery.py:test_restored_acknowledged_general_comment_returns_to_attention"
+      ]
+    },
+    {
+      "id": "R4",
+      "title": "Replanning leaves dangling dependency before adoption",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_replan_then_adopt_has_no_dangling_completed_dependencies"
+      ],
+      "disposition": "Retain complete/skipped tasks and original plan history; remove dependencies on replaced task IDs before later adoption."
+    },
+    {
+      "id": "R5",
+      "title": "Closed PR accepts next reply POST after refresh",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_pr_closure_between_replies_preserves_receipts_and_stops_sending"
+      ]
+    },
+    {
+      "id": "R6",
+      "title": "Preflight failure erases ready verification eligibility",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_failed_preflight_preserves_ready_fix_for_commit_association",
+        "tests/test_owner_recovery.py:test_changed_feedback_does_not_preserve_ready_verification"
+      ],
+      "disposition": "Only a preflight failure after source, settings, discussion and trust checks preserves an unchanged ready batch."
+    },
+    {
+      "id": "R7",
+      "title": "Own published reply invalidates remaining replies and batch",
+      "status": "already_fixed_verified",
+      "checks": [
+        "tests/test_owner_recovery.py:test_confirmed_receipt_does_not_interrupt_two_replies_to_same_thread",
+        "tests/test_owner.py:test_edited_own_receipt_is_a_real_feedback_change"
+      ]
+    },
+    {
+      "id": "R8",
+      "title": "Unrelated skip bypasses interrupted-task adoption gate",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_unrelated_skip_cannot_restart_interrupted_task"
+      ],
+      "disposition": "Skips must cover all interrupted tasks; unknown interrupted stages and combined repairs require explicit adoption."
+    },
+    {
+      "id": "R9",
+      "title": "Adoption removes queued task initial fixer stage",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_adoption_retains_queued_tasks_initial_fixer"
+      ]
+    },
+    {
+      "id": "R10",
+      "title": "Unrelated shared Git config change triggers integrity recovery",
+      "status": "retain_conservative_guard",
+      "checks": [],
+      "disposition": "Retain the conservative shared Git administration integrity check. No safe distinction between unrelated and relevant changes was established."
+    },
+    {
+      "id": "R11",
+      "title": "Fork repository identity breaks remembered toolkit routing",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_ambiguous_toolkit_selection_requires_repository_before_saving",
+        "emacs/tests/magit-auto-review-owner-tests.el:owner/toolkit-selection-resolves-repository-before-saving"
+      ]
+    },
+    {
+      "id": "R12",
+      "title": "Final-review prompt duplicates accumulated diff",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_context_omits_identical_diff_and_bounds_ignored_inventory"
+      ],
+      "disposition": "Omit task_diff only when byte-identical to batch_diff; preserve distinct empty task diffs."
+    },
+    {
+      "id": "R13",
+      "title": "Network owner operations lack frontend cancellation ID",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "emacs/tests/magit-auto-review-owner-tests.el:owner/cancel-network-operation-signals-owned-process",
+        "emacs/tests/magit-auto-review-owner-tests.el:owner/cancel-provider-uses-operation-id-and-idle-errors"
+      ]
+    },
+    {
+      "id": "R14",
+      "title": "Replanning retains unavailable feedback and revives explicit skips",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_skips_survive_replanning_and_deleted_items_can_be_excluded",
+        "tests/test_owner_recovery.py:test_replanning_preserves_skips_even_when_feedback_still_exists"
+      ],
+      "disposition": "Explicit skips remain historical tasks across replanning and do not stale the active feedback set."
+    },
+    {
+      "id": "R15",
+      "title": "Fix at root heading includes non-attention History items",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "emacs/tests/magit-auto-review-owner-tests.el:owner/root-fixes-only-attention-feedback"
+      ]
+    },
+    {
+      "id": "R16",
+      "title": "Ignored file paths are duplicated into state and model contexts",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_context_omits_identical_diff_and_bounds_ignored_inventory"
+      ],
+      "disposition": "Retain ignored files on disk; store a count and a 20-path diagnostic sample, including legacy context compaction."
+    },
+    {
+      "id": "R17",
+      "title": "Dirty submodule contents are invisible to checkpoint identities",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_checkpoint_refuses_dirty_submodule_contents"
+      ],
+      "disposition": "Reject dirty initialized submodules before checkpointing because a superproject tree cannot capture their uncommitted contents."
+    },
+    {
+      "id": "R18",
+      "title": "Configured push destination can become stale",
+      "status": "unverified_no_behavior_change",
+      "checks": [],
+      "disposition": "No demonstrated current failure or safe automatic rewrite of user-managed push configuration. Reproduce against current branch before changing behavior."
+    },
+    {
+      "id": "R19",
+      "title": "Automatic repair proceeds despite reviewer clarification outcomes",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_legacy_clarification_does_not_launch_task_or_combined_repairs"
+      ],
+      "disposition": "Legacy clarify outcomes block both task and combined automatic repairs."
+    },
+    {
+      "id": "R20",
+      "title": "Deleted feedback aborts commit association for surviving items",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_missing_association_does_not_abort_surviving_reply"
+      ],
+      "disposition": "Preserve deleted-feedback commit associations as history and report them without aborting surviving replies."
+    },
+    {
+      "id": "R21",
+      "title": "Fresh checkpoint indexes may rehash unchanged tracked files",
+      "status": "unverified_no_behavior_change",
+      "checks": [],
+      "disposition": "Fresh index construction is source-visible; repository-scale latency and a safe caching strategy have not been established."
+    },
+    {
+      "id": "R22",
+      "title": "Failed checkpoints allegedly accept unreviewed final work",
+      "status": "refuted_or_unsubstantiated_no_repair",
+      "checks": [],
+      "disposition": "Historical adjudication did not establish the claimed defect; retain evidence and require a new concrete reproduction before repair."
+    },
+    {
+      "id": "R23",
+      "title": "Explicit recovery mutations persist before later validation fails",
+      "status": "refuted_or_unsubstantiated_no_repair",
+      "checks": [],
+      "disposition": "Historical adjudication did not establish the claimed defect; retain evidence and require a new concrete reproduction before repair."
+    },
+    {
+      "id": "R24",
+      "title": "Repeated freshness checks allegedly constitute a demonstrated performance defect",
+      "status": "refuted_or_unsubstantiated_no_repair",
+      "checks": [],
+      "disposition": "Historical adjudication did not establish the claimed defect; retain evidence and require a new concrete reproduction before repair."
+    },
+    {
+      "id": "R25",
+      "title": "Owner auth preflight allegedly accepts terminal provider failures",
+      "status": "refuted_or_unsubstantiated_no_repair",
+      "checks": [],
+      "disposition": "Historical adjudication did not establish the claimed defect; retain evidence and require a new concrete reproduction before repair."
+    },
+    {
+      "id": "R26",
+      "title": "Recovered verification setup failure still blocks suggestion acceptance",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_suggestions.py: explicit setup failure supersession, rejection of executed check failures and invalid links"
+      ],
+      "disposition": "Add explicit successful rerun links for setup failures only. Keep all evidence; executed failing checks and unclassified legacy failures remain blockers."
+    },
+    {
+      "id": "R27",
+      "title": "Reopening an owner buffer discards the freshly loaded view",
+      "status": "already_fixed_verified",
+      "checks": [
+        "emacs/tests/magit-auto-review-owner-tests.el:owner/reopening-adopts-current-view"
+      ]
+    },
+    {
+      "id": "R28",
+      "title": "Provider command patterns may permit remote push variants",
+      "status": "unverified_no_behavior_change",
+      "checks": [],
+      "disposition": "Command-pattern concern lacks an executed current-provider reproduction. Do not claim sandbox bypass or weaken policy without evidence."
+    },
+    {
+      "id": "R29",
+      "title": "Duplicated task and combined repair policy allegedly loses required evidence",
+      "status": "refuted_or_unsubstantiated_no_repair",
+      "checks": [],
+      "disposition": "Historical adjudication did not establish the claimed defect; retain evidence and require a new concrete reproduction before repair."
+    },
+    {
+      "id": "R30",
+      "title": "Failed combined repair resumes without explicit adoption",
+      "status": "fixed_in_working_tree",
+      "checks": [
+        "tests/test_owner_recovery.py:test_failed_combined_repair_requires_adoption_with_actual_provider_wrapper"
+      ],
+      "disposition": "Persist pending combined repairs before invocation; detect legacy failed attempts and require adoption before review resumes."
+    }
+  ],
+  "additional_improvements": [
+    {
+      "scope": "Review evidence quality",
+      "files": [
+        "prompts/independent.txt",
+        "prompts/synthesis-testing-focused.txt"
+      ],
+      "change": "Request focused executable reproductions for stateful recovery claims when supported, inspect surrounding orchestration, and state per-finding limitations when relying on inspection. Read-only source alone does not establish that scratch tests are impossible."
+    }
+  ],
+  "validation": {
+    "focused_recovery": {
+      "tests": 17,
+      "result": "passed"
+    },
+    "focused_suggestions": {
+      "tests": 32,
+      "result": "passed"
+    },
+    "frontend": {
+      "ert_tests": 148,
+      "byte_compilation": "passed_without_warnings",
+      "result": "passed"
+    },
+    "backend": {
+      "command": "make check-backend",
+      "result": "passed",
+      "bats_tests": 181,
+      "python_tests": 364,
+      "shellcheck": "passed",
+      "syntax_checks": "passed"
+    },
+    "diff_check": "passed",
+    "environment": {
+      "emacs": "/workspaces/proj/auto-review-tools/emacs/bin/emacs",
+      "emacs_version": "30.1",
+      "load_file": "/workspaces/proj/auto-review-tools/test-load.el"
+    }
+  },
+  "updated_at": "2026-10-29T14:56:41.132288+00:00",
+  "delivery": "Implemented and validated on the original feature branch; no push, GitHub writes, or additional model runs."
+}

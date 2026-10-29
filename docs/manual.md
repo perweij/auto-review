@@ -10,6 +10,7 @@ The [JSON API reference](api.md) describes the frontend/backend contract.
 - [Requirements and authentication setup](#requirements-and-authentication-setup)
 - [Running a review](#running-a-review)
 - [Automatic reviews](#automatic-reviews)
+- [Suggested changes](#suggested-changes)
 - [Configuration](#configuration)
 - [Live authentication checks](#live-authentication-checks)
 - [Verification policy](#verification-policy)
@@ -48,9 +49,12 @@ pr-review 123
 pr-review https://github.com/org/repository/pull/123 --no-publish
 pr-review 123 --repo org/repository
 pr-review 123 --repo github.example.com/org/repository
-pr-review 123 --codex-model gpt-6-astra --claude-model fable
+pr-review 123 --codex-model gpt-6.1-sol --claude-model opus
 pr-review 123 --reviewers codex --codex-model gpt-6-luna --codex-effort medium
 pr-review 123 --processing-provider codex --claude-effort medium
+pr-review 123 --economical
+pr-review 123 --expensive
+pr-review 123 --economical --codex-effort medium
 pr-review 123 --resume /absolute/path/to/run
 pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model calls
 ```
@@ -58,13 +62,24 @@ pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model ca
 Repository discovery uses `gh repo view`; specify `--repo` when it is ambiguous.
 Exactly one Git remote must match the target repository. Fork PRs are fetched
 through the base repository's `refs/pull/<N>/head`, without adding a fork remote.
-New reviews default to both reviewers, `gpt-6-astra` and `fable`, at high effort,
-with Claude processing. `--reviewers claude` or `--reviewers codex` selects one
+New reviews default to both reviewers, `gpt-6.1-sol` and `opus`, at high effort,
+with Codex/Sol processing. `--reviewers claude` or `--reviewers codex` selects one
 reviewer: it produces structured findings directly and handles discussion matching,
 without an adversarial synthesis phase. `--processing-provider claude|codex`
 chooses synthesis and discussion matching when both reviewers are enabled; its
 model and effort are inherited from that provider's review settings. Thread
 adaptation and fresh-discussion reassessment use the same provider.
+
+`--economical` supplies new-review defaults: Haiku + GPT-6.1 Terra, both at high
+effort, with Terra processing. `--expensive` instead supplies Fable + GPT-6 Astra,
+both at high effort, with Astra processing. These preset flags are mutually
+exclusive. Explicit model, effort, reviewer, and processing flags override the
+preset regardless of argument order. Testing and suggested-change options are
+unaffected. Saved review settings take precedence over this defaults
+preset: use explicit flags (or the Emacs setup action) to change an existing review.
+The expanded choices are saved as ordinary settings; there is no persistent mode
+that prevents later edits. These reviewer flags work with interactive analysis,
+`--no-publish`, and `--auto-publish`; they do not configure owner sessions.
 
 Settings are retained per review, including testing policy and effort. Resume uses
 the pending/current generation's settings unless explicitly overridden. Changing
@@ -137,6 +152,96 @@ trust with `T`. Opening the buffer does not resume models or publish anything.
 Automatic run records live under the session's `automatic-runs/`, separately from
 generation drafts. Reports, drafts, generations, receipts, and prior run records
 are retained. A paused first analysis does not create an empty draft ledger.
+
+## Suggested changes
+
+Suggested changes are opt-in for both interactive and automatic reviews:
+
+```sh
+pr-review 123 --suggested-changes
+pr-review 123 --suggested-changes --auto-publish --json
+```
+
+The setting is saved with the review. Use `--no-suggested-changes` to disable
+it for subsequent analysis; existing saved drafts and history remain available.
+In Emacs reviewer setup, `R s` toggles suggestions, `R r` runs analysis, and
+`R P` explicitly runs analysis **and publishes automatically** as a COMMENT
+review. Automatic publication is never a saved default. These reviewer controls
+are separate from Owner mode's automatic fix-and-commit workflow.
+
+A suggestion replaces the exact inclusive line range attached to a new inline
+comment. The body explains the finding; a generated `suggestion` code fence
+contains the replacement. GitHub lets the PR owner inspect and apply it. The
+review tool itself does not commit or push the replacement.
+
+The first version supports one complete, independent fix per finding, within
+one contiguous RIGHT-side range of a single diff hunk. Multiline replacements
+and deletions are supported, including ranges in files already added by the PR.
+Thread replies, overall comments, combined findings, file creation/renaming,
+and fixes requiring coordinated changes elsewhere remain ordinary findings.
+Source must be regular UTF-8 text with LF endings and a final newline. Replacements
+containing a Markdown closing fence are rejected rather than published inaccurately.
+
+Generation follows discussion matching. Each proposed replacement then receives
+a **separate verification invocation**, using the configured processing provider,
+model, and effort. Verification runs against the exact replacement in an isolated
+checkout and follows the focused testing policy, even when synthesis uses `full`.
+Multiple individually accepted suggestions also receive a combined
+independence/interaction check. Rejected suggestions remain blocked, but do not
+prevent this check of the accepted subset. You can stage that subset interactively;
+automatic publication still requires every finding to be ready. A combined result
+is shown as accepted only for suggestion versions included in that check.
+This adds model time and cost. Evidence explicitly distinguishes executed checks
+from acceptance by inspection; inspection-only acceptance requires a justification.
+Verification reduces risk but does not guarantee correctness.
+
+A setup failure can be resolved by a successful rerun within the same verification
+budget and permitted environment. Both attempts remain visible, with the rerun
+identifying the setup check it supersedes. An executed failing test cannot be
+superseded this way; unresolved failures still block acceptance. Older saved
+verification failures require an explicit new verification, not automatic acceptance.
+
+Both frontends show the exact target, before/after diff, evidence, and blockers:
+
+| Action | Emacs reviewer | Interactive CLI |
+| --- | --- | --- |
+| Inspect | Expand the finding | `i ID` |
+| Edit generated replacement | `S e`, then `C-c C-c` to save | `se ID` |
+| Verify active suggestions | `S v` | `sv` |
+| Remove suggestion, retain finding | `S k` | `sx ID` |
+
+Replacement text must retain its final newline; empty replacement text deletes
+the selected range. Editing explanation, replacement, or target unstages the draft
+and requires verification again. Stale editor saves retain the replacement buffer
+or CLI recovery file. Manual creation of suggestions is not supported yet. Raw
+suggestion fences pasted into ordinary bodies are blocked so they cannot bypass
+source checks and verification.
+
+Recovering a saved version into the same draft restores its placement and
+suggestion together, with fresh verification required. Recovering wording into a
+different draft preserves that destination's finding identity and removes its
+attached suggestion. A new recovered draft within the same analysis can retain
+the source suggestion; recovery from an older analysis copies wording only,
+because finding IDs may have been reused. Original suggestions remain in history.
+
+An unsuitable complex fix can omit a suggestion without blocking its valid ordinary
+finding. An attached invalid, rejected, or uncertain suggestion blocks that comment;
+in automatic mode it blocks the **entire batch before publication**. Generation
+failures also remain visible and block publication. Resume interrupted analysis,
+edit and verify the replacement, remove the suggestion, or suppress the finding.
+Resuming retries failed generation without moving the finding to an invalid
+candidate's target. Regenerated candidates remain in saved history; this automatic
+history alone does not count as a manual decision. Untagged legacy history remains
+conservative and requires interactive completion.
+If HEAD changed, rerun analysis against the new snapshot. Existing restrictions
+on automatic publication after manual intervention still apply: finish inspected
+manual changes interactively.
+
+Completed verification, candidates, evidence, and logs are retained with the saved
+review. Unchanged work is reused on resume, and publication receipts retain the
+existing retry and uncertain-submission recovery behavior. Repository tests use
+mocked GitHub APIs; validate actual GitHub rendering and application on a designated
+test PR before relying on unattended suggestions in a new deployment.
 
 ## Configuration
 
@@ -352,6 +457,12 @@ If implementation succeeded but review was incomplete, `r` retries that review
 against the unchanged fix, then checks the combined result. Reviewers can run
 focused tests with disposable files and Git repositories in an attempt's scratch
 directory; the Owner checkout and its real Git index remain protected.
+Review explicitly distinguishes passing verification, concrete defects requiring
+changes, and verification that could not finish. A failing regression test proving
+a defect enters the bounded repair pass; an unavailable test environment pauses
+for verification to be retried. Resuming an unchanged rejection passes the saved
+findings to the fixer if its repair attempt remains. Resume does not reset an
+exhausted repair budget: inspect/adopt manual corrections or replan unfinished work.
 
 After committing, return to Owner and press `g`. An exact match to a verified
 fix automatically finishes its local findings and moves the completed fix under
@@ -438,6 +549,23 @@ HEAD, Git operations in progress, local changes, and genuinely diverged branches
 require inspection in Magit. Ignored files are never overwritten by this update.
 Agent-configuration changes return
 the exact diff and a token for explicit `--trust-agent-config TOKEN`.
+
+Skipping an unrelated task cannot authorize replay of an interrupted fixer.
+Adopting partial work preserves the initial fix step for tasks that have not yet
+started. A failed combined repair also requires explicit adoption before review
+can continue. If selected feedback was deleted, skip its affected task, then replan
+the remaining work; skipped tasks stay in history. A failed authentication probe
+does not discard an otherwise unchanged, verified fix.
+
+In Emacs, `f` or `C-u f` at the root heading selects only actionable Attention
+items. Select another item or group explicitly to fix feedback outside Attention.
+`K` also cancels an active fetch or publication operation; saved progress and
+uncertain publication intents remain available for recovery. Repository selection
+precedes toolkit selection when the checkout has multiple GitHub repositories.
+
+Owner checkpoints cannot include uncommitted contents inside submodules. If one
+is dirty, inspect and commit or reconcile it before continuing. The contents are
+preserved. Ignored-file diagnostics show a bounded sample and total count.
 
 Exact association recognizes either the whole verified patch with the baseline
 as sole parent, or the recorded sequence of logical trees with matching parents.

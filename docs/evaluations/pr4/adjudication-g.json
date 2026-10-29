@@ -1,0 +1,26 @@
+[
+  {
+    "finding": "F1",
+    "issue": "R2",
+    "verdict": "confirmed",
+    "evidence": "adjudication.json"
+  },
+  {
+    "finding": "F2",
+    "issue": "R6",
+    "verdict": "confirmed",
+    "evidence": "adjudication-c.json"
+  },
+  {
+    "finding": "F3",
+    "issue": "R5",
+    "verdict": "confirmed",
+    "evidence": "adjudication.json"
+  },
+  {
+    "finding": "F4",
+    "issue": "R19",
+    "verdict": "confirmed",
+    "evidence": "adjudication-clarification.json"
+  }
+]

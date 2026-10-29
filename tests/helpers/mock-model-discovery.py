@@ -13,10 +13,10 @@ for line in sys.stdin:
             continue
         result = {} if request['method'] == 'initialize' else {
             'data': [{'model': name, 'supportedReasoningEfforts': [{'reasoningEffort': e} for e in efforts]}
-                     for name in ('gpt-6-astra', 'gpt-6-luna')], 'nextCursor': None}
+                     for name in ('gpt-6-astra', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-terra')], 'nextCursor': None}
         response = {'id': request['id'], 'result': result}
     else:
         response = {'type': 'control_response', 'response': {'request_id': request['request_id'],
                     'subtype': 'success', 'response': {'models': [
-                        {'value': name, 'supportedEffortLevels': efforts} for name in ('fable', 'haiku')]}}}
+                        {'value': name, 'supportedEffortLevels': efforts} for name in ('fable', 'haiku', 'opus')]}}}
     print(json.dumps(response), flush=True)

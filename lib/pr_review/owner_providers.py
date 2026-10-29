@@ -26,10 +26,13 @@ PLAN = obj({"tasks": {"type": "array", "items": obj({"id": TEXT, "items": STRING
     "expected": {"type": "array", "items": obj({"item": TEXT, "outcome": TEXT})}})}})
 RESULT = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS,
               "complete": {"type": "boolean"}, "blocking": STRINGS})
+REVIEW = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS,
+              "assessment": {"type": "string", "enum": ["passed", "changes_requested", "incomplete"]},
+              "blocking": STRINGS})
 
 
 def output_schema(role, keys):
-    schema = copy.deepcopy(PLAN if role == "plan" else RESULT)
+    schema = copy.deepcopy(PLAN if role == "plan" else REVIEW if role == "review" else RESULT)
     if keys:
         if role == "plan":
             properties = schema["properties"]["tasks"]["items"]["properties"]
@@ -167,8 +170,14 @@ def invoke(session, state, batch, role, context):
                          "already_addressed. Use clarify or no_change where appropriate. Run focused checks.\n")
     else:
         instructions += ("Keep the owner checkout read-only. Independently assess the exact changes and every selected concern against the final code. "
-                         "Identify regressions and blocking defects. Report evidence for every outcome; complete=false "
-                         "when verification is incomplete. Do not edit the implementation or its Git index. "
+                         "Identify regressions and blocking defects. Report evidence for every outcome. "
+                         "Set assessment=passed only when verification finished and no blocking defects or unanswered questions remain. "
+                         "Set assessment=changes_requested when verification establishes concrete implementation defects; "
+                         "list those defects in blocking so the fixer can repair them. A failing regression test that demonstrates "
+                         "a defect is changes_requested, NOT incomplete. The fix being unfinished does not mean the assessment is unfinished. "
+                         "Use assessment=incomplete when verification could not finish (for example a broken test environment, "
+                         "missing evidence, or a question requiring human judgement); explain the limitation in blocking. "
+                         "Do not edit the implementation or its Git index. "
                          "Your working root may be scratch; inspect the owner checkout and its applicable project instructions explicitly. "
                          "Run focused tests from the checkout with temporary output in scratch, or copy the current files "
                          "needed for a test into scratch. Do not substitute a clone of HEAD for uncommitted fixes. "

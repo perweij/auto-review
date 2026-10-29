@@ -9,6 +9,11 @@ from . import workflow
 from .receipts import import_legacy
 
 
+def has_manual_versions(comment):
+    """Only explicitly automatic snapshots are exempt from manual/unknown history."""
+    return any(not isinstance(v, dict) or v.get('actor') != 'automatic' for v in comment.get('versions', []))
+
+
 def generation(path, manifest):
     snapshot = manifest.get("snapshot", {})
     # Base can advance without changing the reviewed diff. That metadata refresh
@@ -185,7 +190,8 @@ class Session:
         atomic_json(self.file, state)
 
     def blockers(self, comment, state, *, bulk=False):
-        reasons = []
+        from .suggestions import blockers
+        reasons = blockers(self, comment, state, bulk=bulk)
         if comment.get("status") == "published":
             return ["Already published; create a follow-up instead."]
         if not comment.get("body", "").strip():
@@ -221,6 +227,14 @@ class Session:
         assessments = finding_assessments({} if self.manifest.get("analysis_kind") == "followup"
                                          else read_json(self.path / "reviews/synthesis.json", {}))
         for c in comments:
+            from .suggestions import identity, preview, render
+            c['suggestion_preview'] = preview(c)
+            if c['suggestion_preview']:
+                batch = state.get('suggestion_batch', {})
+                c['suggestion_preview']['batch_verification'] = (
+                    batch if not batch or identity(self, c) in batch.get('members', []) else
+                    dict(status='not_verified', evidence='This suggestion version was not included in the saved combined verification.'))
+            c['publication_body'] = render(c)
             # Display metadata does not affect the draft revision, staging,
             # prepared publication, or any saved human wording.
             c.update(comment_assessment(c, assessments))
@@ -330,7 +344,7 @@ class Session:
                            "analysis_kind": m.get("analysis_kind", "full"),
                            "created_at": m.get("created_at"), "updated_at": state.get("updated_at"),
                            "status": m.get("attempt", {}).get("status", m.get("status")),
-                           "human_edits": sum(bool(c.get("human_edited") or c.get("versions")) for c in state["comments"]),
+                           "human_edits": sum(bool(c.get("human_edited") or has_manual_versions(c)) for c in state["comments"]),
                            "saved_versions": sum(len(c.get("versions", [])) for c in state["comments"]),
                            "documents": len(state.get("documents", [])), "current": path == self.current})
         return {"generations": sorted(result, key=lambda x: x.get("updated_at") or x.get("created_at") or "", reverse=True)}

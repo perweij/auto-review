@@ -10,6 +10,7 @@ load helpers/fixture
     [ "$(sort -u "$FIXTURE/reviewed-heads")" = "$HEAD_SHA" ]
     [ ! -e "$FIXTURE/post-count" ]
     manifest_is '.status == "complete" and .phases.synthesis.status == "completed"'
+    manifest_is '.configuration | .claude_model=="opus" and .codex_model=="gpt-6.1-sol" and .processing_provider=="codex" and .claude_effort=="high" and .codex_effort=="high"'
     jq -e '.findings | all(.[]; .severity == "Medium")' "$(run_directory)/reviews/synthesis.json"
     grep -q 'Codex' "$(run_directory)/reviews/codex.md"
     grep -q 'codex.md' "$FIXTURE/synthesis-stdin"
@@ -108,10 +109,10 @@ load helpers/fixture
 
 @test "stdout-only synthesis error points to structured output and retains reviews" {
     export MOCK_STDOUT_ERROR_STAGE=synthesis
-    run_review; assert_failure
+    run_review --processing-provider claude; assert_failure
     [[ $output == *'CLI result subtype: error_during_execution'* ]]
     [[ $output == *'logs/synthesis.raw.json'* && $output == *'Captured stderr is empty:'* ]]
-    [[ $output == *'model: fable'* && $output != *'fixture-provider-error-do-not-replay'* ]]
+    [[ $output == *'model: opus'* && $output != *'fixture-provider-error-do-not-replay'* ]]
     manifest_is '.phases.synthesis.status=="failed" and .phases.synthesis.exit_status==1 and (.phases.synthesis.stdout_log|endswith("logs/synthesis.raw.json"))'
     [ -s "$(run_directory)/reviews/codex.md" ]
     [ -s "$(run_directory)/reviews/claude-independent.md" ]
@@ -123,7 +124,7 @@ load helpers/fixture
 
 @test "expired Claude OAuth is diagnosed despite success subtype and empty stderr" {
     export MOCK_STDOUT_OAUTH_STAGE=synthesis
-    run_review; assert_failure
+    run_review --processing-provider claude; assert_failure
     [[ $output == *'CLI result subtype: success'* && $output == *'is_error=true'* ]]
     [[ $output == *"Claude's OAuth session expired"* && $output == *'claude auth login'* ]]
     [[ $output == *'Captured stderr is empty:'* ]]
@@ -135,7 +136,7 @@ load helpers/fixture
 
 @test "invalid structured synthesis is retained and resumable" {
     export MOCK_SCHEMA_INVALID=1
-    run_review; assert_failure
+    run_review --processing-provider claude; assert_failure
     [[ $output == *'violates the JSON schema'* ]]
     [ -s "$(run_directory)/logs/synthesis.raw.json" ]
     unset MOCK_SCHEMA_INVALID

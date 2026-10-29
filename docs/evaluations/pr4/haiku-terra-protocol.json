@@ -1,0 +1,35 @@
+{
+  "case": "J-feature-haiku-terra",
+  "recorded_at": "2026-10-29T13:55:43.689983+00:00",
+  "baseline": "C-feature-synthesised",
+  "tool_revision": "e9af5848a70bd6f5dd3f737836641ae68210f4fd",
+  "snapshot": {
+    "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+    "base": "f7f0f2e2df548186b3b85d5f420ad0424af25655",
+    "pr": 4,
+    "historical_description": "empty",
+    "discussion": "withheld",
+    "ci": "not supplied"
+  },
+  "models": {
+    "codex": "gpt-6.1-terra",
+    "claude": "haiku",
+    "effort": "high",
+    "processing_provider": "codex"
+  },
+  "budget": "One fresh two-provider review and synthesis, no suggestions, repeats or publication.",
+  "held_constant": [
+    "Pinned tool revision",
+    "Frozen source and historical context",
+    "Both independent reviewers fresh",
+    "Codex-provider synthesis and matching",
+    "High effort",
+    "Focused synthesis testing",
+    "Suggestions disabled"
+  ],
+  "change": "Replace Opus and Sol with Haiku and Terra, including Terra synthesis/matching.",
+  "quality": "Independently audit final findings; separate behavioral issues, observations and unsubstantiated claims. Map to stable catalog IDs and preserve new findings.",
+  "cost": "Subscription use; provider costs are nominal API equivalents, not invoices. Codex review usage may remain incomplete.",
+  "limitation": "One PR and one sample; changes reviewers and synthesis model together. No claim these are universally the cheapest models.",
+  "model_reference": "https://developers.openai.com/api/docs/models/gpt-6.1-terra"
+}

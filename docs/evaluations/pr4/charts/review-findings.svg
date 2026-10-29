@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1080pt" height="756pt" viewBox="0 0 1080 756" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-10-29T14:10:02.305824</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 756
+L 1080 756
+L 1080 0
+L 0 0
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 383.4 510.3
+L 1009.8 510.3
+L 1009.8 158.76
+L 383.4 158.76
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 383.4 510.3
+L 383.4 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_2"/>
+     <g id="text_1">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="383.4" y="522.157422" transform="rotate(-0 383.4 522.157422)">0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 464.225806 510.3
+L 464.225806 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4"/>
+     <g id="text_2">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="464.225806" y="522.157422" transform="rotate(-0 464.225806 522.157422)">2</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 545.051613 510.3
+L 545.051613 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6"/>
+     <g id="text_3">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="545.051613" y="522.157422" transform="rotate(-0 545.051613 522.157422)">4</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 625.877419 510.3
+L 625.877419 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8"/>
+     <g id="text_4">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="625.877419" y="522.157422" transform="rotate(-0 625.877419 522.157422)">6</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_9">
+      <path d="M 706.703226 510.3
+L 706.703226 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10"/>
+     <g id="text_5">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="706.703226" y="522.157422" transform="rotate(-0 706.703226 522.157422)">8</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_11">
+      <path d="M 787.529032 510.3
+L 787.529032 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_12"/>
+     <g id="text_6">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="787.529032" y="522.157422" transform="rotate(-0 787.529032 522.157422)">10</text>
+     </g>
+    </g>
+    <g id="xtick_7">
+     <g id="line2d_13">
+      <path d="M 868.354839 510.3
+L 868.354839 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_14"/>
+     <g id="text_7">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="868.354839" y="522.157422" transform="rotate(-0 868.354839 522.157422)">12</text>
+     </g>
+    </g>
+    <g id="xtick_8">
+     <g id="line2d_15">
+      <path d="M 949.180645 510.3
+L 949.180645 158.76
+" clip-path="url(#pf36e939404)" style="fill: none; stroke: #e9edf1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_16"/>
+     <g id="text_8">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #586773" x="949.180645" y="522.157422" transform="rotate(-0 949.180645 522.157422)">14</text>
+     </g>
+    </g>
+    <g id="text_9">
+     <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #4f5e6b" x="696.6" y="545.158281" transform="rotate(-0 696.6 545.158281)">Distinct findings within each review</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2"/>
+   <g id="patch_3">
+    <path d="M 383.4 186.8832
+L 504.63871 186.8832
+L 504.63871 217.6848
+L 383.4 217.6848
+z
+" clip-path="url(#pf36e939404)" style="fill: #245c92"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 383.4 253.8432
+L 545.051613 253.8432
+L 545.051613 284.6448
+L 383.4 284.6448
+z
+" clip-path="url(#pf36e939404)" style="fill: #245c92"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 383.4 320.8032
+L 706.703226 320.8032
+L 706.703226 351.6048
+L 383.4 351.6048
+z
+" clip-path="url(#pf36e939404)" style="fill: #245c92"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 706.703226 320.8032
+L 787.529032 320.8032
+L 787.529032 351.6048
+L 706.703226 351.6048
+z
+" clip-path="url(#pf36e939404)" style="fill: #2a937f"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 383.4 387.7632
+L 666.290323 387.7632
+L 666.290323 418.5648
+L 383.4 418.5648
+z
+" clip-path="url(#pf36e939404)" style="fill: #245c92"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 666.290323 387.7632
+L 787.529032 387.7632
+L 787.529032 418.5648
+L 666.290323 418.5648
+z
+" clip-path="url(#pf36e939404)" style="fill: #2a937f"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 787.529032 387.7632
+L 989.593548 387.7632
+L 989.593548 418.5648
+L 787.529032 418.5648
+z
+" clip-path="url(#pf36e939404)" style="fill: url(#h7920a51e2d); stroke: #8a939d; stroke-width: 0.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 383.4 454.7232
+L 706.703226 454.7232
+L 706.703226 485.5248
+L 383.4 485.5248
+z
+" clip-path="url(#pf36e939404)" style="fill: #245c92"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 706.703226 454.7232
+L 827.941935 454.7232
+L 827.941935 485.5248
+L 706.703226 485.5248
+z
+" clip-path="url(#pf36e939404)" style="fill: url(#h7920a51e2d); stroke: #8a939d; stroke-width: 0.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="444.019355" y="205.660953" transform="rotate(-0 444.019355 205.660953)">3</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="504.63871" y="182.375452" transform="rotate(-0 504.63871 182.375452)">3 supported</text>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="358.344" y="199.914954" transform="rotate(-0 358.344 199.914954)">OpenAI · Sol × 1</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #586773" x="358.344" y="216.934847" transform="rotate(-0 358.344 216.934847)">Direct review</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="464.225806" y="272.620953" transform="rotate(-0 464.225806 272.620953)">4</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="545.051613" y="249.335452" transform="rotate(-0 545.051613 249.335452)">4 supported</text>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="358.344" y="266.874954" transform="rotate(-0 358.344 266.874954)">OpenAI · Sol × 2</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #586773" x="358.344" y="283.894847" transform="rotate(-0 358.344 283.894847)">Synthesis: OpenAI · Sol</text>
+   </g>
+   <g id="text_18">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="545.051613" y="339.580953" transform="rotate(-0 545.051613 339.580953)">8</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="747.116129" y="339.580953" transform="rotate(-0 747.116129 339.580953)">2</text>
+   </g>
+   <g id="text_20">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="787.529032" y="316.295452" transform="rotate(-0 787.529032 316.295452)">10 supported</text>
+   </g>
+   <g id="text_21">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="358.344" y="333.834954" transform="rotate(-0 358.344 333.834954)">Anthropic · Opus + OpenAI · Sol</text>
+   </g>
+   <g id="text_22">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #586773" x="358.344" y="350.854847" transform="rotate(-0 358.344 350.854847)">Synthesis: OpenAI · Sol</text>
+   </g>
+   <g id="text_23">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="524.845161" y="406.540953" transform="rotate(-0 524.845161 406.540953)">7</text>
+   </g>
+   <g id="text_24">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="726.909677" y="406.540953" transform="rotate(-0 726.909677 406.540953)">3</text>
+   </g>
+   <g id="text_25">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #46515d" x="888.56129" y="406.540953" transform="rotate(-0 888.56129 406.540953)">5</text>
+   </g>
+   <g id="text_26">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="787.529032" y="383.255452" transform="rotate(-0 787.529032 383.255452)">10 supported</text>
+   </g>
+   <g id="text_27">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="358.344" y="400.794954" transform="rotate(-0 358.344 400.794954)">Anthropic · Opus × 2</text>
+   </g>
+   <g id="text_28">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #586773" x="358.344" y="417.814847" transform="rotate(-0 358.344 417.814847)">Synthesis: Anthropic · Opus</text>
+   </g>
+   <g id="text_29">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="545.051613" y="473.500953" transform="rotate(-0 545.051613 473.500953)">8</text>
+   </g>
+   <g id="text_30">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #46515d" x="767.322581" y="473.500953" transform="rotate(-0 767.322581 473.500953)">3</text>
+   </g>
+   <g id="text_31">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="706.703226" y="450.215452" transform="rotate(-0 706.703226 450.215452)">8 supported</text>
+   </g>
+   <g id="text_32">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #172b40" x="358.344" y="467.754954" transform="rotate(-0 358.344 467.754954)">Anthropic · Haiku + OpenAI · Terra</text>
+   </g>
+   <g id="text_33">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #586773" x="358.344" y="484.774847" transform="rotate(-0 358.344 484.774847)">Synthesis: OpenAI · Terra</text>
+   </g>
+  </g>
+  <g id="text_34">
+   <text style="font-weight: 700; font-size: 24px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #172b40" x="54" y="39.312" transform="rotate(-0 54 39.312)">AI code review: useful findings by model setup</text>
+  </g>
+  <g id="text_35">
+   <text style="font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #4f5e6b" x="54" y="68.04" transform="rotate(-0 54 68.04)">One pull request · five configurations · findings independently checked</text>
+  </g>
+  <g id="text_36">
+   <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #172b40" x="54" y="563.22" transform="rotate(-0 54 563.22)">How to read the categories</text>
+  </g>
+  <g id="text_37">
+   <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #245c92" x="54" y="588.924" transform="rotate(-0 54 588.924)">Bug</text>
+  </g>
+  <g id="text_38">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #4f5e6b" x="189" y="588.924" transform="rotate(-0 189 588.924)">Demonstrated incorrect behavior or a broken intended workflow.</text>
+  </g>
+  <g id="text_39">
+   <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #2a937f" x="54" y="612.36" transform="rotate(-0 54 612.36)">Observation</text>
+  </g>
+  <g id="text_40">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #4f5e6b" x="189" y="612.36" transform="rotate(-0 189 612.36)">Supported design or efficiency concern, without an established failure.</text>
+  </g>
+  <g id="text_41">
+   <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #586773" x="54" y="635.796" transform="rotate(-0 54 635.796)">Not established</text>
+  </g>
+  <g id="text_42">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #4f5e6b" x="189" y="635.796" transform="rotate(-0 189 635.796)">Insufficient evidence, an unmeasured claim, or a refuted finding.</text>
+  </g>
+  <g id="text_43">
+   <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #586773" x="54" y="671.328" transform="rotate(-0 54 671.328)">Models: OpenAI GPT-6.1 Sol / Terra via Codex; Anthropic Claude Opus 5.5 / Haiku 5.5. All at high effort.</text>
+  </g>
+  <g id="text_44">
+   <text style="font-size: 9.6px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #586773" x="54" y="694.764" transform="rotate(-0 54 694.764)">Same source snapshot and tool revision; one run per setup. Same-model pairs reuse one independent review. Counts overlap across setups.</text>
+  </g>
+  <g id="text_45">
+   <text style="font-size: 9.8px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #586773" x="54" y="718.2" transform="rotate(-0 54 718.2)">Synthesis combines and checks reviewer reports. Its model also varies here. This is a small case study, not a general model ranking.</text>
+  </g>
+  <g id="legend_1">
+   <g id="patch_12">
+    <path d="M 58.5 110.490281
+L 76.1 110.490281
+L 76.1 102.790281
+L 58.5 102.790281
+z
+" style="fill: #245c92"/>
+   </g>
+   <g id="text_46">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start" x="84.9" y="110.490281" transform="rotate(-0 84.9 110.490281)">Supported bugs</text>
+   </g>
+   <g id="patch_13">
+    <path d="M 199.801875 110.490281
+L 217.401875 110.490281
+L 217.401875 102.790281
+L 199.801875 102.790281
+z
+" style="fill: #2a937f"/>
+   </g>
+   <g id="text_47">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start" x="226.201875" y="110.490281" transform="rotate(-0 226.201875 110.490281)">Supported observations</text>
+   </g>
+   <g id="patch_14">
+    <path d="M 385.222344 110.490281
+L 402.822344 110.490281
+L 402.822344 102.790281
+L 385.222344 102.790281
+z
+" style="fill: url(#h7920a51e2d); stroke: #8a939d; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_48">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start" x="411.622344" y="110.490281" transform="rotate(-0 411.622344 110.490281)">Not established</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pf36e939404">
+   <rect x="383.4" y="158.76" width="626.4" height="351.54"/>
+  </clipPath>
+ </defs>
+ <defs>
+  <pattern id="h7920a51e2d" patternUnits="userSpaceOnUse" x="0" y="0" width="72" height="72">
+   <rect x="0" y="0" width="73" height="73" fill="#e2e5e9"/>
+   <path d="M -36 36
+L 36 -36
+M -32 40
+L 40 -32
+M -28 44
+L 44 -28
+M -24 48
+L 48 -24
+M -20 52
+L 52 -20
+M -16 56
+L 56 -16
+M -12 60
+L 60 -12
+M -8 64
+L 64 -8
+M -4 68
+L 68 -4
+M 0 72
+L 72 0
+M 4 76
+L 76 4
+M 8 80
+L 80 8
+M 12 84
+L 84 12
+M 16 88
+L 88 16
+M 20 92
+L 92 20
+M 24 96
+L 96 24
+M 28 100
+L 100 28
+M 32 104
+L 104 32
+M 36 108
+L 108 36
+" style="fill: #8a939d; stroke: #8a939d; stroke-width: 1.0; stroke-linecap: butt; stroke-linejoin: miter"/>
+  </pattern>
+ </defs>
+</svg>

@@ -73,6 +73,7 @@ def with_marker(body, value):
 
 
 def make_actions(session, state):
+    from .suggestions import render
     selected = [c for c in state["comments"] if c["status"] == "staged"]
     actions = []
     review = [c for c in selected if c["placement"]["kind"] in ("inline", "review")]
@@ -101,7 +102,7 @@ def make_actions(session, state):
                 continue
             a = session.git.anchor(c["placement"])
             value = {"path": a["path"], "line": a["line"], "side": a["side"],
-                     "body": with_marker(c["body"], comment_markers[c["id"]])}
+                     "body": with_marker(render(c), comment_markers[c["id"]])}
             if a["start_line"] != a["line"]:
                 value.update(start_line=a["start_line"], start_side=a["side"])
             inline.append(value)
@@ -227,7 +228,7 @@ def prepare(session, state):
             affected.append(c["id"])
     if affected:
         session.save(state)
-        return {"ready": False, "reason": "Some comments need a corrected placement.",
+        return {"ready": False, "reason": "Some comments need attention; inspect their placement and suggestion blockers.",
                 "affected": affected, "review": session.view(state)}
     actions = make_actions(session, state)
     if not actions:
@@ -282,6 +283,9 @@ def publish(session, state, request):
         return {"complete": False, "reason": "GitHub review status changed. Inspect it and prepare publication again.",
                 "review": session.view(state)}
     repository_operation(session, "validate", next((a["event"] for a in batch["actions"] if a["kind"] == "review"), "COMMENT"))
+    if any(session.blockers(c, state) for c in state['comments'] if c['status'] == 'staged'):
+        return {'complete': False, 'reason': 'Draft or suggestion verification changed; inspect and prepare again.',
+                'review': session.view(state)}
     for previous in (a for b in state["batches"] for a in b["actions"]):
         if previous["status"] in ("draft", "failed"):
             previous["status"] = "superseded"
@@ -296,6 +300,10 @@ def publish(session, state, request):
             return {"complete": False, "reason": "GitHub review status changed; prepare the remaining publication again.",
                     "review": session.view(state)}
         repository_operation(session, "validate", action["event"])
+        from .suggestions import blockers as suggestion_blockers
+        if any(suggestion_blockers(session, c, state) for c in state['comments'] if c['id'] in action['comment_ids']):
+            return {'complete': False, 'reason': 'Suggestion verification changed; inspect the unsent comments.',
+                    'review': session.view(state)}
         action["status"] = "submitting"
         persist_action(session, state, action)
         try:

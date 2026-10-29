@@ -42,6 +42,25 @@ def inspect(comment):
     for entry in (comment['context'].get('thread') or {}).get('comments', []):
         print(f"\n@{entry['author']}: {entry['body']}")
     print('\n'.join(comment['blockers']))
+    suggestion = comment.get('suggestion_preview')
+    if suggestion:
+        print('\nSuggested change: ' + str(suggestion['target']))
+        print(suggestion['diff'])
+        verification = suggestion['verification']
+        print('Verification: ' + verification.get('status', 'required'))
+        print(verification.get('evidence', ''))
+        for check in verification.get('checks', []):
+            print(check['command'] + ': ' + check['result'])
+            if check.get('supersedes') is not None:
+                print(f"  supersedes setup check {check['supersedes'] + 1}")
+        if verification.get('inspection_only_reason'):
+            print('No executable checks run: ' + verification['inspection_only_reason'])
+        batch = suggestion.get('batch_verification', {})
+        if batch:
+            print('Combined verification: ' + batch.get('status', 'required') + '. ' + batch.get('evidence', ''))
+    generation = comment.get('suggestion_generation', {})
+    if generation.get('reason'):
+        print('Suggestion: ' + generation['reason'])
     if comment.get('receipt'):
         print('Posted: ' + comment['receipt'].get('html_url', '(see saved receipt)'))
 
@@ -61,6 +80,7 @@ def terminal(path):
             print(f"Limited coverage: {len(review['coverage']['threads'])} selected conversations; not a full PR review.")
         print('s ID stage · u ID unstage · k ID suppress · r ID restore · e ID edit · i ID inspect')
         print('a ID place · ack ID acknowledge discussion · new create overall assessment · v VERDICT')
+        print('se ID edit suggestion · sx ID remove suggestion · sv verify active suggestions')
         print('refresh · resolve uncertain publication · history · show GENERATION · current · docs · recover GENERATION ID')
         print('recover-doc GENERATION NAME · p preview/publish staged · q quit')
         recovery = None
@@ -86,6 +106,12 @@ def terminal(path):
                 continue
             if key in ('refresh', 'resolve'):
                 call({**request, 'command': key})
+                continue
+            if key == 'sv':
+                result = call({**request, 'command': 'verify-suggestions'})
+                for comment in result['review']['comments']:
+                    if comment.get('suggestion'):
+                        inspect(comment)
                 continue
             if key == 'p':
                 prepared = call({**request, 'command': 'prepare'})
@@ -120,7 +146,14 @@ def terminal(path):
                 if key == 'i':
                     inspect(comment)
                     continue
-                if key == 'e':
+                if key == 'se':
+                    if not comment.get('suggestion'):
+                        raise ValueError('Choose a generated suggestion.')
+                    replacement, recovery = edit_text(comment['suggestion']['replacement'])
+                    mutation.update(operation='suggestion-edit', replacement=replacement)
+                elif key == 'sx':
+                    mutation.update(operation='suggestion-remove')
+                elif key == 'e':
                     body, recovery = edit_text(comment['body'])
                     mutation.update(operation='edit', body=body)
                 elif key == 'a':

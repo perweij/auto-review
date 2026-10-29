@@ -1,0 +1,26 @@
+{
+  "recorded_at": "2026-10-29T10:11:16.339590+00:00",
+  "question": "Does combining two reviews help without provider diversity?",
+  "tool_revision": "0c83823045bf44193aca613a578fb3230f7b70e9",
+  "snapshot": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+  "paired_cases": [
+    "E-main-synthesised",
+    "F-main-two-codex"
+  ],
+  "held_constant": [
+    "Exact first independent Codex report from E, selected before seeing its findings",
+    "PR source and 12 context artifacts",
+    "Codex gpt-6.1-sol/high synthesis and focused verification policy",
+    "Pinned main application revision"
+  ],
+  "change": "Replace independent Claude Opus/high partner with fresh independent Codex gpt-6.1-sol/high partner.",
+  "independence": "Fresh Codex runs before E report is copied into its artifact directory.",
+  "budget": "One fresh independent Codex review, one Codex synthesis, one Codex discussion-matching stage, plus authentication probe; no additional Claude calls.",
+  "limitations": [
+    "One pair, not repeated sampling.",
+    "Reviewer identity labels in synthesis prompt adapted to Codex A/Codex B; policy otherwise unchanged.",
+    "First independent Codex report reused, so F elapsed time/usage is incremental.",
+    "A-main-single uses a direct structured review; comparison to two-review synthesis also changes workflow and inference budget.",
+    "Provider caches remain enabled."
+  ]
+}

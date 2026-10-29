@@ -1323,6 +1323,9 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(view["replies"], [])
 
     def test_actual_provider_adapter_captures_edits_and_blocks_review_writes(self):
+        settings = self.request("owner-read")["settings"]
+        settings["review"] = dict(provider="claude", model="opus", effort="high")
+        self.request("owner-mutate", operation="settings", settings=settings)
         self.fix()
         session = OwnerSession({"session": self.path})
         state = session.load()
@@ -1420,11 +1423,138 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual([role for role, _ in self.calls], ["plan", "fix", "review", "review", "review"])
         retry = self.calls[-2][1]
         self.assertIn("Real-Git fixture could not run", retry["previous_incomplete_review"]["blocking"])
-        self.assertIn("+fixed", retry["task_diff"])
+        self.assertIn("+fixed", retry.get("task_diff", retry["batch_diff"]))
         self.assertEqual(view["batches"][-1]["tasks"][0]["before"], before)
         prepared = self.request("owner-prepare-commit", batch=batch["id"])
         self.assertTrue(prepared["ready"])
         self.assertEqual(self.git("write-tree", cwd=view["worktree"]), view["batches"][-1]["final_tree"])
+
+    def test_explicit_changes_requested_repairs_a_failed_regression(self):
+        original = self.model
+        rejected = False
+        def model(*args):
+            nonlocal rejected
+            value = original(*args)
+            if args[3] == 'review':
+                value.pop('complete')
+                value['assessment'] = 'passed' if rejected else 'changes_requested'
+                if not rejected:
+                    rejected = True
+                    value['summary'] = 'Assessment finished; the fix is incomplete.'
+                    value['blocking'] = ['Two cross-buffer regression tests fail: guards are buffer-local.']
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            view = self.fix()
+        batch = view['batches'][-1]
+        self.assertEqual(batch['status'], 'ready')
+        self.assertEqual(batch['tasks'][0]['repairs'], 1)
+        self.assertEqual([r for r, _ in self.calls], ['plan', 'fix', 'review', 'fix', 'review', 'review'])
+        repair = self.calls[3][1]['review_findings']
+        self.assertEqual(repair['assessment'], 'changes_requested')
+        self.assertTrue(repair['complete'])
+        self.assertIn('buffer-local', repair['blocking'][0])
+        self.assertFalse(self.posts)
+
+    def test_explicit_incomplete_assessment_retries_only_review(self):
+        original = self.model
+        def incomplete(*args):
+            value = original(*args)
+            if args[3] == 'review':
+                value.pop('complete')
+                value.update(assessment='incomplete', blocking=['The test environment is unavailable.'])
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=incomplete):
+            batch = self.fix()['batches'][-1]
+        self.assertEqual(batch['status'], 'paused')
+        self.assertEqual(batch['tasks'][0]['repairs'], 0)
+        self.assertEqual([r for r, _ in self.calls], ['plan', 'fix', 'review'])
+        view = self.request('owner-fix', batch=batch['id'])
+        self.assertEqual(view['batches'][-1]['status'], 'ready')
+        self.assertEqual([r for r, _ in self.calls], ['plan', 'fix', 'review', 'review', 'review'])
+        self.assertEqual(self.calls[-2][1]['previous_incomplete_review']['assessment'], 'incomplete')
+
+    def test_resume_corrected_legacy_rejection_passes_saved_findings_to_fixer(self):
+        original = self.model
+        def incomplete(*args):
+            value = original(*args)
+            if args[3] == 'review':
+                value.update(complete=False, blocking=['Cross-buffer regression reproduced.'])
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=incomplete):
+            batch = self.fix()['batches'][-1]
+        session = OwnerSession({'session': self.path})
+        state = session.load()
+        task = state['batches'][-1]['tasks'][0]
+        before = copy.deepcopy(task['before'])
+        task['review'].update(assessment='changes_requested', complete=True)
+        session.save(state)
+        view = self.request('owner-fix', batch=batch['id'])
+        self.assertEqual(view['batches'][-1]['status'], 'ready')
+        self.assertEqual([r for r, _ in self.calls], ['plan', 'fix', 'review', 'fix', 'review', 'review'])
+        self.assertEqual(self.calls[3][1]['review_findings']['blocking'], ['Cross-buffer regression reproduced.'])
+        self.assertEqual(view['batches'][-1]['tasks'][0]['before'], before)
+        self.assertEqual(view['batches'][-1]['tasks'][0]['repairs'], 1)
+
+    def test_resuming_rejection_does_not_reset_exhausted_repair_budget(self):
+        original = self.model
+        def rejected(*args):
+            value = original(*args)
+            if args[3] == 'review':
+                value.pop('complete')
+                value.update(assessment='changes_requested', blocking=['Regression remains.'])
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=rejected):
+            batch = self.fix()['batches'][-1]
+            calls = list(self.calls)
+            for _ in range(2):
+                view = self.request('owner-fix', batch=batch['id'])
+                self.assertEqual(view['batches'][-1]['status'], 'paused')
+                self.assertEqual(view['batches'][-1]['tasks'][0]['repairs'], 1)
+                self.assertEqual(self.calls, calls)
+
+    def test_explicit_combined_rejection_uses_bounded_repair(self):
+        original = self.model
+        def model(*args):
+            value = original(*args)
+            if args[3] == 'review':
+                value.pop('complete')
+                value['assessment'] = 'changes_requested' if args[4].get('scope') else 'passed'
+                if args[4].get('scope'):
+                    value['blocking'] = ['Interaction defect reproduced.']
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.fix()['batches'][-1]
+        self.assertEqual(batch['status'], 'paused')
+        self.assertEqual(batch['repairs'], 1)
+        self.assertEqual(batch['tasks'][0]['review']['assessment'], 'passed')
+        self.assertEqual([r for r, _ in self.calls].count('fix'), 2)
+
+    def test_read_only_assessment_never_repairs_explicit_defects(self):
+        original = self.model
+        def rejected(*args):
+            value = original(*args)
+            if args[3] == 'review':
+                value.pop('complete')
+                value.update(assessment='changes_requested', blocking=['Regression remains.'])
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=rejected):
+            batch = self.fix(verify_only=True)['batches'][-1]
+            self.request('owner-fix', batch=batch['id'])
+        self.assertNotIn('fix', [r for r, _ in self.calls])
+
+    def test_review_schema_and_semantics_separate_assessment_from_implementation(self):
+        schema = owner_providers.output_schema('review', ['thread:T1'])
+        self.assertNotIn('complete', schema['properties'])
+        self.assertIn('assessment', schema['required'])
+        self.assertIn('complete', owner_providers.output_schema('fix', [])['properties'])
+        value = dict(summary='Review', outcomes=[dict(item='thread:T1', status='fixed', evidence='Checked')],
+                     checks=[], blocking=[], assessment='passed')
+        self.assertTrue(owner_fixes.validate_result(value, ['thread:T1'])['complete'])
+        self.assertNotIn('complete', value)
+        for update in ({'assessment': 'unknown'}, {'blocking': ['Defect']},
+                       {'assessment': 'changes_requested'}, {'complete': False}):
+            with self.subTest(update=update), self.assertRaises(ApiError):
+                owner_fixes.validate_result({**value, **update}, ['thread:T1'])
 
     def test_provider_review_runs_real_git_fixtures_without_touching_owner_index(self):
         self.fix()

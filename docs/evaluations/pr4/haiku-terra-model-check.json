@@ -1,0 +1,11 @@
+{
+  "case": "J-feature-haiku-terra",
+  "review_and_processing_commands_verified": true,
+  "claude_actual_models": [
+    "claude-haiku-5-5"
+  ],
+  "codex_requested_model": "gpt-6.1-terra",
+  "effort": "high",
+  "authentication_exception": "Standard unchanged low-effort auth probes use Haiku and gpt-6-luna; they do not review code.",
+  "context_equal": true
+}

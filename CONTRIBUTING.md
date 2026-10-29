@@ -58,6 +58,18 @@ repositories and worktrees with mocked providers/GitHub. They cover authenticati
 snapshots, recovery, process cancellation, cache reuse, owner fixes, and exact
 publication. Legacy session fixtures remain part of compatibility coverage.
 
+Checks can read from a read-only source checkout when writable temporary storage
+and the documented dependencies are available. Python lint compiles syntax in
+memory, imports run with bytecode caching disabled through Make, and Emacs byte
+compilation uses a temporary directory removed at exit. The Git fixtures and
+compiled Emacs files still require writable scratch; set `TMPDIR` to an existing
+permitted directory if the default temporary storage is unavailable. Set
+`AUTO_REVIEW_TEST_LOAD_FILE` when Magit/Forge are installed outside the default
+Emacs load path. A completely read-only model sandbox cannot run the full suite
+merely by disabling Python bytecode. Do not relax its restrictions: report the
+missing permission/dependency and continue code assessment or use supplied results
+for the exact snapshot. A failed suite launcher does not mean its tests executed.
+
 For Guix's installed-package checks, supply your own channels file:
 
 ```sh

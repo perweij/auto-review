@@ -116,8 +116,17 @@ setting or an implicit side effect of `run`.
 `settings` accepts `session`, or `cwd` plus optional `pr` and `repository`, and
 returns `{settings,session}`. It reads settings from a pending generation first,
 otherwise the current generation. With no saved review it uses the optional
-`defaults` object followed by backend defaults. Explicit top-level setting fields
+`defaults` object over backend defaults. `economical: true` then supplies Haiku +
+GPT-6.1 Terra/high with Codex processing; `expensive: true` supplies Fable +
+GPT-6 Astra/high with Codex processing. Both flags must be booleans and cannot
+both be true. Saved pending/current settings take
+precedence over that preset. The preset changes only the reviewer pair, models,
+efforts, and processing provider; it is expanded rather than saved as a mode.
+Frontends can apply it to provisional settings by sending those as `defaults`
+without a session or PR selector. Explicit top-level setting fields
 override these values. The operation is local and does not modify saved state.
+New reviews use Opus + GPT-6.1 Sol at high effort with Codex/Sol processing.
+New owner sessions also initialize Fix and Review to Sol/high unless customized.
 Legacy settings retain their recorded models/effort/testing policy; absent fields
 mean both reviewers, Claude processing, high effort, and focused testing.
 
@@ -150,6 +159,9 @@ reviewer `discover`.
 (Reviewer by default); include it to save a repository preference. The shared
 `pull-requests` result includes `toolkit`, and its saved session descriptors
 belong to that selected toolkit. Owner selection never depends on PR authorship.
+Saving a preference without a repository requires exactly one GitHub repository
+among the remotes; otherwise `invalid_request` includes `repositories` to choose
+from. Frontends resolve the repository before reading or saving its preference.
 
 | Command | Request fields | Result/behavior |
 | --- | --- | --- |
@@ -214,6 +226,9 @@ Resuming an unchanged task with successful implementation and incomplete review
 retries the review, preserving the original before/after scope and providing the
 previous verification blocker. Source, Git state, settings, and feedback checks
 still apply. Incomplete implementation requires the fixer again.
+An unchanged completed rejection supplies its saved findings to the remaining
+automatic repair attempt on resume. Resuming does not reset an exhausted repair
+budget; inspect/adopt manual corrections or explicitly replan unfinished work.
 Existing staged paths must be exact versions from this fix;
 unrelated staging and partial/manual variants are retained without alteration.
 Preparation installs only the changed paths' saved blobs through a temporary
@@ -398,9 +413,17 @@ repairing. Plans cover every item exactly once, can combine items, and include
 per-item expected outcomes and an acyclic dependency graph. Tasks run sequentially
 in topological order with selection order breaking ties. Each task and the final
 combined patch receive review; a checkpoint permits at most one automatic repair.
-Each result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
-`complete`, and `blocking`. Outcome statuses are `fixed`, `already_addressed`,
-`clarify`, and `no_change`; readiness requires complete, nonblocking verification.
+Each saved result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
+`complete`, and `blocking`. New review-model results use `assessment` instead of
+`complete`: `passed` means a completed nonblocking assessment; `changes_requested`
+means concrete implementation defects were established; `incomplete` means
+verification could not finish or requires human judgement. The backend derives
+the saved `complete` field from that assessment for compatibility. A failing test
+that demonstrates a defect requests changes; it is not unfinished verification.
+Contradictory assessments are rejected. Existing reports without `assessment`
+retain their previous interpretation; no classification is guessed from prose.
+Outcome statuses are `fixed`, `already_addressed`, `clarify`, and `no_change`;
+readiness still requires complete, nonblocking verification.
 
 Plan `items` and `expected.item` use feedback keys; `depends_on` uses task IDs
 defined in the same plan. An invalid plan can receive two correction calls per
@@ -425,6 +448,30 @@ Resume keeps the original baseline and, once model work starts, settings; change
 reconciliation and a new batch. Commit-only recovery instead recognizes its own
 recorded sequence. Unstaging code is a human operation. Integrity
 failures persist across retries until explicit adoption; records are retained.
+Skips must cover every interrupted task unless changes are adopted. A failed
+combined repair (`combined_repair_pending`) requires adoption, because no single
+task owns its partial changes. Adoption rechecks started work and preserves queued
+tasks' initial fixer stage. `clarify` outcomes never authorize an automatic repair,
+including legacy reports without an explicit assessment.
+
+Skipped tasks remain history across replanning and no longer invalidate active
+feedback freshness. Missing selected feedback must be explicitly skipped before
+the remaining work can be replanned. Completed tasks retained by a replacement
+plan do not retain dependencies on removed task IDs. An authentication/preflight
+failure on an unchanged ready batch preserves verification and records
+`preflight_error`; source, settings, discussion, and trust failures still block it.
+
+Owner checkpoints reject dirty initialized submodules with `dirty_submodule`:
+their uncommitted contents cannot be represented by a superproject tree. Files
+remain untouched. `ignored` contains at most 20 diagnostic paths and
+`ignored_count` records the full count. Provider context omits `task_diff` when it
+is identical to `batch_diff`; distinct empty task diffs remain present. Older
+checkpoint inventories are bounded when included in provider context.
+
+Association retains missing feedback as historical provenance and reports it in
+`reply_issues`, while processing surviving destinations. Publication rechecks
+that the PR is open before each send; closure preserves confirmed receipts and
+leaves remaining replies unsent.
 
 `owner-fix` emits standard `started`/`progress` events. Use shared `cancel` with
 the `operation_id` from `started`. Both adapters share process-group cancellation,
@@ -497,12 +544,31 @@ edited; a new comment is an explicit follow-up. Historical generations are
 read-only. Recovery copies text/provenance into an Unstaged current draft and
 does not change the original. Legacy combined documents are never auto-split.
 
+Within the current generation, recovering a version into its original comment
+restores its saved placement and suggestion state together. A new recovered
+comment can retain that generation's source suggestion and finding metadata,
+but must be verified again. Recovering into a different existing comment keeps
+the destination's identity and evidence: it copies wording, removes any attached
+suggestion, and restores the destination's pre-suggestion placement. Document and
+cross-generation recovery also copy wording/provenance only. Finding IDs are local
+to a generation, so historical IDs and replacements are not transplanted into a
+new analysis. The original candidates remain available in historical state.
+
 Mutations use per-generation locks and atomic JSON replacement. A model run's
 per-PR lock does not prevent editing its previous completed generation. When a
 replacement becomes current, a stale editor retains its buffer text and must
 save it explicitly into a current draft.
 
 ## Explicit network and model operations
+
+Suggestion verification preserves each executed check's `command`, `result`, and
+`passed` fields. New reports also include `failure_kind` (`"setup"`, `"check"`, or
+null) and `supersedes` (the zero-based index of an earlier setup failure, or null).
+Only a passing rerun may supersede an earlier failed setup attempt; executed
+test failures cannot be superseded. Both records remain in the evidence. Legacy
+checks without these additive fields remain valid but their failures cannot be
+implicitly resolved. An accepted verification must have no unresolved failed
+checks, or have no executed checks and a justified `inspection_only_reason`.
 
 - `refresh`: fetch complete GitHub context, record last checked head/time,
   retain manual text/placement, and unstage affected comments if discussion

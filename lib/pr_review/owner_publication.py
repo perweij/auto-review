@@ -32,7 +32,10 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
     pending = {a["reply"] for a in state["actions"] if a["status"] in ("ambiguous", "submitting")}
     for key, association in batch.get("associations", {}).items():
         association["refs"] = [workspace.pin_commit(session, sha) for sha in association["commits"]]
-        item = session.items(state, [key])[0]
+        item = next((item for item in state['feedback'] if item['key'] == key), None)
+        if not item or item.get('missing'):
+            issues.append({'item': key, 'reason': 'Feedback is no longer available; its commit association is retained as history.'})
+            continue
         if item["kind"] == "local_review":
             continue
         if automatic and batch.get("commit_progress", {}).get("items", {}).get(key) != association["commits"]:
@@ -252,6 +255,10 @@ def publish(session, state, request):
         raise ApiError("stale_confirmation", "Publication changed; inspect a fresh preview.")
     for reply in prepared["replies"]:
         refresh(session, state)
+        if state['metadata']['state'] != 'OPEN':
+            state.pop('prepared', None)
+            session.save(state)
+            raise ApiError('closed_pr', 'The PR closed during publication; confirmed replies are retained and remaining replies were not sent.')
         remote = workspace.fetch_head(session, state)
         if remote != prepared["head"]:
             raise ApiError("stale_confirmation", "PR head changed during publication; prepare the remaining replies again.")

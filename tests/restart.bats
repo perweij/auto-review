@@ -108,7 +108,7 @@ invalidate_claude() {
 }
 
 @test "processor-only replacement after publication retains independent reports" {
-    tty_review 'a p1|overall|s p1|p|yes|q'; assert_success
+    tty_review 'a p1|overall|s p1|p|yes|q' --processing-provider claude; assert_success
     saved=$(run_directory)
     actions=$(sha256sum "$saved/publication/drafts.json")
     run_review --processing-provider codex; assert_success

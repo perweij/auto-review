@@ -110,7 +110,7 @@ time.sleep(60)
     def test_selection_rejects_cross_provider_and_unsupported_effort(self):
         config = {**settings.DEFAULTS, "reviewers": ["codex"]}
         catalog = {"codex": {"provider": "codex", "models": [
-            {"value": "gpt-6-astra", "efforts": ["high"]}]}}
+            {"value": "gpt-6.1-sol", "efforts": ["high"]}]}}
         models.validate_selection(config, catalog)
         for field, value in (("codex_effort", "medium"), ("codex_model", "fable")):
             with self.assertRaises(ApiError):

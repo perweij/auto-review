@@ -96,6 +96,8 @@ def toolkit(request):
         names.discard("")
         if len(names) == 1:
             identity = names.pop()
+        elif 'toolkit' in request:
+            raise ApiError('invalid_request', 'Choose a repository before saving its toolkit preference.', repositories=sorted(names))
     if identity:
         identity = repository_name(identity)
     path = state_root() / "toolkits" / (digest([common, identity]) + ".json")
@@ -164,6 +166,12 @@ def feedback_body(body):
         r"(?m)^<!-- (?:pr-review generation=[^\s<>]+ head=[0-9a-f]{40,64}"
         r"|pr-owner session=[0-9a-f]{24}) action=[^\s<>]+ -->[ \t]*(?:\r?\n[ \t]*)*\Z",
         "", body).strip()
+
+
+def active_feedback_keys(batch):
+    """Keep skipped feedback as history without blocking the remaining work."""
+    skipped = {key for task in batch.get('tasks', []) if task['status'] == 'skipped' for key in task['items']}
+    return [key for key in batch['items'] if key not in skipped]
 
 
 def superseded_batches(state):
@@ -338,7 +346,7 @@ def refresh(session, state):
         batch["discussion_stale"] = any(
             key not in current or current[key].get("missing")
             or current[key]["fingerprint"] != batch["fingerprints"].get(key)
-            for key in batch["items"])
+            for key in active_feedback_keys(batch))
     reconcile_resolved_feedback(state, items)
     push_target = {"repository": target, "branch": branch}
     previous_target = state.get("push_target", {})

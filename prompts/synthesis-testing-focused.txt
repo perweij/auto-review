@@ -6,6 +6,15 @@ Prefer tracing the relevant code, a small reproduction, or an existing test
 selected by name. Reuse relevant, trustworthy evidence for this exact snapshot
 from the supplied reports or CI; distinguish that evidence from checks you run.
 
+For a stateful failure/recovery claim (interruption, adoption, invalidation,
+replanning, or partial publication), attempt a focused executable reproduction
+when dependencies and permitted scratch are available. Check the actual orchestration
+and shared error handling, not just an isolated conditional. If you use inspection
+alone, explain for that finding why no executable check was run, which transitions
+were traced, and what remains uncertain. A read-only source checkout alone does
+not establish that tests cannot run. Do not mark a claim confirmed when the
+unverified transition is essential to its alleged failure.
+
 Do not run a repository-wide test suite, build, lint sweep, benchmark, or broad
 integration bundle for general confidence. This also applies to aggregate targets
 such as make check and to commands delegated to agents or background tasks.
@@ -19,6 +28,11 @@ allowance. Do not restart a timed-out check with a larger timeout, broaden it to
 a full suite, or repeat failing commands merely to obtain a passing result.
 When a check is unavailable or times out, use the available evidence and move on.
 Do not fix the repository or launch paid reviews/smoke tests as verification.
+
+Before a check, inspect its documented dependencies and output locations. Use
+already permitted temporary storage for caches/fixtures where supported. A
+read-only checkout does not imply writable scratch. Do not relax sandbox policy
+or install dependencies to make tests run; report the specific limitation instead.
 
 Continue the code assessment and produce the requested structured report even
 when testing is incomplete. Record the actual commands, outcomes, timeouts and

@@ -1,0 +1,1026 @@
+{
+  "status": "complete",
+  "snapshot": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+  "runs": [
+    {
+      "case": "A-main-single",
+      "exit_code": 0,
+      "elapsed_seconds": 757.97,
+      "findings": 2,
+      "codex_reported_tokens": {
+        "input_tokens": 1941295,
+        "cached_input_tokens": 1773312,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 23229,
+        "reasoning_output_tokens": 10763
+      },
+      "claude_reported_usd": null,
+      "missing_or_zero_codex_usage": [],
+      "validity_counts": {
+        "CONFIRMED": 2
+      },
+      "titles": [
+        "Keep replies awaiting publication recovery immutable during reassociation",
+        "Restore acknowledged general feedback to the Attention group"
+      ],
+      "retained_findings": 2,
+      "supported_findings": 2,
+      "unverified_findings": 0,
+      "blocking_retained": 1,
+      "draft_count": 2,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 2
+      },
+      "suggestion_verification": {
+        "none": 2
+      },
+      "model_supported_findings": 2,
+      "audited_behavioral_findings": 2,
+      "audited_nonblocking_observations": 0
+    },
+    {
+      "case": "B-feature-single",
+      "exit_code": 0,
+      "elapsed_seconds": 749.1,
+      "findings": 3,
+      "codex_reported_tokens": {
+        "input_tokens": 1771742,
+        "cached_input_tokens": 1609600,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 23091,
+        "reasoning_output_tokens": 11110
+      },
+      "claude_reported_usd": null,
+      "missing_or_zero_codex_usage": [],
+      "validity_counts": {
+        "CONFIRMED": 3
+      },
+      "titles": [
+        "Preserve dependency references when replacing replanned tasks",
+        "Keep uncertain replies immutable during commit reassociation",
+        "Recheck the PR open state before every reply POST"
+      ],
+      "retained_findings": 3,
+      "supported_findings": 3,
+      "unverified_findings": 0,
+      "blocking_retained": 3,
+      "draft_count": 3,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 3
+      },
+      "suggestion_verification": {
+        "none": 3
+      },
+      "model_supported_findings": 3,
+      "audited_behavioral_findings": 3,
+      "audited_nonblocking_observations": 0
+    },
+    {
+      "case": "C-feature-synthesised",
+      "exit_code": 0,
+      "elapsed_seconds": 1798.9,
+      "findings": 14,
+      "codex_reported_tokens": {
+        "input_tokens": 1788958,
+        "cached_input_tokens": 1617920,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 33563,
+        "reasoning_output_tokens": 11443
+      },
+      "claude_reported_usd": 1.638578,
+      "missing_or_zero_codex_usage": [
+        "logs/codex.events.jsonl"
+      ],
+      "validity_counts": {
+        "CONFIRMED": 6,
+        "REJECTED": 4,
+        "MODIFIED": 3,
+        "NEW": 1
+      },
+      "titles": [
+        "Keep uncertain replies immutable during reassociation",
+        "Preserve verified history when resume fails before execution",
+        "Recheck the PR's open state before each send",
+        "Prevent published owner replies from invalidating remaining replies",
+        "Failed provider checkpoint allegedly accepts unreviewed partial edits",
+        "Bind interrupted-task skips to the interrupted task",
+        "Preserve the implementation stage for queued tasks during adoption",
+        "Scope Git integrity checks to relevant shared configuration",
+        "Resolve repository identity before looking up the remembered toolkit",
+        "Resume validation failures allegedly persist unauthorized adoption",
+        "Repeated freshness collection allegedly causes demonstrated rate-limit failures",
+        "Owner preflight allegedly accepts terminal provider failures",
+        "Avoid sending the same combined diff twice",
+        "Make network owner operations cancellable from Emacs"
+      ],
+      "retained_findings": 10,
+      "supported_findings": 10,
+      "unverified_findings": 0,
+      "blocking_retained": 8,
+      "draft_count": 10,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 10
+      },
+      "suggestion_verification": {
+        "none": 10
+      },
+      "model_supported_findings": 10,
+      "audited_behavioral_findings": 8,
+      "audited_nonblocking_observations": 2
+    },
+    {
+      "case": "D-feature-suggestions",
+      "exit_code": 0,
+      "elapsed_seconds": 501.27,
+      "findings": 3,
+      "analysis_reused": true,
+      "matching_reused": true,
+      "codex_reported_tokens": {
+        "input_tokens": 1295551,
+        "cached_input_tokens": 1024896,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 19238,
+        "reasoning_output_tokens": 3864
+      },
+      "claude_reported_usd": null,
+      "missing_or_zero_codex_usage": [],
+      "validity_counts": {
+        "CONFIRMED": 3
+      },
+      "titles": [
+        "Preserve dependency references when replacing replanned tasks",
+        "Keep uncertain replies immutable during commit reassociation",
+        "Recheck the PR open state before every reply POST"
+      ],
+      "retained_findings": 3,
+      "supported_findings": 3,
+      "unverified_findings": 0,
+      "blocking_retained": 3,
+      "draft_count": 3,
+      "suggestion_batch_status": "accepted",
+      "suggestion_generation": {
+        "omitted": 1,
+        "generated": 2
+      },
+      "suggestion_verification": {
+        "none": 1,
+        "accepted": 2
+      },
+      "model_supported_findings": 3,
+      "audited_behavioral_findings": 3,
+      "audited_nonblocking_observations": 0
+    },
+    {
+      "case": "E-main-synthesised",
+      "exit_code": 0,
+      "elapsed_seconds": 1952.41,
+      "findings": 12,
+      "codex_reported_tokens": {
+        "input_tokens": 1766319,
+        "cached_input_tokens": 1602816,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 25320,
+        "reasoning_output_tokens": 7616
+      },
+      "claude_reported_usd": 1.982871,
+      "missing_or_zero_codex_usage": [
+        "logs/codex.events.jsonl"
+      ],
+      "validity_counts": {
+        "CONFIRMED": 3,
+        "MODIFIED": 3,
+        "REJECTED": 4,
+        "UNVERIFIED": 1,
+        "NEW": 1
+      },
+      "titles": [
+        "Reject dirty initialized submodules before accepting checkpoints",
+        "Exclude removed and explicitly skipped feedback from replanning",
+        "Resolve repository identity before reading the remembered toolkit",
+        "Owner replies invalidate verification fingerprints",
+        "Restrict bulk selection to explicit feedback groups",
+        "Owner opening requires explicit repository selection with ambiguous remotes",
+        "Avoid copying ignored-path inventories into repeated prompts",
+        "Publishing performs repeated complete refreshes",
+        "Saved push mapping may diverge from the refreshed target",
+        "Require skips to cover interrupted tasks before continuing",
+        "Fix and resume repeat provider preflight and freshness checks",
+        "Recheck PR state before every reply send"
+      ],
+      "retained_findings": 8,
+      "supported_findings": 7,
+      "unverified_findings": 1,
+      "blocking_retained": 6,
+      "draft_count": 8,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 8
+      },
+      "suggestion_verification": {
+        "none": 8
+      },
+      "model_supported_findings": 7,
+      "audited_behavioral_findings": 6,
+      "audited_nonblocking_observations": 1
+    },
+    {
+      "case": "F-main-two-codex",
+      "exit_code": 0,
+      "elapsed_seconds": 853.08,
+      "findings": 5,
+      "paired_with": "E-main-synthesised",
+      "incremental_time_only": true,
+      "codex_reported_tokens": {
+        "input_tokens": 1650146,
+        "cached_input_tokens": 1491968,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 20708,
+        "reasoning_output_tokens": 5747
+      },
+      "claude_reported_usd": null,
+      "missing_or_zero_codex_usage": [
+        "logs/codex.events.jsonl"
+      ],
+      "validity_counts": {
+        "CONFIRMED": 4,
+        "MODIFIED": 1
+      },
+      "titles": [
+        "Reject dirty submodules before accepting checkpoints",
+        "Preserve skips and exclude unavailable feedback when replanning",
+        "Resolve the repository before looking up its toolkit",
+        "Freeze replies while their submissions remain uncertain",
+        "Recheck that the PR is open before each submission"
+      ],
+      "retained_findings": 5,
+      "supported_findings": 5,
+      "unverified_findings": 0,
+      "blocking_retained": 4,
+      "draft_count": 5,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 5
+      },
+      "suggestion_verification": {
+        "none": 5
+      },
+      "model_supported_findings": 5,
+      "audited_behavioral_findings": 5,
+      "audited_nonblocking_observations": 0
+    },
+    {
+      "case": "G-feature-two-codex",
+      "exit_code": 0,
+      "elapsed_seconds": 874.37,
+      "findings": 4,
+      "paired_with": "C-feature-synthesised",
+      "incremental_time_only": true,
+      "codex_reported_tokens": {
+        "input_tokens": 1617804,
+        "cached_input_tokens": 1447552,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 19527,
+        "reasoning_output_tokens": 6690
+      },
+      "claude_reported_usd": null,
+      "missing_or_zero_codex_usage": [
+        "logs/codex.events.jsonl"
+      ],
+      "validity_counts": {
+        "CONFIRMED": 4
+      },
+      "titles": [
+        "Freeze uncertain replies during commit reassociation",
+        "Preserve accepted verification when resume fails before execution",
+        "Recheck open-PR state before every reply submission",
+        "Pause on clarification before automatic repair"
+      ],
+      "retained_findings": 4,
+      "supported_findings": 4,
+      "unverified_findings": 0,
+      "blocking_retained": 4,
+      "draft_count": 4,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 4
+      },
+      "suggestion_verification": {
+        "none": 4
+      },
+      "model_supported_findings": 4,
+      "audited_behavioral_findings": 4,
+      "audited_nonblocking_observations": 0
+    },
+    {
+      "case": "H-feature-two-claude",
+      "exit_code": 0,
+      "elapsed_seconds": 770.18,
+      "findings": 15,
+      "paired_with": "C-feature-synthesised",
+      "incremental_time_only": true,
+      "codex_reported_tokens": {},
+      "claude_reported_usd": 3.916891,
+      "missing_or_zero_codex_usage": [],
+      "validity_counts": {
+        "CONFIRMED": 13,
+        "MODIFIED": 2
+      },
+      "titles": [
+        "Staleness fingerprint includes owner's own comments; multi-reply publication aborts and batches go stale",
+        "invoke() sets batch checkpoint to post-run tree before checking returncode/result",
+        "Interrupted-task gate accepts any non-empty --skip",
+        "Adopt converts never-run queued tasks to review-only",
+        "admin() hashes entire shared .git/config, causing false integrity failures",
+        "Toolkit choice / owner-open break with multiple remotes and nil repository",
+        "Resume mutations applied before settings/staleness validation",
+        "Full discussion refresh before every task and every published reply",
+        "Owner preflight duplicates and drifts from reviewer auth-probe validation; re-runs paid probes",
+        "batch_diff and task_diff duplicated when before == baseline",
+        "Missing feedback re-marked changed on every refresh; batches cannot recover",
+        "associate aborts for all ready batches when any associated item is missing",
+        "execute() error handler demotes a 'ready' batch to 'paused'",
+        "Checkpoints store full ignored-file list, propagated into state and model prompts",
+        "Checkpoint rehashes the entire worktree each call"
+      ],
+      "retained_findings": 15,
+      "supported_findings": 10,
+      "unverified_findings": 0,
+      "blocking_retained": 5,
+      "draft_count": 15,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 15
+      },
+      "suggestion_verification": {
+        "none": 15
+      },
+      "model_supported_findings": 15,
+      "audited_behavioral_findings": 7,
+      "audited_nonblocking_observations": 3,
+      "audit_unmeasured_optimization_candidates": 1,
+      "audit_unsubstantiated_or_refuted_claims": 4,
+      "audit": "adjudication-h.json"
+    },
+    {
+      "case": "I-best-suggestions",
+      "exit_code": 0,
+      "elapsed_seconds": 1394.27,
+      "findings": 14,
+      "analysis_reused": true,
+      "matching_reused": true,
+      "ordinary_comments_preserved": true,
+      "comment_count_before": 10,
+      "comment_count_after": 10,
+      "paired_with": "C-feature-synthesised",
+      "incremental_time_only": true,
+      "codex_reported_tokens": {
+        "input_tokens": 3773911,
+        "cached_input_tokens": 3060096,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 50737,
+        "reasoning_output_tokens": 12864
+      },
+      "claude_reported_usd": 0.00013,
+      "missing_or_zero_codex_usage": [],
+      "validity_counts": {
+        "CONFIRMED": 6,
+        "REJECTED": 4,
+        "MODIFIED": 3,
+        "NEW": 1
+      },
+      "titles": [
+        "Keep uncertain replies immutable during reassociation",
+        "Preserve verified history when resume fails before execution",
+        "Recheck the PR's open state before each send",
+        "Prevent published owner replies from invalidating remaining replies",
+        "Failed provider checkpoint allegedly accepts unreviewed partial edits",
+        "Bind interrupted-task skips to the interrupted task",
+        "Preserve the implementation stage for queued tasks during adoption",
+        "Scope Git integrity checks to relevant shared configuration",
+        "Resolve repository identity before looking up the remembered toolkit",
+        "Resume validation failures allegedly persist unauthorized adoption",
+        "Repeated freshness collection allegedly causes demonstrated rate-limit failures",
+        "Owner preflight allegedly accepts terminal provider failures",
+        "Avoid sending the same combined diff twice",
+        "Make network owner operations cancellable from Emacs"
+      ],
+      "retained_findings": 10,
+      "supported_findings": 10,
+      "unverified_findings": 0,
+      "blocking_retained": 8,
+      "draft_count": 10,
+      "suggestion_batch_status": "accepted",
+      "suggestion_generation": {
+        "generated": 6,
+        "omitted": 4
+      },
+      "suggestion_verification": {
+        "accepted": 5,
+        "none": 4,
+        "failed": 1
+      },
+      "model_supported_findings": 10,
+      "audited_behavioral_findings": 8,
+      "audited_nonblocking_observations": 2
+    },
+    {
+      "case": "J-feature-haiku-terra",
+      "exit_code": 0,
+      "elapsed_seconds": 670.13,
+      "findings": 13,
+      "codex_reported_tokens": {
+        "input_tokens": 278319,
+        "cached_input_tokens": 192384,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9192,
+        "reasoning_output_tokens": 605
+      },
+      "claude_reported_usd": 0.355484,
+      "missing_or_zero_codex_usage": [
+        "logs/codex.events.jsonl"
+      ],
+      "validity_counts": {
+        "CONFIRMED": 7,
+        "MODIFIED": 2,
+        "UNVERIFIED": 1,
+        "REJECTED": 2,
+        "NEW": 1
+      },
+      "titles": [
+        "Require skipping the interrupted task before resuming",
+        "Leave unstarted tasks queued when adopting partial work",
+        "Flag an obsolete configured push target",
+        "Do not let missing feedback block other associations",
+        "Avoid invalidating verified work and staged replies on the owner's own comments",
+        "Permit replanning around deleted feedback",
+        "Provider command restrictions may not prevent remote pushes",
+        "Toolkit selection without a repository can be stored under a null identity",
+        "Repeated refreshes may increase API usage",
+        "Validate the final provider authentication result",
+        "Refresh the owner view when reopening an existing buffer",
+        "Duplicated combined-review repair policy",
+        "Require adoption after a failed combined repair"
+      ],
+      "retained_findings": 11,
+      "supported_findings": 8,
+      "unverified_findings": 1,
+      "blocking_retained": 7,
+      "draft_count": 11,
+      "suggestion_batch_status": null,
+      "suggestion_generation": {
+        "none": 11
+      },
+      "suggestion_verification": {
+        "none": 11
+      },
+      "model_supported_findings": 10,
+      "audited_behavioral_findings": 8,
+      "audited_nonblocking_observations": 0,
+      "audit_unsubstantiated_or_refuted_claims": 3,
+      "audit_unmeasured_optimization_candidates": 0,
+      "audit": "adjudication-j.json"
+    }
+  ],
+  "quality": {
+    "single_findings_all_independently_reproduced": true,
+    "synthesis_retained": 10,
+    "synthesis_behavioral": 8,
+    "synthesis_nonblocking_observations": 2,
+    "synthesis_rejected": 4,
+    "synthesis_new": 1,
+    "synthesis_validation": "Six behavioral findings reproduced with real temporary Git/backend workflows; two additionally have backend reproductions and frontend source traces, without Emacs execution. Both nonblocking observations reproduced.",
+    "known_reference_missed_by_all": "R1",
+    "single_only_findings_missed_by_synthesis": [
+      "R3",
+      "R4"
+    ],
+    "case": "C-feature-synthesised (original pilot synthesis)"
+  },
+  "suggestions": {
+    "analysis_bytes_unchanged": true,
+    "matching_bytes_unchanged": true,
+    "retained_findings": 3,
+    "generated": 2,
+    "omitted": 1,
+    "individual_and_combined_verification": "accepted",
+    "independent_reproduction_checks": "Both generated patches loaded together resolve their historical failures in real-Git/mocked-GitHub fixtures.",
+    "case": "D-feature-suggestions (earlier single-review continuation)"
+  },
+  "cost": {
+    "basis": "Subscription runs; nominal Claude list-price equivalents are not invoices.",
+    "claude_reported_usd": 7.893954,
+    "codex_dollars": null,
+    "limitation": "Independent Codex review stages in C, E, F, G and J report zero usage. Complete all-provider token/dollar totals unavailable. Paired/continuation usage excludes copied logs; nominal Claude costs are not subscription invoices."
+  },
+  "limits": [
+    "Original pilot completed, then user authorized E main synthesis and F paired two-Codex control.",
+    "One sample per condition; not a causal ranking or statistical comparison.",
+    "Partial reference set, not exhaustive recall.",
+    "Initial PR body empty; historical discussion and CI intentionally withheld.",
+    "D overlaps late C; D elapsed time is not an isolated latency measurement.",
+    "Provider caching was not disabled; cached token counts retained.",
+    "C uses two independent reviewers and Codex synthesis; gains cannot be attributed to model diversity versus synthesis separately.",
+    "Historical defects are not assertions about current main.",
+    "No GitHub publication performed. Application code unchanged; requested evaluation records saved under docs/evaluations/pr4/.",
+    "G/H reuse C independent reports; incremental timings exclude reused stages.",
+    "H changes both reviewer pair and synthesis/matching provider.",
+    "Suggestion-enabled continuations reuse saved analysis, not fresh independent discovery."
+  ],
+  "next_candidate": "No further model runs authorized or scheduled.",
+  "artifacts": [
+    "evaluation.json",
+    "summary.json",
+    "issue-catalog.json",
+    "adjudication.json",
+    "adjudication-c.json",
+    "adjudication-c-remaining.json",
+    "suggestion-adjudication.json",
+    "input-comparison.json",
+    "adjudication-e.json",
+    "adjudication-f.json",
+    "adjudication-skip-replan.json",
+    "two-codex-protocol.json",
+    "two-codex-command-comparison.json",
+    "adjudication-g.json",
+    "adjudication-h.json",
+    "winner-selection.json",
+    "feature-controls-protocol.json",
+    "phase-timings.json",
+    "coverage-matrix.json",
+    "suggestion-retention.json",
+    "best-suggestion-adjudication.json",
+    "adjudication-j.json",
+    "adjudication-reopen.json",
+    "adjudication-combined-repair.json",
+    "haiku-terra-protocol.json",
+    "haiku-terra-model-check.json",
+    "haiku-terra-input-comparison.json",
+    "terra-verification-audit.json",
+    "adjudication-terra-strong.json",
+    "adjudication-terra-auth.json"
+  ],
+  "main_synthesised": {
+    "supported": 7,
+    "behavioral": 6,
+    "nonblocking_overhead": 1,
+    "unverified": 1,
+    "rejected": 4,
+    "elapsed_seconds": 1952.41,
+    "adjudication": "adjudication-e.json"
+  },
+  "paired_codex_control": {
+    "recorded_at": "2026-10-29T10:11:16.339590+00:00",
+    "question": "Does combining two reviews help without provider diversity?",
+    "tool_revision": "0c83823045bf44193aca613a578fb3230f7b70e9",
+    "snapshot": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+    "paired_cases": [
+      "E-main-synthesised",
+      "F-main-two-codex"
+    ],
+    "held_constant": [
+      "Exact first independent Codex report from E, selected before seeing its findings",
+      "PR source and 12 context artifacts",
+      "Codex gpt-6.1-sol/high synthesis and focused verification policy",
+      "Pinned main application revision"
+    ],
+    "change": "Replace independent Claude Opus/high partner with fresh independent Codex gpt-6.1-sol/high partner.",
+    "independence": "Fresh Codex runs before E report is copied into its artifact directory.",
+    "budget": "One fresh independent Codex review, one Codex synthesis, one Codex discussion-matching stage, plus authentication probe; no additional Claude calls.",
+    "limitations": [
+      "One pair, not repeated sampling.",
+      "Reviewer identity labels in synthesis prompt adapted to Codex A/Codex B; policy otherwise unchanged.",
+      "First independent Codex report reused, so F elapsed time/usage is incremental.",
+      "A-main-single uses a direct structured review; comparison to two-review synthesis also changes workflow and inference budget.",
+      "Provider caches remain enabled."
+    ]
+  },
+  "repository_catalog": "docs/evaluations/pr4/findings.json",
+  "paired_codex_result": {
+    "supported_findings": 5,
+    "behavioral_findings": 5,
+    "unverified_findings": 0,
+    "independent_candidates": {
+      "reused_A": 3,
+      "fresh_B": 2,
+      "overlap": 0
+    },
+    "synthesis_added_findings": 0,
+    "synthesis_expanded_finding": "F2: explicit skips are revived by replan even without deletion",
+    "incremental_elapsed_seconds": 853.08,
+    "reused_review_stage_and_transition_seconds": 550,
+    "approximate_from_scratch_stage_total_seconds": 1403.08,
+    "shared_with_mixed_provider": [
+      "R17",
+      "R14",
+      "R11",
+      "R5"
+    ],
+    "unique_to_two_codex": [
+      "R2"
+    ],
+    "unique_to_mixed_provider": [
+      "R15",
+      "R16",
+      "R8"
+    ],
+    "adjudication": "adjudication-f.json"
+  },
+  "conclusions": [
+    "Feature Opus+Sol and Haiku+Terra each found eight independently supported behavioral issues in this pilot; their coverage differs. Opus+Sol also retained two supported observations. Earlier winner selection preceded the later user-requested Haiku+Terra run.",
+    "Feature two-Codex synthesis retained four supported behavioral findings; main two-Codex retained five. This sample does not establish a general branch advantage.",
+    "All-Claude retained fifteen model findings: seven supported behavioral issues, three supported observations, one unmeasured optimization candidate, and four unsubstantiated/refuted claims. Raw count overstates demonstrated quality.",
+    "All-Claude uses Claude for synthesis/matching too, so this is not a reviewer-diversity-only comparison.",
+    "G and H reused a C independent review; measured times are incremental. Adding approximate reused-stage time gives G 1261s and H 1131s, not measured standalone runtimes.",
+    "Suggestion continuation I preserved all ten C comments and byte-identical analysis/matching. Six patches generated, four omitted; five patches individually and jointly accepted. One failed verification evidence validation after a setup failure and successful retry, blocking full automatic publication.",
+    "The smaller D continuation likewise preserved all three B findings, attaching two accepted patches. Suggestions did not filter away findings in either continuation.",
+    "One initial PR snapshot and one sample per condition cannot establish a reliable model ranking or exhaustive recall. No GitHub publication performed.",
+    "Haiku+Terra completed in 670.13 seconds versus Opus+Sol 1798.90 seconds; both used two fresh reviews. This is observed latency for one run, not a reliable speed benchmark.",
+    "Haiku+Terra retained eleven comments: eight supported behavioral issues, two unverified claims and one refuted claim. Its synthesis performed source inspection without executing focused verification tests.",
+    "New confirmed historical issues R27 (stale owner buffer on reopen) and R30 (failed combined-repair adoption) are preserved with reproductions. R28 remains unverified and R29 was rejected; neither is counted as a supported bug."
+  ],
+  "feature_controls_protocol": {
+    "recorded_at": "2026-10-29T12:03:59.830235+00:00",
+    "cases": [
+      "G-feature-two-codex",
+      "H-feature-two-claude"
+    ],
+    "reuse_from": "C-feature-synthesised",
+    "independence": "Fresh reviewer finishes before saved report is copied into its session.",
+    "selection": "Select strongest supported behavioral coverage; retain overhead observations separately. Do not choose solely by raw draft count. Record reasoning before suggestion continuation.",
+    "suggestions": "One continuation of selected saved analysis; compare analysis/matching bytes, finding IDs and ordinary finding bodies before/after; no publication.",
+    "confounds": [
+      "One sample per configuration.",
+      "H changes both reviewer pair and synthesis/matching provider.",
+      "Reused reviewer time/usage excluded from new incremental measurements."
+    ]
+  },
+  "feature_two_codex": {
+    "supported": 4,
+    "behavioral": 4,
+    "unverified": 0,
+    "incremental_elapsed_seconds": 874.37,
+    "new_issue": "R19",
+    "paired_with": "C-feature-synthesised"
+  },
+  "all_claude_audit": {
+    "case": "H-feature-two-claude",
+    "model_retained": 15,
+    "independently_supported_behavioral": 7,
+    "supported_nonblocking_observations": 3,
+    "unmeasured_optimization_candidates": 1,
+    "unsubstantiated_or_refuted_claims": 4,
+    "findings": [
+      {
+        "finding": "F1",
+        "issue": "R7",
+        "verdict": "supported_behavioral_narrow_receipt_scope",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F3",
+        "issue": "R8",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-c.json"
+      },
+      {
+        "finding": "F4",
+        "issue": "R9",
+        "verdict": "supported_behavioral_narrow_repair_allowance",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F5",
+        "issue": "R10",
+        "verdict": "supported_design_tradeoff",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F6",
+        "issue": "R11",
+        "verdict": "supported_behavioral_narrow_repository_routing",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F10",
+        "issue": "R12",
+        "verdict": "supported_efficiency",
+        "evidence": "adjudication-c-remaining.json"
+      },
+      {
+        "finding": "F11",
+        "issue": "R14",
+        "verdict": "supported_behavioral",
+        "evidence": "adjudication-e-candidates.json"
+      },
+      {
+        "finding": "F12",
+        "issue": "R20",
+        "verdict": "supported_behavioral_narrow_affected_batch",
+        "evidence": "adjudication-deleted-association.json"
+      },
+      {
+        "finding": "F13",
+        "issue": "R6",
+        "verdict": "supported_behavioral_only_unchanged_input_preflight",
+        "evidence": "adjudication-c.json"
+      },
+      {
+        "finding": "F14",
+        "issue": "R16",
+        "verdict": "supported_efficiency",
+        "evidence": "adjudication-e-candidates.json"
+      },
+      {
+        "finding": "F15",
+        "issue": "R21",
+        "verdict": "unmeasured_performance_candidate",
+        "evidence": "Fresh-index mechanism source-visible; no measured large-repository failure."
+      },
+      {
+        "finding": "F2",
+        "issue": "R22",
+        "verdict": "unreviewed_final_acceptance_claim_refuted",
+        "evidence": "adjudication-failed-checkpoint.json"
+      },
+      {
+        "finding": "F7",
+        "issue": "R23",
+        "verdict": "not_established_as_defect",
+        "evidence": "Requested recovery mutations persist, but no rollback contract, unauthorized mutation or verification bypass established."
+      },
+      {
+        "finding": "F8",
+        "issue": "R24",
+        "verdict": "not_established_as_defect",
+        "evidence": "Full refresh preserves discussion freshness; no measured failure. Proposed head-only replacement loses required feedback checks."
+      },
+      {
+        "finding": "F9",
+        "issue": "R25",
+        "verdict": "terminal_error_claim_refuted",
+        "evidence": "adjudication-auth-claim.json"
+      }
+    ],
+    "qualification": "Several retained claims need narrower failure scenarios or safer corrections. In particular, do not ignore all owner messages, bypass repository selection, or preserve ready state after changed verification inputs."
+  },
+  "selected_result": {
+    "selected_case": "C-feature-synthesised",
+    "recorded_at": "2026-10-29T12:36:25.894933+00:00",
+    "criterion": "Supported behavioral coverage first; distinguish observations, unverified risks and refuted claims.",
+    "comparison": {
+      "C-feature-synthesised": {
+        "supported_behavioral": 8,
+        "supported_nonblocking_observations": 2
+      },
+      "G-feature-two-codex": {
+        "supported_behavioral": 4
+      },
+      "H-feature-two-claude": {
+        "model_retained": 15,
+        "supported_behavioral": 7,
+        "supported_nonblocking_observations": 3,
+        "unmeasured_optimization": 1,
+        "unsubstantiated_or_refuted": 4
+      }
+    },
+    "reason": "C has the largest supported behavioral set in this pilot; H raw count is inflated by unsupported claims and additional optimization observations. No assertion of general model superiority.",
+    "expected_findings_before": 14,
+    "expected_comments_before": 10,
+    "continuation": "Native feature CLI --suggested-changes --resume; analysis/matching reuse and all ordinary finding identities/text checked."
+  },
+  "phase_timings": {
+    "note": "Approximate elapsed between adjacent model-stage start timestamps; includes transition bookkeeping. Reused independent stages omitted from paired cases.",
+    "cases": {
+      "C-feature-synthesised": {
+        "claude": 361.0,
+        "codex": 387.0,
+        "synthesis": 970.0
+      },
+      "E-main-synthesised": {
+        "claude": 485.0,
+        "codex": 550.0,
+        "synthesis": 847.0
+      },
+      "F-main-two-codex": {
+        "codex": 345.0,
+        "synthesis": 458.0
+      },
+      "G-feature-two-codex": {
+        "codex": 271.0,
+        "synthesis": 567.0
+      },
+      "H-feature-two-claude": {
+        "claude": 438.0,
+        "synthesis": 289.0
+      },
+      "J-feature-haiku-terra": {
+        "claude": 499.0,
+        "codex": 39.0,
+        "synthesis": 104.0
+      }
+    }
+  },
+  "best_suggestions": {
+    "case": "I-best-suggestions",
+    "paired_with": "C-feature-synthesised",
+    "exit_code": 0,
+    "elapsed_seconds": 1394.27,
+    "session": "/workspaces/proj/auto-review-evaluations/pr4-20261029/runs/C-feature-synthesised/state/pr-review/github.com/perweij/auto-review/pr-4-dgspm7t9-history/attempt-x0oh2pcw",
+    "incremental_time_only": true,
+    "analysis_reused": true,
+    "matching_reused": true,
+    "ordinary_comments_preserved": true,
+    "findings": 14,
+    "comment_count_before": 10,
+    "comment_count_after": 10,
+    "generated": 6,
+    "omitted": 4,
+    "individually_accepted": [
+      "p1",
+      "p3",
+      "p5",
+      "p6",
+      "p9"
+    ],
+    "individual_verification_failed": [
+      "p10"
+    ],
+    "automatic_publication_ready": false,
+    "publication": "not attempted; offline adapter rejects writes",
+    "limitation": "Continuation of saved analysis tests retention without rerunning discovery. It does not measure stochastic variation in fresh reviews with suggestions enabled.",
+    "verification_recovery_observation": {
+      "issue": "R26",
+      "reason": "Verifier reported an initial temporary-directory setup failure, then passing checks after setting TMPDIR. The application rejects accepted=true when any recorded check failed. The finding and proposed patch remain saved; automatic publication remains blocked.",
+      "raw_verifier_result": {
+        "accepted": true,
+        "evidence": "p10 is fixed without companion edits. The fallback sends SIGTERM to the active backend; api.dispatch already installs cancellation handling that stops subprocesses and unwinds locks. Publication saves intent before sending and retains it as ambiguous on cancellation. Focused checks exercised the exact Emacs cancellation function and async callbacks for refresh, prepare, publish, and recovery. All subprocesses were reaped, locks released, and drafts/uncertain intent retained. Existing operation-ID cancellation also passed. Full Magit integration was not run because Magit is unavailable.",
+        "checks": [
+          {
+            "command": "timeout --signal=TERM --kill-after=5s 15s emacs --batch --eval '(progn (princ (format \"Emacs %s\\n\" emacs-version)) (dolist (feature (quote (magit transient))) (princ (format \"%s: %s\\n\" feature (locate-library (symbol-name feature))))))'",
+            "result": "Emacs 30.1 and Transient available; Magit unavailable.",
+            "passed": true
+          },
+          {
+            "command": "timeout --signal=TERM --kill-after=5s 60s python3 .verification-p10/check.py",
+            "result": "Setup failed before tests: ERT attempted cache creation under read-only /tmp.",
+            "passed": false
+          },
+          {
+            "command": "TMPDIR=\"$PWD/.verification-p10\" timeout --signal=TERM --kill-after=5s 60s python3 .verification-p10/check.py",
+            "result": "Passed all six focused Emacs tests and four backend cleanup/state assertions using mocked GitHub calls. Completed in approximately 1.3 seconds.",
+            "passed": true
+          },
+          {
+            "command": "timeout --signal=TERM --kill-after=5s 10s git diff HEAD --stat; timeout --signal=TERM --kill-after=5s 10s git status --short; timeout --signal=TERM --kill-after=5s 10s git diff --cached --exit-code",
+            "result": "Only the supplied tracked change and untracked verification artifacts remain; index unchanged.",
+            "passed": true
+          }
+        ],
+        "inspection_only_reason": ""
+      },
+      "saved_verification": {
+        "status": "failed",
+        "fingerprint": "8a6b757ce6cbcbaf329a9a1307c5f8750dfa43ab1a33fd5ee2961c61ba3db2c2",
+        "evidence": "Acceptance requires passing checks or a justified inspection-only assessment."
+      },
+      "independent_check": "best-suggestion-adjudication.json; Emacs cancellation passed independent process/routing checks, not live GitHub publication."
+    },
+    "accepted_subset_batch_status": "accepted (five patches only)"
+  },
+  "haiku_terra_result": {
+    "audit": {
+      "case": "J-feature-haiku-terra",
+      "model_retained": 11,
+      "independently_supported_behavioral": 8,
+      "supported_nonblocking_observations": 0,
+      "unmeasured_optimization_candidates": 0,
+      "unsubstantiated_or_refuted_claims": 3,
+      "unverified_retained": 2,
+      "refuted_retained": 1,
+      "model_rejected": 2,
+      "findings": [
+        {
+          "finding": "F1",
+          "issue": "R8",
+          "verdict": "supported_behavioral",
+          "evidence": "adjudication-c.json"
+        },
+        {
+          "finding": "F2",
+          "issue": "R9",
+          "verdict": "supported_behavioral_narrow_initial_fix_and_repair_allowance",
+          "evidence": "adjudication-c-remaining.json"
+        },
+        {
+          "finding": "F3",
+          "issue": "R18",
+          "verdict": "unverified_reachable_trigger_and_end_to_end_wrong_push",
+          "evidence": "adjudication-e.json"
+        },
+        {
+          "finding": "F4",
+          "issue": "R20",
+          "verdict": "supported_behavioral_affected_batch",
+          "evidence": "adjudication-terra-strong.json"
+        },
+        {
+          "finding": "F5",
+          "issue": "R7",
+          "verdict": "supported_behavioral_narrow_known_publication_receipts",
+          "evidence": "adjudication-c-remaining.json"
+        },
+        {
+          "finding": "F6",
+          "issue": "R14",
+          "verdict": "supported_behavioral",
+          "evidence": "adjudication-e-candidates.json"
+        },
+        {
+          "finding": "F7",
+          "issue": "R28",
+          "verdict": "unverified_permission_matcher_and_network_behavior",
+          "evidence": "Source alone does not establish the claimed CLI bypass; not exercised."
+        },
+        {
+          "finding": "F8",
+          "issue": "R11",
+          "verdict": "supported_behavioral_narrow_repository_routing",
+          "evidence": "adjudication-terra-strong.json"
+        },
+        {
+          "finding": "F9",
+          "issue": "R24",
+          "verdict": "model_rejected_unmeasured_performance_claim",
+          "evidence": "Synthesis rejects; not retained or counted."
+        },
+        {
+          "finding": "F10",
+          "issue": "R25",
+          "verdict": "terminal_failure_claim_refuted",
+          "evidence": "adjudication-terra-auth.json"
+        },
+        {
+          "finding": "F11",
+          "issue": "R27",
+          "verdict": "supported_behavioral",
+          "evidence": "adjudication-reopen.json"
+        },
+        {
+          "finding": "F12",
+          "issue": "R29",
+          "verdict": "model_rejected_maintenance_claim",
+          "evidence": "Synthesis rejects; no demonstrated loss of required verification evidence."
+        },
+        {
+          "finding": "F13",
+          "issue": "R30",
+          "verdict": "supported_behavioral_missing_adoption_but_final_review_retained",
+          "evidence": "adjudication-terra-strong.json"
+        }
+      ],
+      "qualifications": [
+        "F2 does not bypass review: queued tasks lose initial fixer invocation and separate repair allowance.",
+        "F5 is supported for known publication receipts. Blanket exclusion of all owner messages could conceal meaningful new feedback.",
+        "F8 is a supported routing edge case when repository context is absent, not general failure of explicit repository selection.",
+        "F13 is a distinct combined-repair failure: all tasks complete, so the task interruption guard does not apply. Plain resume lacks explicit adoption, but still performs combined review. It does not revive the refuted unreviewed-acceptance claim R22.",
+        "F3 stale mapping exists in source, but realistic PR-destination change and wrong push remain unverified.",
+        "F10 overlooks terminal failure detection by the shared process supervisor; earlier real-subprocess reproduction applies unchanged.",
+        "Synthesis used source inspection without executing focused tests; independent checks supplied the recovery and Emacs reproductions."
+      ],
+      "verification_audit": "terra-verification-audit.json"
+    },
+    "elapsed_seconds": 670.13,
+    "baseline_elapsed_seconds": 1798.9,
+    "elapsed_ratio": 0.3725220968369559,
+    "claude_reported_usd": 0.355484,
+    "baseline_claude_reported_usd": 1.638578,
+    "supported_behavioral_overlap": [
+      "R11",
+      "R7",
+      "R8",
+      "R9"
+    ],
+    "unique_supported_behavioral_vs_baseline": [
+      "R14",
+      "R20",
+      "R27",
+      "R30"
+    ],
+    "baseline_unique_supported_behavioral": [
+      "R13",
+      "R2",
+      "R5",
+      "R6"
+    ],
+    "protocol": "haiku-terra-protocol.json",
+    "inputs": "haiku-terra-input-comparison.json",
+    "model_check": "haiku-terra-model-check.json",
+    "fresh_run": true,
+    "suggestions": false,
+    "publication": false,
+    "verification_audit": "terra-verification-audit.json"
+  }
+}

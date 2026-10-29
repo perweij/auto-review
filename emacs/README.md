@@ -154,6 +154,10 @@ unstaged changes; inspect and resume that batch with `r` for remaining verificat
 When the implementation succeeded and only review was incomplete, resuming
 unchanged work retries that review and the combined check, without rerunning the
 successful fixer. Review can use disposable Git fixtures outside the checkout.
+Concrete defects, including failing regression tests, request changes and enter
+the bounded repair pass instead. An unchanged completed rejection resumes with
+its saved findings if a repair attempt remains. An exhausted repair budget needs
+inspected/adopted corrections or explicit replanning; `r` does not reset it.
 Other operations retain explicit completion and stopped/error messages.
 
 Owner `F` is unbound; interactive provider handoff is deferred. Reviewer `F`
@@ -343,8 +347,32 @@ and the [roadmap](../docs/roadmap.md#interactive-owner-fixes) for planned intera
 `q` to cancel. `C-u R` opens the same menu. Saved reviews retain their own settings;
 new reviews use `magit-auto-review-reviewers`, `magit-auto-review-claude-model`,
 `magit-auto-review-codex-model`, the corresponding `*-effort` variables,
-`magit-auto-review-processing-provider`, and `magit-auto-review-synthesis-tests`.
-Menu changes do not alter these defaults.
+`magit-auto-review-processing-provider`, `magit-auto-review-synthesis-tests`,
+and `magit-auto-review-suggested-changes` (default nil).
+New reviews use Opus + GPT-6.1 Sol at high effort, with Codex/Sol processing.
+The model customizations default to nil, inheriting the backend models. Explicit
+customizations and saved session settings take precedence. Menu changes do not
+alter these defaults.
+
+In reviewer setup, `b` applies the Economical preset: Haiku + GPT-6.1 Terra at
+high effort with Terra processing. `B` applies the Expensive preset: Fable +
+GPT-6 Astra at high effort with Astra processing. Either action updates the
+displayed settings, including when configuring an existing review, and refreshes
+model choices. It does not
+launch work or save changes until you run; individual settings remain editable,
+and testing/suggestion options are preserved. `s` toggles suggested changes.
+`r` runs analysis for inspection;
+`P` explicitly runs and publishes automatically as COMMENT, stopping the whole
+batch if any finding or attached suggestion needs attention. This publication
+choice is not saved as a default.
+
+Suggested changes appear with their replacement range, before/after diff, and
+verification evidence. Use `S e` to edit a generated replacement, `S v` to verify
+active suggestions, or `S k` to remove the suggestion while keeping the finding.
+The replacement editor uses `C-c C-c` to save; `C-c C-k` returns while retaining
+its buffer. Edits unstage the draft and require verification again. Failed or
+interrupted work is retained. See [suggested changes](../docs/manual.md#suggested-changes)
+for eligibility, verification cost, and recovery.
 
 Inside an individual review, `g` reloads that PR's saved results and `R r`
 reruns that same PR. To review another PR, use `B`, refresh the list with `g`,
