@@ -508,6 +508,16 @@ edited; a new comment is an explicit follow-up. Historical generations are
 read-only. Recovery copies text/provenance into an Unstaged current draft and
 does not change the original. Legacy combined documents are never auto-split.
 
+Within the current generation, recovering a version into its original comment
+restores its saved placement and suggestion state together. A new recovered
+comment can retain that generation's source suggestion and finding metadata,
+but must be verified again. Recovering into a different existing comment keeps
+the destination's identity and evidence: it copies wording, removes any attached
+suggestion, and restores the destination's pre-suggestion placement. Document and
+cross-generation recovery also copy wording/provenance only. Finding IDs are local
+to a generation, so historical IDs and replacements are not transplanted into a
+new analysis. The original candidates remain available in historical state.
+
 Mutations use per-generation locks and atomic JSON replacement. A model run's
 per-PR lock does not prevent editing its previous completed generation. When a
 replacement becomes current, a stale editor retains its buffer text and must

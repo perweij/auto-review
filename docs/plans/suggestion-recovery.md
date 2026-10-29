@@ -4,7 +4,7 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: implement package 4.
+or temporary artifacts. Current step: implement package 5.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -67,7 +67,7 @@ Overlapping or jointly rejected suggestions still cannot publish together.
 
 ### 3. Cancellation preserves staging — F2
 
-Status: complete. Cancellation now propagates out of suggestion blockers before
+Status: complete (`b5860eb`). Cancellation now propagates out of suggestion blockers before
 publication preparation can save an unstaged comment. Regression checks both the
 in-memory staging state and unchanged saved bytes. All 77 suggestion/automation
 tests passed, including existing interrupted-generation/publication coverage.
@@ -80,7 +80,15 @@ turn into a saved validation failure or change the selected publication batch.
 
 ### 4. Coherent historical recovery — F7
 
-Status: pending. Establish and document semantics before implementation.
+Status: complete. All 66 suggestion/API tests passed, including restored anchors,
+fresh-copy evidence, existing destination/document recovery, and cross-generation
+ID collisions. Semantics: same-comment/current-generation
+recovery restores saved placement and suggestion together. Another destination
+keeps its identity/evidence and receives prose only, removing its old suggestion
+and restoring its ordinary anchor. A fresh current-generation copy carries full
+source finding metadata and requires verification again. Cross-generation and
+document recovery are prose/provenance only; reused IDs cannot transfer meaning.
+The original source remains available in history.
 
 Reproduction: recovering a pre-suggestion version removes the replacement but
 leaves its moved anchor. Recovering one comment into another overwrites finding
@@ -89,7 +97,7 @@ IDs while retaining the destination title/evidence.
 Acceptance: same-comment historical recovery restores coherent placement and
 suggestion state. Recovery into another existing draft preserves its identity;
 it must not silently transplant a replacement for another finding. A fresh
-recovered draft retains the source suggestion context. All restored suggestions
+recovered draft in the same generation retains the source suggestion context. All restored suggestions
 require fresh verification. Ordinary text/document recovery remains supported.
 
 ### 5. Markdown edge cases — F5

@@ -3,6 +3,7 @@ import copy
 from io import StringIO
 from pathlib import Path
 import signal
+import shutil
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -363,6 +364,61 @@ class SuggestionTest(unittest.TestCase):
         self.assertEqual(recovered['suggestion']['replacement'], 'corrected\n')
         self.assertEqual(recovered['finding_ids'], ['F1'])
         self.assertFalse(s.verified(self.session, recovered))
+        self.assertEqual(recovered['evidence'], c['evidence'])
+        self.assertEqual(recovered['locations'], c['locations'])
+
+    def test_recover_pre_suggestion_version_restores_saved_placement(self):
+        from pr_review.commands import remember
+        c = self.state['comments'][0]
+        original = copy.deepcopy(c['placement'])
+        remember(c)
+        self.attach(start=2, end=2)
+        self.save()
+        result = self.f.change('recover', source_generation=self.session.id, source_comment='p1', version=0, comment='p1')
+        c = result['review']['comments'][0]
+        self.assertEqual(c['placement'], original)
+        self.assertNotIn('suggestion', c)
+        self.assertNotIn('suggestion_original_placement', c)
+        self.assertEqual(c['status'], 'unstaged')
+
+    def test_recover_other_finding_or_document_keeps_destination_identity_and_ordinary_anchor(self):
+        self.attach()
+        destination = self.state['comments'][1]
+        original = copy.deepcopy(destination)
+        self.attach(1, start=3, end=3)
+        self.save()
+        (self.session.path / 'publication/review-body-history-old.md').write_text('Historical document')
+        for source in (dict(source_comment='p1'), dict(document='review-body-history-old.md')):
+            with self.subTest(source=source):
+                # Each case starts with the destination's own attached replacement.
+                self.save()
+                result = self.f.change('recover', source_generation=self.session.id, comment='p2', **source)
+                c = result['review']['comments'][1]
+                for key in ('finding_ids', 'classification', 'title', 'evidence', 'locations', 'placement'):
+                    self.assertEqual(c[key], original[key], key)
+                self.assertNotIn('suggestion', c)
+                self.assertEqual(c['body'], 'Comment 1' if 'source_comment' in source else 'Historical document')
+                self.assertTrue(c['human_edited'])
+
+    def test_cross_generation_recovery_does_not_reuse_colliding_finding_ids(self):
+        self.attach()
+        self.save()
+        old = self.session.id
+        candidate = Path(str(self.f.path) + '-history') / 'attempt-new'
+        shutil.copytree(self.f.path, candidate)
+        manifest = read_json(candidate / 'manifest.json')
+        manifest['session_directory'] = str(self.f.path)
+        atomic_json(candidate / 'manifest.json', manifest)
+        (self.f.path / '.current-review').symlink_to(candidate)
+        self.f.session = Session({'session': str(self.f.path)})
+        for destination in ({}, dict(comment='p2')):
+            with self.subTest(destination=destination):
+                result = self.f.change('recover', source_generation=old, source_comment='p1', **destination)
+                c = next(c for c in result['review']['comments'] if c['id'] == result['changed'][0])
+                self.assertNotIn('suggestion', c)
+                self.assertEqual(c['finding_ids'], ['F2'] if destination else [])
+                self.assertEqual(c['body'], 'Comment 1')
+                self.assertEqual(c['provenance']['generation'], old)
 
     def test_changed_model_settings_after_prepare_prevent_publication(self):
         c = self.attach()

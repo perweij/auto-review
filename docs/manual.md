@@ -197,6 +197,13 @@ or CLI recovery file. Manual creation of suggestions is not supported yet. Raw
 suggestion fences pasted into ordinary bodies are blocked so they cannot bypass
 source checks and verification.
 
+Recovering a saved version into the same draft restores its placement and
+suggestion together, with fresh verification required. Recovering wording into a
+different draft preserves that destination's finding identity and removes its
+attached suggestion. A new recovered draft within the same analysis can retain
+the source suggestion; recovery from an older analysis copies wording only,
+because finding IDs may have been reused. Original suggestions remain in history.
+
 An unsuitable complex fix can omit a suggestion without blocking its valid ordinary
 finding. An attached invalid, rejected, or uncertain suggestion blocks that comment;
 in automatic mode it blocks the **entire batch before publication**. Generation

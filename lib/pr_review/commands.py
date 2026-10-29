@@ -117,18 +117,33 @@ def mutate(session, state, request, *, actor="manual"):
         else:
             comment = new_comment(body, title, provenance=provenance)
             state["comments"].append(comment)
-        if request.get('document') is None:
+        # Wording recovered into another finding must not transplant its source
+        # identity or replacement. IDs are also local to an analysis generation.
+        same_generation = source.id == session.id
+        same_comment = same_generation and request.get('comment') == request.get('source_comment')
+        restore_suggestion = (request.get('document') is None and same_generation
+                              and (same_comment or not request.get('comment')))
+        if restore_suggestion:
             saved = original if version is None else original['versions'][version]
             for key in ('suggestion', 'suggestion_generation', 'suggestion_original_placement'):
                 if saved.get(key) is not None:
                     comment[key] = copy.deepcopy(saved[key])
                 else:
                     comment.pop(key, None)
-            if comment.get('suggestion'):
+            if same_comment or comment.get('suggestion'):
                 comment['placement'] = copy.deepcopy(saved['placement'])
-                comment['finding_ids'] = copy.deepcopy(original['finding_ids'])
-                comment['classification'] = original['classification']
+            if comment.get('suggestion'):
+                if not request.get('comment'):
+                    for key in ('finding_ids', 'classification', 'evidence', 'locations', 'automatic',
+                                'explanation', 'partial_coverage'):
+                        comment[key] = copy.deepcopy(original[key])
                 comment['suggestion'].pop('verification', None)
+        else:
+            placement = comment.pop('suggestion_original_placement', None)
+            if placement:
+                comment['placement'] = placement
+            comment.pop('suggestion', None)
+            comment.pop('suggestion_generation', None)
         changed.append(comment["id"])
     elif operation in ("stage", "unstage", "suppress", "restore", "edit", "placement", "automatic", "acknowledge", "suggestion-edit", "suggestion-remove"):
         ids = request.get("comments", [request.get("comment")])
