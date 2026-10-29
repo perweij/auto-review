@@ -57,7 +57,7 @@ except SystemExit as exc:
 from pr_review.common import ROOT
 from pr_review.providers import review_command, Runtime
 from pr_review.settings import DEFAULTS
-args = review_command(DEFAULTS, Runtime(), "synthesis", Path("relative session"), "base")
+args = review_command(dict(DEFAULTS, processing_provider="claude"), Runtime(), "synthesis", Path("relative session"), "base")
 assert args[args.index("--json-schema") + 1] == (ROOT / "prompts/synthesis.schema.json").read_text().rstrip("\\n")
 assert args[args.index("--append-system-prompt") + 1] == (ROOT / "prompts/synthesis-testing-focused.txt").read_text().rstrip("\\n")
 assert "relative session/context" in args

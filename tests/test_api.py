@@ -243,6 +243,50 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(result["settings"]["processing_provider"], "claude")
         self.assertNotIn("configuration", read_json(self.path / "manifest.json"))
 
+    def test_new_defaults_and_economical_preset_preserve_saved_settings(self):
+        from pr_review.cli import parser
+        from pr_review.owner_state import default_settings
+        from pr_review.settings import from_manifest
+        fresh = {"protocol": 1, "command": "settings", "cwd": str(self.repo), "pr": 8}
+        standard = dispatch(fresh)["settings"]
+        self.assertEqual((standard['claude_model'], standard['codex_model'], standard['processing_provider']),
+                         ('opus', 'gpt-6.1-sol', 'codex'))
+        self.assertEqual(default_settings({})['fix'],
+                         dict(provider='codex', model='gpt-6.1-sol', effort='high'))
+        args = vars(parser().parse_args(['8', '--economical', '--codex-effort', 'medium']))
+        economical = dispatch({**fresh, **args})['settings']
+        self.assertEqual((economical['claude_model'], economical['codex_model']), ('haiku', 'gpt-6.1-terra'))
+        self.assertEqual(economical['processing_provider'], 'codex')
+        self.assertEqual((economical['claude_effort'], economical['codex_effort']), ('high', 'medium'))
+        legacy = from_manifest(self.manifest)
+        self.assertEqual((legacy['processing_provider'], legacy['claude_model'], legacy['codex_model']),
+                         ('claude', 'fable', 'gpt-6-astra'))
+        before = (self.path / 'manifest.json').read_bytes()
+        self.assertEqual(dispatch(self.request('settings', economical=True))['settings'], legacy)
+        self.assertEqual((self.path / 'manifest.json').read_bytes(), before)
+        with self.assertRaises(ApiError):
+            dispatch({**fresh, 'economical': 'yes'})
+
+    def test_expensive_preset_overrides_and_conflicts(self):
+        from pr_review.cli import parser
+        fresh = {"protocol": 1, "command": "settings", "cwd": str(self.repo), "pr": 8}
+        args = vars(parser().parse_args(['8', '--expensive']))
+        settings = dispatch({**fresh, **args})['settings']
+        self.assertEqual((settings['claude_model'], settings['codex_model'], settings['processing_provider']),
+                         ('fable', 'gpt-6-astra', 'codex'))
+        self.assertEqual((settings['claude_effort'], settings['codex_effort']), ('high', 'high'))
+        for argv in (['--expensive', '--codex-model', 'chosen'], ['--codex-model', 'chosen', '--expensive']):
+            explicit = vars(parser().parse_args(['8', *argv]))
+            self.assertEqual(dispatch({**fresh, **explicit})['settings']['codex_model'], 'chosen')
+        saved = dispatch(self.request('settings'))['settings']
+        self.assertEqual(dispatch(self.request('settings', expensive=True))['settings'], saved)
+        for invalid in ({'expensive': 'yes'}, {'expensive': True, 'economical': True}):
+            with self.assertRaises(ApiError):
+                dispatch({**fresh, **invalid})
+        with patch('sys.stderr'), self.assertRaises(SystemExit) as caught:
+            parser().parse_args(['8', '--economical', '--expensive'])
+        self.assertEqual(caught.exception.code, 2)
+
     def test_cli_settings_reader_keeps_explicit_external_resume_supported(self):
         from pr_review.settings import DEFAULTS
         external = self.root / "external-review/manifest.json"

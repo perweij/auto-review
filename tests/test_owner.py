@@ -1323,6 +1323,9 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(view["replies"], [])
 
     def test_actual_provider_adapter_captures_edits_and_blocks_review_writes(self):
+        settings = self.request("owner-read")["settings"]
+        settings["review"] = dict(provider="claude", model="opus", effort="high")
+        self.request("owner-mutate", operation="settings", settings=settings)
         self.fix()
         session = OwnerSession({"session": self.path})
         state = session.load()

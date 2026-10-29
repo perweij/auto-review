@@ -49,9 +49,12 @@ pr-review 123
 pr-review https://github.com/org/repository/pull/123 --no-publish
 pr-review 123 --repo org/repository
 pr-review 123 --repo github.example.com/org/repository
-pr-review 123 --codex-model gpt-6-astra --claude-model fable
+pr-review 123 --codex-model gpt-6.1-sol --claude-model opus
 pr-review 123 --reviewers codex --codex-model gpt-6-luna --codex-effort medium
 pr-review 123 --processing-provider codex --claude-effort medium
+pr-review 123 --economical
+pr-review 123 --expensive
+pr-review 123 --economical --codex-effort medium
 pr-review 123 --resume /absolute/path/to/run
 pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model calls
 ```
@@ -59,13 +62,24 @@ pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model ca
 Repository discovery uses `gh repo view`; specify `--repo` when it is ambiguous.
 Exactly one Git remote must match the target repository. Fork PRs are fetched
 through the base repository's `refs/pull/<N>/head`, without adding a fork remote.
-New reviews default to both reviewers, `gpt-6-astra` and `fable`, at high effort,
-with Claude processing. `--reviewers claude` or `--reviewers codex` selects one
+New reviews default to both reviewers, `gpt-6.1-sol` and `opus`, at high effort,
+with Codex/Sol processing. `--reviewers claude` or `--reviewers codex` selects one
 reviewer: it produces structured findings directly and handles discussion matching,
 without an adversarial synthesis phase. `--processing-provider claude|codex`
 chooses synthesis and discussion matching when both reviewers are enabled; its
 model and effort are inherited from that provider's review settings. Thread
 adaptation and fresh-discussion reassessment use the same provider.
+
+`--economical` supplies new-review defaults: Haiku + GPT-6.1 Terra, both at high
+effort, with Terra processing. `--expensive` instead supplies Fable + GPT-6 Astra,
+both at high effort, with Astra processing. These preset flags are mutually
+exclusive. Explicit model, effort, reviewer, and processing flags override the
+preset regardless of argument order. Testing and suggested-change options are
+unaffected. Saved review settings take precedence over this defaults
+preset: use explicit flags (or the Emacs setup action) to change an existing review.
+The expanded choices are saved as ordinary settings; there is no persistent mode
+that prevents later edits. These reviewer flags work with interactive analysis,
+`--no-publish`, and `--auto-publish`; they do not configure owner sessions.
 
 Settings are retained per review, including testing policy and effort. Resume uses
 the pending/current generation's settings unless explicitly overridden. Changing

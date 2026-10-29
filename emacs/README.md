@@ -349,9 +349,19 @@ new reviews use `magit-auto-review-reviewers`, `magit-auto-review-claude-model`,
 `magit-auto-review-codex-model`, the corresponding `*-effort` variables,
 `magit-auto-review-processing-provider`, `magit-auto-review-synthesis-tests`,
 and `magit-auto-review-suggested-changes` (default nil).
-Menu changes do not alter these defaults.
+New reviews use Opus + GPT-6.1 Sol at high effort, with Codex/Sol processing.
+The model customizations default to nil, inheriting the backend models. Explicit
+customizations and saved session settings take precedence. Menu changes do not
+alter these defaults.
 
-In reviewer setup, `s` toggles suggested changes. `r` runs analysis for inspection;
+In reviewer setup, `b` applies the Economical preset: Haiku + GPT-6.1 Terra at
+high effort with Terra processing. `B` applies the Expensive preset: Fable +
+GPT-6 Astra at high effort with Astra processing. Either action updates the
+displayed settings, including when configuring an existing review, and refreshes
+model choices. It does not
+launch work or save changes until you run; individual settings remain editable,
+and testing/suggestion options are preserved. `s` toggles suggested changes.
+`r` runs analysis for inspection;
 `P` explicitly runs and publishes automatically as COMMENT, stopping the whole
 batch if any finding or attached suggestion needs attention. This publication
 choice is not saved as a default.

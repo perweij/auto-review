@@ -40,7 +40,7 @@ load helpers/fixture
 }
 
 @test "switching processing provider reuses independent reports and preserves old configuration" {
-    run_review; assert_success
+    run_review --processing-provider claude; assert_success
     previous=$(run_directory)
     printf 'Carefully edited text\n' > "$previous/publication/review-body.md"
     export MOCK_FAIL_STAGE=synthesis
@@ -70,4 +70,29 @@ load helpers/fixture
     run_review --reviewers codex; assert_success
     jq -se 'all(.[]; .tool!="claude")' "$FIXTURE/calls.jsonl"
     [[ $(cat "$FIXTURE/stages") == $'synthesis\ncontributions\nsynthesis\ncontributions' ]]
+}
+
+@test "economical preset runs both reviewers and Terra processing at high effort" {
+    run_review --economical
+    assert_success
+    manifest_is '.configuration | .reviewers==["claude","codex"] and .claude_model=="haiku" and .codex_model=="gpt-6.1-terra" and .processing_provider=="codex" and .claude_effort=="high" and .codex_effort=="high"'
+    jq -se 'any(.[]; .tool=="claude" and (.args|index("haiku"))) and any(.[]; .tool=="codex" and (.args|index("gpt-6.1-terra")) and (.args|index("--output-schema")))' "$FIXTURE/calls.jsonl"
+}
+
+@test "economical explicit overrides and saved settings take precedence" {
+    run_review --codex-effort medium --economical
+    assert_success
+    manifest_is '.configuration.codex_effort=="medium" and .configuration.codex_model=="gpt-6.1-terra"'
+    count=$(wc -l < "$FIXTURE/stages")
+    run_review --economical
+    assert_success
+    manifest_is '.configuration.codex_effort=="medium"'
+    [[ $(wc -l < "$FIXTURE/stages") == "$count" ]]
+}
+
+@test "expensive preset runs Fable and Astra with Astra processing at high effort" {
+    run_review --expensive
+    assert_success
+    manifest_is '.configuration | .reviewers==["claude","codex"] and .claude_model=="fable" and .codex_model=="gpt-6-astra" and .processing_provider=="codex" and .claude_effort=="high" and .codex_effort=="high"'
+    jq -se 'any(.[]; .tool=="claude" and (.args|index("fable"))) and any(.[]; .tool=="codex" and (.args|index("gpt-6-astra")) and (.args|index("--output-schema")))' "$FIXTURE/calls.jsonl"
 }

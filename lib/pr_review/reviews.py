@@ -310,8 +310,7 @@ def execute(request, *, confirm_trust=None):
         root, worktree = locate(repo, request.get('session'))
         from .automation import check_existing
         check_existing(root)
-        configuration = dict(settings.DEFAULTS)
-        configuration.update({k: v for k, v in request.get('defaults', {}).items() if k in settings.DEFAULTS and v is not None})
+        configuration = settings.initial_settings(request)
         if root:
             from .sessions import selected
             configuration.update(settings.from_manifest(read_json(selected(root) / 'manifest.json', {})))

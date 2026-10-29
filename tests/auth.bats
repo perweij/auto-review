@@ -76,7 +76,7 @@ load helpers/fixture
 @test "explicit probe model override leaves the review model unchanged" {
     export PR_REVIEW_CODEX_PROBE_MODEL=account-cheap-model
     run_review; assert_success
-    manifest_is '.phases.codex_auth_probe.model=="account-cheap-model" and .models.codex=="gpt-6-astra"'
+    manifest_is '.phases.codex_auth_probe.model=="account-cheap-model" and .models.codex=="gpt-6.1-sol"'
     jq -se 'any(.[]; .tool=="codex" and (.args | index("account-cheap-model")))' "$FIXTURE/calls.jsonl"
 }
 

@@ -116,8 +116,17 @@ setting or an implicit side effect of `run`.
 `settings` accepts `session`, or `cwd` plus optional `pr` and `repository`, and
 returns `{settings,session}`. It reads settings from a pending generation first,
 otherwise the current generation. With no saved review it uses the optional
-`defaults` object followed by backend defaults. Explicit top-level setting fields
+`defaults` object over backend defaults. `economical: true` then supplies Haiku +
+GPT-6.1 Terra/high with Codex processing; `expensive: true` supplies Fable +
+GPT-6 Astra/high with Codex processing. Both flags must be booleans and cannot
+both be true. Saved pending/current settings take
+precedence over that preset. The preset changes only the reviewer pair, models,
+efforts, and processing provider; it is expanded rather than saved as a mode.
+Frontends can apply it to provisional settings by sending those as `defaults`
+without a session or PR selector. Explicit top-level setting fields
 override these values. The operation is local and does not modify saved state.
+New reviews use Opus + GPT-6.1 Sol at high effort with Codex/Sol processing.
+New owner sessions also initialize Fix and Review to Sol/high unless customized.
 Legacy settings retain their recorded models/effort/testing policy; absent fields
 mean both reviewers, Claude processing, high effort, and focused testing.
 

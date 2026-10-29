@@ -50,7 +50,7 @@ load helpers/fixture
 
 @test "structured Claude phases stream activity and retain reusable buffered-output cache identity" {
     export MOCK_STREAM_STAGE=synthesis
-    run_review; assert_success
+    run_review --processing-provider claude; assert_success
     [[ $output == *'[synthesis] Process running:'* ]]
     [[ $output =~ [0-2]s\ since\ last\ output\ \(stdout/stderr\) ]]
     [[ $output != *fixture-model-text-do-not-replay* ]]

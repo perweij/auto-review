@@ -13,7 +13,7 @@
 (defcustom magit-auto-review-reviewers '("claude" "codex")
   "Default enabled reviewers for new reviews."
   :type '(set (const "claude") (const "codex")) :group 'magit-auto-review)
-(defcustom magit-auto-review-processing-provider "claude"
+(defcustom magit-auto-review-processing-provider "codex"
   "Default synthesis and discussion provider when both reviewers are enabled."
   :type '(choice (const "claude") (const "codex")) :group 'magit-auto-review)
 (defcustom magit-auto-review-claude-effort "high"
@@ -267,6 +267,25 @@
                                  (or (alist-get (intern p) magit-auto-review--setup-status) "Loading…"))))
            (append (alist-get 'reviewers magit-auto-review--setup-settings) nil))))
 
+(defun magit-auto-review--setup-preset (preset)
+  "Apply PRESET to the provisional settings without running a review."
+  (setq magit-auto-review--setup-settings
+        (alist-get 'settings
+                   (magit-auto-review--call
+                    `((command . "settings") (,preset . t)
+                      (defaults . ,magit-auto-review--setup-settings)))))
+  (magit-auto-review-refresh-choices))
+
+(defun magit-auto-review-setup-economical ()
+  "Select Haiku + Terra/high for both reviewers and Terra processing."
+  (interactive)
+  (magit-auto-review--setup-preset 'economical))
+
+(defun magit-auto-review-setup-expensive ()
+  "Select Fable + Astra/high for both reviewers and Astra processing."
+  (interactive)
+  (magit-auto-review--setup-preset 'expensive))
+
 (transient-define-prefix magit-auto-review-setup-menu ()
   "Review settings.  Change any value, then Run/resume."
   :refresh-suffixes t
@@ -289,6 +308,8 @@
      (lambda () (interactive) (magit-auto-review--choice-open 'codex_effort)) :transient t
      :inapt-if (lambda () (not (magit-auto-review--setup-enabled "codex"))))]]
   ["Processing"
+   ("b" "Economical: Haiku + Terra/high" magit-auto-review-setup-economical :transient t)
+   ("B" "Expensive: Fable + Astra/high" magit-auto-review-setup-expensive :transient t)
    ("p" (lambda ()
           (let ((reviewers (append (alist-get 'reviewers magit-auto-review--setup-settings) nil)))
             (format "Synthesis and discussion: %s%s"
