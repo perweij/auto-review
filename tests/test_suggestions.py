@@ -185,6 +185,46 @@ class SuggestionTest(unittest.TestCase):
         self.assertIn('together', '\n'.join(s.blockers(self.session, a, self.state, bulk=True)))
         self.assertEqual(self.state['suggestion_batch']['evidence'], 'Interaction found.')
 
+    def test_rejected_unselected_candidate_allows_verified_interactive_subset_only(self):
+        from pr_review.automation import AutomaticRun
+        self.state['mutation_tracking'] = True
+        self.state['comments'].append(copy.deepcopy(self.state['comments'][0]))
+        self.state['comments'][-1].update(id='p3', finding_ids=['F3'])
+        comments = [self.attach(i, start=i+1, end=i+1, replacement=f'fixed{i}\n') for i in range(3)]
+        for c in comments[:2]:
+            self.accepted(c)
+        def model(session, stage, context, cwd):
+            if context['combined']:
+                self.assertEqual([f['id'] for f in context['findings']], ['p1', 'p2'])
+                return ACCEPT, 'combined'
+            return {**ACCEPT, 'accepted': False, 'evidence': 'Third suggestion is incomplete.'}, 'rejected'
+        with patch.object(s, 'invoke', side_effect=model) as verify:
+            s.verify_comments(self.session, self.state, comments)
+        self.assertEqual(verify.call_count, 2)
+        self.assertEqual(self.state['suggestion_batch']['status'], 'accepted')
+        self.save()
+        github, posts = self.f.fake_github()
+        with patch.object(publication, 'repository_operation'), patch.object(publication, 'gh', side_effect=github):
+            outcome = AutomaticRun(dict(operation_id='b' * 32, log_path=str(self.f.root / 'auto.log'))).publish(self.session)
+        self.assertEqual(outcome['outcome'], 'needs_attention')
+        self.assertEqual(posts, [])
+        self.assertTrue(all(c['status'] == 'unstaged' for c in self.session.load()['comments']))
+        for identity in ('p1', 'p2'):
+            self.assertEqual(self.f.change('stage', comment=identity)['skipped'], [])
+        self.assertTrue(self.f.change('stage', comment='p3')['skipped'])
+
+    def test_batch_preview_does_not_claim_an_edited_suggestion_was_verified(self):
+        comments = [self.attach(), self.attach(1, start=2, end=2)]
+        with patch.object(s, 'invoke', return_value=(ACCEPT, 'log')):
+            s.verify_comments(self.session, self.state, comments)
+        comments[0]['body'] += ' Changed'
+        self.accepted(comments[0])
+        shown = self.session.view(self.state)['comments']
+        self.assertEqual(shown[0]['suggestion_preview']['batch_verification']['status'], 'not_verified')
+        self.assertIn('together', '\n'.join(shown[0]['bulk_blockers']))
+        self.assertEqual(shown[1]['suggestion_preview']['batch_verification']['status'], 'accepted')
+        self.assertNotIn('Combined verification: accepted', self.inspect(comments[0]))
+
     def test_interruption_retains_first_verification_and_resume_reuses_it(self):
         a, b = self.attach(), self.attach(1, start=2, end=2, replacement='other\n')
         with patch.object(s, 'invoke', side_effect=[(ACCEPT, 'a'), Cancelled(signal.SIGTERM)]):

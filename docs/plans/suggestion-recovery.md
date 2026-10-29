@@ -4,7 +4,7 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: implement package 2.
+or temporary artifacts. Current step: implement package 3.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -34,7 +34,7 @@ draft comment IDs. More findings do not necessarily mean better findings.
 
 ### 1. Generation history and failed candidates — F1, F3
 
-Status: complete. Generated history is tagged automatic and remains in recoverable
+Status: complete (`f045014`). Generated history is tagged automatic and remains in recoverable
 versions; legacy/unknown and manual history still stop auto publication. Candidates
 are validated before attachment. Failed/pending legacy candidates retry on resume.
 Validation: all 74 suggestion/automation tests passed, including three new
@@ -51,7 +51,11 @@ failed candidates. Successful generation/verification is reused.
 
 ### 2. Interactive subsets and truthful verification display — F4, F11
 
-Status: pending. Depends on package 1 only for shared generation tests.
+Status: complete. Accepted candidates receive combined verification even when an
+unselected candidate was rejected. Both frontend previews use current identity
+membership when showing the saved combined result. Validation: all 76 suggestion/
+automation tests passed, including a three-candidate case proving no automatic
+posts and successful interactive subset staging, plus stale-preview coverage.
 
 Reproduction: accepted A+B and rejected C never get a combined A+B check. A
 changed suggestion displays an old batch's accepted result despite blockers.

@@ -172,7 +172,11 @@ Generation follows discussion matching. Each proposed replacement then receives
 a **separate verification invocation**, using the configured processing provider,
 model, and effort. Verification runs against the exact replacement in an isolated
 checkout and follows the focused testing policy, even when synthesis uses `full`.
-Multiple active suggestions also receive a combined independence/interaction check.
+Multiple individually accepted suggestions also receive a combined
+independence/interaction check. Rejected suggestions remain blocked, but do not
+prevent this check of the accepted subset. You can stage that subset interactively;
+automatic publication still requires every finding to be ready. A combined result
+is shown as accepted only for suggestion versions included in that check.
 This adds model time and cost. Evidence explicitly distinguishes executed checks
 from acceptance by inspection; inspection-only acceptance requires a justification.
 Verification reduces risk but does not guarantee correctness.

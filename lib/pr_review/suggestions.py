@@ -275,7 +275,10 @@ def verify_comments(session, state, comments):
             record.update(status='failed', evidence=str(exc))
         finally:
             session.save(state)
-    if len(comments) > 1 and all(verified(session, c) for c in comments):
+    # Failed candidates still block automatic publication. Verify the accepted
+    # subset so a reviewer can deliberately stage those comments interactively.
+    comments = [c for c in comments if verified(session, c)]
+    if len(comments) > 1:
         fingerprint = batch_identity(session, comments)
         if state.get('suggestion_batch', {}).get('fingerprint') == fingerprint and state['suggestion_batch'].get('status') == 'accepted':
             return

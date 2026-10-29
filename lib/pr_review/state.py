@@ -222,10 +222,13 @@ class Session:
         assessments = finding_assessments({} if self.manifest.get("analysis_kind") == "followup"
                                          else read_json(self.path / "reviews/synthesis.json", {}))
         for c in comments:
-            from .suggestions import preview, render
+            from .suggestions import identity, preview, render
             c['suggestion_preview'] = preview(c)
             if c['suggestion_preview']:
-                c['suggestion_preview']['batch_verification'] = state.get('suggestion_batch', {})
+                batch = state.get('suggestion_batch', {})
+                c['suggestion_preview']['batch_verification'] = (
+                    batch if not batch or identity(self, c) in batch.get('members', []) else
+                    dict(status='not_verified', evidence='This suggestion version was not included in the saved combined verification.'))
             c['publication_body'] = render(c)
             # Display metadata does not affect the draft revision, staging,
             # prepared publication, or any saved human wording.
