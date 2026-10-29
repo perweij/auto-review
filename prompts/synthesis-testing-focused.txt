@@ -20,6 +20,11 @@ a full suite, or repeat failing commands merely to obtain a passing result.
 When a check is unavailable or times out, use the available evidence and move on.
 Do not fix the repository or launch paid reviews/smoke tests as verification.
 
+Before a check, inspect its documented dependencies and output locations. Use
+already permitted temporary storage for caches/fixtures where supported. A
+read-only checkout does not imply writable scratch. Do not relax sandbox policy
+or install dependencies to make tests run; report the specific limitation instead.
+
 Continue the code assessment and produce the requested structured report even
 when testing is incomplete. Record the actual commands, outcomes, timeouts and
 checks left undone in the coverage notes. A timeout or unavailable test is not

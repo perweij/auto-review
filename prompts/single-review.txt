@@ -5,6 +5,13 @@ substantiated findings and UNVERIFIED when evidence is insufficient. This is a
 single-provider review: never claim independent agreement or adversarial synthesis.
 Do not invoke other reviewers, /code-review, or another model provider.
 
+For changed stateful workflows, trace failure/save/resume, edit/invalidate/verify,
+partial selection/staging/publication, cancellation, and historical recovery where
+applicable. Check both safety (invalid work cannot proceed) and recovery (valid
+work can proceed); a guard proving one does not establish the other. Follow state
+across module/frontend boundaries. In coverage notes, identify important paths
+inspected and remaining gaps. Do not target a finding count or manufacture issues.
+
 Return the specified JSON envelope. report_md must contain:
 1. Executive summary (purpose, changes, assessment).
 2. Validated findings, ordered by severity.

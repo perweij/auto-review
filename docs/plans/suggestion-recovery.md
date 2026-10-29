@@ -4,10 +4,10 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: finish package 6 and full read-only-source
-validation. `make check-all` is running in a read-only mount with separate writable
-scratch; progress is in `/tmp/suggestion-recovery-check-all.log`. No live models or
-GitHub writes. Confirm the result before marking this plan complete.
+or temporary artifacts. All six work packages are complete. Read the validation
+log below for results and limitations. Next optional step: user-driven dogfooding
+on the PR; assess actual omissions and incorrect findings rather than counts.
+No live-model validation or GitHub publication was performed by this work.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -42,7 +42,7 @@ versions; legacy/unknown and manual history still stop auto publication. Candida
 are validated before attachment. Failed/pending legacy candidates retry on resume.
 Validation: all 74 suggestion/automation tests passed, including three new
 regressions (failed/pending legacy states are separate subcases).
-A follow-up check also found the history browser counted automatic versions as
+A follow-up (`741ce5d`) also found the history browser counted automatic versions as
 human edits. It now shares the automatic guard's authorship rule; the regression
 asserts both saved-version and human-edit counts, and passed.
 
@@ -121,7 +121,7 @@ closed code examples. Use focused rendering/validation cases without posting.
 
 ### 6. Review coverage and test environment
 
-Status: implemented, full validation running. Added lifecycle coverage to both
+Status: complete. Added lifecycle coverage to both
 independent reviews, single review, and synthesis, without a finding quota. Test
 policies require checking dependencies/output locations and disclosing blocked
 checks without weakening sandbox permissions. Improved recall remains unproven.
@@ -158,3 +158,20 @@ claim improved model recall without a later controlled dogfood run.
 - Initial investigation used isolated Git fixtures and mocked model/network
   responses. Convert the relevant reproductions into repository tests per package.
 - Existing owner repair: `b016b30`, lint and all 335 Python tests passed.
+- Final validation (2026-10-29): lint and all 181 Bats integration tests, 346 Python
+  tests, and 143 Emacs ERT tests passed; Emacs byte compilation was warning-free.
+  Checks ran under `bwrap` with `/` mounted read-only, a separately bound writable
+  scratch directory as `TMPDIR`, and network isolation. The existing frontend
+  dependency loader was supplied via `AUTO_REVIEW_TEST_LOAD_FILE`.
+- The initial full run exposed six legacy-cache subcase failures because the
+  compatibility tests assumed current prompts matched the historical fixture.
+  Tests now replay the recorded historical commands for byte-compatibility checks;
+  a new regression confirms current review instructions invalidate those saved
+  reviews. All six legacy-cache tests pass. Python and Emacs checks then passed in
+  the same read-only environment; already-passing Bats checks were not repeated.
+- Read-only lint was checked again after adding the Emacs runner to ShellCheck
+  and Bash syntax validation. `git diff --check` passed.
+- Production provider permissions are unchanged. A fully read-only provider still
+  cannot execute tests requiring writable fixtures unless permitted scratch is
+  available. This implementation does not claim improved model recall, live
+  GitHub rendering, Guix closure validation, or minimum-Python validation.

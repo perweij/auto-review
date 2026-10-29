@@ -12,6 +12,12 @@ suite after a timeout, failure, or unavailable dependency, and do not increase i
 timeout. Do not move retries into background tasks or delegate them to agents.
 The permission is for one attempt, not a requirement to obtain a green test run.
 
+Before that attempt, inspect documented dependencies and output locations. Use
+already permitted temporary storage for caches/fixtures where supported. A
+read-only checkout does not imply writable scratch. Do not relax sandbox policy
+or install dependencies to make tests run; if the requirements cannot be met,
+report the specific limitation and leave the suite unrun.
+
 Additional checks must answer a specific unresolved finding and use at most 60
 seconds each and 300 seconds of cumulative elapsed time, including setup and
 waiting. Prefer a small reproduction or a named test. Do not repeat a timed-out

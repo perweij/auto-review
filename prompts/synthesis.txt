@@ -9,6 +9,13 @@ Check whether existing discussion already addresses it. Find omissions, interact
 and bugs missed by both reviewers. Eliminate duplicates. Agreement is not evidence;
 favor neither model. Distinguish demonstrated bugs from unverified risks.
 
+For changed stateful workflows, trace failure/save/resume, edit/invalidate/verify,
+partial selection/staging/publication, cancellation, and historical recovery where
+applicable. Check both safety (invalid work cannot proceed) and recovery (valid
+work can proceed); a guard proving one does not establish the other. Follow state
+across module/frontend boundaries. In coverage notes, identify important paths
+inspected and remaining gaps. Do not target a finding count or manufacture issues.
+
 Classify each original finding CONFIRMED, MODIFIED, REJECTED or UNVERIFIED. Classify
 genuinely new findings NEW. Retained findings need: ID, title, severity (Critical,
 High, Medium, Low), source (Codex, Claude, Both, New), file and line, description,
