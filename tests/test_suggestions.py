@@ -293,11 +293,16 @@ class SuggestionTest(unittest.TestCase):
             s.generate(self.run)
         state = self.session.load()
         self.assertIsNone(manual_reason(state))
+        history = self.session.history()['generations'][0]
+        self.assertEqual(history['human_edits'], 0)
+        self.assertEqual(history['saved_versions'], 1)
         c = state['comments'][0]
         self.assertEqual(c['versions'][0]['suggestion']['replacement'], 'corrected\n')
         self.assertEqual(c['placement']['line'], 1)
         remember(c)
         self.assertIsNotNone(manual_reason(state))
+        self.session.save(state)
+        self.assertEqual(self.session.history()['generations'][0]['human_edits'], 1)
         # Untagged historical versions have unknown authorship, not automatic trust.
         c['versions'] = [{}]
         self.assertIsNotNone(manual_reason(state))

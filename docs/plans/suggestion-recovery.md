@@ -4,7 +4,10 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: investigate and implement package 6 guidance.
+or temporary artifacts. Current step: finish package 6 and full read-only-source
+validation. `make check-all` is running in a read-only mount with separate writable
+scratch; progress is in `/tmp/suggestion-recovery-check-all.log`. No live models or
+GitHub writes. Confirm the result before marking this plan complete.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -39,6 +42,9 @@ versions; legacy/unknown and manual history still stop auto publication. Candida
 are validated before attachment. Failed/pending legacy candidates retry on resume.
 Validation: all 74 suggestion/automation tests passed, including three new
 regressions (failed/pending legacy states are separate subcases).
+A follow-up check also found the history browser counted automatic versions as
+human edits. It now shares the automatic guard's authorship rule; the regression
+asserts both saved-version and human-edit counts, and passed.
 
 Reproduction: regenerating an untouched suggestion appends to `versions`, which
 the automatic guard mistakes for manual editing. A generated candidate rejected
@@ -102,7 +108,7 @@ require fresh verification. Ordinary text/document recovery remains supported.
 
 ### 5. Markdown edge cases — F5
 
-Status: complete. Validation rejects GFM block types 3–5 outside code fences,
+Status: complete (`fc4c369`). Validation rejects GFM block types 3–5 outside code fences,
 permits closed fenced HTML examples, and respects backtick info-string rules.
 All 81 suggestion/automation tests passed. GitHub UI rendering was not tested.
 
@@ -115,7 +121,16 @@ closed code examples. Use focused rendering/validation cases without posting.
 
 ### 6. Review coverage and test environment
 
-Status: pending investigation. Independent of packages 1–5.
+Status: implemented, full validation running. Added lifecycle coverage to both
+independent reviews, single review, and synthesis, without a finding quota. Test
+policies require checking dependencies/output locations and disclosing blocked
+checks without weakening sandbox permissions. Improved recall remains unproven.
+
+Confirmed `make lint` failed in a read-only mount while writing Python bytecode;
+it now checks syntax in memory and passes there. Make disables import caches.
+The Emacs runner compiles into temporary storage, then tests those compiled files.
+The full suite still needs writable scratch and installed frontend dependencies.
+Documented these requirements; production model sandbox permissions are unchanged.
 
 The single-provider report did not report six reproducible functional/UI defects
 (F1, F2, F3, F4, F7, F11). F5 has code/specification support. Its suite stopped at
