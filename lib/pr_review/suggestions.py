@@ -132,6 +132,8 @@ def blockers(session, comment, state, *, bulk=False):
             record = state.get('suggestion_batch', {})
             if record.get('status') != 'accepted' or not {identity(session, c) for c in selected}.issubset(set(record.get('members', []))):
                 reasons.append('Verify the selected suggestions together before staging or publishing.')
+    except Cancelled:
+        raise
     except (ApiError, KeyError, TypeError, ValueError) as exc:
         reasons.append(str(exc) + ' ' + RECOVERY)
     return reasons

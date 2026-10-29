@@ -4,7 +4,7 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: implement package 3.
+or temporary artifacts. Current step: implement package 4.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -51,7 +51,7 @@ failed candidates. Successful generation/verification is reused.
 
 ### 2. Interactive subsets and truthful verification display — F4, F11
 
-Status: complete. Accepted candidates receive combined verification even when an
+Status: complete (`4ed7d43`). Accepted candidates receive combined verification even when an
 unselected candidate was rejected. Both frontend previews use current identity
 membership when showing the saved combined result. Validation: all 76 suggestion/
 automation tests passed, including a three-candidate case proving no automatic
@@ -67,7 +67,10 @@ Overlapping or jointly rejected suggestions still cannot publish together.
 
 ### 3. Cancellation preserves staging — F2
 
-Status: pending.
+Status: complete. Cancellation now propagates out of suggestion blockers before
+publication preparation can save an unstaged comment. Regression checks both the
+in-memory staging state and unchanged saved bytes. All 77 suggestion/automation
+tests passed, including existing interrupted-generation/publication coverage.
 
 Reproduction: `Cancelled` is an `ApiError`; suggestion blockers catch it, causing
 publication preparation to unstage and save a comment before cancellation exits.

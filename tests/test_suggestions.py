@@ -391,6 +391,20 @@ class SuggestionTest(unittest.TestCase):
         self.assertFalse(result['ready'])
         self.assertFalse(any(call.args[2:] or 'payload' in call.kwargs for call in gh.call_args_list))
 
+    def test_cancelled_validation_preserves_staging_and_saved_state(self):
+        c = self.attach()
+        self.accepted(c)
+        c['status'] = 'staged'
+        self.save()
+        before = self.session.file.read_bytes()
+        with patch.object(publication, 'recover'), patch.object(publication, 'refresh', return_value=[]), \
+                patch.object(publication, 'repository_operation'), \
+                patch.object(s, 'validate', side_effect=Cancelled(signal.SIGTERM)):
+            with self.assertRaises(Cancelled):
+                publication.prepare(self.session, self.state)
+        self.assertEqual(c['status'], 'staged')
+        self.assertEqual(self.session.file.read_bytes(), before)
+
     def test_api_verification_uses_shared_operation_and_current_revision(self):
         c = self.attach()
         self.save()
