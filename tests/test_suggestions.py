@@ -225,6 +225,64 @@ class SuggestionTest(unittest.TestCase):
         self.assertEqual(c['body'], 'Comment 1')
         self.assertEqual(s.blockers(self.session, c, self.session.load()), [])
 
+    def test_regeneration_keeps_history_without_becoming_a_manual_decision(self):
+        from pr_review.automation import manual_reason
+        from pr_review.commands import remember
+        c = self.attach()
+        c['suggestion_generation']['fingerprint'] = 'older-generation'
+        self.state['mutation_tracking'] = True
+        self.state['comments'][1]['status'] = 'suppressed'
+        self.save()
+        with patch.object(s, 'invoke', return_value=({'reason': 'Needs companion edits.', 'suggestion': None}, 'log')):
+            s.generate(self.run)
+        state = self.session.load()
+        self.assertIsNone(manual_reason(state))
+        c = state['comments'][0]
+        self.assertEqual(c['versions'][0]['suggestion']['replacement'], 'corrected\n')
+        self.assertEqual(c['placement']['line'], 1)
+        remember(c)
+        self.assertIsNotNone(manual_reason(state))
+        # Untagged historical versions have unknown authorship, not automatic trust.
+        c['versions'] = [{}]
+        self.assertIsNotNone(manual_reason(state))
+
+    def test_invalid_candidate_preserves_placement_and_resume_regenerates(self):
+        self.state['comments'][1]['status'] = 'suppressed'
+        self.save()
+        original = copy.deepcopy(self.state['comments'][0]['placement'])
+        candidate = dict(target=dict(path='source.txt', side='RIGHT', start_line=2, line=2),
+                         original='wrong\n', replacement='fixed\n')
+        with patch.object(s, 'invoke', return_value=({'reason': 'Local fix.', 'suggestion': candidate}, 'failed-log')) as model:
+            s.generate(self.run)
+        self.assertEqual(model.call_count, 1)
+        c = self.session.load()['comments'][0]
+        self.assertEqual(c['placement'], original)
+        self.assertNotIn('suggestion', c)
+        self.assertEqual(c['suggestion_generation']['status'], 'failed')
+        self.assertEqual(c['suggestion_generation']['log_path'], 'failed-log')
+        candidate['original'] = 'new\n'
+        with patch.object(s, 'invoke', side_effect=[({'reason': 'Corrected.', 'suggestion': candidate}, 'gen'), (ACCEPT, 'verify')]) as model:
+            s.generate(self.run)
+        self.assertEqual(model.call_count, 2)
+        c = self.session.load()['comments'][0]
+        self.assertTrue(s.verified(self.session, c))
+        with patch.object(s, 'invoke', side_effect=AssertionError('Successful work must be reused')):
+            s.generate(self.run)
+
+    def test_resume_replaces_legacy_failed_or_pending_attached_candidates(self):
+        for status in ('failed', 'pending'):
+            with self.subTest(status=status):
+                c = self.attach(start=2, end=2)
+                c['suggestion']['original'] = 'wrong\n'
+                c['suggestion_generation']['status'] = status
+                self.state['comments'][1]['status'] = 'suppressed'
+                self.save()
+                candidate = dict(target=dict(path='source.txt', side='RIGHT', start_line=2, line=2),
+                                 original='new\n', replacement='fixed\n')
+                with patch.object(s, 'invoke', side_effect=[({'reason': 'Corrected.', 'suggestion': candidate}, 'gen'), (ACCEPT, 'verify')]) as model:
+                    s.generate(self.run)
+                self.assertEqual(model.call_count, 2)
+                self.assertTrue(s.verified(self.session, self.session.load()['comments'][0]))
     def test_edit_remove_and_history_keep_finding_and_invalidate_acceptance(self):
         c = self.attach(start=2, end=2)
         self.accepted(c)

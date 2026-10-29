@@ -198,6 +198,10 @@ finding. An attached invalid, rejected, or uncertain suggestion blocks that comm
 in automatic mode it blocks the **entire batch before publication**. Generation
 failures also remain visible and block publication. Resume interrupted analysis,
 edit and verify the replacement, remove the suggestion, or suppress the finding.
+Resuming retries failed generation without moving the finding to an invalid
+candidate's target. Regenerated candidates remain in saved history; this automatic
+history alone does not count as a manual decision. Untagged legacy history remains
+conservative and requires interactive completion.
 If HEAD changed, rerun analysis against the new snapshot. Existing restrictions
 on automatic publication after manual intervention still apply: finish inspected
 manual changes interactively.

@@ -13,8 +13,8 @@ def comment_by_id(state, identity):
     return comment
 
 
-def remember(comment):
-    comment.setdefault("versions", []).append({"at": now(), **{k: copy.deepcopy(comment.get(k)) for k in
+def remember(comment, *, actor="manual"):
+    comment.setdefault("versions", []).append({"at": now(), "actor": actor, **{k: copy.deepcopy(comment.get(k)) for k in
         ("body", "placement", "override", "status", "provenance", "suggestion", "suggestion_generation", "suggestion_original_placement")}})
 
 

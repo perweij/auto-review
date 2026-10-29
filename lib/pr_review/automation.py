@@ -31,7 +31,8 @@ def manual_reason(state, *, completed_history=False):
         return 'Saved draft authorship is unknown. Finish this saved review in Emacs.'
     if state.get('manual_intervention') or state.get('documents') or any(
             c.get('human_edited') or c.get('override')
-            or c.get('versions') or c.get('classification') == 'HUMAN' for c in state['comments']):
+            or any(v.get('actor') != 'automatic' for v in c.get('versions', []))
+            or c.get('classification') == 'HUMAN' for c in state['comments']):
         return 'This review contains manual decisions. Finish it in Emacs.'
     return None
 

@@ -4,7 +4,7 @@
 
 Read repository instructions, this plan, `git status`, and recent commits before
 continuing. Update this file with each work package. Do not depend on chat history
-or temporary artifacts. Current step: implement package 1.
+or temporary artifacts. Current step: implement package 2.
 
 The pre-existing owner assessment/resume repair is committed separately as
 `b016b30`. Validation: `make lint test-api`, 335 Python tests passed. It separates
@@ -34,7 +34,11 @@ draft comment IDs. More findings do not necessarily mean better findings.
 
 ### 1. Generation history and failed candidates — F1, F3
 
-Status: pending.
+Status: complete. Generated history is tagged automatic and remains in recoverable
+versions; legacy/unknown and manual history still stop auto publication. Candidates
+are validated before attachment. Failed/pending legacy candidates retry on resume.
+Validation: all 74 suggestion/automation tests passed, including three new
+regressions (failed/pending legacy states are separate subcases).
 
 Reproduction: regenerating an untouched suggestion appends to `versions`, which
 the automatic guard mistakes for manual editing. A generated candidate rejected

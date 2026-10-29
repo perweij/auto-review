@@ -314,13 +314,16 @@ def generate(run):
             if generation.get('status') == 'removed':
                 continue
             fingerprint = generation_identity(session, comment)
-            if generation.get('fingerprint') == fingerprint and (comment.get('suggestion') or generation.get('status') == 'omitted'):
+            if generation.get('fingerprint') == fingerprint and (generation.get('status') == 'omitted'
+                    or (generation.get('status') == 'generated' and comment.get('suggestion'))):
                 continue
             if comment.get('suggestion'):
                 from .commands import remember
-                remember(comment)
+                remember(comment, actor='automatic')
                 comment.pop('suggestion')
                 comment['placement'] = comment.pop('suggestion_original_placement', comment['automatic'])
+                comment['status'] = 'unstaged'
+                state.pop('prepared', None)
             if (comment['classification'] != 'NEW' or len(comment['finding_ids']) != 1
                     or comment['placement'].get('kind') != 'inline'):
                 comment['suggestion_generation'] = dict(status='omitted', reason='Requires one finding in a new inline comment.', fingerprint=fingerprint)
@@ -333,6 +336,7 @@ def generate(run):
                 with checkout(session, []) as root:
                     value, log = invoke(session, 'suggestions', dict(head=session.git.head, merge_base=session.git.base, comment=comment,
                         diff=session.git.diff(comment['placement']['path'])['patch']), root)
+                comment['suggestion_generation']['log_path'] = log
                 if set(value) != {'reason', 'suggestion'} or not isinstance(value['reason'], str) or not value['reason'].strip():
                     raise ApiError('invalid_suggestion', 'Generation returned invalid suggestion data.')
                 candidate = value['suggestion']
@@ -343,17 +347,20 @@ def generate(run):
                             or not isinstance(candidate['original'], str) or not isinstance(candidate['replacement'], str)):
                         raise ApiError('invalid_suggestion', 'Generation returned an invalid replacement.')
                     target = session.git.anchor(candidate['target'])
+                    suggestion = {**candidate, 'target': target, 'head': session.git.head}
+                    # Invalid model output must not move the ordinary finding or
+                    # become an attached candidate that resume mistakes for success.
+                    validate(session, {**comment, 'suggestion': suggestion, 'placement': target})
                     comment['suggestion_original_placement'] = copy.deepcopy(comment['placement'])
-                    comment['suggestion'] = {**candidate, 'target': target, 'head': session.git.head}
+                    comment['suggestion'] = suggestion
                     comment['placement'] = target
                     comment['status'] = 'unstaged'
                     state.pop('prepared', None)
                     comment['suggestion_generation'] = dict(status='generated', reason=value['reason'], log_path=log)
-                    validate(session, comment)
             except Cancelled:
                 raise
             except ApiError as exc:
-                comment['suggestion_generation'] = dict(status='failed', reason=str(exc))
+                comment['suggestion_generation'].update(status='failed', reason=str(exc))
             finally:
                 comment['suggestion_generation']['fingerprint'] = fingerprint
                 session.save(state)
