@@ -121,7 +121,7 @@ closed code examples. Use focused rendering/validation cases without posting.
 
 ### 6. Review coverage and test environment
 
-Status: complete. Added lifecycle coverage to both
+Status: complete (`dc68271`). Added lifecycle coverage to both
 independent reviews, single review, and synthesis, without a finding quota. Test
 policies require checking dependencies/output locations and disclosing blocked
 checks without weakening sandbox permissions. Improved recall remains unproven.
