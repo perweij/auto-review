@@ -154,6 +154,10 @@ unstaged changes; inspect and resume that batch with `r` for remaining verificat
 When the implementation succeeded and only review was incomplete, resuming
 unchanged work retries that review and the combined check, without rerunning the
 successful fixer. Review can use disposable Git fixtures outside the checkout.
+Concrete defects, including failing regression tests, request changes and enter
+the bounded repair pass instead. An unchanged completed rejection resumes with
+its saved findings if a repair attempt remains. An exhausted repair budget needs
+inspected/adopted corrections or explicit replanning; `r` does not reset it.
 Other operations retain explicit completion and stopped/error messages.
 
 Owner `F` is unbound; interactive provider handoff is deferred. Reviewer `F`

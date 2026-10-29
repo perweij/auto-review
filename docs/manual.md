@@ -422,6 +422,12 @@ If implementation succeeded but review was incomplete, `r` retries that review
 against the unchanged fix, then checks the combined result. Reviewers can run
 focused tests with disposable files and Git repositories in an attempt's scratch
 directory; the Owner checkout and its real Git index remain protected.
+Review explicitly distinguishes passing verification, concrete defects requiring
+changes, and verification that could not finish. A failing regression test proving
+a defect enters the bounded repair pass; an unavailable test environment pauses
+for verification to be retried. Resuming an unchanged rejection passes the saved
+findings to the fixer if its repair attempt remains. Resume does not reset an
+exhausted repair budget: inspect/adopt manual corrections or replan unfinished work.
 
 After committing, return to Owner and press `g`. An exact match to a verified
 fix automatically finishes its local findings and moves the completed fix under

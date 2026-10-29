@@ -214,6 +214,9 @@ Resuming an unchanged task with successful implementation and incomplete review
 retries the review, preserving the original before/after scope and providing the
 previous verification blocker. Source, Git state, settings, and feedback checks
 still apply. Incomplete implementation requires the fixer again.
+An unchanged completed rejection supplies its saved findings to the remaining
+automatic repair attempt on resume. Resuming does not reset an exhausted repair
+budget; inspect/adopt manual corrections or explicitly replan unfinished work.
 Existing staged paths must be exact versions from this fix;
 unrelated staging and partial/manual variants are retained without alteration.
 Preparation installs only the changed paths' saved blobs through a temporary
@@ -398,9 +401,17 @@ repairing. Plans cover every item exactly once, can combine items, and include
 per-item expected outcomes and an acyclic dependency graph. Tasks run sequentially
 in topological order with selection order breaking ties. Each task and the final
 combined patch receive review; a checkpoint permits at most one automatic repair.
-Each result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
-`complete`, and `blocking`. Outcome statuses are `fixed`, `already_addressed`,
-`clarify`, and `no_change`; readiness requires complete, nonblocking verification.
+Each saved result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
+`complete`, and `blocking`. New review-model results use `assessment` instead of
+`complete`: `passed` means a completed nonblocking assessment; `changes_requested`
+means concrete implementation defects were established; `incomplete` means
+verification could not finish or requires human judgement. The backend derives
+the saved `complete` field from that assessment for compatibility. A failing test
+that demonstrates a defect requests changes; it is not unfinished verification.
+Contradictory assessments are rejected. Existing reports without `assessment`
+retain their previous interpretation; no classification is guessed from prose.
+Outcome statuses are `fixed`, `already_addressed`, `clarify`, and `no_change`;
+readiness still requires complete, nonblocking verification.
 
 Plan `items` and `expected.item` use feedback keys; `depends_on` uses task IDs
 defined in the same plan. An invalid plan can receive two correction calls per

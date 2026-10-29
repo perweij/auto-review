@@ -52,6 +52,17 @@ def validate_plan(value, items):
 
 
 def validate_result(value, keys):
+    # Review models classify the assessment, not whether the implementation is
+    # finished. Keep the derived legacy field for saved-state/API consumers.
+    # Old reports remain readable; never guess their intent from prose.
+    if isinstance(value, dict) and 'assessment' in value:
+        assessment = value['assessment']
+        if assessment not in ('passed', 'changes_requested', 'incomplete'):
+            raise ApiError('invalid_result', 'Unknown owner review assessment.')
+        complete = assessment != 'incomplete'
+        if 'complete' in value and (type(value['complete']) is not bool or value['complete'] != complete):
+            raise ApiError('invalid_result', 'Owner review assessment contradicts its completion field.')
+        value = {**value, 'complete': complete}
     if (not isinstance(value, dict) or not isinstance(value.get("summary"), str)
             or type(value.get("complete")) is not bool
             or any(not isinstance(value.get(k), list) or any(not isinstance(x, str) for x in value[k]) for k in ("checks", "blocking"))
@@ -64,6 +75,10 @@ def validate_result(value, keys):
         raise ApiError("invalid_result", "Every feedback outcome requires a status and evidence.")
     if sorted(o["item"] for o in outcomes) != sorted(keys):
         raise ApiError("invalid_result", "Verification must assess each selected item exactly once.")
+    if value.get('assessment') == 'passed' and (value['blocking'] or any(o['status'] == 'clarify' for o in outcomes)):
+        raise ApiError('invalid_result', 'A passed owner review cannot contain blockers or unanswered questions.')
+    if value.get('assessment') == 'changes_requested' and (not value['blocking'] or any(o['status'] == 'clarify' for o in outcomes)):
+        raise ApiError('invalid_result', 'Changes requested requires concrete defects, not unanswered questions.')
     return value
 
 
@@ -88,12 +103,16 @@ def context(session, state, batch, keys, before):
 
 
 def run_task(session, state, batch, task):
-    # An incomplete assessment is a review retry, not a new implementation.
     # execute() has already checked source, Git state, feedback, and settings.
-    if (task["status"] == "needs_attention" and task.get("review", {}).get("complete") is False
+    # An unfinished assessment retries review. A completed rejection instead
+    # supplies the existing findings to the bounded repair path below.
+    saved_review = None
+    if (task["status"] == "needs_attention" and task.get('review')
             and task.get("implementation", {}).get("complete") is True
             and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]):
         task["status"] = "reviewing"
+        if task['review']['complete'] and task['review']['blocking']:
+            saved_review = task['review']
     if batch.get("verify_only") and task["status"] != "reviewing":
         task.update(before=batch["checkpoint"], status="reviewing", implementation={"summary": "Read-only verification requested"})
     if task["status"] != "reviewing":
@@ -112,7 +131,8 @@ def run_task(session, state, batch, task):
         data["implementation_report"] = task["implementation"]
         if task.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = task["review"]
-        review = validate_result(models.invoke(session, state, batch, "review", data), task["items"])
+        review = saved_review if saved_review is not None else validate_result(models.invoke(session, state, batch, "review", data), task["items"])
+        saved_review = None
         task["review"] = review
         task["after"] = batch["checkpoint"]
         session.save(state)
@@ -131,6 +151,8 @@ def run_task(session, state, batch, task):
             task["status"] = "reviewing"
             session.save(state)
             continue
+        if not batch.get('verify_only') and review['complete'] and review['blocking'] and task['repairs'] >= 1:
+            emit('progress', message='Automatic task repair limit reached. Inspect and adopt manual corrections, or explicitly replan unfinished work.')
         task["status"] = "needs_attention"
         session.save(state)
         return False
