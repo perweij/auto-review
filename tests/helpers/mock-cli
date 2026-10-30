@@ -221,6 +221,10 @@ if [[ $stage == codex && -n ${MOCK_CODEX_EVENT:-} ]]; then
     case $MOCK_CODEX_EVENT in
         git) jq -nc --arg path "$PWD" '{type:"error",message:($path+" is not a git repository")}' ;;
         failed) echo '{"type":"turn.failed","error":{"message":"fixture-provider-error-do-not-replay"}}' ;;
+        sandbox)
+            jq -nc --arg text "Review blocked: commands failed before execution with bwrap: Can't mount proc on /proc: Operation not permitted" '{type:"item.completed",item:{type:"agent_message",text:$text}}'
+            echo '{"type":"turn.completed"}'
+            exit 0 ;;
         retry) echo '{"type":"error","message":"Reconnecting... 1/5: fixture-provider-error-do-not-replay"}' ;;
     esac
     if [[ ${MOCK_CODEX_EVENT_HANG:-} == 1 ]]; then

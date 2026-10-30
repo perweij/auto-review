@@ -16,7 +16,7 @@ load helpers/fixture
     grep -q 'codex.md' "$FIXTURE/synthesis-stdin"
     grep -q 'pr-discussion.json' "$FIXTURE/synthesis-stdin"
     jq -se 'any(.[]; .tool == "claude" and (.args | index("/code-review high --max-findings default refs/pr-review/7/base")))' "$FIXTURE/calls.jsonl"
-    jq -se 'any(.[]; .tool == "codex" and (.args | index("sandbox_mode=read-only")) and (.args | index("--ephemeral")) and (.args | index("--strict-config")))' "$FIXTURE/calls.jsonl"
+    jq -se 'any(.[]; .tool == "codex" and (.args | index("sandbox_mode=danger-full-access")) and (.args | index("--ephemeral")) and (.args | index("--strict-config")))' "$FIXTURE/calls.jsonl"
     jq -se 'all(.[] | select((.args | join(" ") | contains("PR_REVIEW_AUTH_OK")) | not);
         .args | all(.[]; test("^--(fix|comment|bare|setting-sources|strict-mcp-config)$|^--dangerously|^checks$|check-runs") | not))' "$FIXTURE/calls.jsonl"
     [ -z "$(git -C "$FIXTURE/repo-review-pr-7" status --porcelain)" ]

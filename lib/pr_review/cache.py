@@ -83,6 +83,11 @@ def reusable(run, stage, output, expected):
     record = run.manifest.get('phases', {}).get(stage, {})
     if not output.is_file() or not output.stat().st_size or record.get('status') != 'completed' or record.get('output_hash') != hash_file(output):
         return False
+    # Older versions accepted these provider diagnostics as completed reports.
+    # Preserve their files, but rerun them after the environment is repaired.
+    from .providers import reported_execution_failure
+    if reported_execution_failure(output.read_text(errors='replace')):
+        return False
     prior = record.get('inputs')
     if prior is not None:
         if fingerprint(prior) != record.get('fingerprint'):

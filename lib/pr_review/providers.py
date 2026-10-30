@@ -60,7 +60,7 @@ def review_command(settings, runtime, stage, directory, base_ref):
     text = lambda name: (ROOT / "prompts" / name).read_text().rstrip("\n")
     codex = ["codex", "exec", "-m", settings["codex_model"], "--strict-config",
              "-c", "model_reasoning_effort=" + settings["codex_effort"],
-             "-c", "sandbox_mode=read-only", "-c", "approval_policy=never"]
+             "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never"]
     if stage == "codex":
         codex.insert(2, "review")
         return codex + ["-c", "developer_instructions=" + json.dumps((ROOT / "prompts/independent.txt").read_text(), ensure_ascii=False),
@@ -117,7 +117,7 @@ def probe_command(provider, runtime, response):
                 "--strict-mcp-config", "--setting-sources", "user", "--system-prompt",
                 "You are an authentication diagnostic. Follow the requested output exactly.", "--", prompt]
     return ["codex", "exec", "-m", runtime.probe_model, "--strict-config", "--skip-git-repo-check",
-            "-c", "model_reasoning_effort=low", "-c", "sandbox_mode=read-only", "-c", "approval_policy=never",
+            "-c", "model_reasoning_effort=low", "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never",
             "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-o", str(response), "--", prompt]
 
 
@@ -126,6 +126,19 @@ def adaptation_command(settings):
     model, effort = settings[provider + "_model"], settings[provider + "_effort"]
     if provider == "codex":
         return ["codex", "exec", "-m", model, "--strict-config", "--skip-git-repo-check", "-c", "model_reasoning_effort=" + effort,
-                "-c", "sandbox_mode=read-only", "-c", "approval_policy=never", "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-"]
+                "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never", "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-"]
     return ["claude", "-p", "--model", model, "--effort", effort, "--tools", "", "--strict-mcp-config",
             "--mcp-config", '{"mcpServers":{}}', "--no-session-persistence", "--output-format", "json"]
+
+
+def reported_execution_failure(text):
+    """Conservatively reject a report of a known sandbox launch failure.
+
+    This is a diagnostic guard, not a proof of successful evidence collection.
+    Only the final model response belongs here, never prompts or tool output
+    (which may legitimately quote this error while reviewing a regression fix).
+    """
+    return (isinstance(text, str)
+            and "bwrap: Can't mount proc on /proc: Operation not permitted" in text
+            and bool(re.search(r"review blocked|assessment incomplete|unable to read|failed before execution",
+                               text, re.I)))

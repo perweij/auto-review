@@ -520,7 +520,7 @@ class SuggestionTest(unittest.TestCase):
                 self.assertEqual(kwargs['cwd'], self.f.repo)
                 if provider == 'codex':
                     atomic_json(Path(argv[argv.index('-o') + 1]), ACCEPT)
-                    self.assertIn('sandbox_mode=workspace-write', argv)
+                    self.assertIn('sandbox_mode=danger-full-access', argv)
                     return Result(0, '', '', events=[])
                 return Result(0, '', '', events=[dict(type='result', subtype='success', structured_output=ACCEPT)])
             with patch.object(s, 'process', side_effect=execute):

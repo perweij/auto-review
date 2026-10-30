@@ -32,7 +32,9 @@ The backend uses the Python standard library; no pip installation is needed.
 Model runs and live authentication probes consume provider usage. Code and review
 context are sent to the selected providers.
 
-Use trusted repositories in a container sandbox, such as Podman. Project agent
+Use trusted repositories in a container sandbox, such as Podman. Codex runs with
+`sandbox_mode=danger-full-access` and `approval_policy=never`, relying on that
+container for isolation instead of starting an additional sandbox. Project agent
 settings load normally, and changes to agent configuration require explicit
 trust. See the [trust and credential details](docs/manual.md#trust-credentials-and-github-access).
 

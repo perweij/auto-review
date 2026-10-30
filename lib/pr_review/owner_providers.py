@@ -90,22 +90,16 @@ def argv(choice, runtime, role, directory, schema):
     if provider == "codex":
         args = ["codex", "exec", "-m", choice["model"], "--strict-config", "-c",
                 "model_reasoning_effort=" + choice["effort"], "-c",
-                "sandbox_mode=" + ("read-only" if role == "plan" else "workspace-write"),
+                "sandbox_mode=danger-full-access",
                 "-c", "shell_environment_policy.set.TMPDIR=" + json.dumps(str(directory / "scratch")),
                 "-c", "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
                 "-c", "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
                 "-c", "approval_policy=never", "--ephemeral", "--json", "--output-schema", str(schema),
                 "-o", str(directory / "result.json")]
         if role == "review":
-            # Workspace-write always grants cwd. Use an isolated working root,
-            # never the owner checkout, and remove ambient extra write grants.
-            args += ["--cd", str(directory / "scratch"), "--skip-git-repo-check", "--ignore-rules",
-                     "-c", "sandbox_workspace_write.writable_roots=[]",
-                     "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-                     "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
-                     "-c", "sandbox_workspace_write.network_access=false"]
-        elif role == "fix":
-            args += ["--add-dir", str(directory / "scratch")]
+            # Keep verification scratch separate from the owner checkout.
+            # Execution isolation is provided by the enclosing container.
+            args += ["--cd", str(directory / "scratch"), "--skip-git-repo-check", "--ignore-rules"]
         return args + ["-"]
     denied = list(DENIED_TOOLS)
     if role == "fix":

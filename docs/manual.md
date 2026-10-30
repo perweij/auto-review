@@ -36,8 +36,13 @@ Use authenticated CLI installations (`gh auth login`, `codex login`, and
 `gh auth setup-git`.
 
 The intended environment is a container sandbox (such as podman) and trusted
-organization repositories. Project agent settings load normally. The CLI requires
-confirmation when the PR changes agent configuration. Claude defaults to `auto`;
+organization repositories. Every Codex model invocation (including probes,
+review, planning, fixes, suggestions, and verification) explicitly uses
+`sandbox_mode=danger-full-access` and `approval_policy=never`. This avoids an
+additional bubblewrap sandbox inside the container. The backend calls plain
+`codex`; no `codex-dangerous` wrapper is required. Project agent settings load
+normally. The CLI requires confirmation when the PR changes agent configuration.
+Claude defaults to `auto`;
 use `PR_REVIEW_CLAUDE_PERMISSION_MODE=dontAsk` when running directly on a host.
 
 ## Running a review
@@ -519,8 +524,10 @@ Opening or editing settings does not invoke inference.
 The planner can combine related concerns and order tasks by dependency. Tasks run
 sequentially in a dedicated `pr-owner/...` branch and linked worktree, preserving
 every original feedback destination. The fixer may edit source; the planner and
-reviewer are read-only. Each task and the combined patch get an independent
-review, with at most one automatic repair at each checkpoint. Incomplete checks,
+reviewer are instructed not to edit source. For Codex this is a workflow rule,
+not an OS-enforced read-only sandbox; the backend also checks repository
+integrity. Each task and the combined patch get an independent review, with at
+most one automatic repair at each checkpoint. Incomplete checks,
 clarification, or remaining blocking findings pause the batch. Owner checks use
 the focused 60-second-per-check/five-minute cumulative instruction limits.
 

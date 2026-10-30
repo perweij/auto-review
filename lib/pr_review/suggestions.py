@@ -203,11 +203,7 @@ def invoke(session, stage, context, cwd):
     (directory / 'prompt.txt').write_text(prompt)
     argv = providers.review_command(configuration, runtime, stage, directory, session.git.base)
     if stage == 'suggestion-verify' and configuration['processing_provider'] == 'codex':
-        argv[argv.index('sandbox_mode=read-only')] = 'sandbox_mode=workspace-write'
-        argv[2:2] = ['--ignore-rules', '-c', 'sandbox_workspace_write.writable_roots=[]',
-                     '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
-                     '-c', 'sandbox_workspace_write.exclude_slash_tmp=true',
-                     '-c', 'sandbox_workspace_write.network_access=false']
+        argv[2:2] = ['--ignore-rules']
     env, removed = providers.environment(configuration['processing_provider'])
     from .sessions import say
     say(f'[{stage}] {configuration["processing_provider"]} / {configuration[configuration["processing_provider"] + "_model"]}; artifacts: {directory}')

@@ -2021,7 +2021,7 @@ class PlanTest(unittest.TestCase):
         value["html_url"] = "https://github.com/Org/Repo/pull/7#issuecomment-100"
         self.assertTrue(owner_publication.valid_receipt(session, action, value))
 
-    def test_provider_roles_have_distinct_write_policy(self):
+    def test_provider_roles_use_container_isolation_and_separate_scratch(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             schema = directory / "schema.json"
@@ -2029,19 +2029,16 @@ class PlanTest(unittest.TestCase):
             for role in ("plan", "fix", "review"):
                 choice = {"provider": "codex", "model": "chosen", "effort": "medium"}
                 args = owner_providers.argv(choice, Runtime(), role, directory, schema)
-                self.assertIn("sandbox_mode=" + ("read-only" if role == "plan" else "workspace-write"), args)
+                self.assertIn("sandbox_mode=danger-full-access", args)
+                self.assertFalse(any(a.startswith("sandbox_workspace_write.") for a in args))
                 self.assertIn("approval_policy=never", args)
                 if role == "review":
                     self.assertEqual(args[args.index("--cd") + 1], str(directory / "scratch"))
                     self.assertIn("--skip-git-repo-check", args)
                     self.assertIn("--ignore-rules", args)
-                    self.assertIn("sandbox_workspace_write.writable_roots=[]", args)
-                    self.assertIn("sandbox_workspace_write.exclude_tmpdir_env_var=true", args)
-                    self.assertIn("sandbox_workspace_write.exclude_slash_tmp=true", args)
-                    self.assertIn("sandbox_workspace_write.network_access=false", args)
                 elif role == "fix":
                     self.assertNotIn("--cd", args)
-                    self.assertEqual(args[args.index("--add-dir") + 1], str(directory / "scratch"))
+                    self.assertNotIn("--add-dir", args)
                 else:
                     self.assertNotIn("--cd", args)
                     self.assertNotIn("--add-dir", args)

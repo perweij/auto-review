@@ -96,6 +96,20 @@ class Review(Store):
         self.save()
         if result.returncode:
             self.model_failure(stage, provider, result.returncode, output, stderr, probe)
+        # A provider can exit successfully after reporting that none of its
+        # commands ran. Do not cache that diagnostic as completed analysis.
+        responses = [e.get('item', {}).get('text', '') for e in result.events
+                     if e.get('type') == 'item.completed' and isinstance(e.get('item'), dict)
+                     and e['item'].get('type') == 'agent_message']
+        responses += [json.dumps(e.get('structured_output') or e.get('result', ''))
+                      for e in result.events if e.get('type') == 'result']
+        if responses and providers.reported_execution_failure(responses[-1]):
+            record.update(status='failed', failure_reason='sandbox_unavailable')
+            self.active = None
+            self.save()
+            raise ApiError('model_failed', f"{stage}: model reported a sandbox launch failure "
+                           "(bwrap cannot mount /proc). Review inputs could not be inspected. "
+                           f"Repair the provider execution environment and retry. See {output}")
         return result, output
 
     def model_failure(self, stage, provider, rc, output, stderr, probe=False):
