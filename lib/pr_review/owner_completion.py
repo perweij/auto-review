@@ -41,7 +41,7 @@ def reconcile(session, state):
             fingerprint = item["fingerprint"]
             commits = batch.get("commit_progress", {}).get("items", {}).get(item["key"])
             proof = None
-            if (item["kind"] == "local_review" and not item.get("missing")
+            if (item["kind"] in ("local_review", "issue_plan") and not item.get("missing")
                     and batch.get("status") == "ready" and commits
                     and not batch.get("discussion_stale") and not batch.get("integrity_failure")
                     and not batch.get("commit_execution", {}).get("inspection_required")

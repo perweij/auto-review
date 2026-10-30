@@ -8,13 +8,16 @@ from . import operations, publication, settings, models, workflow, pulls
 
 def dispatch(request):
     operation = request.get("command")
+    if operation in ("issue-run", "issue-read", "issue-eligibility"):
+        from .issues import dispatch as issue_dispatch
+        return issue_dispatch(request)
     if isinstance(operation, str) and (operation.startswith("owner-") or operation == "toolkit"):
         from .owner import dispatch as owner_dispatch
         return owner_dispatch(request)
     if operation == "capabilities":
         from .owner import COMMANDS
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "thread-state", "followup", *COMMANDS]}
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow"],
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":

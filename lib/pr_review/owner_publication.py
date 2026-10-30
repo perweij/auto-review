@@ -36,7 +36,7 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
         if not item or item.get('missing'):
             issues.append({'item': key, 'reason': 'Feedback is no longer available; its commit association is retained as history.'})
             continue
-        if item["kind"] == "local_review":
+        if item["kind"] in ("local_review", "issue_plan"):
             continue
         if automatic and batch.get("commit_progress", {}).get("items", {}).get(key) != association["commits"]:
             issues.append({"item": key, "reason": "An explicit association differs from this fix; inspect its reply."})
@@ -128,7 +128,7 @@ def associate(session, state, request):
 
 
 def new_reply(item, body, **extra):
-    if item["kind"] == "local_review":
+    if item["kind"] in ("local_review", "issue_plan"):
         raise ApiError("local_only", "This finding is local; choose a GitHub conversation to compose a reply.")
     return {"id": uuid.uuid4().hex, "source": item["key"], "fingerprint": item["fingerprint"],
             "target": {"kind": "reply", "root_id": item["root_id"]} if item["kind"] == "thread" else {"kind": "timeline"},
@@ -174,7 +174,7 @@ def invalidate(session, state, remote):
 
 def blockers(session, state, reply, remote, allow_unpushed=False):
     item = session.items(state, [reply["source"]])[0]
-    if item["kind"] == "local_review":
+    if item["kind"] in ("local_review", "issue_plan"):
         raise ApiError("local_only", "Local findings do not have a GitHub reply destination.")
     if reply.get("needs_attention") or item["fingerprint"] != reply["fingerprint"]:
         raise ApiError("stale_discussion", "Inspect and acknowledge the changed reply context first.")

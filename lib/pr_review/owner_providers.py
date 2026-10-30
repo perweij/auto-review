@@ -149,6 +149,11 @@ def invoke(session, state, batch, role, context):
         "For local_review feedback, comments contain the saved wording selected by the user; source contains "
         "the original review as historical context. Recheck the concern against current code, especially when "
         "the original reviewed commit differs. A local finding has no GitHub reply destination. "
+        "For issue_plan items, implement only the approved issue plan and acceptance criteria in source. "
+        "If requirements are ambiguous or expand scope, return clarify with questions; do not guess. "
+        "An issue_plan has no GitHub reply destination. "
+        "When approved_issue_plan is supplied, it bounds every task, including later PR feedback. "
+        "Return clarify rather than expand its scope or acceptance criteria. "
         "Do not claim verification you did not perform. In structured output, item identifiers must equal the "
         "supplied feedback key strings verbatim; never append titles or descriptions to identifiers.\n" + policy + "\n"
         + "Owner checkout (the source of truth, including uncommitted and untracked fixes): "
@@ -204,21 +209,11 @@ def invoke(session, state, batch, role, context):
         batch["checkpoint"] = after
         if owner_git.admin(session, state) != identity or (role != "fix" and before["tree"] != after["tree"]):
             raise ApiError("integrity_failed", "Provider changed protected owner state; inspect the retained worktree.")
-        if result.returncode:
-            raise ApiError("model_failed", f"Owner {role} failed; inspect {directory}.")
-        if choice["provider"] == "codex":
-            value = read_json(directory / "result.json")
-            if not any(e.get("type") == "turn.completed" for e in result.events):
-                raise ApiError("model_failed", "Codex did not complete the owner operation.")
-        else:
+        from .structured import response
+        value = response(choice, result, directory)
+        if choice["provider"] == "claude":
             events = [e for e in result.events if e.get("type") == "result"]
-            if not events or events[-1].get("is_error") or events[-1].get("subtype") != "success":
-                raise ApiError("model_failed", "Claude did not complete the owner operation.")
-            event = events[-1]
-            record["permission_denials"] = event.get("permission_denials", [])
-            value = event.get("structured_output") or json.loads(event.get("result", ""))
-        if not isinstance(value, dict):
-            raise ApiError("model_failed", "Owner provider returned no structured result.")
+            record["permission_denials"] = events[-1].get("permission_denials", [])
         write_json(directory / "result.json", value)
         record.update(status="complete", result=value)
         return value

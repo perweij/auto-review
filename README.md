@@ -141,3 +141,23 @@ and test commands. `make check-backend` runs the deterministic backend checks;
 
 GNU General Public License, version 3 or later (`GPL-3.0-or-later`).
 See [LICENSE](LICENSE) for the full text.
+
+## Fix an issue from the terminal
+
+`fix-issue` plans on the GitHub issue, then uses the shared Owner backend to
+implement, commit, push, and review the approved fix:
+
+```sh
+bin/fix-issue -i 123
+bin/fix-issue -i 123 --approve 1
+bin/fix-issue -p 456
+```
+
+Repeat the command after answering questions or receiving review feedback.
+Questions and revisioned plans remain on the issue. A draft PR is bootstrapped
+with an empty commit after approval; implementation runs in an isolated Owner
+worktree. Successful verification and configured full reviews mark the PR ready.
+
+`--yolo` skips plan approval for that invocation; unanswered questions still
+block. `--force` overrides assignment checks only. See the
+[issue workflow](docs/manual.md#issue-fixing) for eligibility, settings, and recovery.

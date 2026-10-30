@@ -740,3 +740,104 @@ version-1 runs remain readable but require a new run for discussion-aware public
 | A publication response is uncertain | Use reviewer `resolve` or owner `recover` to read back GitHub state before another send. |
 | An owner fix is paused | Inspect the verification blocker and current diff, then resume the selected batch. Use `--adopt` only after inspecting manual changes and unstaging them. |
 | A model is silent | Check the activity timestamps and logs. There is no default model deadline; cancel with Ctrl-C or configure `PR_REVIEW_MODEL_TIMEOUT`. |
+
+## Issue fixing
+
+`bin/fix-issue` automates planning, implementation, pushes, and subsequent review
+fixes. Its invocation authorizes these GitHub writes. It uses the existing Owner
+fix engine and reviewer/synthesis configuration. Emacs Owner commands retain
+their explicit publication behavior.
+
+Run from a checkout with a GitHub remote:
+
+```sh
+fix-issue -i 123 --reviewers codex
+fix-issue -i 123 --approve 1
+fix-issue -p 456
+```
+
+Install the entry point alongside `pr-review` (keep `bin`, `lib`, and `prompts`
+together), or symlink `bin/fix-issue` into your PATH. Python and provider
+requirements are the same as for `pr-review`.
+
+### Eligibility and planning
+
+The issue must be open and have a description. Both issue and PR must be
+unassigned or assigned exclusively to the authenticated GitHub user. `-f` /
+`--force` overrides only those assignment checks. Assignments are not changed.
+There must be at most one open explicitly associated PR, in the same repository;
+`-p` requires one linked issue. Forks and ambiguous relationships block execution.
+On first adoption the PR branch may contain only empty single-parent commits.
+Any source, documentation, configuration, or test changes prevent adoption.
+A prior merged associated PR requires manual assessment.
+
+The processing provider inspects a dedicated planning worktree and posts numbered
+questions or a revisioned plan on the issue. Answer in issue comments; reference
+question IDs or quote their wording. Missing details are clarified before coding.
+Approve with an issue comment `/fix-issue approve REV` or pass `--approve REV`.
+The latter records your explicit approval on GitHub and proceeds. Approval must
+come from the GitHub user who started the workflow. Changed scope requires a new
+plan revision. `--yolo` bypasses approval for this invocation, but never blocking
+questions, assignment checks, or workspace/branch integrity checks.
+
+After approval, an empty commit and draft PR are created if needed. Bootstrap
+and implementation commits honor configured hooks and signing. A server that
+rejects an empty PR stops bootstrap; the program never adds placeholder files.
+If the fixer subsequently determines no code is needed, the draft remains for
+manual closure. Planning can also finish with evidence that no changes are
+needed before creating a PR.
+
+### Execution, settings, and recovery
+
+Implementation uses Owner's isolated worktree. Main-checkout edits do not affect
+it; any linked worktree in the same underlying Git repository resumes the same
+local issue session. State is stored in `issues-v1` below the normal state root,
+with execution state in the linked `owners-v1` session. Resume from another
+machine or without those local records is not supported.
+
+Shared reviewer flags and economical/expensive presets use normal precedence:
+defaults, preset, saved settings, then explicit individual flags. Owner settings
+are reused from its session; a new session derives them from the configured
+processing provider. `--settings-file` accepts the existing Owner JSON shape:
+
+```json
+{
+  "fix": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "review": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "verification": "focused"
+}
+```
+
+Started batches retain their settings. Agent configuration changes require the
+normal `--trust-agent-config TOKEN` approval, reported with the blocker details.
+
+Each invocation uses Owner verification, pushes verified commits, and runs the
+configured full review. Eligible findings enter Owner locally; uncertain or
+revisited findings require attention. One additional corrective batch is allowed
+per invocation, followed by another review. Further findings leave the PR draft
+until the next invocation. Later PR feedback is processed the same way; verified
+replies are published, while human thread resolution remains manual.
+
+Unexpected remote commits stop execution even between batches. Neither `--force`
+nor `--yolo` authorizes them. Interrupted model edits remain in the Owner worktree;
+inspect them before using `--adopt` to accept them for reverification. Adoption
+does not accept remote commits or approve expanded scope. Hooks, signing,
+permissions, and branch rules can stop commits or pushes; fix the reported cause
+and invoke again. Publication intents and read-back receipts recover uncertain
+writes without blindly reposting.
+
+`--json` returns eligibility checks, phase, URLs, session/worktree paths, and next
+action; progress goes to stderr. Exit codes are 0 for success/no-op, 1 for failure,
+2 for waiting on answers/approval, 3 for attention, 4 for partial publication,
+5 for uncertain remote outcomes, and 130 for interruption.
+
+### Shared eligibility services
+
+`pr_review.issue_eligibility` separates fact collection from pure evaluation.
+`collect_eligibility_facts` accepts complete prefetched facts for scanners;
+`evaluate_eligibility` returns eligible/ineligible/indeterminate, workflow
+disposition, individual reason codes, and an advisory next action. Collection
+may fetch dedicated `refs/fix-issue/` snapshots but never changes working files
+or publishes. Unknown facts never pass. Semantic intake is a separate provider
+operation. A future scanner can add its own label filter and reuse these checks;
+execution always refreshes eligibility before writes.

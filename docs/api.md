@@ -733,3 +733,13 @@ generation lock. Operations needing both locks acquire the PR lock first, then t
 draft lock. Promotion waits for an in-progress save before switching the pointer.
 CLI explicit external resume is an internal capability and is never accepted from
 an API request field; protocol sessions remain restricted to the state directory.
+
+### Issue workflow services
+
+The shared application dispatcher also accepts `issue-eligibility`, `issue-read`,
+and `issue-run`, with exactly one positive integer `issue` or `pr`, plus the
+normal repository/cwd selection. `issue-eligibility` returns structural checks
+without running models or publishing. `issue-read` reads saved coordination
+state after collecting current eligibility. `issue-run` has the same explicit
+write authorization and options as `fix-issue`; it can publish, push, and change
+PR draft status. These services are additive and do not change Owner defaults.

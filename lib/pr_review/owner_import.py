@@ -76,3 +76,27 @@ def from_review(request):
         state.pop("prepared", None)
         owner.save(state)
         return {"owner": owner.view(state), "items": selected}
+
+
+def from_issue(owner, plan, issue, workflow, context=None):
+    """Import a real approved issue task, retaining immutable source provenance."""
+    with locked(owner.execution_lock):
+        state = owner.load()
+        key = "issue:" + digest(workflow)[:32]
+        old = next((i for i in state["feedback"] if i["key"] == key), None)
+        source = {"issue": issue["html_url"], "workflow": workflow, "plan": copy.deepcopy(plan), "context": context or {}}
+        item = {"key": key, "kind": "issue_plan", "title": issue["title"], "source": source,
+                "comments": [{"id": key, "author": "Approved issue plan", "body": plan["body"]}],
+                "actionable": True, "unread": False, "queued": True, "triage": "attention", "attention": True}
+        item["fingerprint"] = digest(item)
+        if old and old['fingerprint'] == item['fingerprint']:
+            return key
+        if old:
+            item['versions'] = old.get('versions', []) + [copy.deepcopy({k: v for k, v in old.items() if k != 'versions'})]
+            state['feedback'] = [i for i in state['feedback'] if i['key'] != key]
+            for batch in state['batches']:
+                if key in batch['items']:
+                    batch['discussion_stale'] = True
+        state["feedback"].append(item)
+        owner.save(state)
+        return key

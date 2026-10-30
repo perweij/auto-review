@@ -110,7 +110,9 @@ def context(session, state, batch, keys, before):
             if 'ignored' in snapshot:
                 snapshot.setdefault('ignored_count', len(snapshot['ignored']))
                 snapshot['ignored'] = snapshot['ignored'][:20]
-    return {"feedback": session.items(state, keys), "baseline": batch["baseline"],
+    approved = next((i["source"] for i in state["feedback"] if i["kind"] == "issue_plan" and not i.get("missing")), None)
+    return {**({"approved_issue_plan": approved} if approved and state.get("issue_workflow") else {}),
+            "feedback": session.items(state, keys), "baseline": batch["baseline"],
             "batch_diff": batch_diff, **({'task_diff': task_diff} if task_diff != batch_diff else {}),
             "completed_tasks": completed}
 
