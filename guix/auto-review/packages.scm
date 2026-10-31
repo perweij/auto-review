@@ -67,7 +67,9 @@
               (when (file-exists? license-file)
                 (install-file license-file
                               (string-append #$output "/share/doc/auto-review"))))
-            (let ((program (string-append #$output "/bin/pr-review"))
+            (for-each
+             (lambda (entry)
+              (let ((program (string-append #$output "/bin/" entry))
                   (interpreter-patches 0)
                   (environment-patches 0))
               (substitute* program
@@ -90,7 +92,8 @@
                            (= environment-patches 1))
                 (error "auto-review entry-point patch mismatch"
                        interpreter-patches environment-patches))
-              (invoke/quiet program "--help")))))
+              (invoke/quiet program "--help")))
+             '("pr-review" "fix-issue")))))
       ;; These are private runtime inputs, not extra commands in the user's
       ;; profile.  Host model CLIs, credentials, signing and editor stay inherited.
       (inputs (list python git github-cli openssh certs))

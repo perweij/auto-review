@@ -16,6 +16,13 @@ def build(session, batch):
                            "items": keys, "tasks": [t["id"] for t in batch["tasks"] if t["status"] == "complete"]}]
                 if baseline != final else []}
 
+    # Commit execution is a journaled transaction. Keep an older combined
+    # transaction stable after preparation has started; never rewrite history.
+    saved = batch.get("commit_plan", {})
+    if (saved.get("mode") == "combined" and saved.get("baseline") == batch["baseline"]
+            and saved.get("final_tree") == final and batch.get("commit_execution", {}).get("attempts")):
+        return combined(saved.get("reason", "Retain the started combined commit transaction."))
+
     previous, units = baseline, []
     for task in batch["tasks"]:
         if task["status"] != "complete":
@@ -39,8 +46,12 @@ def build(session, batch):
                       "items": [key for key in keys if key in covered],
                       "tasks": [identity for unit in units for identity in unit["tasks"]] + [task["id"]]}]
         previous = after
-    if previous != final:
-        return combined("Combined review repairs or adopted changes cross the task boundaries; commit the combined result.")
+    if previous != final and units:
+        # Task snapshots remain useful boundaries even if the final review
+        # required additional changes. Only the final tree is the full fix.
+        units.append({"id": "integration-repair", "kind": "integration_repair",
+                      "before_tree": previous, "tree": final, "items": keys, "tasks": []})
+        plan["reason"] = "Preserve task commits and append the integration repair; publish only the complete verified result."
     if not units and baseline != final:
         return combined("Separate reviewed task checkpoints are unavailable; commit the combined result.")
     plan["units"] = units
@@ -73,7 +84,14 @@ def inspect(session, batch, head, plan=None):
     commits = paths[0]
     completed = len(commits)
     by_unit = {unit["id"]: sha for unit, sha in zip(units, commits)}
-    by_item = {key: [sha] for unit, sha in zip(units, commits) for key in unit["items"]}
+    by_item = {}
+    for unit, sha in zip(units, commits):
+        for key in unit["items"]:
+            by_item.setdefault(key, []).append(sha)
+    # A task snapshot alone does not establish a fixed outcome when a later
+    # integration repair is required. Withhold associations until it exists.
+    if any(u.get("kind") == "integration_repair" for u in units) and completed < len(units):
+        by_item = {}
     result.update(completed=completed, commits=commits, units=by_unit, items=by_item, method="tasks")
     if units and completed == len(units):
         result.update(status="complete", complete=True)

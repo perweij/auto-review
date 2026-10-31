@@ -276,14 +276,116 @@ class AutoCommitTest(unittest.TestCase):
         self.assertEqual(done["batches"][-1]["commit_progress"]["commits"], view["batches"][-1]["commit_progress"]["commits"])
         self.assertEqual(owner_providers.invoke.call_count, calls)
 
-    def test_combined_fallback_and_manual_ready_batch_opt_in(self):
+    def test_integration_repair_and_manual_ready_batch_opt_in(self):
         self.group.repair = True
         self.group.fix()
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.group.worktree), self.group.batch["baseline"])
         view = self.resume(auto_commit=True)
-        self.assertEqual(view["batches"][-1]["commit_plan"]["mode"], "combined")
-        self.assertEqual(view["batches"][-1]["commit_progress"]["total"], 1)
-        self.assertEqual(view["replies"][0]["commits"], view["replies"][1]["commits"])
+        batch = view["batches"][-1]
+        self.assertEqual(batch["commit_plan"]["mode"], "tasks")
+        commits = batch["commit_progress"]["commits"]
+        self.assertEqual(len(commits), 3)
+        self.assertEqual(view["replies"][0]["commits"], [commits[0], commits[2]])
+        self.assertEqual(view["replies"][1]["commits"], [commits[1], commits[2]])
+        self.push(commits[1])
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-prepare")
+        self.assertEqual(caught.exception.code, "unpublished_commit")
+        self.push(commits[2])
+        preview = self.request("owner-prepare")
+        self.assertEqual(len(preview['replies']), 2)
+        self.assertTrue(all(commits[2] in r['body'] for r in preview['replies']))
+        self.assertFalse(self.fixture.posts)
+
+    def test_interrupted_integration_commit_recovers_without_models_or_duplicate_commits(self):
+        self.group.repair = True
+        real = owner_auto_commit.run
+        calls = 0
+        def interrupted(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            result = real(*args, **kwargs)
+            if calls == 3:
+                raise Cancelled(signal.SIGTERM)
+            return result
+        with patch("pr_review.owner_auto_commit.run", side_effect=interrupted):
+            with self.assertRaises(Cancelled):
+                self.start()
+        view = self.request("owner-read")
+        head = self.git("rev-parse", "HEAD", cwd=view['worktree'])
+        model_calls = owner_providers.invoke.call_count
+        done = self.resume()
+        batch = done['batches'][-1]
+        self.assertEqual(batch['commit_progress']['commits'][-1], head)
+        self.assertEqual(len(batch['commit_progress']['commits']), 3)
+        self.assertEqual(owner_providers.invoke.call_count, model_calls)
+        self.assertEqual(batch['commit_execution']['status'], 'complete')
+        self.assertTrue(batch['commit_execution']['attempts'][-1]['recovered'])
+        self.assertEqual(len(done['replies']), 2)
+
+    def test_integration_hook_failure_keeps_tasks_but_withholds_fixed_claims(self):
+        self.group.repair = True
+        hook = self.hook('pre-commit', 'exit 0')
+        # Reject the third commit based on the saved task trees, independent
+        # of the fixture repository's history length.
+        real = owner_auto_commit.run
+        calls = 0
+        def rejecting(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                hook.write_text('#!/bin/sh\nexit 1\n')
+            else:
+                hook.write_text('#!/bin/sh\nexit 0\n')
+            return real(*args, **kwargs)
+        with patch('pr_review.owner_auto_commit.run', side_effect=rejecting):
+            view = self.start()
+        batch = view['batches'][-1]
+        self.assertEqual(batch['commit_progress']['completed'], 2)
+        self.assertEqual(batch['commit_execution']['status'], 'paused')
+        self.assertEqual(batch['commit_progress']['items'], {})
+        self.assertEqual(view['replies'], [])
+        first_commits = batch['commit_progress']['commits']
+        hook.unlink()
+        done = self.resume()
+        self.assertEqual(done['batches'][-1]['commit_progress']['commits'][:2], first_commits)
+        self.assertEqual(len(done['replies']), 2)
+
+    def test_explicit_reply_association_cannot_publish_before_integration_repair(self):
+        self.group.repair = True
+        view = self.start()
+        batch = view['batches'][-1]
+        commits = batch['commit_progress']['commits']
+        self.push(commits[1])
+        self.request('owner-associate', batch=batch['id'], items=['thread:T1'], commits=[commits[0]])
+        # This is now an inspected manual association. The final-tree gate
+        # still applies even though its single linked commit has been pushed.
+        session = OwnerSession({'session': self.fixture.path})
+        state = session.load()
+        reply = next(r for r in state['replies'] if r['source'] == 'thread:T1')
+        reply.pop('needs_attention', None)
+        reply['status'] = 'staged'
+        with self.assertRaises(ApiError) as caught:
+            owner_publication.blockers(session, state, reply, commits[1])
+        self.assertEqual(caught.exception.code, 'unpublished_commit')
+        self.assertIn('integration repair', str(caught.exception))
+        owner_publication.blockers(session, state, reply, commits[2])
+        self.assertFalse(self.fixture.posts)
+
+    def test_failed_final_review_cannot_commit_task_prefix(self):
+        original = self.group.model
+        def rejecting(*args):
+            result = original(*args)
+            if args[3] == 'review' and args[4].get('scope'):
+                result['blocking'] = ['Integration remains broken']
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=rejecting):
+            view = self.start()
+        batch = view['batches'][-1]
+        self.assertEqual(batch['status'], 'paused')
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=view['worktree']), batch['baseline'])
+        self.assertEqual(view['replies'], [])
+        self.assertFalse(self.request('owner-prepare-commit')['ready'])
 
     def test_automatic_commits_preserve_later_manual_edits_and_conflicting_index(self):
         self.group.fix()

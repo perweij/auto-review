@@ -65,6 +65,9 @@ def check_backend(program):
             return result.stdout
 
         assert '--resume' in invoke([str(link), '--help'])
+        issue_link = host / 'fix-issue'
+        issue_link.symlink_to(program.parent / 'fix-issue')
+        assert '--approve' in invoke([str(issue_link), '--help'])
         assert '--auto-commit' in invoke([str(link), 'owner', '--help'])
         result = json.loads(invoke([str(link), 'api'],
                                   data='{"protocol":1,"command":"capabilities"}\n'))

@@ -1,0 +1,12 @@
+{"protocol": 1, "type": "started", "operation_id": "fb35c3902a974334bb95755a268d7142", "log_path": "/tmp/tmp5hpk_c20/state/pr-review/operations/fb35c3902a974334bb95755a268d7142.log"}
+{"protocol": 1, "type": "progress", "message": "Owner task p1-shared: Shared implementation"}
+PASS None OPEN sends 2
+{"protocol": 1, "type": "started", "operation_id": "822ca58aecbd4494884dfbf32a36965a", "log_path": "/tmp/tmp__rdf42m/state/pr-review/operations/822ca58aecbd4494884dfbf32a36965a.log"}
+{"protocol": 1, "type": "progress", "message": "Owner task p1-shared: Shared implementation"}
+PASS 2 CLOSED sends 0
+{"protocol": 1, "type": "started", "operation_id": "50e52300830341b3a2f8160303b344f0", "log_path": "/tmp/tmpk4bo5dq1/state/pr-review/operations/50e52300830341b3a2f8160303b344f0.log"}
+{"protocol": 1, "type": "progress", "message": "Owner task p1-shared: Shared implementation"}
+PASS 3 CLOSED sends 1
+{"protocol": 1, "type": "started", "operation_id": "d8e6e02031b64107a71f08d662c0d50f", "log_path": "/tmp/tmpqgzkx5h0/state/pr-review/operations/d8e6e02031b64107a71f08d662c0d50f.log"}
+{"protocol": 1, "type": "progress", "message": "Owner task p1-shared: Shared implementation"}
+PASS 2 MERGED sends 0

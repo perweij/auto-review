@@ -21,8 +21,14 @@ def message(state, batch, unit=None):
     subject = ("Fix: " + titles[0])[:72] if len(titles) == 1 else f"Address review feedback for PR #{state['pr']}"
     if unit and len(batch.get("commit_plan", {}).get("units", [])) > 1 and titles:
         subject = ("Fix: " + titles[0])[:72]
+    integration = unit and unit.get("kind") == "integration_repair"
+    if integration:
+        subject = f"Integrate review fixes for PR #{state['pr']}"
     summaries = list(dict.fromkeys(line(t.get("implementation", {}).get("summary")) for t in batch["tasks"]
                                   if t.get("status") == "complete" and (not unit or t["id"] in unit["tasks"])))
+    if integration:
+        summaries = ["Complete the task commits with the integration repair verified by the final combined review.",
+                     line(batch.get("review", {}).get("summary"))]
     body = "\n".join("- " + title for title in titles)
     return subject + "\n\n" + body + "\n\n" + "\n".join(s for s in summaries if s) + "\n\nPR: " + state["url"] + "\n"
 
@@ -57,6 +63,12 @@ def prepare(session, state, request):
     selected = [u for u in plan["units"] if (request.get("unit") == u["id"] or
                 request.get("item") in u["items"] or request.get("task") in u["tasks"])]
     explicit = any(request.get(k) for k in ("unit", "item", "task"))
+    if (request.get("item") and not request.get("unit") and not request.get("task")
+            and any(u.get("kind") == "integration_repair" for u in selected)):
+        # A finding may need both its task and the shared repair. Select the
+        # earliest outstanding related unit; keep explicit unit/task choices.
+        pending = [u for u in selected if u["id"] not in progress["units"]]
+        selected = (pending or selected[-1:])[:1]
     if len(selected) > 1:
         return stopped("Choose one logical fix or select its batch for the next commit.")
     if explicit and not selected:

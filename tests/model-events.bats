@@ -80,3 +80,15 @@ load helpers/fixture
     manifest_is '.removed_environment.codex | index("GIT_CONFIG_COUNT")!=null and index("GIT_CONFIG_KEY_0")!=null and index("GIT_CONFIG_VALUE_0")!=null and index("GIT_CONFIG_PARAMETERS")!=null'
     [ -s "$(run_directory)/logs/codex.git-preflight.log" ]
 }
+
+@test "successful provider exit with a sandbox failure report cannot complete analysis" {
+    export MOCK_CODEX_EVENT=sandbox
+    run_review; assert_failure
+    [[ $output == *'model reported a sandbox launch failure'* ]]
+    manifest_is '.phases.codex.status=="failed" and .phases.codex.failure_reason=="sandbox_unavailable"'
+    [ ! -e "$(run_directory)/reviews/codex.md" ]
+    [ ! -e "$(run_directory)/reviews/synthesis.json" ]
+    [ ! -f "$FIXTURE/post-count" ]
+    unset MOCK_CODEX_EVENT
+    run_review; assert_success
+}

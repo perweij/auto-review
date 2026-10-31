@@ -20,7 +20,7 @@ check-guix:
 
 lint:
 	shellcheck -x tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.bats tests/*.sh emacs/tests/run.sh
-	python3 -c 'from pathlib import Path; [compile(p.read_bytes(), str(p), "exec") for p in [Path("bin/pr-review"), *Path("lib/pr_review").rglob("*.py")]]'
+	python3 -c 'from pathlib import Path; [compile(p.read_bytes(), str(p), "exec") for p in [Path("bin/pr-review"), Path("bin/fix-issue"), *Path("lib/pr_review").rglob("*.py")]]'
 	@for file in tests/helpers/mock-cli tests/helpers/fixture.bash tests/*.sh emacs/tests/run.sh; do bash -n "$$file" || exit; done
 
 test:

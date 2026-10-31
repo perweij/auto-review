@@ -49,6 +49,16 @@ class LegacyBytesTest(unittest.TestCase):
             with self.subTest(stage=stage):
                 self.assertFalse(cache.reusable(self.run, stage, self.path / 'reviews' / name, cache.inputs(self.run, stage)))
 
+    def test_saved_sandbox_failure_report_is_not_reused(self):
+        for stage, name in [('codex', 'codex.md'), ('synthesis', 'synthesis.json')]:
+            with self.subTest(stage=stage):
+                output = self.path / 'reviews' / name
+                report = ("Review blocked: commands failed before execution with "
+                          "bwrap: Can't mount proc on /proc: Operation not permitted")
+                output.write_text(json.dumps({'report_md': report}) if stage == 'synthesis' else report)
+                self.run.manifest['phases'][stage]['output_hash'] = hash_file(output)
+                self.assertFalse(cache.reusable(self.run, stage, output, cache.inputs(self.run, stage)))
+
     def test_original_cache_bytes_and_validated_reuse_for_every_stage(self):
         for stage, name in [('claude','claude-independent.md'), ('codex','codex.md'), ('synthesis','synthesis.json'), ('contributions','contributions.json')]:
             with self.subTest(stage=stage):
@@ -204,6 +214,29 @@ class SupervisorTest(unittest.TestCase):
             self.assertIn('GH_TOKEN', os.environ)
 
 class ProviderPolicyTest(unittest.TestCase):
+    def test_all_codex_model_commands_use_container_isolation(self):
+        from pr_review.settings import DEFAULTS
+        settings = {**DEFAULTS, 'processing_provider': 'codex'}
+        runtime, directory = providers.Runtime(), Path('/tmp/artifacts')
+        commands = [providers.review_command(settings, runtime, stage, directory, 'base')
+                    for stage in ('codex', 'synthesis', 'contributions', 'followup',
+                                  'suggestions', 'suggestion-verify')]
+        commands += [providers.probe_command('codex', runtime, directory / 'probe.txt'),
+                     providers.adaptation_command(settings)]
+        for args in commands:
+            with self.subTest(args=args[:3]):
+                modes = [a for a in args if a.startswith('sandbox_mode=')]
+                self.assertEqual(modes, ['sandbox_mode=danger-full-access'])
+                self.assertIn('approval_policy=never', args)
+                self.assertFalse(any(a.startswith('sandbox_workspace_write.') for a in args))
+
+    def test_reported_sandbox_failure_diagnostic(self):
+        error = "bwrap: Can't mount proc on /proc: Operation not permitted"
+        self.assertTrue(providers.reported_execution_failure('Review blocked: ' + error))
+        self.assertTrue(providers.reported_execution_failure(json.dumps({'report_md': 'Assessment incomplete. ' + error})))
+        self.assertFalse(providers.reported_execution_failure('The regression test covers ' + error))
+        self.assertFalse(providers.reported_execution_failure('Review blocked by missing dependencies'))
+
     def test_tool_text_is_not_a_terminal_error(self):
         from pr_review.processes import event_error
         self.assertEqual(event_error({'type':'item.completed','item':{'text':'not a git repository'}}), '')

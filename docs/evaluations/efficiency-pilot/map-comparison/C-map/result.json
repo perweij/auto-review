@@ -1,0 +1,1 @@
+{"summary":"Added a per-reply PR state check so publication stops after refresh detects closure or merge, before creating an intent for the next reply. Sent reply receipts are preserved.","checks":["Passed: focused regression for PR closure during publication and existing open-PR publication test (2 tests)."],"findings":[]}

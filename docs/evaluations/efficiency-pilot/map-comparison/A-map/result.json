@@ -1,0 +1,1 @@
+{"summary":"No concrete behavioral defects introduced by the reviewed changes were established.","checks":["Read-only review of git diff HEAD^ HEAD and traced owner state, recovery, and publication paths.","No tests or other checks were run. "],"findings":[]}

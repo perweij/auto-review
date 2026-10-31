@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import patch
 
 import test_owner
-from pr_review import owner_git
+from pr_review import owner_git, owner_commit_plan
+from pr_review.owner_state import OwnerSession
 from pr_review.owner_cli import main as owner_cli
 
 
@@ -142,15 +143,67 @@ class CommitPlanTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Choose one feedback item", errors.getvalue())
 
-    def test_combined_review_repairs_keep_one_explained_commit(self):
+    def test_integration_repair_preserves_task_commits_and_requires_complete_series(self):
         self.repair = True
         plan = self.fix()
-        self.assertEqual(plan["mode"], "combined")
-        self.assertEqual(len(plan["units"]), 1)
-        self.assertIn("Combined review repairs", plan["reason"])
-        prepared = self.request("owner-prepare-commit")
-        self.assertEqual(prepared["total"], 1)
-        self.assertEqual(self.git("write-tree", cwd=self.worktree), self.batch["final_tree"])
+        self.assertEqual(plan["mode"], "tasks")
+        self.assertEqual(len(plan["units"]), 3)
+        self.assertEqual(plan["units"][-1]["kind"], "integration_repair")
+        shas = []
+        for position in range(3):
+            prepared = self.request("owner-prepare-commit")
+            self.assertEqual((prepared["position"], prepared["total"]), (position + 1, 3))
+            if position == 2:
+                self.assertIn("Integrate review fixes", prepared["message"])
+            shas.append(self.commit_prepared(prepared))
+            self.git("update-ref", "refs/pull/7/head", shas[-1])
+            self.fixture.metadata["headRefOid"] = shas[-1]
+            view = self.request("owner-associate")
+            if position < 2:
+                self.assertEqual(view["replies"], [])
+                self.assertEqual(view["batches"][-1]["commit_progress"]["items"], {})
+                self.assertFalse(view["batches"][-1]["commit_progress"]["complete"])
+        self.assertEqual(self.git("show", shas[0] + ":source.txt"), "first fix")
+        self.assertEqual(self.git("show", shas[1] + ":source.txt"), "first fix\nsecond fix")
+        self.assertEqual(self.git("rev-parse", shas[-1] + "^{tree}"), self.batch["final_tree"])
+        self.assertEqual({r["source"]: r["commits"] for r in view["replies"]},
+                         {"thread:T1": [shas[0], shas[2]], "thread:T2": [shas[1], shas[2]]})
+
+    def test_feedback_selection_advances_from_task_to_integration_repair(self):
+        self.repair = True
+        self.fix()
+        self.commit_prepared(self.request("owner-prepare-commit", item=self.keys[0]))
+        pending = self.request("owner-prepare-commit", item=self.keys[0])
+        self.assertFalse(pending["ready"])
+        self.assertIn("Commit fix 2 of 3 first", pending["reason"])
+        self.commit_prepared(self.request("owner-prepare-commit", item=self.keys[1]))
+        repair = self.request("owner-prepare-commit", item=self.keys[0])
+        self.assertTrue(repair["ready"])
+        self.assertIn("Integrate review fixes", repair["message"])
+
+    def test_discontinuous_checkpoints_still_use_combined_fallback(self):
+        self.repair = True
+        self.fix()
+        session = OwnerSession({"session": self.fixture.path})
+        state = session.load()
+        batch = state['batches'][-1]
+        batch['tasks'][1]['before']['tree'] = batch['tasks'][0]['before']['tree']
+        plan = owner_commit_plan.build(session, batch)
+        self.assertEqual(plan['mode'], 'combined')
+        self.assertEqual(len(plan['units']), 1)
+
+    def test_started_legacy_combined_transaction_is_not_repartitioned(self):
+        self.repair = True
+        self.fix()
+        session = OwnerSession({"session": self.fixture.path})
+        state = session.load()
+        batch = state['batches'][-1]
+        batch['commit_plan'].update(mode='combined', reason='Legacy combined repair')
+        batch['commit_execution'] = {'attempts': [{'unit': 'combined', 'status': 'running'}]}
+        plan = owner_commit_plan.build(session, batch)
+        self.assertEqual(plan['mode'], 'combined')
+        self.assertEqual(plan['units'][0]['id'], 'combined')
+        self.assertEqual(plan['units'][0]['tree'], batch['final_tree'])
 
     def test_shared_fix_without_another_patch_does_not_create_an_empty_commit(self):
         self.no_second_change = True

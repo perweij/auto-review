@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_review.api import dispatch
-from pr_review.common import ApiError, atomic_json, digest, locked
+from pr_review.common import ApiError, atomic_json, digest, locked, read_json
 from pr_review.repository import Repository
 from pr_review.owner_state import OwnerSession, feedback_body, superseded_batches
 from pr_review import owner_commit, owner_completion, owner_fixes, owner_git, owner_providers, owner_publication
@@ -1592,6 +1592,48 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(batch["checkpoint"]["tree"], tree)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), batch["baseline"])
 
+    def test_large_provider_context_is_preserved_outside_request(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        original = {"feedback": [{"key": "thread:T1", "body": "context \u2603 " * 120000}],
+                    "batch_diff": "diff\n" * 10000, "completed_tasks": [],
+                    "implementation_report": {"summary": "Keep all evidence"}}
+        result = {"summary": "Checked", "outcomes": [], "checks": [], "complete": True, "blocking": []}
+        def provider(args, **kwargs):
+            directory = Path(kwargs["env"]["TMPDIR"]).parent
+            prompt = kwargs["input_bytes"].decode()
+            self.assertLess(len(prompt), owner_providers.INLINE_CONTEXT_CHARS)
+            self.assertIn(str(directory / "context/index.json"), prompt)
+            self.assertNotIn(original["batch_diff"], prompt)
+            self.assertEqual((directory / "prompt.txt").read_text(), prompt)
+            recovered = {}
+            for field in read_json(directory / "context/index.json"):
+                values = [read_json(Path(path)) for path in field["files"]]
+                recovered[field["field"]] = values if field["kind"] == "list" else values[0]
+            self.assertEqual(original, recovered)
+            if args[0] == "claude":
+                self.assertEqual(args[args.index("--add-dir") + 1], str(directory / "context"))
+                events = [{"type": "result", "subtype": "success", "structured_output": result}]
+            else:
+                Path(args[args.index("-o") + 1]).write_text(json.dumps(result))
+                events = [{"type": "turn.completed"}]
+            return SimpleNamespace(returncode=0, events=events)
+        for provider_name in ("codex", "claude"):
+            batch["settings"]["review"]["provider"] = provider_name
+            with self.subTest(provider=provider_name), patch("pr_review.owner_providers.run", side_effect=provider):
+                self.assertEqual(REAL_INVOKE(session, state, batch, "review", original), result)
+        self.assertEqual("context \u2603 " * 120000, original["feedback"][0]["body"])
+
+    def test_small_provider_context_remains_inline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context = {"feedback": [], "batch_diff": "small diff"}
+            prompt, root = owner_providers.context_prompt("Instructions\n", context, Path(tmp))
+            self.assertEqual(prompt, "Instructions\n" + json.dumps(context, ensure_ascii=True))
+            self.assertIsNone(root)
+            self.assertFalse((Path(tmp) / "context").exists())
+
     def test_orphaned_attempt_is_recorded_and_not_blindly_replayed(self):
         self.fix()
         session = OwnerSession({"session": self.path})
@@ -2021,7 +2063,7 @@ class PlanTest(unittest.TestCase):
         value["html_url"] = "https://github.com/Org/Repo/pull/7#issuecomment-100"
         self.assertTrue(owner_publication.valid_receipt(session, action, value))
 
-    def test_provider_roles_have_distinct_write_policy(self):
+    def test_provider_roles_use_container_isolation_and_separate_scratch(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             schema = directory / "schema.json"
@@ -2029,19 +2071,16 @@ class PlanTest(unittest.TestCase):
             for role in ("plan", "fix", "review"):
                 choice = {"provider": "codex", "model": "chosen", "effort": "medium"}
                 args = owner_providers.argv(choice, Runtime(), role, directory, schema)
-                self.assertIn("sandbox_mode=" + ("read-only" if role == "plan" else "workspace-write"), args)
+                self.assertIn("sandbox_mode=danger-full-access", args)
+                self.assertFalse(any(a.startswith("sandbox_workspace_write.") for a in args))
                 self.assertIn("approval_policy=never", args)
                 if role == "review":
                     self.assertEqual(args[args.index("--cd") + 1], str(directory / "scratch"))
                     self.assertIn("--skip-git-repo-check", args)
                     self.assertIn("--ignore-rules", args)
-                    self.assertIn("sandbox_workspace_write.writable_roots=[]", args)
-                    self.assertIn("sandbox_workspace_write.exclude_tmpdir_env_var=true", args)
-                    self.assertIn("sandbox_workspace_write.exclude_slash_tmp=true", args)
-                    self.assertIn("sandbox_workspace_write.network_access=false", args)
                 elif role == "fix":
                     self.assertNotIn("--cd", args)
-                    self.assertEqual(args[args.index("--add-dir") + 1], str(directory / "scratch"))
+                    self.assertNotIn("--add-dir", args)
                 else:
                     self.assertNotIn("--cd", args)
                     self.assertNotIn("--add-dir", args)

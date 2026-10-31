@@ -110,7 +110,9 @@ def context(session, state, batch, keys, before):
             if 'ignored' in snapshot:
                 snapshot.setdefault('ignored_count', len(snapshot['ignored']))
                 snapshot['ignored'] = snapshot['ignored'][:20]
-    return {"feedback": session.items(state, keys), "baseline": batch["baseline"],
+    approved = next((i["source"] for i in state["feedback"] if i["kind"] == "issue_plan" and not i.get("missing")), None)
+    return {**({"approved_issue_plan": approved} if approved and state.get("issue_workflow") else {}),
+            "feedback": session.items(state, keys), "baseline": batch["baseline"],
             "batch_diff": batch_diff, **({'task_diff': task_diff} if task_diff != batch_diff else {}),
             "completed_tasks": completed}
 
@@ -187,7 +189,8 @@ def final_review(session, state, batch):
         batch["review"] = review
         if successful(review):
             batch.update(status="ready", final_tree=batch["checkpoint"]["tree"], completed_at=now(),
-                         verified_items=keys, verified_fingerprints={i["key"]: i["fingerprint"] for i in session.items(state, keys)})
+                         verified_items=keys, verified_fingerprints={i["key"]: i["fingerprint"] for i in session.items(state, keys)},
+                         verified_base=state["metadata"]["baseRefOid"])
             for task in batch["tasks"]:
                 if task.get("after") and task["after"]["tree"] != batch["final_tree"]:
                     task["verification_superseded"] = True

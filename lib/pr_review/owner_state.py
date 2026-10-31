@@ -332,7 +332,7 @@ def refresh(session, state):
             (item["kind"] == "thread" and not item["is_resolved"]))
         items.append(item)
     for old in previous.values():
-        if old["kind"] == "local_review":
+        if old["kind"] in ("local_review", "issue_plan"):
             items.append(old)
             continue
         old.update(missing=True, attention=False)

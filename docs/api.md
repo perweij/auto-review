@@ -166,7 +166,7 @@ from. Frontends resolve the repository before reading or saving its preference.
 | Command | Request fields | Result/behavior |
 | --- | --- | --- |
 | `owner-open` | `cwd`, `pr`, optional `repository`, `defaults` | Create or read a local owner session; no network/model |
-| `owner-import` | Reviewer `session`, `generation`, `revision`, distinct ordered `comments`, optional `defaults` | Copy saved comments into the same PR's owner session; return `{owner,items}` |
+| `owner-import` | Reviewer `session`, `generation`, `revision`, distinct ordered `comments`, optional `defaults`, boolean `automatic` | Copy saved comments into the same PR's owner session; return `{owner,items}` |
 | `owner-discover` | `cwd`, optional `repository`, `pr` | `{sessions}` for the Git common directory |
 | `owner-read` | `session` | Saved owner view; available while a fix runs |
 | `owner-reconcile` | `session` | Check local commits and finish matching local findings; return owner view plus `reconciliation` |
@@ -191,14 +191,21 @@ network/model calls, staging, refs, reply creation, or publication. A ready
 batch's `commit_match.commit` records the completing commit of a unique exact
 group commit or a recorded sequence of verified task checkpoints. Each sequence
 commit must have the preceding matched commit as its sole parent, starting at
-the original batch baseline. Only current `fixed` outcomes for local
-findings in their latest batch are automatically handled; stale feedback,
+the original batch baseline. Current `fixed` outcomes for local
+findings in their latest batch are automatically handled after matching commits; stale feedback,
 incomplete results, integrity failures, missing items, and explicit triage
 overrides prevent completion. `local_completion` retains its batch, commit, and
 feedback fingerprint. Lost proof reopens only automatically handled feedback;
 an exact amendment updates the proof. A matched prefix can finish its own findings
 while later units remain pending. This proves a recorded fix was committed,
 not that subsequent edits preserve its semantics or that it was pushed.
+
+Verified `already_addressed` and `no_change` outcomes in a batch with no commit
+units can also finish local findings. Their `local_completion` records the batch,
+feedback fingerprint, HEAD, tree, and verified base. Completion requires the
+same HEAD and base, a clean index/worktree, and complete verification without
+execution or integrity blockers. Changed inputs or lost verification reopen
+automatically handled findings. Explicit restore or re-import still requeues them.
 
 The response-only `reconciliation` has `status: "complete"`, `committed_batches`,
 `handled_items`, and `reopened_items`. With an active execution lock it returns
@@ -250,9 +257,11 @@ still require inspection. No index changes occur in these cases.
 Ready batches carry a deterministic `commit_plan` with `mode`, original `baseline`,
 `final_tree`, and ordered `units` (`id`, `before_tree`, `tree`, `items`, `tasks`).
 Unbroken, independently reviewed task checkpoints produce logical commits.
-Shared outcomes with no extra patch combine their earlier changes. Missing or
-discontinuous checkpoints and combined-review repairs fall back to a combined
-unit with `reason`; no heuristic path splitting occurs. The full batch must have
+Shared outcomes with no extra patch combine their earlier changes. When the task
+chain is intact but the verified final tree differs, an additional unit with
+`kind: "integration_repair"` records that difference and references all verified
+items. Its `tasks` list is empty. Missing or discontinuous checkpoints still fall
+back to a combined unit with `reason`; no heuristic path splitting occurs. The full batch must have
 passed combined verification before any unit can be prepared. Existing ready
 sessions derive their plan on demand, and existing whole-group commits remain
 valid without history rewriting.
@@ -262,8 +271,12 @@ valid without history rewriting.
 and `items` to exact matched SHAs. Unexpected HEAD changes between units block
 staging; ambiguous histories do not create automatic associations. `owner-associate`
 uses method `task` for exact unit matches and preserves explicit associations.
-Pushed prefixes may generate replies for their own items; later uncommitted
-findings receive no fixed-in claim.
+Without an integration repair, pushed prefixes may generate replies for their own
+items; later uncommitted findings receive no fixed-in claim. When an integration
+repair is required, item mappings remain empty until the complete series exists.
+Then each item maps to its task commit plus the integration commit. Publication
+requires the complete verified series on the remote, including for explicitly
+associated replies. Started legacy combined-commit transactions keep their plan.
 
 `owner-fix` accepts optional Boolean `auto_commit`. A new batch defaults to false;
 omission on resume preserves the saved choice, and explicit false disables it.
@@ -326,7 +339,10 @@ drafts and staging unchanged. No GitHub or model call occurs.
 the same generation/comment is idempotent for unchanged content; changed content
 retains the prior copy in `versions`, replaces the current snapshot, and marks
 dependent batches stale. All selected items are queued at the front of the owner
-view for explicit fixing. Local snapshots are never refreshed implicitly from
+view for explicit fixing. With `automatic: true`, used by the issue coordinator,
+the importer first reconciles completion and excludes unchanged completed items
+from the returned `items`, preserving their handled state. The default explicit
+import always requeues selected findings. Local snapshots are never refreshed implicitly from
 reviewer drafts. CLI equivalent:
 `pr-review owner import --review-session PATH --comment ID [--comment ID…]`;
 optional `--generation` and `--revision` pin the source explicitly.
@@ -733,3 +749,30 @@ generation lock. Operations needing both locks acquire the PR lock first, then t
 draft lock. Promotion waits for an in-progress save before switching the pointer.
 CLI explicit external resume is an internal capability and is never accepted from
 an API request field; protocol sessions remain restricted to the state directory.
+
+### Issue workflow services
+
+The shared application dispatcher also accepts `issue-eligibility`, `issue-read`,
+and `issue-run`, with exactly one positive integer `issue` or `pr`, plus the
+normal repository/cwd selection. `issue-eligibility` returns structural checks
+without running models or publishing. `issue-read` reads saved coordination
+state after collecting current eligibility. `issue-run` has the same explicit
+write authorization and options as `fix-issue`; it can publish, push, and change
+PR draft status. These services are additive and do not change Owner defaults.
+
+Readiness, including the cached no-op path, requires all automatic Owner replies
+to be published and reply drafting/inspection blockers to be resolved. Recovered
+`unsent` actions and unstaged automatic replies remain blocking across retries;
+the coordinator never silently restages them. Inspect and explicitly stage/publish
+the reply in Owner to resume. A published reply resolves its earlier unsent
+attempts, which remain in the journal as history.
+
+`issue-recover` uses the same issue/PR and repository selectors. Without
+`retry_absent`, it returns saved comment/PR-creation `actions` with fresh
+`readback` observations and sends nothing. With `retry_absent` set to one exact
+action key, the caller attests after inspection that this uncertain write stored
+nothing remotely. A fresh absent read-back permits only a submitting action
+without a receipt to become pending, retaining its prior state and decision in
+history. A now-accepted write is receipted instead. Ambiguous/changed results and
+read failures cannot authorize a resend. Recovery never runs models, pushes, or
+publishes; a separate `issue-run` resumes execution.
