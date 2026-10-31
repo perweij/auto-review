@@ -780,7 +780,9 @@ come from the GitHub user who started the workflow. Changed scope requires a new
 plan revision. `--yolo` bypasses approval for this invocation, but never blocking
 questions, assignment checks, or workspace/branch integrity checks.
 
-After approval, an empty commit and draft PR are created if needed. Bootstrap
+After approval, an empty commit and draft PR are created if needed. The PR body
+links to the published plan comment and includes the intended issue-closing
+reference; plan prose is not embedded, so it cannot add closing references. Bootstrap
 and implementation commits honor configured hooks and signing. A server that
 rejects an empty PR stops bootstrap; the program never adds placeholder files.
 If the fixer subsequently determines no code is needed, the draft remains for
@@ -825,6 +827,27 @@ does not accept remote commits or approve expanded scope. Hooks, signing,
 permissions, and branch rules can stop commits or pushes; fix the reported cause
 and invoke again. Publication intents and read-back receipts recover uncertain
 writes without blindly reposting.
+
+If a comment or draft-PR request loses its response, ordinary retries first
+read back outstanding intents before assessing the discussion. An exact accepted
+write is recovered without sending it again. If it is absent, inspect GitHub and
+the local journal with:
+
+```sh
+fix-issue -i 123 --inspect-writes --json
+fix-issue -i 123 --retry-absent 'plan:1'
+fix-issue -i 123
+```
+
+Use the exact action key shown by inspection (`create-pr` for PR creation).
+`--retry-absent ACTION` is your explicit decision that the uncertain request
+stored nothing remotely. It performs another read-back and changes only that
+action to pending, retaining its previous intent and the decision in history;
+it does not send anything. The next normal invocation may retry it. If the write
+is now found, its receipt is recovered instead. Multiple matches, changed
+publications, a saved receipt whose publication disappeared, or a failed read
+block this reset. Inspect those cases manually; neither ordinary retries nor
+`--force`/`--yolo` authorize duplicate sends.
 
 `--json` returns eligibility checks, phase, URLs, session/worktree paths, and next
 action; progress goes to stderr. Exit codes are 0 for success/no-op, 1 for failure,

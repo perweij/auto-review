@@ -21,6 +21,9 @@ def parser():
     approval.add_argument('--yolo', action='store_true', help='skip plan approval for this invocation; questions still block')
     approval.add_argument('--approve', type=int, metavar='REV', help='record approval of this exact published plan revision')
     result.add_argument('--adopt', action='store_true', help='adopt inspected partial Owner workspace changes and reverify')
+    recovery = result.add_mutually_exclusive_group()
+    recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
+    recovery.add_argument('--retry-absent', metavar='ACTION', help='confirm after inspection that this uncertain action was not sent; allow a later retry')
     result.add_argument('--json', action='store_true')
     result.add_argument('--settings-file', help='Owner fix/review settings JSON')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
@@ -43,12 +46,13 @@ def main(argv=None):
             print(fields['message'], file=sys.stderr, flush=True)
     try:
         with local_sessions(), cancellation_scope(), event_sink(progress), contextlib.redirect_stdout(sys.stderr):
-            result = dispatch({'command': 'issue-run', **args})
+            operation = 'issue-recover' if args['inspect_writes'] or args['retry_absent'] is not None else 'issue-run'
+            result = dispatch({'command': operation, **args})
     except (ApiError, OSError, ValueError) as exc:
         result = {'outcome': 'failed', 'error': str(exc), 'exit_code': 130 if isinstance(exc, KeyboardInterrupt) else 1}
         if isinstance(exc, ApiError):
             result.update(reason_code=exc.code, details=exc.details)
-            result['exit_code'] = 130 if exc.code == 'cancelled' else 3 if exc.code == 'busy' else 1
+            result['exit_code'] = 130 if exc.code == 'cancelled' else 3 if exc.code == 'busy' else exc.details.get('exit_code', 1)
     except KeyboardInterrupt:
         result = {'outcome': 'interrupted', 'exit_code': 130}
     if args['json']:
@@ -58,4 +62,6 @@ def main(argv=None):
         for key in ('issue_url', 'pr_url', 'session', 'worktree', 'next_action', 'error'):
             if result.get(key):
                 print(f'{key}: {result[key]}')
+        if 'actions' in result:
+            print(json.dumps(result['actions'], indent=2))
     return result['exit_code']

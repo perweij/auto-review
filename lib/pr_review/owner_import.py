@@ -6,9 +6,12 @@ from .repository import Repository
 from .state import Session
 from .owner_state import OwnerSession, open_session
 from .owner_completion import manual_triage
+from . import owner_completion
 
 
 def from_review(request):
+    if type(request.get("automatic", False)) is not bool:
+        raise ApiError("invalid_request", "automatic must be a Boolean.")
     source = Session(request)
     repo = Repository.from_manifest(source.manifest)
     opened = open_session({"cwd": str(repo.cwd), "repository": repo.identity, "pr": repo.pr,
@@ -54,14 +57,26 @@ def from_review(request):
                 imported.append(item)
             source.git.pin(source.id)
         state = owner.load()
+        if request.get("automatic") and state.get("batches"):
+            reconciled = owner_completion.reconcile(owner, state)
+            if reconciled["reconciliation"]["status"] != "complete":
+                raise ApiError("needs_attention", reconciled["reconciliation"]["reason"])
+            state = owner.load()
         previous = {i["key"]: i for i in state["feedback"]}
         changed = set()
+        completed = set()
         for index, item in enumerate(imported):
             old = previous.get(item["key"])
             if old and old["fingerprint"] == item["fingerprint"]:
+                if request.get("automatic") and old.get("local_completion") and not old.get("attention"):
+                    imported[index] = old
+                    completed.add(item["key"])
+                    continue
                 imported[index] = {**old, "queued": True, "triage": "attention", "attention": True}
-                # Re-import is an explicit request to reconsider this finding.
-                manual_triage(state, imported[index])
+                if not request.get("automatic"):
+                    # Explicit re-import requests reconsideration even while
+                    # the previous verification remains valid.
+                    manual_triage(state, imported[index])
             else:
                 item.update(imported_at=now(), versions=copy.deepcopy(old.get("versions", [])) if old else [])
                 if old:
@@ -75,7 +90,7 @@ def from_review(request):
                 batch["discussion_stale"] = True
         state.pop("prepared", None)
         owner.save(state)
-        return {"owner": owner.view(state), "items": selected}
+        return {"owner": owner.view(state), "items": [key for key in selected if key not in completed]}
 
 
 def from_issue(owner, plan, issue, workflow, context=None):
