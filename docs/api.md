@@ -166,7 +166,7 @@ from. Frontends resolve the repository before reading or saving its preference.
 | Command | Request fields | Result/behavior |
 | --- | --- | --- |
 | `owner-open` | `cwd`, `pr`, optional `repository`, `defaults` | Create or read a local owner session; no network/model |
-| `owner-import` | Reviewer `session`, `generation`, `revision`, distinct ordered `comments`, optional `defaults` | Copy saved comments into the same PR's owner session; return `{owner,items}` |
+| `owner-import` | Reviewer `session`, `generation`, `revision`, distinct ordered `comments`, optional `defaults`, boolean `automatic` | Copy saved comments into the same PR's owner session; return `{owner,items}` |
 | `owner-discover` | `cwd`, optional `repository`, `pr` | `{sessions}` for the Git common directory |
 | `owner-read` | `session` | Saved owner view; available while a fix runs |
 | `owner-reconcile` | `session` | Check local commits and finish matching local findings; return owner view plus `reconciliation` |
@@ -191,14 +191,21 @@ network/model calls, staging, refs, reply creation, or publication. A ready
 batch's `commit_match.commit` records the completing commit of a unique exact
 group commit or a recorded sequence of verified task checkpoints. Each sequence
 commit must have the preceding matched commit as its sole parent, starting at
-the original batch baseline. Only current `fixed` outcomes for local
-findings in their latest batch are automatically handled; stale feedback,
+the original batch baseline. Current `fixed` outcomes for local
+findings in their latest batch are automatically handled after matching commits; stale feedback,
 incomplete results, integrity failures, missing items, and explicit triage
 overrides prevent completion. `local_completion` retains its batch, commit, and
 feedback fingerprint. Lost proof reopens only automatically handled feedback;
 an exact amendment updates the proof. A matched prefix can finish its own findings
 while later units remain pending. This proves a recorded fix was committed,
 not that subsequent edits preserve its semantics or that it was pushed.
+
+Verified `already_addressed` and `no_change` outcomes in a batch with no commit
+units can also finish local findings. Their `local_completion` records the batch,
+feedback fingerprint, HEAD, tree, and verified base. Completion requires the
+same HEAD and base, a clean index/worktree, and complete verification without
+execution or integrity blockers. Changed inputs or lost verification reopen
+automatically handled findings. Explicit restore or re-import still requeues them.
 
 The response-only `reconciliation` has `status: "complete"`, `committed_batches`,
 `handled_items`, and `reopened_items`. With an active execution lock it returns
@@ -332,7 +339,10 @@ drafts and staging unchanged. No GitHub or model call occurs.
 the same generation/comment is idempotent for unchanged content; changed content
 retains the prior copy in `versions`, replaces the current snapshot, and marks
 dependent batches stale. All selected items are queued at the front of the owner
-view for explicit fixing. Local snapshots are never refreshed implicitly from
+view for explicit fixing. With `automatic: true`, used by the issue coordinator,
+the importer first reconciles completion and excludes unchanged completed items
+from the returned `items`, preserving their handled state. The default explicit
+import always requeues selected findings. Local snapshots are never refreshed implicitly from
 reviewer drafts. CLI equivalent:
 `pr-review owner import --review-session PATH --comment ID [--comment ID…]`;
 optional `--generation` and `--revision` pin the source explicitly.
@@ -749,3 +759,20 @@ without running models or publishing. `issue-read` reads saved coordination
 state after collecting current eligibility. `issue-run` has the same explicit
 write authorization and options as `fix-issue`; it can publish, push, and change
 PR draft status. These services are additive and do not change Owner defaults.
+
+Readiness, including the cached no-op path, requires all automatic Owner replies
+to be published and reply drafting/inspection blockers to be resolved. Recovered
+`unsent` actions and unstaged automatic replies remain blocking across retries;
+the coordinator never silently restages them. Inspect and explicitly stage/publish
+the reply in Owner to resume. A published reply resolves its earlier unsent
+attempts, which remain in the journal as history.
+
+`issue-recover` uses the same issue/PR and repository selectors. Without
+`retry_absent`, it returns saved comment/PR-creation `actions` with fresh
+`readback` observations and sends nothing. With `retry_absent` set to one exact
+action key, the caller attests after inspection that this uncertain write stored
+nothing remotely. A fresh absent read-back permits only a submitting action
+without a receipt to become pending, retaining its prior state and decision in
+history. A now-accepted write is receipted instead. Ambiguous/changed results and
+read failures cannot authorize a resend. Recovery never runs models, pushes, or
+publishes; a separate `issue-run` resumes execution.

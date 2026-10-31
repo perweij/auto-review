@@ -189,7 +189,8 @@ def final_review(session, state, batch):
         batch["review"] = review
         if successful(review):
             batch.update(status="ready", final_tree=batch["checkpoint"]["tree"], completed_at=now(),
-                         verified_items=keys, verified_fingerprints={i["key"]: i["fingerprint"] for i in session.items(state, keys)})
+                         verified_items=keys, verified_fingerprints={i["key"]: i["fingerprint"] for i in session.items(state, keys)},
+                         verified_base=state["metadata"]["baseRefOid"])
             for task in batch["tasks"]:
                 if task.get("after") and task["after"]["tree"] != batch["final_tree"]:
                     task["verification_superseded"] = True

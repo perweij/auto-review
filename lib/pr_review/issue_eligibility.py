@@ -73,11 +73,13 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
         if issue.get('pull_request'):
             raise ApiError('invalid_request', 'The issue selector names a pull request.')
         linked = connection(repo, issue_number)
-        pulls = [get(f'repos/{repo.name}/pulls/{r["number"]}') for r in linked
-                 if r['repository']['nameWithOwner'].lower() == repo.name]
+        if any(r['repository']['nameWithOwner'].lower() != repo.name for r in linked):
+            return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue,
+                    'pull_references': linked, 'link_error': 'foreign_pr_unsupported'}
+        pulls = [get(f'repos/{repo.name}/pulls/{r["number"]}') for r in linked]
         if target.get('pr') and int(target['pr']) not in [p['number'] for p in pulls]:
             return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue,
-                    'link_error': 'issue_link_missing'}
+                    'pull_references': linked, 'link_error': 'issue_link_missing'}
         active = [p for p in pulls if p['state'] == 'open']
         pr = next((p for p in pulls if p['number'] == target.get('pr')), None) if target.get('pr') else (active[0] if len(active) == 1 else None)
         base_branch = pr['base']['ref'] if pr else info['default_branch']
@@ -99,7 +101,8 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
                     untouched = False
                     break
         return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue, 'pr': pr,
-                'pulls': pulls, 'base_branch': base_branch, 'base': base, 'head': head, 'untouched': untouched,
+                'pulls': pulls, 'pull_references': linked,
+                'base_branch': base_branch, 'base': base, 'head': head, 'untouched': untouched,
                 'permission': info.get('permissions', {}).get('push'),
                 'comments': pages(repo, f'repos/{repo.name}/issues/{issue_number}/comments')}
     except (ApiError, KeyError, TypeError, ValueError) as exc:
@@ -117,7 +120,9 @@ def evaluate_eligibility(facts, policy=None):
     check('facts_incomplete', True if facts.get('complete') else None, facts.get('error', 'Complete facts required.'))
     issue, pr, workflow = facts.get('issue'), facts.get('pr'), facts.get('workflow')
     if facts.get('link_error'):
-        check(facts['link_error'], False, 'Select one explicitly linked issue and PR.')
+        message = ('Associated PRs must belong to the issue repository.'
+                   if facts['link_error'] == 'foreign_pr_unsupported' else 'Select one explicitly linked issue and PR.')
+        check(facts['link_error'], False, message)
     elif facts.get('complete'):
         check('issue_closed', bool(issue and issue.get('state') == 'open'), 'Issue must be open.')
         check('description_empty', bool(issue and (issue.get('body') or '').strip()), 'Issue description is required.')

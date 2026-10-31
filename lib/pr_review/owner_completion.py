@@ -1,8 +1,20 @@
-"""Reconcile verified fixes with local commits, without Git or GitHub writes."""
+"""Reconcile verified fixes with local code, without Git or GitHub writes."""
 import copy
 
 from .common import ApiError
 from . import owner_git, owner_commit_plan
+
+
+def execution_complete(batch, *, current_discussion=True):
+    """Stale completed execution needs a new batch, never resumed committing."""
+    if batch.get('status') != 'ready' or not batch.get('review', {}).get('complete') or batch.get('review', {}).get('blocking'):
+        return False
+    execution = batch.get('commit_execution', {})
+    if (batch.get('integrity_failure') or (current_discussion and batch.get('discussion_stale')) or execution.get('inspection_required')
+            or (execution and execution.get('status') != 'complete')):
+        return False
+    progress = batch.get('commit_progress', {})
+    return progress.get('complete', False) or not batch.get('commit_plan', {}).get('units', [1])
 
 
 def manual_triage(state, item):
@@ -24,6 +36,7 @@ def reconcile(session, state):
     try:
         owner_git.validate(session, state)
         head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
+        unchanged = None
         latest = {}
         for batch in updated["batches"]:
             for key in batch["items"]:
@@ -52,6 +65,26 @@ def reconcile(session, state):
                     and any(o["item"] == item["key"] and o["status"] == "fixed"
                             for o in batch["review"]["outcomes"])):
                 proof = {"batch": batch["id"], "commit": commits[-1], "fingerprint": fingerprint}
+            # No commit can witness an already-satisfied finding. Bind that
+            # verification to its exact code/base and require a clean index and
+            # worktree, so later edits or a new verification attempt reopen it.
+            if (item["kind"] in ("local_review", "issue_plan") and not item.get("missing")
+                    and execution_complete(batch) and batch.get("commit_plan", {}).get("units") == []
+                    and batch.get("baseline") == head
+                    and batch.get("verified_base")
+                    and batch["verified_base"] == state["metadata"]["baseRefOid"]
+                    and batch.get("verified_fingerprints", {}).get(item["key"]) == fingerprint
+                    and item["key"] in batch.get("verified_items", [])
+                    and any(o["item"] == item["key"] and o["status"] in ("already_addressed", "no_change")
+                            for o in batch["review"]["outcomes"])):
+                if unchanged is None:
+                    tree = session.repo.git("rev-parse", "HEAD^{tree}", cwd=state["worktree"]).stdout.strip()
+                    dirty = session.repo.git("status", "--porcelain=v1", "--untracked-files=all",
+                                             "--ignore-submodules=none", cwd=state["worktree"]).stdout
+                    unchanged = (tree, not dirty)
+                if unchanged == (batch.get("final_tree"), True):
+                    proof = {"batch": batch["id"], "head": head, "tree": unchanged[0],
+                             "base": batch["verified_base"], "fingerprint": fingerprint}
             previous = item.get("local_completion")
             if previous and not proof:
                 item.pop("local_completion")
