@@ -206,9 +206,14 @@ then prepare the next commit. `d` on a commit row shows just that fix's saved pa
 The full group finishes its combined review before commit preparation is enabled.
 Staging uses each reviewed snapshot, including earlier versions of files that
 later tasks also edited. It does not split work by filename or guess patch ownership.
-Combined-review repairs or adopted changes that break those boundaries retain
-one combined commit with an explanation. Outcomes satisfied by earlier changes
-share a commit rather than creating an empty one.
+If the task chain is intact, later combined-review repairs or adopted and
+reverified changes become a final **Integration repair** commit. Every affected
+finding links its task commit and the integration repair; no fixed-in replies are
+created from a partial series, and publication waits for the full series to be
+pushed. Only the final tree has passed the full combined verification; task
+commits may depend on the repair. Missing or discontinuous task checkpoints still
+produce one combined commit with an explanation. Outcomes satisfied by earlier
+changes share a commit rather than creating an empty one.
 Later unstaged edits, including edits to the same files, remain unstaged. Existing
 staging is accepted only when it contains exact versions from this fix; unrelated
 or conflicting staging opens status with an explanation and remains untouched.

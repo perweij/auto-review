@@ -1,0 +1,45 @@
+diff --git a/lib/pr_review/suggestions.py b/lib/pr_review/suggestions.py
+index a6a4493..162a656 100644
+--- a/lib/pr_review/suggestions.py
++++ b/lib/pr_review/suggestions.py
+@@ -132,6 +132,8 @@ def blockers(session, comment, state, *, bulk=False):
+             record = state.get('suggestion_batch', {})
+             if record.get('status') != 'accepted' or not {identity(session, c) for c in selected}.issubset(set(record.get('members', []))):
+                 reasons.append('Verify the selected suggestions together before staging or publishing.')
++    except Cancelled:
++        raise
+     except (ApiError, KeyError, TypeError, ValueError) as exc:
+         reasons.append(str(exc) + ' ' + RECOVERY)
+     return reasons
+diff --git a/tests/test_suggestions.py b/tests/test_suggestions.py
+index afd15f9..d94c410 100644
+--- a/tests/test_suggestions.py
++++ b/tests/test_suggestions.py
+@@ -116,6 +116,27 @@ class SuggestionTest(unittest.TestCase):
+         with self.assertRaises(ApiError):
+             s.validate(self.session, c)
+ 
++    def test_cancellation_during_prepare_preserves_staging_and_saved_state(self):
++        c = self.attach()
++        c['status'] = 'staged'
++        self.save()
++        saved = self.session.file.read_bytes()
++        cancelled = Cancelled(signal.SIGTERM)
++        with patch.object(publication, 'recover'), patch.object(publication, 'refresh', return_value=[]), \
++                patch.object(publication, 'repository_operation'), patch.object(s, 'validate', side_effect=cancelled):
++            with self.assertRaises(Cancelled):
++                publication.prepare(self.session, self.state)
++        self.assertEqual(c['status'], 'staged')
++        self.assertEqual(self.session.file.read_bytes(), saved)
++
++    def test_ordinary_validation_failure_remains_actionable(self):
++        c = self.attach()
++        failure = ApiError('invalid_suggestion', 'Replacement is invalid.')
++        with patch.object(s, 'validate', side_effect=failure):
++            reasons = s.blockers(self.session, c, self.state)
++        self.assertIn('Replacement is invalid.', reasons[0])
++        self.assertIn(s.RECOVERY, reasons[0])
++
+     def test_raw_fences_block_without_opt_in_including_replies_and_overall(self):
+         c = self.state['comments'][0]
+         for body in ('```suggestion\nx\n```', '> ~~~suggestion\nx', '```suggestion:-1+2\nx'):

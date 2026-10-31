@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_review.api import dispatch
-from pr_review.common import ApiError, atomic_json, digest, locked
+from pr_review.common import ApiError, atomic_json, digest, locked, read_json
 from pr_review.repository import Repository
 from pr_review.owner_state import OwnerSession, feedback_body, superseded_batches
 from pr_review import owner_commit, owner_completion, owner_fixes, owner_git, owner_providers, owner_publication
@@ -1591,6 +1591,48 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(index.read_bytes(), before)
         self.assertEqual(batch["checkpoint"]["tree"], tree)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=worktree), batch["baseline"])
+
+    def test_large_provider_context_is_preserved_outside_request(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        original = {"feedback": [{"key": "thread:T1", "body": "context \u2603 " * 120000}],
+                    "batch_diff": "diff\n" * 10000, "completed_tasks": [],
+                    "implementation_report": {"summary": "Keep all evidence"}}
+        result = {"summary": "Checked", "outcomes": [], "checks": [], "complete": True, "blocking": []}
+        def provider(args, **kwargs):
+            directory = Path(kwargs["env"]["TMPDIR"]).parent
+            prompt = kwargs["input_bytes"].decode()
+            self.assertLess(len(prompt), owner_providers.INLINE_CONTEXT_CHARS)
+            self.assertIn(str(directory / "context/index.json"), prompt)
+            self.assertNotIn(original["batch_diff"], prompt)
+            self.assertEqual((directory / "prompt.txt").read_text(), prompt)
+            recovered = {}
+            for field in read_json(directory / "context/index.json"):
+                values = [read_json(Path(path)) for path in field["files"]]
+                recovered[field["field"]] = values if field["kind"] == "list" else values[0]
+            self.assertEqual(original, recovered)
+            if args[0] == "claude":
+                self.assertEqual(args[args.index("--add-dir") + 1], str(directory / "context"))
+                events = [{"type": "result", "subtype": "success", "structured_output": result}]
+            else:
+                Path(args[args.index("-o") + 1]).write_text(json.dumps(result))
+                events = [{"type": "turn.completed"}]
+            return SimpleNamespace(returncode=0, events=events)
+        for provider_name in ("codex", "claude"):
+            batch["settings"]["review"]["provider"] = provider_name
+            with self.subTest(provider=provider_name), patch("pr_review.owner_providers.run", side_effect=provider):
+                self.assertEqual(REAL_INVOKE(session, state, batch, "review", original), result)
+        self.assertEqual("context \u2603 " * 120000, original["feedback"][0]["body"])
+
+    def test_small_provider_context_remains_inline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context = {"feedback": [], "batch_diff": "small diff"}
+            prompt, root = owner_providers.context_prompt("Instructions\n", context, Path(tmp))
+            self.assertEqual(prompt, "Instructions\n" + json.dumps(context, ensure_ascii=True))
+            self.assertIsNone(root)
+            self.assertFalse((Path(tmp) / "context").exists())
 
     def test_orphaned_attempt_is_recorded_and_not_blindly_replayed(self):
         self.fix()

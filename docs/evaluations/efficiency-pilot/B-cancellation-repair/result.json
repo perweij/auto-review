@@ -1,0 +1,1 @@
+{"summary":"Updated suggestion blockers to propagate cancellation, and added a publication-preparation regression checking that cancellation preserves staged status and saved state.","checks":["Passed: focused unittest `test_prepare_cancellation_preserves_staged_suggestion_and_saved_state` (1 test)."],"findings":[]}

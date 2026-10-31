@@ -250,9 +250,11 @@ still require inspection. No index changes occur in these cases.
 Ready batches carry a deterministic `commit_plan` with `mode`, original `baseline`,
 `final_tree`, and ordered `units` (`id`, `before_tree`, `tree`, `items`, `tasks`).
 Unbroken, independently reviewed task checkpoints produce logical commits.
-Shared outcomes with no extra patch combine their earlier changes. Missing or
-discontinuous checkpoints and combined-review repairs fall back to a combined
-unit with `reason`; no heuristic path splitting occurs. The full batch must have
+Shared outcomes with no extra patch combine their earlier changes. When the task
+chain is intact but the verified final tree differs, an additional unit with
+`kind: "integration_repair"` records that difference and references all verified
+items. Its `tasks` list is empty. Missing or discontinuous checkpoints still fall
+back to a combined unit with `reason`; no heuristic path splitting occurs. The full batch must have
 passed combined verification before any unit can be prepared. Existing ready
 sessions derive their plan on demand, and existing whole-group commits remain
 valid without history rewriting.
@@ -262,8 +264,12 @@ valid without history rewriting.
 and `items` to exact matched SHAs. Unexpected HEAD changes between units block
 staging; ambiguous histories do not create automatic associations. `owner-associate`
 uses method `task` for exact unit matches and preserves explicit associations.
-Pushed prefixes may generate replies for their own items; later uncommitted
-findings receive no fixed-in claim.
+Without an integration repair, pushed prefixes may generate replies for their own
+items; later uncommitted findings receive no fixed-in claim. When an integration
+repair is required, item mappings remain empty until the complete series exists.
+Then each item maps to its task commit plus the integration commit. Publication
+requires the complete verified series on the remote, including for explicitly
+associated replies. Started legacy combined-commit transactions keep their plan.
 
 `owner-fix` accepts optional Boolean `auto_commit`. A new batch defaults to false;
 omission on resume preserves the saved choice, and explicit false disables it.

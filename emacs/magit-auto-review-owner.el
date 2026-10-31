@@ -371,7 +371,9 @@
                                        ((= position (1+ (or (alist-get 'completed progress) 0))) "Ready to commit")
                                        (t "After earlier commit"))
                                  (magit-auto-review-owner--brief
-                                  (string-join (mapcar #'magit-auto-review-owner--item-label (alist-get 'items unit)) "; ")))
+                                  (if (equal (alist-get 'kind unit) "integration_repair")
+                                      "Integration repair"
+                                    (string-join (mapcar #'magit-auto-review-owner--item-label (alist-get 'items unit)) "; "))))
                          (if sha 'magit-auto-review-owner-item 'magit-auto-review-owner-attention))
                        (insert "m prepares or inspects this commit; d shows its exact patch.\n")
                        (dolist (key (alist-get 'items unit))

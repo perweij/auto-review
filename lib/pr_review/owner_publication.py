@@ -180,6 +180,12 @@ def blockers(session, state, reply, remote, allow_unpushed=False):
         raise ApiError("stale_discussion", "Inspect and acknowledge the changed reply context first.")
     if reply.get("automatic") and not automatic_proof(session, state, reply):
         raise ApiError("stale_commit", "The exact local fix or reply destination changed; inspect this reply.")
+    batch = next((b for b in state["batches"] if b["id"] == reply.get("batch")), None)
+    if batch and any(u.get("kind") == "integration_repair"
+                     for u in owner_commit_plan.build(session, batch)["units"]):
+        proof_head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip() if allow_unpushed else remote
+        if not owner_commit_plan.inspect(session, batch, proof_head)["complete"]:
+            raise ApiError("unpublished_commit", "The verified integration repair is required before publishing replies. Push the complete series first.")
     require_text(reply["body"], "reply body")
     if item["kind"] == "thread" and not item.get("can_reply"):
         raise ApiError("permission_denied", "GitHub does not permit replying to this thread.")

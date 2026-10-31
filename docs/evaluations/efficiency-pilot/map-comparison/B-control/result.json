@@ -1,0 +1,1 @@
+{"summary":"Updated suggestion blockers to propagate cancellation, preserving staged comments and persisted state during publication preparation. Added a focused regression test.","checks":["Passed: test_prepare_cancellation_preserves_staged_suggestion_and_saved_state","Passed: test_prepare_blocks_invalid_attached_suggestion_without_post"],"findings":[]}

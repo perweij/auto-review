@@ -1,0 +1,42 @@
+diff --git a/lib/pr_review/owner_publication.py b/lib/pr_review/owner_publication.py
+index e3797e6..dc9b19a 100644
+--- a/lib/pr_review/owner_publication.py
++++ b/lib/pr_review/owner_publication.py
+@@ -180,6 +180,8 @@ def publish(session, state, request):
+         raise ApiError("stale_confirmation", "Publication changed; inspect a fresh preview.")
+     for reply in prepared["replies"]:
+         refresh(session, state)
++        if state["metadata"]["state"] != "OPEN":
++            raise ApiError("closed_pr", "Publishing owner replies requires an open PR.")
+         remote = workspace.fetch_head(session, state)
+         if remote != prepared["head"]:
+             raise ApiError("stale_confirmation", "PR head changed during publication; prepare the remaining replies again.")
+diff --git a/tests/test_owner.py b/tests/test_owner.py
+index bc24e8a..da73ea0 100644
+--- a/tests/test_owner.py
++++ b/tests/test_owner.py
+@@ -480,6 +480,24 @@ class OwnerTest(unittest.TestCase):
+         view = self.request("owner-refresh")
+         self.assertEqual([r["status"] for r in view["replies"]], ["published", "unstaged"])
+ 
++    def test_closed_pr_during_publication_stops_before_the_next_send(self):
++        self.request("owner-mutate", operation="reply", item="thread:T1", body="First reply")
++        self.request("owner-mutate", operation="reply", item="thread:T2", body="Second reply")
++        for reply in self.view["replies"]:
++            self.request("owner-mutate", operation="stage", reply=reply["id"])
++        prepared = self.request("owner-prepare")
++        def publish_then_close(*args, **kwargs):
++            receipt = self.publish(*args, **kwargs)
++            self.metadata["state"] = "CLOSED"
++            return receipt
++        with patch("pr_review.owner_publication.gh", side_effect=publish_then_close), self.assertRaises(ApiError) as caught:
++            self.request("owner-publish", token=prepared["token"])
++        self.assertEqual(caught.exception.code, "closed_pr")
++        self.assertEqual(len(self.posts), 1)
++        state = OwnerSession({"session": self.path}).load()
++        self.assertEqual([r["status"] for r in state["replies"]], ["published", "staged"])
++        self.assertEqual([a["status"] for a in state["actions"]], ["published"])
++
+     def test_already_addressed_outcomes_never_generate_fixed_in_replies(self):
+         original = self.model
+         def model(*args):

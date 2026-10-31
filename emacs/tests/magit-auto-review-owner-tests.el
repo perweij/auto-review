@@ -552,6 +552,26 @@
      (should (equal (alist-get 'unit request) "u2"))
      (should (equal (alist-get 'batch request) "b1")))))
 
+(ert-deftest owner/integration-repair-row-has-a-distinct-label-and-diff-target ()
+  (owner-test-buffer
+   (let* ((view (copy-tree (owner-test-commit-plan-view)))
+          (batch (car (alist-get 'batches view)))
+          (plan (alist-get 'commit_plan batch)))
+     (setf (alist-get 'units plan)
+           (append (alist-get 'units plan)
+                   '(((id . "integration-repair") (kind . "integration_repair")
+                      (items . ("local:first" "local:second"))))))
+     (setf (alist-get 'total (alist-get 'commit_progress batch)) 3)
+     (magit-auto-review-owner--accept view))
+   (magit-section-show (owner-test-goto 'owner-batch "b1"))
+   (should (string-match-p "3/3 · After earlier commit · Integration repair" (owner-test-visible-text)))
+   (owner-test-goto 'owner-commit-unit '("b1" . "integration-repair"))
+   (let (request)
+     (cl-letf (((symbol-function 'magit-auto-review--call)
+                (lambda (value) (setq request value) '((diff . "repair patch")))))
+       (save-window-excursion (magit-auto-review-owner-diff)))
+     (should (equal (alist-get 'unit request) "integration-repair")))))
+
 (ert-deftest owner/feedback-commit-target-and-hash-are-specific-to-its-logical-fix ()
   (owner-test-buffer
    (magit-auto-review-owner--accept (owner-test-commit-plan-view))

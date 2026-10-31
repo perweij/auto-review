@@ -433,9 +433,15 @@ Later fixes and manual edits stay unstaged, including separate changes to the
 same file. Push to the displayed **Push PR** destination with `P u`.
 Conflicting or unrelated existing staging is
 preserved and requires manual inspection. Use `C-u m` for status only.
-If combined-review repairs or adopted changes invalidate the separate task
-boundaries, Owner explains why the group needs one combined commit. An existing
-single commit of the whole group is also recognized.
+When the task checkpoints form a continuous chain, Owner preserves their commits
+and appends an **Integration repair** commit for changes required by the final
+combined review or adopted afterward and reverified. All commits are prepared
+only after the final tree passes verification. Replies reference the task commit
+and the integration repair; the complete series must be pushed before publication.
+Intermediate commits may depend on that repair and are not independently verified
+as final fixes. Missing or discontinuous checkpoints still produce one explained
+combined commit. Existing whole-group commits and started combined-commit
+transactions are retained without rewriting history.
 
 Use **`C-u f`** to continue automatically through committing and reply preparation.
 It completes the combined review, creates the logical commits in order, finishes
@@ -520,6 +526,11 @@ processing provider; thereafter they are independent. Fix operations that run
 providers validate fresh model metadata and perform live authentication probes;
 commit-only recovery needs no provider access.
 Opening or editing settings does not invoke inference.
+
+Large Owner prompts store the complete task context in each attempt’s `context/`
+directory and pass an index to the provider. Feedback, accumulated diffs, and
+completed-task evidence are preserved without truncation. This keeps growing
+batches below the provider’s request-size limit.
 
 The planner can combine related concerns and order tasks by dependency. Tasks run
 sequentially in a dedicated `pr-owner/...` branch and linked worktree, preserving

@@ -1,0 +1,106 @@
+Disposable navigation map (partial; current source is authoritative).
+Signatures and locations only; inspect source before editing.
+lib/pr_review/suggestions.py
+  25: lines(text)
+  30: source(session, path)
+  40: validate(session, comment)
+  83: identity(session, comment)
+  97: verified(session, comment)
+  102: overlaps(left, right)
+  107: batch_identity(session, comments)
+  111: selected_suggestions(state, comment=None, bulk=False)
+  116: blockers(session, comment, state, *, bulk=False)
+  140: render(comment)
+  148: preview(comment)
+  160: checkout(session, comments)
+  179: invoke(session, stage, context, cwd)
+  225: verify_result(value)
+  241: verify_set(session, comments)
+  259: verify_comments(session, state, comments)
+  296: generation_identity(session, comment)
+  305: generate(run)
+  365: verify_operation(session, request)
+tests/test_owner_auto_commit.py
+  20: class AutoCommitTest
+  21: AutoCommitTest.setUp(self)
+  28: AutoCommitTest.start(self)
+  31: AutoCommitTest.resume(self, **fields)
+  35: AutoCommitTest.hook(self, name, script)
+  43: AutoCommitTest.push(self, sha)
+  47: AutoCommitTest.test_group_commits_after_final_review_and_stages_precise_replies_without_push(self)
+  83: AutoCommitTest.test_publication_keeps_pending_selection_and_never_silently_omits_unpushed_replies(self)
+  102: AutoCommitTest.test_dropped_pushed_commit_and_changed_discussion_block_the_whole_preview(self)
+  116: AutoCommitTest.test_publishing_first_reply_does_not_invalidate_the_other_verified_item(self)
+  131: AutoCommitTest.test_retry_recovers_commit_created_before_result_was_saved(self)
+  154: AutoCommitTest.test_hook_failure_keeps_verified_staging_and_remembers_mode_on_resume(self)
+  ... additional symbols omitted
+tests/test_owner_commit_plan.py
+  14: class CommitPlanTest
+  15: CommitPlanTest.setUp(self)
+  29: CommitPlanTest.model(self, session, state, batch, role, context)
+  53: CommitPlanTest.fix(self)
+  59: CommitPlanTest.commit_prepared(self, prepared)
+  64: CommitPlanTest.test_separate_commits_stage_saved_versions_even_in_the_same_file(self)
+  98: CommitPlanTest.test_publication_links_each_thread_to_its_own_verified_commit(self)
+  115: CommitPlanTest.test_later_unit_requires_earlier_commit_and_conflicting_staging_is_preserved(self)
+  128: CommitPlanTest.test_cli_targets_one_logical_fix_without_silently_preparing_another(self)
+  145: CommitPlanTest.test_combined_review_repairs_keep_one_explained_commit(self)
+  155: CommitPlanTest.test_shared_fix_without_another_patch_does_not_create_an_empty_commit(self)
+  ... additional symbols omitted
+tests/test_suggestions.py
+  23: class SuggestionTest
+  24: SuggestionTest.setUp(self)
+  32: SuggestionTest.attach(self, index=0, start=1, end=1, replacement='corrected\n')
+  42: SuggestionTest.accepted(self, c)
+  45: SuggestionTest.save(self)
+  48: SuggestionTest.test_opt_in_settings_and_cli_preserve_saved_default(self)
+  57: SuggestionTest.test_git_lines_do_not_split_unicode_separators(self)
+  60: SuggestionTest.test_added_file_is_supported_but_crlf_and_symlinks_are_not(self)
+  82: SuggestionTest.test_multiline_payload_and_deletion_preserve_exact_range_and_markers(self)
+  99: SuggestionTest.test_invalid_source_noop_newlines_fences_side_head_and_range(self)
+  119: SuggestionTest.test_raw_fences_block_without_opt_in_including_replies_and_overall(self)
+  126: SuggestionTest.test_verification_is_separate_isolated_and_reused(self)
+  142: SuggestionTest.inspect(self, c)
+  ... additional symbols omitted
+tests/test_api.py
+  21: class ApiTest
+  22: ApiTest.setUp(self)
+  64: ApiTest.git(self, *args)
+  67: ApiTest.request(self, command='read', **fields)
+  71: ApiTest.change(self, operation, **fields)
+  74: ApiTest.test_local_reads_are_stable_and_never_run_models(self)
+  83: ApiTest.test_edit_unstages_entire_comment_and_preserves_original_version(self)
+  93: ApiTest.test_legacy_severity_is_read_only_metadata_even_for_edited_staged_and_published_comments(self)
+  120: ApiTest.test_severity_does_not_change_a_confirmed_publication_payload(self)
+  139: ApiTest.test_initial_verdict_requires_explicit_choice_and_preserves_it(self)
+  151: ApiTest.test_own_pr_defaults_to_comment_and_explains_unavailable_verdicts(self)
+  164: ApiTest.test_stale_writes_leave_existing_text_untouched(self)
+  171: ApiTest.test_base_metadata_advancement_keeps_generation_and_human_drafts(self)
+  ... additional symbols omitted
+tests/test_assessments.py
+  14: class AssessmentTest
+  15: AssessmentTest.test_explicit_legacy_headers_and_labels(self)
+  28: AssessmentTest.test_explicit_table_columns_are_required(self)
+  38: AssessmentTest.test_prose_confidence_and_code_do_not_assign_a_rating(self)
+  55: AssessmentTest.test_conflicting_legacy_ratings_remain_unknown(self)
+  59: AssessmentTest.test_structured_rating_wins_and_invalid_is_not_guessed(self)
+  73: AssessmentTest.test_grouped_findings_use_highest_known_rating_and_expose_gaps(self)
+  85: AssessmentTest.test_new_output_requires_valid_severity_but_legacy_output_remains_readable(self)
+tests/test_automation.py
+  18: class AutomationTest
+  19: AutomationTest.setUp(self)
+  30: AutomationTest.saved(self, change=None)
+  37: AutomationTest.publish(self, **options)
+  43: AutomationTest.automatic(self, execute_error=None)
+  54: AutomationTest.github_with_urls(self)
+  63: AutomationTest.reply_then_review(self)
+  70: AutomationTest.test_invalid_suggestion_blocks_the_whole_batch_then_verified_payload_recovers(self)
+  97: AutomationTest.assert_saved_outcome(self, result)
+  103: AutomationTest.test_late_cancellation_preserves_published_and_noop_records(self)
+  127: AutomationTest.test_cancellation_during_submission_retains_confirmed_receipts(self)
+  146: AutomationTest.test_cancellation_between_posts_reports_partial_with_unsent_remainder(self)
+  164: AutomationTest.test_cancellation_during_inline_receipt_lookup_keeps_parent_review_url(self)
+  ... additional symbols omitted
+tests/guix-installed.py
+  36: check_backend(program)
+tests/helpers/api-cancel.py

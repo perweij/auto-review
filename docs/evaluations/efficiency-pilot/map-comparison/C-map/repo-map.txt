@@ -1,0 +1,148 @@
+Disposable navigation map (partial; current source is authoritative).
+Signatures and locations only; inspect source before editing.
+lib/pr_review/owner_publication.py
+  11: commit(session, value)
+  17: fixed_items(batch)
+  21: associate(session, state, request)
+  87: new_reply(item, body, **extra)
+  93: invalidate(session, state, remote)
+  108: blockers(session, state, reply, remote)
+  119: prepare(session, state)
+  140: recover(session, state)
+  165: finish(state, action, receipt)
+  171: publish(session, state, request)
+tests/smoke-owner.py
+  19: main()
+tests/test_owner.py
+  27: class OwnerTest
+  28: OwnerTest.setUp(self)
+  76: OwnerTest.item(key, identity, kind='thread')
+  84: OwnerTest.git(self, *args, cwd=None)
+  87: OwnerTest.github(self, repository, endpoint, cwd, **kwargs)
+  93: OwnerTest.request(self, command, **fields)
+  99: OwnerTest.model(self, session, state, batch, role, context)
+  111: OwnerTest.publish(self, session, endpoint, payload=None, pages=False, resource='pulls')
+  123: OwnerTest.fix(self, **fields)
+  126: OwnerTest.commit_fix(self, push=True)
+  136: OwnerTest.test_owner_open_is_local_and_hidden_from_reviewer_discovery(self)
+  143: OwnerTest.test_private_owner_artifacts_cannot_be_created_inside_a_worktree(self)
+  149: OwnerTest.test_selection_remembered_with_inferred_or_explicit_repository(self)
+  154: OwnerTest.test_initial_settings_use_custom_defaults_without_reviewer_history(self)
+  ... additional symbols omitted
+lib/pr_review/owner.py
+  15: dispatch(request)
+  69: mutate(session, state, request)
+  118: thread_state(session, state, request)
+lib/pr_review/owner_cli.py
+  14: main(argv)
+lib/pr_review/owner_fixes.py
+  13: validate_plan(value, items)
+  52: validate_result(value, keys)
+  68: successful(value)
+  72: implementation_ready(session, state, task)
+  81: context(session, state, batch, keys, before)
+  88: run_task(session, state, batch, task)
+  129: final_review(session, state, batch)
+  161: check_fresh(session, state, batch)
+  169: execute(session, state, request)
+lib/pr_review/owner_git.py
+  13: fetch_head(session, state)
+  23: prepare(session, state)
+  52: validate(session, state)
+  62: configure_push(session, state)
+  78: admin(session, state)
+  96: checkpoint(session, state, label)
+  114: pin_commit(session, sha)
+  121: clean(session, state)
+  126: unstaged_index(session, state)
+  131: ancestor(session, older, newer)
+  138: diff(session, before, after)
+  142: trust(session, state, tree)
+lib/pr_review/owner_providers.py
+  17: obj(properties)
+  31: preflight(session, state)
+  67: argv(choice, runtime, role, directory, schema)
+  89: invoke(session, state, batch, role, context)
+lib/pr_review/owner_state.py
+  12: root()
+  16: default_settings(request)
+  27: validate_settings(value)
+  41: local_repository(request)
+  56: open_session(request)
+  74: discover(request)
+  90: toolkit(request)
+  110: fingerprint(item, viewer=None)
+  117: class OwnerSession
+  118: OwnerSession.__init__(self, request)
+  130: OwnerSession.load(self)
+  136: OwnerSession.check(self, request, state)
+  140: OwnerSession.save(self, state)
+  151: OwnerSession.view(self, state=None)
+  156: OwnerSession.items(self, state, keys)
+  165: refresh(session, state)
+lib/pr_review/publication.py
+  10: checkout(session)
+  15: repository_operation(session, operation, verdict='COMMENT')
+  25: gh(session, endpoint, payload=None, *, pages=False, resource='pulls')
+  47: refresh(session, state)
+  67: marker(session, identity)
+  71: with_marker(body, value)
+  75: make_actions(session, state)
+  117: persist_action(session, state, action)
+  131: valid_receipt(session, action, value)
+  151: mark_published(session, state, action, receipt)
+  184: recover(session, state)
+  206: prepare(session, state)
+  266: publish(session, state, request)
+lib/pr_review/receipts.py
+  6: import_legacy(directory, head)
+  24: actions(directory, *, include_copied=False)
+lib/pr_review/repository.py
+  12: fail(message)
+  16: repository_name(value)
+  27: normalize_remote(value)
+  35: class Repository
+  43: Repository.host(self)
+  47: Repository.name(self)
+  51: Repository.url(self)
+  55: Repository.head_ref(self)
+  59: Repository.base_ref(self)
+  63: Repository.lock(self)
+  66: Repository.git(self, *args, check=True, cwd=None)
+  70: Repository.resolve(cls, target, repository=None, cwd=None)
+  103: Repository.from_manifest(cls, manifest)
+  108: Repository.metadata(self, destination=None)
+  130: Repository.pages(self, endpoint, kind='array')
+  144: Repository.graphql(self, query, **variables)
+  157: Repository.verify(self, manifest, directory=None)
+  171: Repository.validate_publication(self, directory, verdict='COMMENT')
+tests/helpers/api-cancel.py
+tests/helpers/api-fixture.py
+tests/helpers/interactive_runner.py
+tests/helpers/interrupt_runner.py
+tests/helpers/mock-gh-json.py
+  14: read(name, default)
+  19: write(name, value)
+  23: count(name)
+tests/test_api.py
+  21: class ApiTest
+  22: ApiTest.setUp(self)
+  64: ApiTest.git(self, *args)
+  67: ApiTest.request(self, command='read', **fields)
+  71: ApiTest.change(self, operation, **fields)
+  74: ApiTest.test_local_reads_are_stable_and_never_run_models(self)
+  83: ApiTest.test_edit_unstages_entire_comment_and_preserves_original_version(self)
+  93: ApiTest.test_legacy_severity_is_read_only_metadata_even_for_edited_staged_and_published_comments(self)
+  120: ApiTest.test_severity_does_not_change_a_confirmed_publication_payload(self)
+  139: ApiTest.test_initial_verdict_requires_explicit_choice_and_preserves_it(self)
+  151: ApiTest.test_own_pr_defaults_to_comment_and_explains_unavailable_verdicts(self)
+  164: ApiTest.test_stale_writes_leave_existing_text_untouched(self)
+  171: ApiTest.test_base_metadata_advancement_keeps_generation_and_human_drafts(self)
+  ... additional symbols omitted
+lib/pr_review/__init__.py
+lib/pr_review/api.py
+  10: emit(kind, **fields)
+  14: dispatch(request)
+  21: main()
+lib/pr_review/application.py
+  9: dispatch(request)
