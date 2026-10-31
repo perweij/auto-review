@@ -2031,6 +2031,26 @@ class CollectorTest(unittest.TestCase):
     def collect(self):
         return collect_eligibility_facts({'issue': 12}, self.repo_object)
 
+    def test_issue_selector_for_pull_request_has_actionable_diagnostic(self):
+        self.issue.update(html_url='https://github.com/org/repo/pull/12',
+                          pull_request={'url': 'https://api.github.com/repos/org/repo/pulls/12'})
+        with patch.object(self.repo_object, 'git') as git:
+            result = self.collect()
+        self.assertFalse(result['complete'])
+        self.assertEqual('invalid_request', result['error_code'])
+        self.assertIn('-i/--issue selector names a pull request', result['error'])
+        self.assertIn('-p/--pr', result['error'])
+        git.assert_not_called()
+
+    def test_real_issue_identity_mismatch_still_blocks(self):
+        self.issue['html_url'] = 'https://github.com/other/repo/issues/12'
+        with patch.object(self.repo_object, 'git') as git:
+            result = self.collect()
+        self.assertFalse(result['complete'])
+        self.assertEqual('facts_incomplete', result['error_code'])
+        self.assertEqual('Issue identity mismatch.', result['error'])
+        git.assert_not_called()
+
     def test_nonempty_branch_rejected(self):
         # main contains the current source commit; use its parent as the fetched base.
         self.git('branch', 'base', self.base)

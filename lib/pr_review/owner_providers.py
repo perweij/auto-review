@@ -21,12 +21,18 @@ def obj(properties):
 TEXT = {"type": "string"}
 STRINGS = {"type": "array", "items": TEXT}
 OUTCOMES = {"type": "array", "items": obj({"item": TEXT, "status": {"type": "string", "enum": ["fixed", "already_addressed", "clarify", "no_change"]}, "evidence": TEXT})}
+CASES = {'type': 'array', 'maxItems': 8, 'items': obj({
+    'id': TEXT, 'scenario': TEXT, 'expected': TEXT, 'basis': TEXT,
+    'intent': {'type': 'string', 'enum': ['preserve', 'change']}})}
+CASE_RESULTS = {'type': 'array', 'items': obj({'id': TEXT,
+    'status': {'type': 'string', 'enum': ['tested', 'source_traced', 'failed', 'unavailable']}, 'evidence': TEXT})}
 PLAN = obj({"tasks": {"type": "array", "items": obj({"id": TEXT, "items": STRINGS,
-    "depends_on": STRINGS, "rationale": TEXT,
+    "depends_on": STRINGS, "rationale": TEXT, "verification_cases": CASES,
     "expected": {"type": "array", "items": obj({"item": TEXT, "outcome": TEXT})}})}})
 RESULT = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS,
+              "verification_cases": CASES, "case_results": CASE_RESULTS,
               "complete": {"type": "boolean"}, "blocking": STRINGS})
-REVIEW = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS,
+REVIEW = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS, "case_results": CASE_RESULTS,
               "assessment": {"type": "string", "enum": ["passed", "changes_requested", "incomplete"]},
               "blocking": STRINGS})
 
@@ -192,7 +198,12 @@ def invoke(session, state, batch, role, context):
         + "Scratch directory for disposable test files and repositories (also TMPDIR): "
         + json.dumps(str(scratch)) + "\n")
     if role == "plan":
-        instructions += ("Read only. Plan tasks covering each selected item exactly once. Combine overlapping concerns, "
+        instructions += ("Read only. Cover each ordinary feedback item exactly once. For an issue_plan, decompose substantial work "
+                         "into small, independently verifiable implementation steps. The same issue feedback key may appear in "
+                         "multiple tasks, with a distinct expected outcome for each step. Each successive step for that issue "
+                         "must directly depend on its previous task ID. Do not collapse a multi-part issue into one task merely "
+                         "because it has one feedback key. Keep the approved scope and acceptance criteria unchanged. "
+                         "Completed tasks are context: plan only the remaining steps. Combine overlapping ordinary concerns, "
                          "keeping unrelated fixes separate: reviewed task boundaries become logical commits where possible. "
                          "identify prerequisites, and explain rationale and one expected outcome per original item. Use task IDs such as t1. "
                          "items and expected.item contain feedback keys. depends_on contains only task IDs defined in this plan, "
@@ -200,14 +211,20 @@ def invoke(session, state, batch, role, context):
                          "If plan_correction is supplied, correct its rejected plan using the validation error and return a complete replacement plan. "
                          "Do not add unselected feedback. Existing completed tasks are context, not new work.\n")
     elif role == "fix":
-        instructions += ("Inspect whether earlier changes already satisfy each concern before editing. Make only justified "
+        instructions += ("Implement the assigned task, including source changes and focused regression tests. Inspection alone "
+                         "is not completion when the requested behavior is still missing. For issue steps, implement this task's "
+                         "expected outcomes without requiring later steps to be finished. "
+                         "Inspect whether earlier changes already satisfy each concern before editing. Make only justified "
                          "source changes. A concern satisfied by earlier changes in this batch can be fixed without another edit. "
                          "Report an outcome for every selected item. If it was already satisfied before the batch, use "
                          "already_addressed. Use clarify or no_change where appropriate. Run focused checks.\n")
     else:
         instructions += ("Keep the owner checkout read-only. Independently assess the exact changes and every selected concern against the final code. "
                          "Identify regressions and blocking defects. Report evidence for every outcome. "
-                         "Set assessment=passed only when verification finished and no blocking defects or unanswered questions remain. "
+                         "When task is supplied for an issue_plan, assess that step against task.expected and check for regressions; "
+                         "later steps need not be implemented yet. When scope is supplied, assess the complete approved issue "
+                         "and all acceptance criteria. Set assessment=passed only when verification finished and no blocking "
+                         "defects or unanswered questions remain. "
                          "Set assessment=changes_requested when verification establishes concrete implementation defects; "
                          "list those defects in blocking so the fixer can repair them. A failing regression test that demonstrates "
                          "a defect is changes_requested, NOT incomplete. The fix being unfinished does not mean the assessment is unfinished. "
@@ -221,6 +238,7 @@ def invoke(session, state, batch, role, context):
                          "commit, and modify Git metadata only in those disposable repositories. This permission does not "
                          "allow writes to the owner checkout, its real index, shared object store, or other existing "
                          "repositories. Any fixture worktrees and shared object stores must also stay inside scratch.\n")
+    instructions += (ROOT / "prompts/owner-compatibility.txt").read_text() + "\n"
     prompt, context_directory = context_prompt(instructions, context, directory)
     atomic_bytes(directory / "prompt.txt", prompt.encode())
     args = argv(choice, Runtime.environment(), role, directory, schema)

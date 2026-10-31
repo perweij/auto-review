@@ -7,7 +7,7 @@ from collections import deque
 from .common import ApiError, now
 from .events import emit
 from .processes import run
-from . import owner_commit, owner_commit_plan, owner_completion, owner_git, owner_publication
+from . import owner_commit, owner_commit_plan, owner_completion, owner_git, owner_publication, owner_contracts
 
 
 def timeout():
@@ -34,6 +34,7 @@ def execute(session, state, batch, remote):
             raise ApiError("commit_inspection", phase["error"])
         owner_git.validate(session, state)
         check_context(state, batch)
+        owner_contracts.require_current(batch)
         worktree = state["worktree"]
         def git(*args):
             return session.repo.git(*args, cwd=worktree).stdout.strip()

@@ -88,6 +88,9 @@ def inspect(session, batch, head, plan=None):
     for unit, sha in zip(units, commits):
         for key in unit["items"]:
             by_item.setdefault(key, []).append(sha)
+    # A multi-step issue is not locally complete after only its first commit.
+    pending_items = {key for unit in units[completed:] for key in unit['items']}
+    by_item = {key: commits for key, commits in by_item.items() if key not in pending_items}
     # A task snapshot alone does not establish a fixed outcome when a later
     # integration repair is required. Withhold associations until it exists.
     if any(u.get("kind") == "integration_repair" for u in units) and completed < len(units):

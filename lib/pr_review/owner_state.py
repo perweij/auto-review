@@ -171,7 +171,8 @@ def feedback_body(body):
 def active_feedback_keys(batch):
     """Keep skipped feedback as history without blocking the remaining work."""
     skipped = {key for task in batch.get('tasks', []) if task['status'] == 'skipped' for key in task['items']}
-    return [key for key in batch['items'] if key not in skipped]
+    retained = {key for task in batch.get('tasks', []) if task['status'] != 'skipped' for key in task['items']}
+    return [key for key in batch['items'] if key not in skipped or key in retained]
 
 
 def superseded_batches(state):

@@ -1,0 +1,10 @@
+{
+  "base": "a14e711404c5c875281fa476d8dd30c747f5ae97",
+  "checkpoints": {
+    "before_repair": "0190fd5ed244663ed2124e45ed7fcb5d0b080197",
+    "failed_repair": "1a708d7e9153219b890cfc4acaff6c6adc4fdee4"
+  },
+  "model": "gpt-6.1-terra",
+  "effort": "high",
+  "manual_reference": "Evaluation only; not model input."
+}

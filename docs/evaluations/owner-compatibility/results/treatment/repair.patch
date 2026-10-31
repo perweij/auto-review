@@ -1,0 +1,157 @@
+diff --git a/lib/pr_review/automation.py b/lib/pr_review/automation.py
+index 8603604..3942922 100644
+--- a/lib/pr_review/automation.py
++++ b/lib/pr_review/automation.py
+@@ -325,7 +325,8 @@ def _execute(request, controller):
+             if result:
+                 return result
+         configured = settings.resolve({**request, 'session': str(root) if root else None})['settings']
+-        catalogs = {p: models.discover({'provider': p}) for p in configured['reviewers']}
++        required = set(configured['reviewers']) | {configured['processing_provider']}
++        catalogs = {p: models.discover({'provider': p}) for p in sorted(required)}
+         models.validate_selection(configured, catalogs)
+         session = reviews.execute({**request, **configured, 'catalogs': catalogs})
+         return controller.publish(session)
+diff --git a/lib/pr_review/reviews.py b/lib/pr_review/reviews.py
+index 8255269..2180798 100644
+--- a/lib/pr_review/reviews.py
++++ b/lib/pr_review/reviews.py
+@@ -30,7 +30,7 @@ class Review(Store):
+ 
+     def configure(self, kind, threads):
+         self.scope(kind, threads)
+-        if (settings.from_manifest(self.manifest) != self.settings and
++        if (settings.validate(settings.from_manifest(self.manifest)) != self.settings and
+                 any(self.manifest['phases'].get(s, {}).get('status') == 'completed' for s in ('synthesis', 'followup'))):
+             self.begin()
+         self.manifest.update(configuration=self.settings, tools=self.tools,
+@@ -333,7 +333,8 @@ def execute(request, *, confirm_trust=None):
+         if request.get('catalogs') is not None:
+             from .models import validate_selection
+             validate_selection(configuration, request['catalogs'])
+-        enabled = [configuration['processing_provider']] if kind == 'followup' else configuration['reviewers']
++        enabled = list(dict.fromkeys(([ *configuration['reviewers'], configuration['processing_provider'] ]
++                                      if kind == 'full' else [configuration['processing_provider']])))
+         tools = capabilities(enabled, configuration['processing_provider'], runtime, repo.cwd)
+         say(f'PR Review: #{repo.pr}; Repository: {repo.identity}; Remote: {repo.remote}')
+         checks = [(['gh', 'auth', 'status', '--hostname', repo.host], f'GitHub authentication failed for {repo.host}')]
+diff --git a/lib/pr_review/settings.py b/lib/pr_review/settings.py
+index 447c7a3..c528ec5 100644
+--- a/lib/pr_review/settings.py
++++ b/lib/pr_review/settings.py
+@@ -56,6 +56,10 @@ def validate(settings):
+         reviewers = result["reviewers"]
+         if not isinstance(reviewers, list) or not 1 <= len(reviewers) <= 2 or any(p not in ("claude", "codex") for p in reviewers):
+             raise ApiError("invalid_request", "Choose one or two Claude or Codex reviewers.")
++        # The provider-based interface historically canonicalized mixed pairs.
++        # Explicit slots, in contrast, retain the caller's chosen ordering.
++        if len(reviewers) == 2 and set(reviewers) == {"claude", "codex"}:
++            reviewers = ["claude", "codex"]
+         slots = [{"id": f"reviewer-{i}", "provider": p, "model": result[p + "_model"],
+                   "effort": result[p + "_effort"]} for i, p in enumerate(reviewers, 1)]
+     if not isinstance(slots, list) or not 1 <= len(slots) <= 2:
+@@ -108,6 +112,14 @@ def initial_settings(request):
+ def apply_overrides(settings, request):
+     """Apply explicit legacy overrides to saved canonical choices as well."""
+     overrides = {k: request[k] for k in CONFIG_KEYS if k in request}
++    reviewers = overrides.get("reviewers")
++    if (isinstance(reviewers, list) and len(reviewers) == 1
++            and "reviewer_slots" not in overrides
++            and "processing" not in overrides and "processing_provider" not in overrides
++            and "processing" not in request.get("defaults", {})
++            and "processing_provider" not in request.get("defaults", {})):
++        overrides["processing_provider"] = reviewers[0]
++        settings.pop("processing", None)
+     slots = settings.get("reviewer_slots")
+     if slots is not None and "reviewer_slots" not in overrides:
+         if "reviewers" in overrides:
+diff --git a/tests/test_automation.py b/tests/test_automation.py
+index eeca599..394641c 100644
+--- a/tests/test_automation.py
++++ b/tests/test_automation.py
+@@ -51,6 +51,26 @@ class AutomationTest(unittest.TestCase):
+                 patch.object(reviews, 'execute', return_value=self.session, side_effect=execute_error):
+             return automation.run({'pr': 7})
+ 
++    def test_catalogs_include_distinct_processing_provider(self):
++        from pr_review import models, reviews, settings
++        from pr_review.repository import Repository
++        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock)
++        configured = settings.validate({'reviewers': ['claude'], 'processing_provider': 'codex'})
++        controller = SimpleNamespace(operation=self.op, before_analysis=lambda root: None,
++                                     publish=lambda session: session)
++        with patch.object(Repository, 'resolve', return_value=repo), \
++                patch('pr_review.sessions.locate', return_value=(self.session.root, self.f.repo)), \
++                patch.object(settings, 'resolve', return_value={'settings': configured}), \
++                patch.object(models, 'discover', side_effect=lambda request: {
++                    'provider': request['provider'], 'models': [{
++                        'value': configured[request['provider'] + '_model'],
++                        'efforts': [configured[request['provider'] + '_effort']]}]}) as discover, \
++                patch.object(models, 'validate_selection', wraps=models.validate_selection) as validate, \
++                patch.object(reviews, 'execute', return_value=self.session):
++            self.assertIs(automation._execute({'pr': 7}, controller), self.session)
++        self.assertEqual({c.args[0]['provider'] for c in discover.call_args_list}, {'claude', 'codex'})
++        self.assertEqual(set(validate.call_args.args[1]), {'claude', 'codex'})
++
+     def github_with_urls(self):
+         github, posts = self.f.fake_github()
+         def call(*args, **kwargs):
+diff --git a/tests/test_slot_settings.py b/tests/test_slot_settings.py
+index 3e86995..b590e0b 100644
+--- a/tests/test_slot_settings.py
++++ b/tests/test_slot_settings.py
+@@ -1,6 +1,8 @@
+ import sys
+ import unittest
+ from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import Mock, patch
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+ from pr_review import models, settings
+@@ -46,3 +48,45 @@ class SlotSettingsTest(unittest.TestCase):
+         legacy = settings.validate(settings.from_manifest({'models': {'claude': 'old'}}))
+         self.assertEqual(legacy['reviewer_slots'][0]['model'], 'old')
+         self.assertEqual(legacy['processing']['provider'], 'claude')
++
++    def test_legacy_order_and_explicit_slot_order(self):
++        from pr_review.reviews import Review
++        config = settings.resolve({'reviewers': ['codex', 'claude']})['settings']
++        self.assertEqual(config['reviewers'], ['claude', 'codex'])
++        review = Review.__new__(Review)
++        review.settings = config
++        self.assertTrue(review.dual)
++        slots = [dict(id='reviewer-1', provider='codex', model='x', effort='high'),
++                 dict(id='reviewer-2', provider='claude', model='y', effort='high')]
++        self.assertEqual(settings.validate({'reviewer_slots': slots})['reviewer_slots'], slots)
++
++    def test_saved_reviewer_override_and_explicit_processing(self):
++        saved = settings.validate(settings.DEFAULTS)
++        with patch.object(settings, 'Session') as session, patch.object(settings, 'read_json', return_value={'configuration': saved}):
++            session.return_value.pointer.return_value = None
++            session.return_value.path = Path('/unused')
++            result = settings.resolve({'session': '/unused', 'reviewers': ['claude']})['settings']
++            self.assertEqual(result['processing']['provider'], 'claude')
++            result = settings.resolve({'session': '/unused', 'reviewers': ['claude'], 'processing_provider': 'codex'})['settings']
++            self.assertEqual(result['processing']['provider'], 'codex')
++            self.assertEqual(settings.resolve({'session': '/unused'})['settings'], saved)
++        result = settings.resolve({'reviewers': ['claude'], 'defaults': {'processing_provider': 'codex'}})['settings']
++        self.assertEqual(result['processing']['provider'], 'codex')
++
++    def test_unchanged_legacy_completed_review_does_not_begin_generation(self):
++        from pr_review.reviews import Review
++        legacy = dict(settings.DEFAULTS)
++        review = Review.__new__(Review)
++        review.manifest = {'configuration': legacy, 'phases': {'synthesis': {'status': 'completed'}}}
++        review.settings = settings.validate(settings.from_manifest(review.manifest))
++        review.scope, review.begin, review.save = Mock(), Mock(), Mock()
++        review.runtime = SimpleNamespace(permission='default')
++        review.tools, review.viewer, review.permission = {}, 'viewer', 'read'
++        review.path = Path('/unused')
++        with patch('pr_review.reviews.say'):
++            review.configure('full', [])
++        review.begin.assert_not_called()
++        review.settings = settings.validate({**legacy, 'claude_model': 'different'})
++        with patch('pr_review.reviews.say'):
++            review.configure('full', [])
++        review.begin.assert_called_once()

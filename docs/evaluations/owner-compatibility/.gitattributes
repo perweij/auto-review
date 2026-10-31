@@ -1,0 +1,3 @@
+# Preserve diff context spaces in exact replay artifacts and the evidence packet.
+*.patch -whitespace
+results/fable/prompt.txt -whitespace

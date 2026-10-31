@@ -21,6 +21,7 @@ def parser():
     approval.add_argument('--yolo', action='store_true', help='skip plan approval for this invocation; questions still block')
     approval.add_argument('--approve', type=int, metavar='REV', help='record approval of this exact published plan revision')
     result.add_argument('--adopt', action='store_true', help='adopt inspected partial Owner workspace changes and reverify')
+    result.add_argument('--replan', action='store_true', help='replan unfinished Owner tasks and continue, retaining completed work and history')
     recovery = result.add_mutually_exclusive_group()
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
     recovery.add_argument('--retry-absent', metavar='ACTION', help='confirm after inspection that this uncertain action was not sent; allow a later retry')

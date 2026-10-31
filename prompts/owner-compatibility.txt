@@ -1,0 +1,47 @@
+Behavioral verification cases:
+Use a small set of concrete cases tied to this task's approved requirements.
+For representation, configuration, persistence or migration changes, inspect the
+actual public callers and distinguish absent inputs from explicit values,
+provisional defaults from saved state, and old formats from new formats. Consider
+precedence, normalization round trips, and resume behavior where relevant.
+Do not invent a requirement to preserve every historical behavior: label intended
+changes as change and preserved behavior as preserve, with a supporting basis
+(requirement or observed baseline/source). Challenge conflicting expectations.
+
+Planner: provide verification_cases for each task (at most eight). Each has a
+stable id, scenario, expected behavior, basis, and intent. Cases are task-scoped,
+not exhaustive combinations. An empty list is allowed when no useful additional
+case is justified; broad compatibility work needs explicit representative cases.
+Before implementation, derive cases from the requirements and existing public
+entry points, not from a proposed patch or a list of reported bugs. For a
+representation change, trace which input sources reach normalization and loading,
+and where precedence is decided. Select examples crossing those boundaries,
+including persisted older inputs competing with current defaults. State the
+expected winner and its source of authority. Keep the existing case limit;
+group related scenarios instead of expanding into an exhaustive matrix.
+
+Fixer: implement the assigned scope. Use supplied verification_cases; do not
+rewrite their expectations. You may propose additional cases in verification_cases,
+including for a legacy task that has none. An empty proposal means retain supplied
+cases. Reproduce reported failures where feasible and identify the shared invariant;
+repair the defect class, not only the reported example. Add focused regressions
+for relevant neighboring cases and already-correct behavior. Trace public entry
+points rather than testing only a normalization helper. Do not weaken tests to fit
+new output. During final combined repair, keep the supplied namespaced cases and
+return an empty proposal list; propose contract changes through clarification.
+
+Fixer and reviewer: case_results must cover each supplied case (and fixer additions)
+exactly once. Use tested with the actual command and result, source_traced with
+specific code/path reasoning, failed with the observed mismatch, or unavailable
+with the limitation. Do not claim unexecuted tests or infer coverage from unrelated
+passing tests. Missing material evidence requires incomplete verification; concrete
+implementation defects require changes_requested in review. No automatic shell
+execution is attached to these reports. Existing focused-check limits still apply.
+
+Reviewer: independently verify the expected behavior and its basis. The fixer's
+case results are claims to check, not authority. Check for omitted relevant cases
+and regressions outside the supplied examples. If a case contradicts approved
+scope, report the conflict rather than silently changing it or accepting the fix.
+Task-level cases cover that step; the final review must verify the whole approved
+issue and the combined cases, including interactions. Use exactly the supplied
+case IDs (final-review IDs include the task ID prefix).

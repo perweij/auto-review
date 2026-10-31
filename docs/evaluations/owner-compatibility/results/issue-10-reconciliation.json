@@ -1,0 +1,18 @@
+{
+  "issue": 10,
+  "pr": 11,
+  "worktree": "/workspaces/work/auto-review-owner-pr-11-d167273628",
+  "backup": "/home/vscode/.local/state/pr-review/manual-recovery/issue-10-xtebbz6_",
+  "before_tree": "d08b12ceb8295a371106dcac8f3fcc911701c12f",
+  "restored_tree": "1a708d7e9153219b890cfc4acaff6c6adc4fdee4",
+  "files": [
+    "lib/pr_review/issues.py",
+    "lib/pr_review/reviews.py",
+    "lib/pr_review/settings.py",
+    "tests/test_slot_settings.py"
+  ],
+  "status": "restored",
+  "journals_unchanged": true,
+  "index_unchanged": true,
+  "head_unchanged": true
+}

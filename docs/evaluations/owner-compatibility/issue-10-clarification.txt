@@ -1,0 +1,34 @@
+## Clarification for the next plan revision: preserve saved choices
+
+These decisions clarify the configuration/migration contract for issue #10. Please incorporate them into the revised plan and unfinished configuration task before continuing implementation. This comment does not approve a new plan revision.
+
+**Saved choices remain unchanged unless explicitly overridden.**
+
+- Repeating the same ordered reviewer list (for example, `--reviewers claude,claude`) preserves the saved slot identities, individual models and efforts, and independent processing choice.
+- Changing `--reviewers` alone, including narrowing to one reviewer, must not reset saved independent processing. Processing remains separately configurable.
+- An explicit processing flag/object changes processing without resetting otherwise unchanged reviewer slots.
+- Saved configuration takes precedence over provisional defaults and presets. Individual explicit overrides still take precedence over saved values.
+- For legacy migration, preserve the historically effective configuration. A mixed-provider legacy session's selected processing provider is a saved choice. Do not reinterpret an other-provider field that the old validator ignored in an already-single-reviewer session as a newly intentional independent selection.
+
+Concrete acceptance examples, also checked with Claude and Codex swapped:
+
+1. Saved slots: reviewer-1 = Claude/model-A/low; reviewer-2 = Claude/model-B/high. Saved processing: Codex/model-C/low. Request `--reviewers claude,claude`: retain both slots and all processing settings.
+2. Same saved configuration, request `--reviewers claude`: select one reviewer and retain Codex/model-C/low processing.
+3. Legacy saved mixed Claude/Codex reviewers with effective Codex/model-C/low processing, request `--reviewers claude`: retain that processing choice.
+4. Same canonical saved configuration as example 1, same reviewers plus an explicit processing-provider override: use the requested processor and preserve the two reviewer slots.
+5. Same canonical saved configuration, same reviewers plus processing = Claude/model-D/high: use that exact processing choice and preserve the two reviewer slots.
+6. Same canonical saved configuration, with different current defaults or the economical preset but no individual role overrides: preserve the saved slots and processor.
+
+These rules supersede any interpretation of the earlier repair feedback that unconditionally switches saved processing to a sole reviewer. Reviewers should assess the same contract rather than infer different precedence rules.
+
+### Separate Emacs compatibility finding
+
+`fix-issue` is CLI-only. The Emacs frontend belongs to `pr-review`, but it shares the backend changed by this issue.
+
+In `emacs/magit-auto-review-setup.el`, `magit-auto-review--default-settings` always serializes `processing_provider` (whose customization default is Codex), and `magit-auto-review-setup-submit` rewrites processing to the sole reviewer before manual launch. Field presence alone therefore does not establish deliberate user intent.
+
+Reconcile those frontend paths with independent processing: preserve deliberate/saved choices; keep fresh single-provider use from gaining an unintended second-provider dependency; audit manual and automatic submissions, saved/pending configurations, catalog checks, and documentation. Add focused frontend/backend coverage. Do not impose Emacs serialization assumptions on the CLI-only `fix-issue` path.
+
+The previous task reached its bounded repair limit. The earlier assistant-written manual delta has been archived and removed locally, restoring the failed agent checkpoint for a clean dogfood retry. Prior task history and repair counts remain intact; no implementation has been verified or published by this clarification.
+
+<!-- issue-10-clarification: saved-choices-2026-10-31 -->

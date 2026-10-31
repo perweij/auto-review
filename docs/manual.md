@@ -815,6 +815,49 @@ local issue session. State is stored in `issues-v1` below the normal state root,
 with execution state in the linked `owners-v1` session. Resume from another
 machine or without those local records is not supported.
 
+An approved issue can be split into dependent implementation steps, each with its
+own expected outcome and review. Ordinary PR feedback still occurs in one task.
+The final combined review verifies the entire approved issue and all acceptance
+criteria. Skipping a step cannot complete the issue, and partial task commits do
+not mark it handled.
+
+When implementation or verification stops, the result includes its stage, task,
+blockers, and attempt directory. `next_action: retry` means rerun the same command;
+`inspect_owner` means inspect the saved Owner reports before resuming. An
+incomplete implementation is not automatically posted as a question to the user.
+On the first resume of an older, paused one-task issue attempt that made no code
+changes and completed no verification, the planner can replace that task with
+smaller dependent steps. Earlier plans/reports remain in history. Modified,
+verified, committing, or integrity-blocked batches are not automatically replanned;
+normal workspace and frozen-setting checks still apply.
+
+To explicitly replace the unfinished Owner task plan after inspecting a stopped
+attempt, use:
+
+```sh
+fix-issue -i 123 --replan
+# Or select the associated PR:
+fix-issue -p 456 --replan
+```
+
+This delegates to Owner's existing replanning operation. Completed tasks remain;
+superseded tasks, their consumed repair allowances, prior plans and attempts stay
+in history. Normal implementation, verification, automatic commits, pushes and
+publication continue after replanning, subject to the existing safeguards.
+New tasks receive the normal repair allowance. It is an explicit
+planning decision, not an automatic retry-budget reset. The flag applies only to
+the selected unfinished batch, once in this invocation; subsequent corrective
+batches run normally. It is not queued if this invocation waits for answers or
+approval. Re-run with `--replan` when ready in that case.
+
+Replanning does not change the approved issue scope, approve a new issue plan,
+adopt edits, or bypass frozen settings, trust, or commit-recovery checks. Publish
+requirement clarifications through the normal issue discussion/approval flow
+before replanning against them. Use `--adopt` as well only when you have inspected
+and intend to retain partial/manual workspace changes. A new issue, a completed
+batch, or a batch with only final verification/committing left has no unfinished
+tasks to replan. `--replan` cannot be combined with write inspection/recovery.
+
 Shared reviewer flags and economical/expensive presets use normal precedence:
 defaults, preset, saved settings, then explicit individual flags. Owner settings
 are reused from its session; a new session derives them from the configured
@@ -871,6 +914,21 @@ block this reset. Inspect those cases manually; neither ordinary retries nor
 action; progress goes to stderr. Exit codes are 0 for success/no-op, 1 for failure,
 2 for waiting on answers/approval, 3 for attention, 4 for partial publication,
 5 for uncertain remote outcomes, and 130 for interruption.
+
+### Behavioral verification in Owner
+
+Owner planning and fixing also record a bounded set of behavioral verification
+cases. Compatibility work should distinguish explicit choices from defaults and
+saved formats from new formats, using the approved requirements and baseline as
+evidence. Repairs retain those cases and check related regressions; independent
+review checks every case and looks for omissions. Failed or unavailable evidence
+cannot support successful verification. This does not add model calls or increase
+the repair allowance. Older saved plans remain usable.
+
+Case evidence is tied to the source reviewed. Task commits remain separate from
+any integration repair, and the final combined tree must pass review before
+publication. Test claims in reports are evidence for the reviewer to check, not
+commands automatically executed by the coordinator.
 
 ### Shared eligibility services
 

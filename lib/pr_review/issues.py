@@ -391,10 +391,17 @@ class Workflow:
             pending = next((b for b in reversed(list(required_batches(data)))
                             if b['items'] == keys and not execution_complete(b, current_discussion=False)), None)
             request = {'items': keys, 'auto_commit': True, 'trusted_snapshot': self.request.get('trusted_snapshot')}
+            explicit_replan = self.request.get('replan') and not getattr(self, '_replan_used', False)
+            if explicit_replan:
+                if not pending or pending['id'] != getattr(self, '_replan_batch', pending['id']):
+                    raise ApiError('invalid_request', 'The unfinished Owner batch selected for replanning changed; inspect and retry.')
+                request['replan'] = True
+                # Applies once, not again to a later corrective batch in this run.
+                self._replan_used = True
             if pending:
                 request['batch'] = pending['id']
                 request['adopt'] = bool(self.request.get('adopt'))
-                if pending.get('discussion_stale'):
+                if pending.get('discussion_stale') or owner_fixes.legacy_issue_replan(owner, data, pending):
                     request['replan'] = True
             view = owner_fixes.execute(owner, data, request)
             batch = next(b for b in reversed(view['batches']) if b['items'] == keys)
@@ -413,7 +420,10 @@ class Workflow:
                     self.writes.comment('Implementation needs clarification or verification:\n\n' + '\n'.join('- ' + b for b in blockers), 'blockers:' + digest(blockers))
                     state.update(phase='waiting', waiting='answers')
                     self.save()
-                raise ApiError('needs_attention', 'Owner verification or commit execution needs attention.', owner=str(owner.path))
+                failure = owner_fixes.execution_failure(batch)
+                reason = '; '.join(failure['blocking']) or failure['summary']
+                raise ApiError('needs_attention', f"Owner {failure['stage']} paused: {reason}",
+                               owner=str(owner.path), **failure)
             check_owner_execution(owner, owner.load())
             # Only verified execution resolves blockers. Keep the generation so
             # clearing them cannot reapply the assessment on an unchanged retry.
@@ -506,6 +516,21 @@ class Workflow:
 
     def run(self):
         state = self.state
+        if self.request.get('replan'):
+            if not state.get('owner'):
+                raise ApiError('invalid_request', '--replan requires an existing unfinished Owner batch.')
+            owner = owner_state.OwnerSession({'session': state['owner']})
+            with locked(owner.execution_lock):
+                data = owner.load()
+                pending = next((b for b in reversed(list(required_batches(data))) if not execution_complete(b)), None)
+                issue_keys = {i['key'] for i in data['feedback'] if i['kind'] == 'issue_plan'}
+                if not pending or (pending['tasks'] and not any(
+                        t['status'] not in ('complete', 'skipped') or
+                        (t['status'] == 'skipped' and set(t['items']) & issue_keys)
+                        for t in pending['tasks'])):
+                    raise ApiError('invalid_request', '--replan requires unfinished Owner tasks; inspect verification or commit recovery separately.')
+                self._replan_batch = pending['id']
+                self._replan_used = False
         configuration = settings.initial_settings(self.request)
         configuration.update(state.get('configuration', {}))
         configuration.update({k: self.request[k] for k in settings.DEFAULTS if k in self.request})
@@ -526,9 +551,9 @@ class Workflow:
         finally:
             state['phase'] = previous_phase
         state.pop('error', None)
-        if state.get('phase') == 'complete' and state.get('finished_input') == digest([input_digest(self.facts, state), self.feedback_digest(), configuration]):
+        if not self.request.get('replan') and state.get('phase') == 'complete' and state.get('finished_input') == digest([input_digest(self.facts, state), self.feedback_digest(), configuration]):
             return self.result('complete')
-        if (state.get('phase') == 'ready' and not self.request.get('approve')
+        if (state.get('phase') == 'ready' and not self.request.get('approve') and not self.request.get('replan')
                 and state.get('ready_input') == input_digest(self.facts, state)
                 and state.get('ready_head') == self.facts.get('head')
                 and state.get('ready_base') == self.facts['base']
@@ -618,9 +643,11 @@ def dispatch(request):
     if request.get('retry_absent') is not None and (
             request.get('command') != 'issue-recover' or not isinstance(request['retry_absent'], str) or not request['retry_absent']):
         raise ApiError('invalid_request', 'retry_absent requires issue-recover and an action key.')
-    for key in ('force', 'yolo', 'adopt'):
+    for key in ('force', 'yolo', 'adopt', 'replan'):
         if key in request and type(request[key]) is not bool:
             raise ApiError('invalid_request', key + ' must be a Boolean.')
+    if request.get('replan') and request.get('command') != 'issue-run':
+        raise ApiError('invalid_request', '--replan applies to issue execution, not write inspection or recovery.')
     for key in ('issue', 'pr', 'approve'):
         if request.get(key) is not None and (type(request[key]) is not int or request[key] < 1):
             raise ApiError('invalid_request', key + ' must be a positive integer.')
@@ -656,4 +683,4 @@ def dispatch(request):
             flow.save()
             return flow.result('uncertain' if exc.code == 'uncertain' else 'partial' if exc.code == 'partial' else 'needs_attention',
                                5 if exc.code == 'uncertain' else 4 if exc.code == 'partial' else 3,
-                               'recover', error=flow.state['error'])
+                               exc.details.get('next_action', 'recover'), error=flow.state['error'])

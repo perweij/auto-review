@@ -1,0 +1,74 @@
+{
+  "summary": "Repaired the configuration compatibility regressions for the assigned configuration-contract step. Later orchestration and migration steps remain outside this task.",
+  "outcomes": [
+    {
+      "item": "issue:ba60935a4766b3a011963241e4182ba9",
+      "status": "fixed",
+      "evidence": "Legacy mixed-provider inputs regain their historical order; reviewer-only overrides restore implicit single-reviewer processing while explicit processing choices remain available; unchanged legacy sessions are compared after normalization; and automation discovers catalogs for the processing provider as well as reviewers."
+    }
+  ],
+  "checks": [
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_slot_settings.py \u2014 7 tests.",
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_automation.py -k test_catalogs_include_distinct_processing_provider \u2014 1 test.",
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_api.py -k settings \u2014 2 tests.",
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_api.py -k configuration \u2014 1 test.",
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_models.py -k selection \u2014 1 test.",
+    "Passed: git diff --check."
+  ],
+  "verification_cases": [
+    {
+      "id": "legacy-order",
+      "scenario": "Provider-based mixed reviewers are supplied in reverse order; explicit slots are supplied in reverse order.",
+      "expected": "Legacy providers normalize to Claude then Codex; explicit slot order remains intact.",
+      "basis": "Historical provider normalization and the approved ordered slot configuration.",
+      "intent": "preserve"
+    },
+    {
+      "id": "processing-override",
+      "scenario": "A saved configuration is overridden with one reviewer, with and without an explicit processing choice.",
+      "expected": "A reviewer-only override implicitly selects that provider for processing; explicit processing remains selected.",
+      "basis": "Approved legacy single-reviewer compatibility and independent processing requirements.",
+      "intent": "preserve"
+    },
+    {
+      "id": "legacy-generation",
+      "scenario": "A completed legacy session is configured with unchanged settings, then with a changed model.",
+      "expected": "Unchanged settings do not start a replacement generation; changed settings do.",
+      "basis": "Approved preservation of resumable legacy sessions.",
+      "intent": "preserve"
+    },
+    {
+      "id": "processing-catalog",
+      "scenario": "Automation selects Claude for review and Codex for processing.",
+      "expected": "Both provider catalogs are discovered and the selected choices pass catalog validation.",
+      "basis": "Approved independent processing and validation of every selected choice.",
+      "intent": "change"
+    }
+  ],
+  "case_results": [
+    {
+      "id": "legacy-order",
+      "status": "tested",
+      "evidence": "test_slot_settings.py passed, including public settings resolution and explicit slot ordering."
+    },
+    {
+      "id": "processing-override",
+      "status": "tested",
+      "evidence": "test_slot_settings.py passed for saved reviewer overrides, explicit processing, unchanged saved settings, and explicit processing defaults."
+    },
+    {
+      "id": "legacy-generation",
+      "status": "tested",
+      "evidence": "test_slot_settings.py passed the Review.configure generation-decision regression."
+    },
+    {
+      "id": "processing-catalog",
+      "status": "tested",
+      "evidence": "The focused automation test passed with mocked catalog discovery and real selection validation."
+    }
+  ],
+  "complete": true,
+  "blocking": [],
+  "case_contract": "09270eb421082b4eaca7d10b809ca77a280bed115479d18056d9aa2294d2bce6",
+  "case_tree": "46155d7bec63d5931c31a02d2c5ba1b4866338a1"
+}

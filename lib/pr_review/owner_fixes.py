@@ -6,7 +6,7 @@ import uuid
 from .common import ApiError, now
 from .events import emit
 from .operations import operation
-from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit
+from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts
 from .owner_state import refresh, superseded_batches, active_feedback_keys
 
 
@@ -15,12 +15,14 @@ def validate_plan(value, items):
     keys = [i["key"] for i in items]
     if not isinstance(tasks, list) or not tasks:
         raise ApiError("invalid_plan", "Planner returned no tasks.")
+    issue_keys = {i["key"] for i in items if i.get("kind") == "issue_plan"}
     found, covered = {}, []
     for task in tasks:
         if (not isinstance(task, dict) or not isinstance(task.get("id"), str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", task["id"]) or task["id"] in found
                 or not isinstance(task.get("items"), list) or not task["items"]
                 or any(not isinstance(k, str) for k in task["items"])
+                or len(set(task["items"])) != len(task["items"])
                 or not isinstance(task.get("depends_on"), list)
                 or any(not isinstance(k, str) for k in task["depends_on"])
                 or len(set(task["depends_on"])) != len(task["depends_on"])
@@ -31,10 +33,12 @@ def validate_plan(value, items):
             raise ApiError("invalid_plan", "Invalid or duplicate task in owner plan.")
         if sorted(e["item"] for e in task["expected"]) != sorted(task["items"]):
             raise ApiError("invalid_plan", "Each task requires an expected outcome for every original item exactly once.")
+        if "verification_cases" in task:
+            owner_contracts.cases(task["verification_cases"], code="invalid_plan")
         found[task["id"]] = copy.deepcopy(task)
         covered.extend(task["items"])
-    if sorted(covered) != sorted(keys):
-        raise ApiError("invalid_plan", "Plan must cover each selected feedback item exactly once.")
+    if set(covered) != set(keys) or any(covered.count(k) != 1 for k in keys if k not in issue_keys):
+        raise ApiError("invalid_plan", "Plan must cover every selected item; ordinary feedback must occur exactly once.")
     unknown = [f"{task['id']} -> {dep}" for task in tasks for dep in task["depends_on"] if dep not in found]
     if unknown:
         raise ApiError("invalid_plan", "Unknown task prerequisites: " + "; ".join(unknown)
@@ -48,6 +52,14 @@ def validate_plan(value, items):
         task.update(status="queued", repairs=0)
         ordered.append(task)
         done.add(task["id"])
+    # Repeated issue outcomes are ordered implementation steps, not independent
+    # claims that the whole issue is fixed. Require an explicit dependency chain.
+    previous = {}
+    for task in ordered:
+        for key in set(task['items']) & issue_keys:
+            if key in previous and previous[key] not in task['depends_on']:
+                raise ApiError('invalid_plan', 'Successive steps for an issue must depend on its previous task ID.')
+            previous[key] = task['id']
     return ordered
 
 
@@ -99,6 +111,49 @@ def implementation_ready(session, state, task):
     return True
 
 
+def legacy_issue_replan(session, state, batch):
+    """Upgrade only an untouched, incomplete pre-step issue attempt on resume."""
+    tasks = batch.get('tasks', [])
+    if (batch.get('issue_task_format', 1) >= 2 or batch.get('status') != 'paused'
+            or batch.get('verify_only') or batch.get('commit_execution') or batch.get('integrity_failure')
+            or len(tasks) != 1 or tasks[0].get('status') != 'needs_attention'):
+        return False
+    report = tasks[0].get('implementation', {})
+    if (report.get('complete') is not False or tasks[0].get('review')
+            or any(o['status'] == 'clarify' for o in report.get('outcomes', []))):
+        return False
+    issue_keys = {i['key'] for i in state['feedback'] if i['kind'] == 'issue_plan' and not i.get('missing')}
+    if not batch['items'] or not set(batch['items']) <= issue_keys:
+        return False
+    baseline = session.repo.git('rev-parse', batch['baseline'] + '^{tree}').stdout.strip()
+    return batch.get('checkpoint', {}).get('tree') == baseline
+
+
+def execution_failure(batch):
+    """Expose saved evidence without conflating incomplete work with questions."""
+    execution = batch.get('commit_execution', {})
+    if execution.get('error'):
+        return {'stage': 'commit', 'summary': execution['error'], 'blocking': [execution['error']],
+                'next_action': 'inspect_owner'}
+    task = next((t for t in batch.get('tasks', []) if t['status'] not in ('complete', 'skipped', 'blocked')), None)
+    if task:
+        implementation = task.get('implementation', {})
+        role = 'fix' if implementation and (implementation.get('complete') is False or
+                 any(o['status'] == 'clarify' for o in implementation.get('outcomes', []))) else 'review'
+        report = task.get('implementation' if role == 'fix' else 'review', {})
+    else:
+        role, report = 'review', batch.get('review', {})
+    blockers = list(report.get('blocking', []))
+    questions = [o['evidence'] for o in report.get('outcomes', []) if o['status'] == 'clarify']
+    blockers = list(dict.fromkeys(blockers + questions))
+    summary = batch.get('error') or report.get('summary') or 'Owner execution is incomplete.'
+    attempt = next((a.get('path') for a in reversed(batch.get('attempts', [])) if a.get('role') == role), None)
+    retry = report.get('complete') is False and not questions and not batch.get('integrity_failure')
+    return {'stage': 'implementation' if role == 'fix' else 'verification',
+            'task': task['id'] if task else None, 'summary': summary, 'blocking': blockers,
+            'attempt': attempt, 'next_action': 'retry' if retry else 'inspect_owner'}
+
+
 def context(session, state, batch, keys, before):
     batch_diff = workspace.diff(session, batch["baseline"], batch["checkpoint"]["tree"])
     task_diff = workspace.diff(session, before, batch["checkpoint"]["tree"])
@@ -124,7 +179,8 @@ def run_task(session, state, batch, task):
     saved_review = None
     if (task["status"] == "needs_attention" and task.get('review')
             and task.get("implementation", {}).get("complete") is True
-            and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]):
+            and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]
+            and owner_contracts.matches(task["review"], owner_contracts.task_cases(task), batch["checkpoint"]["tree"])):
         task["status"] = "reviewing"
         if task['review']['complete'] and task['review']['blocking']:
             saved_review = task['review']
@@ -136,18 +192,23 @@ def run_task(session, state, batch, task):
         session.save(state)
         data = context(session, state, batch, task["items"], task["before"]["tree"])
         data["task"] = {k: task[k] for k in ("id", "rationale", "expected")}
+        data["verification_cases"] = owner_contracts.task_cases(task)
         task["implementation"] = validate_result(models.invoke(session, state, batch, "fix", data), task["items"])
+        owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
         if not implementation_ready(session, state, task):
             return False
         task["status"] = "reviewing"
         session.save(state)
     while True:
         data = context(session, state, batch, task["items"], task["before"]["tree"])
+        data["task"] = {k: task[k] for k in ("id", "rationale", "expected")}
+        data["verification_cases"] = owner_contracts.task_cases(task)
         data["implementation_report"] = task["implementation"]
         if task.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = task["review"]
         review = saved_review if saved_review is not None else validate_result(models.invoke(session, state, batch, "review", data), task["items"])
         saved_review = None
+        owner_contracts.bind(review, owner_contracts.task_cases(task), batch["checkpoint"]["tree"])
         task["review"] = review
         task["after"] = batch["checkpoint"]
         session.save(state)
@@ -160,7 +221,9 @@ def run_task(session, state, batch, task):
             task["status"] = "repairing"
             session.save(state)
             data["review_findings"] = review
+            data["verification_cases"] = owner_contracts.task_cases(task)
             task["implementation"] = validate_result(models.invoke(session, state, batch, "fix", data), task["items"])
+            owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
             if not implementation_ready(session, state, task):
                 return False
             task["status"] = "reviewing"
@@ -174,7 +237,12 @@ def run_task(session, state, batch, task):
 
 
 def final_review(session, state, batch):
-    keys = [k for t in batch["tasks"] if t["status"] == "complete" for k in t["items"]]
+    issue_keys = {i['key'] for i in state['feedback'] if i['kind'] == 'issue_plan'}
+    if any(set(t['items']) & issue_keys and t['status'] != 'complete' for t in batch['tasks']):
+        batch['status'] = 'paused'
+        batch['error'] = 'Every approved issue step must complete before final verification; replan unfinished work.'
+        return
+    keys = list(dict.fromkeys(k for t in batch["tasks"] if t["status"] == "complete" for k in t["items"]))
     if not keys:
         batch["status"] = "paused"
         return
@@ -182,10 +250,12 @@ def final_review(session, state, batch):
         batch["status"] = "reviewing"
         session.save(state)
         data = context(session, state, batch, keys, batch["baseline"])
-        data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks."
+        data["verification_cases"] = owner_contracts.combined(batch["tasks"])
+        data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks. For approved issues, verify the entire approved plan and every acceptance criterion, not just individual step outcomes."
         if batch.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = batch["review"]
         review = validate_result(models.invoke(session, state, batch, "review", data), keys)
+        owner_contracts.bind(review, data["verification_cases"], batch["checkpoint"]["tree"])
         batch["review"] = review
         if successful(review):
             batch.update(status="ready", final_tree=batch["checkpoint"]["tree"], completed_at=now(),
@@ -202,6 +272,9 @@ def final_review(session, state, batch):
             session.save(state)
             data["review_findings"] = review
             result = validate_result(models.invoke(session, state, batch, "fix", data), keys)
+            if result.get('verification_cases'):
+                raise ApiError('invalid_result', 'Integration repair must preserve the completed task contracts; explicitly replan new requirements.')
+            owner_contracts.bind(result, data["verification_cases"], batch["checkpoint"]["tree"])
             if not result["complete"] or any(o["status"] == "clarify" for o in result["outcomes"]):
                 batch["status"] = "paused"
                 return
@@ -383,7 +456,13 @@ def execute(session, state, request):
             batch.pop('preflight_error', None)
             if not batch["tasks"] or request.get("replan"):
                 retained = [t for t in batch["tasks"] if t["status"] in ('complete', 'skipped')]
-                covered = {k for t in retained for k in t["items"]}
+                unfinished = {k for t in batch['tasks'] if t['status'] not in ('complete', 'skipped') for k in t['items']}
+                skipped_issues = {k for t in retained if t['status'] == 'skipped' for k in t['items']
+                                  if any(i['key'] == k and i['kind'] == 'issue_plan' for i in state['feedback'])}
+                # An issue cannot be completed by skipping an implementation step.
+                retained = [t for t in retained if not (t['status'] == 'skipped' and set(t['items']) & skipped_issues)]
+                unfinished |= skipped_issues
+                covered = {k for t in retained for k in t["items"]} - unfinished
                 keys = [k for k in batch["items"] if k not in covered]
                 if keys:
                     plan, tasks = plan_tasks(session, state, batch, keys)
@@ -395,7 +474,14 @@ def execute(session, state, request):
                     retained_ids = {t['id'] for t in retained}
                     for task in retained:
                         task['depends_on'] = [dep for dep in task['depends_on'] if dep in retained_ids]
+                    predecessors = {k: t['id'] for t in retained for k in t['items']}
+                    for task in tasks:
+                        for key in task['items']:
+                            if key in predecessors and predecessors[key] not in task['depends_on']:
+                                task['depends_on'].append(predecessors[key])
+                            predecessors[key] = task['id']
                     batch["tasks"] = retained + tasks
+                    batch["issue_task_format"] = 2
                 batch["discussion_stale"] = False
                 active = active_feedback_keys(batch)
                 batch["fingerprints"] = {i["key"]: i["fingerprint"] for i in session.items(state, active)} if active else {}

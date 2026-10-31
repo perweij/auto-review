@@ -1,0 +1,22 @@
+{
+  "summary": "The configuration-contract step has two compatibility defects involving processing-provider selection.",
+  "outcomes": [
+    {
+      "item": "issue:ba60935a4766b3a011963241e4182ba9",
+      "status": "no_change",
+      "evidence": "A focused reproduction of settings.resolve with reviewers=['claude'] and defaults.processing_provider='codex' returned Claude for processing: apply_overrides replaces the explicit default. Separately, validating a legacy manifest containing configuration.reviewers=['codex'] returned Claude for processing because from_manifest supplies the historical Claude default. The previous validator forced processing to the sole reviewer, so this changes the saved session's effective configuration."
+    }
+  ],
+  "checks": [
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 TMPDIR=/tmp/owner-compatibility-replay-1/control/artifacts/attempts/f298e100a9814c04a085aa1b35ab630b/scratch python -m unittest discover -s tests -p test_slot_settings.py (7 tests).",
+    "Passed: timeout 60s env PYTHONDONTWRITEBYTECODE=1 TMPDIR=/tmp/owner-compatibility-replay-1/control/artifacts/attempts/f298e100a9814c04a085aa1b35ab630b/scratch python -m unittest discover -s tests -p test_api.py -k settings (2 tests).",
+    "Ran two bounded Python reproductions for explicit processing defaults and legacy single-reviewer manifests; both demonstrated the defects described above.",
+    "Inspected the previous settings validator with git show HEAD:lib/pr_review/settings.py to verify historical single-reviewer behavior."
+  ],
+  "assessment": "changes_requested",
+  "blocking": [
+    "Preserve an explicitly configured processing-provider default when a legacy single-reviewer request is applied.",
+    "Normalize legacy single-reviewer manifests using their historical implicit processing provider, including when their configuration omits processing_provider."
+  ],
+  "complete": true
+}

@@ -2,12 +2,14 @@
 import copy
 
 from .common import ApiError
-from . import owner_git, owner_commit_plan
+from . import owner_git, owner_commit_plan, owner_contracts
 
 
 def execution_complete(batch, *, current_discussion=True):
     """Stale completed execution needs a new batch, never resumed committing."""
     if batch.get('status') != 'ready' or not batch.get('review', {}).get('complete') or batch.get('review', {}).get('blocking'):
+        return False
+    if not owner_contracts.current(batch):
         return False
     execution = batch.get('commit_execution', {})
     if (batch.get('integrity_failure') or (current_discussion and batch.get('discussion_stale')) or execution.get('inspection_required')
@@ -43,7 +45,7 @@ def reconcile(session, state):
                 latest[key] = batch
             batch.pop("commit_match", None)
             batch.pop("commit_progress", None)
-            if batch["status"] != "ready" or not batch.get("final_tree"):
+            if batch["status"] != "ready" or not batch.get("final_tree") or not owner_contracts.current(batch):
                 continue
             _plan, progress = owner_commit_plan.update(session, batch, head)
             if progress["complete"]:
