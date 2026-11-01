@@ -1,0 +1,105 @@
+{
+  "arm": "treatment",
+  "model": {
+    "provider": "codex",
+    "model": "gpt-6.1-terra",
+    "effort": "high"
+  },
+  "calls": [
+    {
+      "role": "fix",
+      "status": "complete",
+      "usage": [
+        {
+          "input_tokens": 601324,
+          "cached_input_tokens": 563456,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5051,
+          "reasoning_output_tokens": 665
+        }
+      ],
+      "tool_calls": 13
+    },
+    {
+      "role": "review",
+      "status": "complete",
+      "usage": [
+        {
+          "input_tokens": 202911,
+          "cached_input_tokens": 165376,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2346,
+          "reasoning_output_tokens": 530
+        }
+      ],
+      "tool_calls": 7
+    }
+  ],
+  "review_passed": false,
+  "seconds": 104.5,
+  "external_checks": [
+    {
+      "case": "explicit-default-claude",
+      "passed": true
+    },
+    {
+      "case": "canonical-default-claude",
+      "passed": true
+    },
+    {
+      "case": "legacy-saved-claude",
+      "passed": false,
+      "error": "(['codex'], ['claude'])"
+    },
+    {
+      "case": "legacy-implicit-claude",
+      "passed": true
+    },
+    {
+      "case": "explicit-request-claude",
+      "passed": true
+    },
+    {
+      "case": "canonical-roundtrip-claude",
+      "passed": true
+    },
+    {
+      "case": "explicit-default-codex",
+      "passed": true
+    },
+    {
+      "case": "canonical-default-codex",
+      "passed": true
+    },
+    {
+      "case": "legacy-saved-codex",
+      "passed": false,
+      "error": "(['claude'], ['codex'])"
+    },
+    {
+      "case": "legacy-implicit-codex",
+      "passed": false,
+      "error": "('claude', 'codex')"
+    },
+    {
+      "case": "explicit-request-codex",
+      "passed": true
+    },
+    {
+      "case": "canonical-roundtrip-codex",
+      "passed": true
+    },
+    {
+      "case": "first-review-compatibility",
+      "passed": true
+    },
+    {
+      "case": "first-review-unchanged-generation",
+      "passed": true
+    },
+    {
+      "case": "first-review-processing-catalog",
+      "passed": true
+    }
+  ]
+}

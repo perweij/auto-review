@@ -272,7 +272,8 @@ class ReadinessCacheTest(unittest.TestCase):
                                git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}
         owner = SimpleNamespace(execution_lock=root / 'owner.lock', repo=SimpleNamespace(lock=root / 'repo.lock', git=repo.git),
-                                load=lambda: {'worktree': str(root), 'feedback': [], 'batches': [], 'actions': [], 'replies': []})
+                                load=lambda: {'worktree': str(root), 'feedback': [], 'batches': [], 'actions': [], 'replies': [],
+                                              'settings': {'fix': {'provider': 'codex'}, 'review': {'provider': 'codex'}}})
         assessment = {'decision': 'plan', 'summary': 'Plan', 'plan': 'Implement the fix.',
                       'acceptance': ['Correct behavior'], 'questions': []}
         for target, effect in [('pr_review.issues.state_root', lambda: root),
@@ -295,7 +296,7 @@ class ReadinessCacheTest(unittest.TestCase):
         self.flow.feedback_context = Mock(return_value=[])
         self.flow.bootstrap = Mock(return_value=owner)
         self.reviewed_bases = []
-        self.flow.review = Mock(side_effect=lambda: self.reviewed_bases.append(self.flow.facts['base']) or [])
+        self.flow.push_implementation = Mock(side_effect=lambda owner: (self.reviewed_bases.append(self.flow.facts['base']), Workflow.push_implementation(self.flow, owner))[1])
         self.flow.plan = Mock(wraps=self.flow.plan)
         self.assessment = assessment
 
@@ -323,17 +324,17 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual(1, self.assess.call_count)
 
     def test_approval_prefix_requirement_during_execution_blocks_and_reassesses(self):
-        def review_then_add_requirement():
+        def review_then_add_requirement(owner):
             self.f['comments'].append({'id': 10, 'user': {'login': 'other'},
                                        'body': '/fix-issue approve 1\nAlso retain history.'})
             return []
 
-        self.flow.review.side_effect = review_then_add_requirement
+        self.flow.push_implementation.side_effect = review_then_add_requirement
         with self.assertRaises(ApiError) as caught:
             self.flow.run()
         self.assertEqual('stale_discussion', caught.exception.code)
         self.assertNotEqual('ready', self.flow.state['phase'])
-        self.flow.review.side_effect = lambda: []
+        self.flow.push_implementation.side_effect = lambda owner: Workflow.push_implementation(self.flow, owner)
         self.assertEqual('ready', self.flow.run()['outcome'])
         self.assertEqual(2, self.assess.call_count)
         self.assertEqual(self.f['comments'][0]['body'], self.assess.call_args.args[0]['comments'][0]['body'])
@@ -387,12 +388,12 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('noop', self.flow.run()['outcome'])
 
     def test_base_moves_after_review_blocks_readiness_and_reassesses_on_retry(self):
-        def review_then_move_base():
+        def review_then_move_base(owner):
             self.reviewed_bases.append(self.flow.facts['base'])
             self.f['base'] = 'new-base'
             return []
 
-        self.flow.review.side_effect = review_then_move_base
+        self.flow.push_implementation.side_effect = review_then_move_base
         with self.assertRaises(ApiError) as caught:
             self.flow.run()
         self.assertEqual('stale_base', caught.exception.code)
@@ -400,7 +401,7 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertNotIn('ready_base', self.flow.state)
         self.assertEqual(['base'], self.reviewed_bases)
 
-        self.flow.review.side_effect = lambda: self.reviewed_bases.append(self.flow.facts['base']) or []
+        self.flow.push_implementation.side_effect = lambda owner: (self.reviewed_bases.append(self.flow.facts['base']), Workflow.push_implementation(self.flow, owner))[1]
         self.assessment['decision'] = 'continue'
         self.assertEqual('ready', self.flow.run()['outcome'])
         self.assertEqual(2, self.assess.call_count)
@@ -423,22 +424,6 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertNotIn('ready_base', self.flow.state)
         self.assertNotEqual('ready', self.flow.state['phase'])
 
-    def test_review_snapshot_must_match_assessed_base(self):
-        self.assertEqual('ready', self.flow.run()['outcome'])
-        session = SimpleNamespace(root=self.flow.path / 'review', load=lambda: {'comments': []})
-        with patch('pr_review.reviews.execute', return_value=session), \
-                patch('pr_review.automation.manual_reason', return_value=None):
-            session.manifest = {'snapshot': {'base': 'base', 'head': 'head'}}
-            self.assertEqual([], Workflow.review(self.flow))
-            session.manifest = {'snapshot': {'base': 'new-base', 'head': 'head'}}
-            with self.assertRaises(ApiError) as caught:
-                Workflow.review(self.flow)
-            self.assertEqual('stale_base', caught.exception.code)
-
-            session.manifest = {'snapshot': {'base': 'base', 'head': 'old-head'}}
-            with self.assertRaises(ApiError) as caught:
-                Workflow.review(self.flow)
-            self.assertEqual('stale_head', caught.exception.code)
 
 
 class ReplyObligationTest(unittest.TestCase):
@@ -531,7 +516,7 @@ class ReplyObligationTest(unittest.TestCase):
             with self.subTest(update=update):
                 data.update(actions=[], replies=[], batches=[])
                 t.flow.writes.reset_mock()
-                t.flow.review.side_effect = lambda: data.update(copy.deepcopy(update)) or []
+                t.flow.push_implementation.side_effect = lambda owner: (data.update(copy.deepcopy(update)), 'head')[1]
                 with patch('pr_review.issues.owner_publication.prepare') as prepare, \
                         patch('pr_review.issues.owner_publication.publish') as publish:
                     for _ in range(2):
@@ -647,7 +632,10 @@ class BlockerReassessmentTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.batch = {'id': 'fix', 'items': ['issue:12'], 'status': 'paused',
-                      'review': {'complete': False, 'blocking': ['Which format?']}, 'tasks': [],
+                      'harness_questions': ['Which format?'],
+                      'checkpoint': {'tree': 'current'}, 'review_tree': 'current',
+                      'review': {'complete': False, 'blocking': ['Which format?'],
+                                 'outcomes': [{'status': 'clarify', 'evidence': 'Which format?'}]}, 'tasks': [],
                       'commit_plan': {'units': []}}
         self.data = {'batches': [self.batch], 'feedback': [], 'worktree': str(self.root)}
         self.owner = SimpleNamespace(path=self.root / 'owner', execution_lock=self.root / 'owner.lock',
@@ -704,7 +692,8 @@ class BlockerReassessmentTest(unittest.TestCase):
         self.assertEqual(2, self.assess.call_count)
         self.assertEqual(applied, self.flow().state['applied_assessment'])
         # A later occurrence of the same blocker is a new reassessment request.
-        self.batch.update(status='paused', review={'complete': False, 'blocking': ['Which format?']})
+        self.batch.update(status='paused', review={'complete': False, 'blocking': ['Which format?'],
+                          'outcomes': [{'status': 'clarify', 'evidence': 'Which format?'}]})
         with self.assertRaises(ApiError):
             self.flow().fix(self.owner, ['issue:12'])
         self.assessment.update(decision='questions', questions=['Which format now?'])
@@ -1247,9 +1236,27 @@ class IssueIntegrationTest(unittest.TestCase):
             p = patch(target, side_effect=effect)
             p.start()
             self.addCleanup(p.stop)
-        self.reviews = patch.object(Workflow, 'review', return_value=[])
+        harness = patch('pr_review.issue_harness.invoke', side_effect=self.harness)
+        harness.start()
+        self.addCleanup(harness.stop)
+        self.reviews = patch('pr_review.reviews.execute', side_effect=AssertionError('fix-issue must not launch the PR-review pipeline'))
         self.reviews.start()
         self.addCleanup(self.reviews.stop)
+
+    def harness(self, session, state, batch, role, specification, feedback):
+        from pr_review import owner_providers
+        context = {'feedback': session.items(state, batch['items']),
+                   'approved_issue_plan': {'plan': specification},
+                   'scope': role == 'review', 'task': {'rationale': 'whole specification'}}
+        report = owner_providers.invoke(session, state, batch, role, context)
+        questions = report.get('product_questions', [])
+        blockers = report.get('blocking', [])
+        ready = report.get('complete', True) and not blockers
+        return {'status': 'needs_input' if questions else 'ready' if ready else
+                'working' if role == 'fix' else 'changes_requested',
+                'outcomes': report.get('outcomes', []),
+                'summary': report['summary'], 'checks': report.get('checks', []),
+                'findings': blockers or ([] if ready else [report['summary']]), 'questions': questions}
 
     def collect(self, target, repo):
         sha = self.git('rev-parse', 'remote-feature')
@@ -1327,57 +1334,6 @@ class IssueIntegrationTest(unittest.TestCase):
             self.assertEqual(1, len(owner.load()['batches']))
             self.assertEqual(1, len(self.assessments))
 
-    def test_verified_noncommitting_review_does_not_repeat_on_active_retries(self):
-        request = {**self.req, 'issue': None, 'pr': 7, 'yolo': True}
-        with patch.object(Writes, 'push', autospec=True, side_effect=self.simulate_push):
-            self.assertEqual('ready', dispatch(request)['outcome'])
-            self.head = self.git('rev-parse', 'remote-feature')
-            review = test_owner.OwnerTest.saved_review(self)
-            data = review.load()
-            data['mutation_tracking'] = True
-            review.save(data)
-            self.reviews.stop()
-
-            def no_change(session, state, batch, role, context):
-                if role == 'plan':
-                    return self.model(session, state, batch, role, context)
-                self.calls.append((role, context))
-                return {'summary': 'Already satisfied', 'outcomes': [
-                    {'item': item['key'], 'status': 'already_addressed' if n == 0 else 'no_change',
-                     'evidence': 'Traced existing behavior'} for n, item in enumerate(context['feedback'])],
-                    'complete': True, 'checks': ['code tracing'], 'blocking': []}
-
-            with patch('pr_review.reviews.execute', return_value=review), \
-                    patch('pr_review.owner_providers.invoke', side_effect=no_change):
-                flow = Workflow(request, self.repo_object, self.f)
-                flow.state.pop('ready_base')
-                flow.save()
-                result = dispatch(request)
-                self.assertEqual('ready', result['outcome'], result)
-                owner = owner_state.OwnerSession({'session': self.path})
-                saved = owner.load()
-                locals_ = [i for i in saved['feedback'] if i['kind'] == 'local_review']
-                self.assertEqual(2, len(locals_))
-                self.assertTrue(all(not i['attention'] and i.get('local_completion') for i in locals_))
-                self.assertEqual([], saved['replies'])
-                self.assertEqual(2, len(saved['batches']))
-                calls = len(self.calls)
-                # A retry also repairs retained attention before selection.
-                for item in saved['feedback']:
-                    if item['kind'] == 'local_review':
-                        item.pop('local_completion')
-                        item.update(attention=True, queued=True, triage='attention')
-                owner.save(saved)
-                # Bypass the readiness cache to exercise selection and reimport
-                # in another active invocation against the identical review.
-                flow = Workflow(request, self.repo_object, self.f)
-                flow.state.pop('ready_base')
-                flow.save()
-                self.assertEqual('ready', dispatch(request)['outcome'])
-                self.assertEqual(calls, len(self.calls))
-                self.assertEqual(2, len(owner.load()['batches']))
-                self.assertEqual('noop', dispatch(request)['outcome'])
-
     def test_post_commit_hook_edits_block_push_and_readiness_on_retries(self):
         hook = self.repo / '.git' / 'hooks' / 'post-commit'
         hook.write_text("#!/bin/sh\nprintf 'unverified hook edit\\n' >> source.txt\n")
@@ -1445,7 +1401,7 @@ class IssueIntegrationTest(unittest.TestCase):
 
         with patch('pr_review.issue_writes.command', side_effect=transport), \
                 patch.object(Workflow, 'feedback_context', return_value=[]), \
-                patch.object(Workflow, 'review', return_value=[]) as review:
+                patch('pr_review.reviews.execute', side_effect=AssertionError('fix-issue must not launch the PR-review pipeline')) as review:
             first = dispatch({**self.req, 'yolo': True})
             self.assertEqual('needs_attention', first['outcome'], first)
             self.assertTrue(self.f['pr']['draft'])
@@ -1468,7 +1424,7 @@ class IssueIntegrationTest(unittest.TestCase):
             self.assertEqual(1, len(self.assessments))
             self.assertEqual(calls, len(self.calls))
             self.assertEqual(1, len(owner.load()['batches']))
-            review.assert_called_once()
+            review.assert_not_called()
             self.assertEqual('noop', dispatch({**self.req, 'yolo': True})['outcome'])
         self.assertEqual(1 if accepted else 2, len(sends))
 
@@ -1479,14 +1435,17 @@ class IssueIntegrationTest(unittest.TestCase):
         self.check_pending_push_retry(accepted=True)
 
     def test_remote_head_moves_during_review_blocks_readiness(self):
-        def review_then_move_head():
+        original_push = Workflow.push_implementation
+
+        def review_then_move_head(flow, owner):
+            head = original_push(flow, owner)
             # A review of the new implementation cannot authorize readiness
             # after the remote branch moves back to the original head.
             self.git('update-ref', 'remote-feature', self.head)
-            return []
+            return head
 
         with patch.object(Writes, 'push', autospec=True, side_effect=self.simulate_push), \
-                patch.object(Workflow, 'review', side_effect=review_then_move_head):
+                patch.object(Workflow, 'push_implementation', autospec=True, side_effect=review_then_move_head):
             result = dispatch({**self.req, 'yolo': True})
         self.assertEqual('needs_attention', result['outcome'], result)
         self.assertIn(result['error']['code'], ('stale_head', 'preflight_failed'))
@@ -1499,7 +1458,7 @@ class IssueIntegrationTest(unittest.TestCase):
             writes.save()
 
         with patch.object(Writes, 'push', autospec=True, side_effect=unconfirmed_push), \
-                patch.object(Workflow, 'review', return_value=[]) as review:
+                patch('pr_review.reviews.execute', side_effect=AssertionError('fix-issue must not launch the PR-review pipeline')) as review:
             result = dispatch({**self.req, 'yolo': True})
         self.assertEqual('needs_attention', result['outcome'], result)
         self.assertIn(result['error']['code'], ('stale_head', 'preflight_failed'))
@@ -1507,16 +1466,19 @@ class IssueIntegrationTest(unittest.TestCase):
         review.assert_not_called()
 
     def test_source_changes_during_review_block_publication_and_readiness(self):
-        def review_then_edit():
+        original_push = Workflow.push_implementation
+
+        def review_then_edit(flow, selected_owner):
+            head = original_push(flow, selected_owner)
             owner = owner_state.OwnerSession({'session': self.path})
             data = owner.load()
             (Path(data['worktree']) / 'source.txt').write_text('edit during review\n')
             data['replies'].append({'status': 'staged', 'automatic': True})
             owner.save(data)
-            return []
+            return head
 
         with patch.object(Writes, 'push', autospec=True, side_effect=self.simulate_push), \
-                patch.object(Workflow, 'review', side_effect=review_then_edit), \
+                patch.object(Workflow, 'push_implementation', autospec=True, side_effect=review_then_edit), \
                 patch('pr_review.issues.owner_publication.prepare', return_value={'token': 'token'}) as prepare, \
                 patch('pr_review.issues.owner_publication.publish') as publish:
             result = dispatch({**self.req, 'yolo': True})
@@ -1618,7 +1580,7 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assertEqual(first['session'], second['session'])
         self.assertEqual(1, len(self.assessments))
 
-    def test_interrupted_fix_requires_adopt_then_reverification(self):
+    def test_interrupted_journaled_fix_resumes_with_reverification(self):
         real = self.model
         def interrupted(session, state, batch, role, context):
             result = real(session, state, batch, role, context)
@@ -1632,10 +1594,8 @@ class IssueIntegrationTest(unittest.TestCase):
         worktree = owner.load()['worktree']
         self.assertEqual('fixed\n', (Path(worktree) / 'source.txt').read_text())
         result = dispatch({**self.req, 'yolo': True})
-        self.assertEqual(3, result['exit_code'], result)
-        self.assertIn('interrupted_task', str(result))
-        result = dispatch({**self.req, 'yolo': True, 'adopt': True})
         self.assertEqual(0, result['exit_code'], result)
+        self.assertTrue(owner.load()['batches'][-1]['review']['complete'])
 
     def test_new_plan_revision_updates_same_owner_task_with_history(self):
         dispatch({**self.req, 'yolo': True})
@@ -1721,9 +1681,9 @@ class ReplacementPlanTest(unittest.TestCase):
         self.push = p.start()
         self.addCleanup(p.stop)
         self.reviewed = []
-        self.t.reviews.stop()
-        p = patch.object(Workflow, 'review', autospec=True, side_effect=lambda flow:
-                        self.reviewed.append((flow.state['assessed_base'], flow.state['remote_head'])) or [])
+        original_push = Workflow.push_implementation
+        p = patch.object(Workflow, 'push_implementation', autospec=True, side_effect=lambda flow, owner:
+                        (original_push(flow, owner), self.reviewed.append((flow.state['assessed_base'], flow.state['remote_head'])))[0])
         p.start()
         self.addCleanup(p.stop)
         self.assertEqual('ready', dispatch(self.req)['outcome'])
@@ -1806,7 +1766,7 @@ class ReplacementPlanTest(unittest.TestCase):
         with patch('pr_review.owner_providers.invoke', side_effect=incomplete):
             for _ in range(2):
                 result = dispatch(self.req)
-                self.assertEqual('needs_attention', result['outcome'], result)
+                self.assertEqual('automation_failed', result['outcome'], result)
                 self.assertEqual(2, len(self.owner.load()['batches']))
                 self.assertFalse(execution_complete(self.owner.load()['batches'][-1]))
                 self.assertTrue(self.t.f['pr']['draft'])
@@ -1845,6 +1805,21 @@ class BootstrapTest(IssueIntegrationTest):
             self.created.append(copy.deepcopy(self.f['pr']))
             return self.f['pr']
         return super().api(endpoint, payload, method)
+
+    def harness(self, session, state, batch, role, specification, feedback):
+        from pr_review import owner_providers
+        context = {'feedback': session.items(state, batch['items']),
+                   'approved_issue_plan': {'plan': specification},
+                   'scope': role == 'review', 'task': {'rationale': 'whole specification'}}
+        report = owner_providers.invoke(session, state, batch, role, context)
+        questions = report.get('product_questions', [])
+        blockers = report.get('blocking', [])
+        ready = report.get('complete', True) and not blockers
+        return {'status': 'needs_input' if questions else 'ready' if ready else
+                'working' if role == 'fix' else 'changes_requested',
+                'outcomes': report.get('outcomes', []),
+                'summary': report['summary'], 'checks': report.get('checks', []),
+                'findings': blockers or ([] if ready else [report['summary']]), 'questions': questions}
 
     def collect(self, target, repo):
         if self.f.get('pr'):
@@ -1962,43 +1937,6 @@ class BootstrapTest(IssueIntegrationTest):
         self.assertEqual(1, len(self.created))
 
 
-class ReviewHandoffTest(unittest.TestCase):
-    def make_flow(self):
-        from types import SimpleNamespace
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        flow = object.__new__(Workflow)
-        flow.path = Path(temp.name)
-        flow.request = {}
-        flow.repo = SimpleNamespace(cwd=flow.path, identity='github.com/org/repo')
-        flow.state = {'configuration': {'reviewers': ['claude', 'codex'], 'processing_provider': 'codex'}, 'pr': 7,
-                      'assessed_base': 'base-sha', 'remote_head': 'head-sha'}
-        flow.save = lambda: None
-        return flow
-
-    def test_review_uses_shared_config_and_exact_draft_revision(self):
-        from types import SimpleNamespace
-        flow = self.make_flow()
-        data = {'mutation_tracking': True, 'comments': [{'id': 'C1', 'status': 'unstaged', 'classification': 'NEW'}]}
-        session = SimpleNamespace(root=flow.path, id='generation', manifest={'snapshot': {'base': flow.state['assessed_base'], 'head': flow.state['remote_head']}}, load=lambda: data, blockers=lambda *a, **k: [])
-        with patch('pr_review.reviews.execute', return_value=session) as execute, patch('pr_review.owner_import.from_review', return_value={'items': ['local:C1']}) as imported:
-            self.assertEqual(['local:C1'], flow.review())
-        self.assertEqual(['claude', 'codex'], execute.call_args.args[0]['reviewers'])
-        self.assertEqual('codex', execute.call_args.args[0]['processing_provider'])
-        self.assertEqual(digest(data), imported.call_args.args[0]['revision'])
-
-    def test_uncertain_review_cannot_be_silently_skipped(self):
-        from types import SimpleNamespace
-        flow = self.make_flow()
-        data = {'mutation_tracking': True, 'comments': [{'id': 'C1', 'status': 'unstaged', 'classification': 'UNCERTAIN'}]}
-        session = SimpleNamespace(root=flow.path, id='generation', manifest={'snapshot': {'base': flow.state['assessed_base'], 'head': flow.state['remote_head']}}, load=lambda: data, blockers=lambda *a, **k: ['Needs judgment'])
-        with patch('pr_review.reviews.execute', return_value=session), patch('pr_review.owner_import.from_review') as imported:
-            with self.assertRaises(ApiError) as error:
-                flow.review()
-        self.assertEqual('needs_attention', error.exception.code)
-        imported.assert_not_called()
-
-
 class CollectorTest(unittest.TestCase):
     git = test_owner.OwnerTest.git
     github = test_owner.OwnerTest.github
@@ -2030,6 +1968,26 @@ class CollectorTest(unittest.TestCase):
 
     def collect(self):
         return collect_eligibility_facts({'issue': 12}, self.repo_object)
+
+    def test_issue_selector_for_pull_request_has_actionable_diagnostic(self):
+        self.issue.update(html_url='https://github.com/org/repo/pull/12',
+                          pull_request={'url': 'https://api.github.com/repos/org/repo/pulls/12'})
+        with patch.object(self.repo_object, 'git') as git:
+            result = self.collect()
+        self.assertFalse(result['complete'])
+        self.assertEqual('invalid_request', result['error_code'])
+        self.assertIn('-i/--issue selector names a pull request', result['error'])
+        self.assertIn('-p/--pr', result['error'])
+        git.assert_not_called()
+
+    def test_real_issue_identity_mismatch_still_blocks(self):
+        self.issue['html_url'] = 'https://github.com/other/repo/issues/12'
+        with patch.object(self.repo_object, 'git') as git:
+            result = self.collect()
+        self.assertFalse(result['complete'])
+        self.assertEqual('facts_incomplete', result['error_code'])
+        self.assertEqual('Issue identity mismatch.', result['error'])
+        git.assert_not_called()
 
     def test_nonempty_branch_rejected(self):
         # main contains the current source commit; use its parent as the fetched base.
@@ -2073,3 +2031,21 @@ class CollectorTest(unittest.TestCase):
         self.pull['head']['repo']['full_name'] = 'elsewhere/repo'
         f = self.collect()
         self.assertEqual('ineligible', evaluate_eligibility(f)['eligibility'])
+
+
+class IssueSingleReviewGateTest(unittest.TestCase):
+    def test_legacy_review_session_does_not_restart_post_push_pipeline(self):
+        t = IssueIntegrationTest()
+        self.addCleanup(t.doCleanups)
+        t.setUp()
+        request = {**t.req, 'issue': None, 'pr': 7, 'yolo': True}
+        with patch.object(Writes, 'push', autospec=True, side_effect=t.simulate_push):
+            self.assertEqual('ready', dispatch(request)['outcome'])
+            t.head = t.git('rev-parse', 'remote-feature')
+            flow = Workflow(request, t.repo_object, t.f)
+            flow.state.update(phase='working', review_session='/obsolete/interrupted-review')
+            flow.save()
+            calls = len(t.calls)
+            self.assertEqual('ready', dispatch(request)['outcome'])
+            self.assertEqual(calls, len(t.calls))
+            self.assertEqual('noop', dispatch(request)['outcome'])

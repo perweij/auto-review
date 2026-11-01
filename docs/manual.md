@@ -815,6 +815,24 @@ local issue session. State is stored in `issues-v1` below the normal state root,
 with execution state in the linked `owners-v1` session. Resume from another
 machine or without those local records is not supported.
 
+The entire approved specification is delegated to one persistent implementation
+session. The harness handles its own decomposition, coding, testing and debugging.
+A fresh independent review assesses a completed candidate; actionable findings go
+back to the implementation session. There are no per-task repair credits or
+intermediate user checkpoints. Product questions are published on GitHub; internal
+design and verification problems remain implementation work.
+
+Recorded partial work and provider session identity survive interruption. Source
+or Git changes not accounted for in saved checkpoints require inspection and
+`--adopt` before continuation. Unfinished sessions from the retired task pipeline
+are no longer automatically migrated; their worktrees and artifacts remain available
+for manual recovery.
+
+Resume unfinished implementation with the normal command. The former issue
+`--replan` option and repair-credit authorization have been removed. Existing
+attempts and plans remain readable history. Interactive Owner retains its own
+explicit replanning controls.
+
 Shared reviewer flags and economical/expensive presets use normal precedence:
 defaults, preset, saved settings, then explicit individual flags. Owner settings
 are reused from its session; a new session derives them from the configured
@@ -831,12 +849,12 @@ processing provider. `--settings-file` accepts the existing Owner JSON shape:
 Started batches retain their settings. Agent configuration changes require the
 normal `--trust-agent-config TOKEN` approval, reported with the blocker details.
 
-Each invocation uses Owner verification, pushes verified commits, and runs the
-configured full review. Eligible findings enter Owner locally; uncertain or
-revisited findings require attention. One additional corrective batch is allowed
-per invocation, followed by another review. Further findings leave the PR draft
-until the next invocation. Later PR feedback is processed the same way; verified
-replies are published, while human thread resolution remains manual.
+After independent harness verification, the coordinator commits, pushes, and marks
+the PR ready. Review findings return to the same implementation session before
+publication; there is no separate post-push review loop. Verified
+replies are published, while human thread resolution remains manual. The saved
+Owner `verification` setting remains compatible with interactive Owner; its focused
+testing policy does not constrain whole-issue implementation.
 
 Unexpected remote commits stop execution even between batches. Neither `--force`
 nor `--yolo` authorizes them. Interrupted model edits remain in the Owner worktree;
@@ -872,6 +890,21 @@ action; progress goes to stderr. Exit codes are 0 for success/no-op, 1 for failu
 2 for waiting on answers/approval, 3 for attention, 4 for partial publication,
 5 for uncertain remote outcomes, and 130 for interruption.
 
+### Behavioral verification in Owner
+
+Owner planning and fixing also record a bounded set of behavioral verification
+cases. Compatibility work should distinguish explicit choices from defaults and
+saved formats from new formats, using the approved requirements and baseline as
+evidence. Repairs retain those cases and check related regressions; independent
+review checks every case and looks for omissions. Failed or unavailable evidence
+cannot support successful verification. This does not add model calls or increase
+the repair allowance. Older saved plans remain usable.
+
+Case evidence is tied to the source reviewed. Task commits remain separate from
+any integration repair, and the final combined tree must pass review before
+publication. Test claims in reports are evidence for the reviewer to check, not
+commands automatically executed by the coordinator.
+
 ### Shared eligibility services
 
 `pr_review.issue_eligibility` separates fact collection from pure evaluation.
@@ -882,3 +915,57 @@ may fetch dedicated `refs/fix-issue/` snapshots but never changes working files
 or publishes. Unknown facts never pass. Semantic intake is a separate provider
 operation. A future scanner can add its own label filter and reuse these checks;
 execution always refreshes eligibility before writes.
+
+## Autonomous issue execution and resource controls
+
+After approval, one persistent Codex or Claude Code implementation session owns
+the whole specification: exploration, decomposition, coding, test setup, tests and
+debugging. The coordinator does not split it into independently launched tasks,
+generate test contracts, or replay reported test commands. It resumes the exact
+implementation session when more work is needed; it never selects a global “last”
+session. Interactive Owner keeps its existing task workflow and focused policy.
+
+When the harness reports a complete candidate, a fresh independent reviewer checks
+the whole approved scope and the source tree. Findings go back to the same
+implementation session. The reviewer inspects existing evidence and runs additional
+checks where needed, rather than automatically repeating the entire test suite.
+The harness reviewer is the sole acceptance gate. Its model and provider come from
+the saved Owner review settings; `--reviewers` does not start additional post-push
+reviews. Use `bin/pr-review` separately when an additional PR review is wanted.
+
+The coordinator retains approval and eligibility checks, isolated worktrees,
+source/Git integrity checks, exact final-tree verification, journaled commits and
+pushes, and GitHub questions/status messages. Completed commit boundaries remain
+recorded; new work uses one whole-specification execution. New executions normally produce one verified commit
+per candidate, without model-generated task commits. Final verification is required
+before any implementation claim can be published.
+
+Real product choices are asked on GitHub. Repeated returns without source progress
+end with a diagnostic; provider failures and resource limits preserve partial work
+and the exact implementation session. Recorded interrupted changes can resume;
+unrecorded external edits still require explicit inspection/adoption. A process
+exit is not a routine implementation checkpoint or a scheduling requirement.
+
+`--max-runtime 30m` (or `2h`, `90s`) limits cumulative active time after approval,
+including provider calls, checks and automatic recovery. Invocation gaps and
+approval waits do not consume it. Saved limits remain in effect unless explicitly
+replaced; increasing `--max-runtime` increases the total allowance, not just the
+next invocation. Runtime expiry cancels owned subprocesses and returns
+`resource_limit`; interrupted work is unverified.
+
+`--min-weekly-quota-remaining 20` preserves an observed 20% weekly reserve.
+`--max-weekly-quota-use 5` stops after an observed five-percentage-point increase
+during active execution. Both may be used together and apply independently to
+provider allowance pools. Observations may include simultaneous account activity.
+Resuming does not replenish consumed allowance. Reset/telemetry gaps are reported
+as unknown, never zero; configured runtime provides the fallback. A requested
+quota guard without available telemetry or an explicit runtime fallback stops
+before unmonitored model work. Codex weekly telemetry uses local app-server
+account/rateLimits/read without model turns; Claude weekly telemetry is presently
+unavailable in this adapter. No private endpoint or extracted credential is used.
+
+Quota polling is at most once per minute. Provider reporting delays and requests
+already in flight can overshoot a threshold. Tokens are not converted into quota
+percentages. Neither percentage monitoring nor a runtime limit guarantees an exact
+subscription spend. With `--json`, human progress stays on stderr and stdout has
+one final result, including a versioned execution/resource summary.

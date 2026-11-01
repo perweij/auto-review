@@ -6,7 +6,7 @@ import tempfile
 
 from .common import ApiError, now
 from .processes import run
-from . import owner_git as workspace, owner_commit_plan
+from . import owner_git as workspace, owner_commit_plan, owner_contracts
 
 
 def message(state, batch, unit=None):
@@ -58,14 +58,16 @@ def prepare(session, state, request):
         return stopped(unverified_reason(batch))
     if batch.get("commit_execution", {}).get("inspection_required"):
         return stopped(batch["commit_execution"]["error"])
+    if not owner_contracts.current(batch):
+        return stopped("Verification cases or source changed; reverify before committing.")
     plan, progress = owner_commit_plan.update(session, batch, head)
     session.save(state)
     selected = [u for u in plan["units"] if (request.get("unit") == u["id"] or
                 request.get("item") in u["items"] or request.get("task") in u["tasks"])]
     explicit = any(request.get(k) for k in ("unit", "item", "task"))
     if (request.get("item") and not request.get("unit") and not request.get("task")
-            and any(u.get("kind") == "integration_repair" for u in selected)):
-        # A finding may need both its task and the shared repair. Select the
+            and len(selected) > 1):
+        # An issue may span steps; a finding may also need a shared repair. Select the
         # earliest outstanding related unit; keep explicit unit/task choices.
         pending = [u for u in selected if u["id"] not in progress["units"]]
         selected = (pending or selected[-1:])[:1]

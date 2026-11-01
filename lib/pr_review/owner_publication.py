@@ -5,7 +5,7 @@ import uuid
 from .common import ApiError, digest, now, require_text
 from .publication import gh, valid_receipt, with_marker
 from .owner_state import refresh
-from . import owner_git as workspace, owner_commit_plan
+from . import owner_git as workspace, owner_commit_plan, owner_contracts
 
 
 def commit(session, value):
@@ -138,7 +138,7 @@ def new_reply(item, body, **extra):
 def automatic_proof(session, state, reply):
     """A staged-before-push claim must still have its exact local proof."""
     batch = next((b for b in state["batches"] if b["id"] == reply.get("batch")), None)
-    if (not batch or batch["status"] != "ready" or batch.get("integrity_failure")
+    if (not batch or batch["status"] != "ready" or not owner_contracts.current(batch) or batch.get("integrity_failure")
             or batch.get("commit_execution", {}).get("inspection_required")
             or reply["source"] not in fixed_items(batch)
             or batch.get("verified_fingerprints", {}).get(reply["source"]) != reply["fingerprint"]
@@ -181,6 +181,8 @@ def blockers(session, state, reply, remote, allow_unpushed=False):
     if reply.get("automatic") and not automatic_proof(session, state, reply):
         raise ApiError("stale_commit", "The exact local fix or reply destination changed; inspect this reply.")
     batch = next((b for b in state["batches"] if b["id"] == reply.get("batch")), None)
+    if batch:
+        owner_contracts.require_current(batch)
     if batch and any(u.get("kind") == "integration_repair"
                      for u in owner_commit_plan.build(session, batch)["units"]):
         proof_head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip() if allow_unpushed else remote

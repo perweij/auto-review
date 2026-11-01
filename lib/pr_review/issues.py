@@ -1,6 +1,4 @@
-"""Issue coordination; all implementation and review fixes execute in Owner."""
-import contextlib
-import sys
+"""Issue coordination around a persistent implementation harness and guarded publication."""
 import json
 from pathlib import Path
 import re
@@ -8,10 +6,11 @@ import uuid
 
 from .common import ApiError, atomic_json, command, digest, git, locked, now, read_json, state_root
 from .repository import Repository, normalize_remote, repository_name
-from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion
+from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
 from .issue_planning import assess_issue
+from . import issue_resources
 from .issue_writes import Writes
 
 
@@ -59,7 +58,7 @@ def approval_revision(comment, state):
 
 
 def semantic_comments(comments, state):
-    # Only exact receipted publications and standalone commands are excluded.
+    # Only exact receipted publications and standalone approvals are excluded.
     receipts = {a['receipt']['id']: a['receipt'] for a in state.get('actions', {}).values()
                 if a.get('receipt') and 'body' in a}
     return [semantic_comment(c) for c in comments
@@ -158,7 +157,10 @@ class Workflow:
                 'issue_url': f'https://{self.repo.identity}/issues/{self.state["issue"]}',
                 'pr_url': f'https://{self.repo.identity}/pull/{self.state["pr"]}' if self.state.get('pr') else None,
                 'session': str(self.path), 'worktree': self.state.get('worktree'), 'next_action': next_action,
-                'eligibility': self.eligibility, **extra}
+                # Keep the checked facts/snapshot intact, but report the current
+                # action rather than the action saved before this invocation.
+                'eligibility': {**self.eligibility, 'next_action': next_action},
+                'execution': {'version': 1, 'engine': self.state.get('execution_engine'), 'resources': self.state.get('resources', {})}, **extra}
 
     def guard(self):
         target = {'issue': self.state['issue']}
@@ -175,10 +177,31 @@ class Workflow:
             raise ApiError('stale_base', 'PR base changed since assessment; rerun to assess and review the current base.')
         if self.state.get('phase') in ('approved', 'working') and self.state.get('approved_input'):
             if input_digest(facts, self.state) != self.state['approved_input']:
-                raise ApiError('stale_discussion', 'Issue requirements changed during execution; replan before publication.')
+                raise ApiError('stale_discussion', 'Issue requirements changed during execution; resume to reassess them before publication.')
             if not self.request.get('yolo') and not any(approval_comment(c, self.state) for c in facts['comments']):
                 raise ApiError('stale_approval', 'Approval was removed or changed; approve the current plan again.')
         return facts
+
+    def notify_owner_pause(self, batch, failure):
+        """Publish an actionable status, not a new requirement or approval request."""
+        if failure['next_action'] == 'retry':
+            guidance = 'Automation could not complete execution. A later invocation can retry after the reported limitation is resolved.'
+        else:
+            guidance = ('Automation needs maintainer attention for the reported technical failure. '
+                        'This is not a requirement question; automatic continuation is blocked.')
+        body = (f'## fix-issue paused: {failure["stage"]}\n\n'
+                + (f'Task: `{failure["task"]}`\n\n' if failure.get('task') else '')
+                + failure['summary'] + '\n\n'
+                + '\n'.join('- ' + reason for reason in failure['blocking'])
+                + '\n\n' + guidance
+                + '\n\nThis is an execution stop, not a request for plan approval.')
+        # Attempt paths are local diagnostics, not public identifiers. A retry of
+        # the same saved stop must reconcile its receipt instead of posting again.
+        key = 'owner-pause:' + digest([batch['id'], body])
+        try:
+            self.writes.comment(body, key)
+        except ApiError as exc:
+            raise ApiError(exc.code, str(exc), **{**exc.details, 'owner_failure': failure}) from exc
 
     def clean(self, path, expected):
         if self.repo.git('status', '--porcelain', '--untracked-files=all', cwd=path).stdout or self.repo.git('rev-parse', 'HEAD', cwd=path).stdout.strip() != expected:
@@ -390,30 +413,31 @@ class Workflow:
             # feedback must be assessed in a new batch from the current HEAD.
             pending = next((b for b in reversed(list(required_batches(data)))
                             if b['items'] == keys and not execution_complete(b, current_discussion=False)), None)
-            request = {'items': keys, 'auto_commit': True, 'trusted_snapshot': self.request.get('trusted_snapshot')}
+            request = {'items': keys, 'auto_commit': True, 'issue_harness': True,
+                       'trusted_snapshot': self.request.get('trusted_snapshot')}
             if pending:
                 request['batch'] = pending['id']
                 request['adopt'] = bool(self.request.get('adopt'))
-                if pending.get('discussion_stale'):
-                    request['replan'] = True
             view = owner_fixes.execute(owner, data, request)
             batch = next(b for b in reversed(view['batches']) if b['items'] == keys)
             state['worktree'] = view['worktree']
             self.save()
             if not execution_complete(batch):
-                blockers = batch.get('review', {}).get('blocking', [])
-                for task in batch.get('tasks', []):
-                    for report in ('implementation', 'review'):
-                        for outcome in task.get(report, {}).get('outcomes', []):
-                            if outcome.get('status') == 'clarify':
-                                blockers.append(outcome['evidence'])
+                blockers = batch.get('harness_questions', [])
                 if blockers:
                     state['execution_blockers'] = blockers
                     state['reassessment_generation'] = state.get('reassessment_generation', 0) + 1
-                    self.writes.comment('Implementation needs clarification or verification:\n\n' + '\n'.join('- ' + b for b in blockers), 'blockers:' + digest(blockers))
+                    self.writes.comment('Implementation needs clarification:\n\n' + '\n'.join('- ' + b for b in blockers), 'blockers:' + digest(blockers))
                     state.update(phase='waiting', waiting='answers')
                     self.save()
-                raise ApiError('needs_attention', 'Owner verification or commit execution needs attention.', owner=str(owner.path))
+                failure = issue_harness.execution_failure(batch)
+                if blockers:
+                    failure['next_action'] = 'await_answers'
+                else:
+                    self.notify_owner_pause(batch, failure)
+                reason = '; '.join(failure['blocking']) or failure['summary']
+                raise ApiError('needs_attention', f"Owner {failure['stage']} paused: {reason}",
+                               owner=str(owner.path), **failure)
             check_owner_execution(owner, owner.load())
             # Only verified execution resolves blockers. Keep the generation so
             # clearing them cannot reapply the assessment on an unchanged retry.
@@ -461,38 +485,6 @@ class Workflow:
         self.guard()
         if head != reviewed_head or head != self.state['remote_head'] or head != self.facts.get('head'):
             raise ApiError('stale_head', 'Reviewed PR head differs from the verified implementation; rerun review.')
-
-    def review(self):
-        from .reviews import execute
-        from .state import Session
-        from .automation import manual_reason
-        configuration = self.state['configuration']
-        request = {'cwd': str(self.repo.cwd), 'repository': self.repo.identity, 'pr': self.state['pr'], **configuration,
-                   'trusted_snapshot': self.request.get('trusted_snapshot')}
-        if self.state.get('review_session'):
-            request['session'] = self.state['review_session']
-        with contextlib.redirect_stdout(sys.stderr):
-            session = execute(request)
-        self.state['review_session'] = str(session.root)
-        self.save()
-        if session.manifest.get('snapshot', {}).get('base') != self.state['assessed_base']:
-            raise ApiError('stale_base', 'Review base differs from the assessed base; rerun to assess and review the current base.')
-        if session.manifest.get('snapshot', {}).get('head') != self.state['remote_head']:
-            raise ApiError('stale_head', 'Review head differs from the confirmed implementation; rerun review.')
-        data = session.load()
-        reason = manual_reason(data)
-        if reason:
-            raise ApiError('needs_attention', reason)
-        candidates = [c for c in data['comments'] if c['status'] not in ('published', 'suppressed')]
-        blockers = [c for c in candidates if session.blockers(c, data, bulk=True)]
-        if blockers:
-            raise ApiError('needs_attention', 'Review findings need judgment before automatic fixing.', comments=[c['id'] for c in blockers])
-        if not candidates:
-            return []
-        imported = owner_import.from_review({'session': str(session.root), 'generation': session.id, 'revision': digest(data),
-                                            'comments': [c['id'] for c in candidates], 'defaults': configuration,
-                                            'automatic': True})
-        return imported['items']
 
     def feedback_context(self):
         if not self.state.get('pr'):
@@ -546,10 +538,30 @@ class Workflow:
             return self.result('noop')
         if state.get('phase') == 'blocked' and state.get('waiting') != 'unsuitable':
             state['phase'] = 'intake'
+        if state.get('owner'):
+            owner = owner_state.OwnerSession({'session': state['owner']})
+            with locked(owner.execution_lock):
+                for batch in required_batches(owner.load()):
+                    if not execution_complete(batch):
+                        issue_harness.require_supported(batch)
         if not self.plan():
             return self.result(state.get('waiting') or state['phase'], 0 if state['phase'] == 'complete' else 3 if state['phase'] == 'blocked' else 2,
                                'none' if state['phase'] in ('complete', 'blocked') else 'await_answers' if state.get('waiting') == 'answers' else 'await_approval')
+        state['execution_engine'] = 'harness-v1'
+        self.save()
+        with issue_resources.execution(state, self.save, self.request):
+            return self.execute_approved()
+
+    def execute_approved(self):
+        state = self.state
         owner = self.bootstrap()
+        actual_settings = owner.load()['settings']
+        resource = state.get('resources', {})
+        additional = {actual_settings[r]['provider'] for r in ('fix', 'review')}
+        if additional - set(resource.get('providers', [])):
+            resource['providers'] = sorted(set(resource.get('providers', [])) | additional)
+            resource.pop('quota_polled', None)
+            issue_resources.check()
         self.writes.draft(True)
         state['phase'] = 'working'
         self.save()
@@ -573,14 +585,6 @@ class Workflow:
                 self.guard()
                 state.update(phase='complete', finished_input=digest([input_digest(self.facts, state), self.feedback_digest(), state['configuration']]))
                 return self.result('no_change')
-        # Each invocation gets at most one corrective batch; persisted intent lets
-        # interrupted retries resume the same Owner batch rather than duplicate it.
-        keys = self.review()
-        if keys:
-            self.fix(owner, keys)
-            reviewed_head = self.push_implementation(owner)
-            if self.review():
-                return self.result('needs_attention', 3, 'fix_feedback')
         # Only publish this workflow's automatic, verified replies.
         with locked(owner.execution_lock), locked(owner.repo.lock):
             data = owner.load()
@@ -603,7 +607,7 @@ class Workflow:
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)
             self.writes.draft(False)
-            self.writes.comment('Verified implementation and configured reviews passed. PR: ' + f'https://{self.repo.identity}/pull/{state["pr"]}', 'ready:' + state['remote_head'])
+            self.writes.comment('Implementation and independent harness review passed. PR: ' + f'https://{self.repo.identity}/pull/{state["pr"]}', 'ready:' + state['remote_head'])
             data = owner.load()
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)
@@ -621,6 +625,8 @@ def dispatch(request):
     for key in ('force', 'yolo', 'adopt'):
         if key in request and type(request[key]) is not bool:
             raise ApiError('invalid_request', key + ' must be a Boolean.')
+    if request.get('replan'):
+        raise ApiError('invalid_request', '--replan is obsolete for fix-issue; resume with the normal issue command.')
     for key in ('issue', 'pr', 'approve'):
         if request.get(key) is not None and (type(request[key]) is not int or request[key] < 1):
             raise ApiError('invalid_request', key + ' must be a positive integer.')
@@ -647,13 +653,33 @@ def dispatch(request):
             flow.state['phase'] = 'complete'
             return flow.result('complete')
         try:
+            issue_resources.validate(request)
             return flow.run()
         except ApiError as exc:
             if exc.code == 'cancelled':
                 raise
             # Errors describe this invocation; phase records resumable progress.
             flow.state['error'] = {'code': exc.code, 'message': str(exc), **exc.details}
+            execution_stops = {
+                'trust_required': 'Agent configuration changed and requires explicit trust before execution can continue.',
+                'model_failed': 'The coding provider could not complete its turn. Saved work and session identity are retained.',
+                'provider_failed': 'The coding provider could not complete its turn. Saved work and session identity are retained.',
+                'invalid_result': 'The provider could not supply a usable completion report after correction. No implementation was published.',
+                'integrity_failed': 'Protected worktree or Git state changed. Inspect the retained changes before continuing.',
+                'worktree_changed': 'The worktree differs from the saved execution checkpoint. Inspect and adopt the retained changes before continuing.',
+                'interrupted_task': 'An older interrupted run left unverified changes. Inspect and adopt the retained changes before continuing.',
+            }
+            if (exc.code in ('automation_failed', 'resource_limit', 'blocked_external') or
+                    flow.state.get('execution_engine') == 'harness-v1' and flow.state.get('phase') == 'working'
+                    and exc.code in execution_stops):
+                body = ('fix-issue stopped: ' + exc.code.replace('_', ' ') + '\n\n' + execution_stops.get(exc.code, str(exc))
+                        + ('\n\n' + exc.details['summary'] if exc.details.get('summary') else '')
+                        + '\n\nCompleted work is retained. This is an execution stop, not a request for plan approval.')
+                try:
+                    flow.writes.comment(body, 'execution-stop:' + digest(body))
+                except ApiError as notice_error:
+                    flow.state['error']['notice_error'] = str(notice_error)
             flow.save()
-            return flow.result('uncertain' if exc.code == 'uncertain' else 'partial' if exc.code == 'partial' else 'needs_attention',
+            return flow.result('uncertain' if exc.code == 'uncertain' else 'partial' if exc.code == 'partial' else exc.code if exc.code in ('automation_failed', 'resource_limit', 'blocked_external') else 'needs_attention',
                                5 if exc.code == 'uncertain' else 4 if exc.code == 'partial' else 3,
-                               'recover', error=flow.state['error'])
+                               exc.details.get('next_action', 'recover'), error=flow.state['error'])

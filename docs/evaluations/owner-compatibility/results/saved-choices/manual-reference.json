@@ -1,0 +1,72 @@
+[
+  {
+    "case": "unchanged-reviewers-preserve-slots-and-processing",
+    "provider": "claude",
+    "passed": false,
+    "error": "{'expected': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'first-model', 'effort': 'low'}, {'id': 'reviewer-2', 'provider': 'claude', 'model': 'second-model', 'effort': 'high'}], 'actual': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}, {'id': 'reviewer-2', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}]}"
+  },
+  {
+    "case": "narrowed-reviewers-preserve-processing",
+    "provider": "claude",
+    "passed": false,
+    "error": "{'expected': {'provider': 'codex', 'model': 'saved-processor', 'effort': 'low'}, 'actual': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}}"
+  },
+  {
+    "case": "legacy-effective-processing-survives-reviewer-change",
+    "provider": "claude",
+    "passed": false,
+    "error": "{'expected': {'provider': 'codex', 'model': 'saved-processor', 'effort': 'low'}, 'actual': {'provider': 'claude', 'model': 'fable', 'effort': 'high'}}"
+  },
+  {
+    "case": "explicit-processing-flag-preserves-slots",
+    "provider": "claude",
+    "passed": false,
+    "error": "{'expected': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'first-model', 'effort': 'low'}, {'id': 'reviewer-2', 'provider': 'claude', 'model': 'second-model', 'effort': 'high'}], 'actual': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}, {'id': 'reviewer-2', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}]}"
+  },
+  {
+    "case": "explicit-processing-object-preserves-slots",
+    "provider": "claude",
+    "passed": false,
+    "error": "{'expected': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'first-model', 'effort': 'low'}, {'id': 'reviewer-2', 'provider': 'claude', 'model': 'second-model', 'effort': 'high'}], 'actual': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}, {'id': 'reviewer-2', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}]}"
+  },
+  {
+    "case": "saved-choices-outrank-provisional-preset",
+    "provider": "claude",
+    "passed": true
+  },
+  {
+    "case": "unchanged-reviewers-preserve-slots-and-processing",
+    "provider": "codex",
+    "passed": false,
+    "error": "{'expected': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'first-model', 'effort': 'low'}, {'id': 'reviewer-2', 'provider': 'codex', 'model': 'second-model', 'effort': 'high'}], 'actual': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}]}"
+  },
+  {
+    "case": "narrowed-reviewers-preserve-processing",
+    "provider": "codex",
+    "passed": false,
+    "error": "{'expected': {'provider': 'claude', 'model': 'saved-processor', 'effort': 'low'}, 'actual': {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}}"
+  },
+  {
+    "case": "legacy-effective-processing-survives-reviewer-change",
+    "provider": "codex",
+    "passed": false,
+    "error": "{'expected': {'provider': 'claude', 'model': 'saved-processor', 'effort': 'low'}, 'actual': {'provider': 'codex', 'model': 'gpt-6-astra', 'effort': 'high'}}"
+  },
+  {
+    "case": "explicit-processing-flag-preserves-slots",
+    "provider": "codex",
+    "passed": false,
+    "error": "{'expected': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'first-model', 'effort': 'low'}, {'id': 'reviewer-2', 'provider': 'codex', 'model': 'second-model', 'effort': 'high'}], 'actual': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}]}"
+  },
+  {
+    "case": "explicit-processing-object-preserves-slots",
+    "provider": "codex",
+    "passed": false,
+    "error": "{'expected': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'first-model', 'effort': 'low'}, {'id': 'reviewer-2', 'provider': 'codex', 'model': 'second-model', 'effort': 'high'}], 'actual': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}]}"
+  },
+  {
+    "case": "saved-choices-outrank-provisional-preset",
+    "provider": "codex",
+    "passed": true
+  }
+]

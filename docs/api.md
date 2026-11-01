@@ -776,3 +776,45 @@ without a receipt to become pending, retaining its prior state and decision in
 history. A now-accepted write is receipted instead. Ambiguous/changed results and
 read failures cannot authorize a resend. Recovery never runs models, pushes, or
 publishes; a separate `issue-run` resumes execution.
+
+`issue-run` delegates the approved scope to a persistent implementation harness.
+The linked Owner batch stores source identity, completed commit boundaries and
+publication evidence; unfinished tasks do not control execution. A saved review
+phase resumes review without repeating implementation. A source or context change
+invalidates that candidate. Unfinished pre-harness issue sessions are rejected with
+`unsupported_session`; their worktrees and artifacts are retained for manual recovery.
+
+The independent harness reviewer is the sole acceptance gate, configured by the
+Owner review settings. After verification the coordinator commits, pushes, and
+marks the PR ready; it does not invoke the separate PR-review/synthesis pipeline.
+Legacy `review_session` references are retained as history and are not resumed.
+
+The former issue `replan` control is obsolete and rejected before I/O. Resume with
+an ordinary `issue-run`; `adopt` still explicitly accepts inspected workspace
+changes. Interactive `owner-fix` retains its separate explicit replanning and task
+controls. Harness batches reject those task controls instead of entering the
+interactive task engine.
+
+Issue product questions use `next_action: await_answers`. Commit failures report
+`stage: commit`, `summary` and `blocking`, with `inspect_owner`; uncertain writes
+still use `recover`. These diagnostic fields never bypass source verification or
+authorize publication. Older task diagnostics remain in saved history.
+
+The following verification-case contract applies to interactive Owner tasks,
+not to issue-harness execution.
+
+New Owner tasks carry up to eight `verification_cases`, each with a stable `id`,
+`scenario`, `expected`, supporting `basis`, and `intent` (`preserve` or `change`).
+Fixers may add cases but cannot rewrite existing expectations. Reports carry
+`case_results` covering each required ID exactly once: `tested`, `source_traced`,
+`failed`, or `unavailable`, with concrete `evidence`. These are provider claims;
+the coordinator never executes commands from reports. Independent review checks
+their basis and omissions as well as their coverage.
+
+The backend binds validated evidence to `case_contract` (case-definition digest)
+and `case_tree` (actual source checkpoint). Changed cases or checkpoints cannot
+reuse that verification for commits, completion, or publication. Final review uses
+`task-id/case-id` IDs across completed tasks and checks the final combined tree.
+Integration repairs preserve these contracts. Legacy reports without cases remain
+readable; an active legacy task may acquire cases without changing its repair
+allowance. `case_contract_version: 1` identifies tasks with established case evidence.
