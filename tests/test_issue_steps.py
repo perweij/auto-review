@@ -71,7 +71,8 @@ class IssueStepsTest(unittest.TestCase):
                      [task('config', self.key), task('pipeline', self.key, ['config'])])
             return {'tasks': tasks}
         name = context.get('task', {}).get('rationale')
-        incomplete = role == 'fix' and (self.legacy or name == self.fail)
+        incomplete = (role == 'fix' and (self.legacy or name == self.fail)
+                      or role == 'review' and getattr(self, 'incomplete_review', False))
         if role == 'fix' and not incomplete:
             path = Path(state['worktree']) / (name + '.txt')
             path.write_text(name+' implementation\n')
@@ -86,7 +87,8 @@ class IssueStepsTest(unittest.TestCase):
 
     def flow(self):
         flow = object.__new__(Workflow)
-        flow.state = {}
+        flow.state = {'issue': 12, 'viewer': 'author'}
+        flow.facts = {'comments': []}
         flow.request = {}
         flow.save = Mock()
         flow.writes = Mock()
@@ -120,6 +122,11 @@ class IssueStepsTest(unittest.TestCase):
         view = self.fixture.request('owner-fix', batch=batch['id'], replan=True, auto_commit=True)
         self.assertEqual('ready', view['batches'][-1]['status'])
         self.assertEqual(['pipeline'], [c['task']['rationale'] for role,c in self.calls if role == 'fix'])
+        replanning = next(c for role, c in self.calls if role == 'plan')
+        self.assertEqual(['pipeline'], [t['rationale'] for t in replanning['unfinished_tasks']])
+        self.assertEqual(['Implement remaining scope'],
+                         replanning['unfinished_tasks'][0]['implementation']['blocking'])
+        self.assertNotIn('before', replanning['unfinished_tasks'][0])
         self.assertEqual(2, len(view['batches'][-1]['commit_progress']['commits']))
 
     def test_failed_final_review_never_commits_partial_issue(self):
@@ -197,17 +204,33 @@ class IssueStepsTest(unittest.TestCase):
         self.assertEqual('manual changes must survive\n', source.read_text())
         self.assertEqual([], self.calls)
 
-    def test_issue_error_exposes_implementation_blocker_without_posting_question(self):
+    def test_issue_error_exposes_assessed_blocker_and_posts_status(self):
         self.fail = 'config'
+        self.incomplete_review = True
         flow = self.flow()
         with self.assertRaises(ApiError) as caught:
             flow.fix(self.owner, [self.key])
         self.assertIn('Implement remaining scope', str(caught.exception))
-        self.assertEqual('implementation', caught.exception.details['stage'])
+        self.assertEqual('verification', caught.exception.details['stage'])
         self.assertEqual('retry', caught.exception.details['next_action'])
         self.assertEqual('p1-config', caught.exception.details['task'])
         self.assertEqual(['Implement remaining scope'], caught.exception.details['blocking'])
-        flow.writes.comment.assert_not_called()
+        body, key = flow.writes.comment.call_args.args
+        self.assertIn('execution stop, not a request for plan approval', body)
+        self.assertNotIn('CLI', body)
+        self.assertIn('Implement remaining scope', body)
+        self.assertTrue(key.startswith('owner-pause:'))
+        self.assertNotIn('execution_blockers', flow.state)
+
+    def test_notice_failure_preserves_owner_diagnostics(self):
+        self.fail = 'config'
+        self.incomplete_review = True
+        flow = self.flow()
+        flow.writes.comment.side_effect = ApiError('uncertain', 'Read-back failed')
+        with self.assertRaises(ApiError) as caught:
+            flow.fix(self.owner, [self.key])
+        self.assertEqual('uncertain', caught.exception.code)
+        self.assertEqual('p1-config', caught.exception.details['owner_failure']['task'])
 
 
 if __name__ == '__main__':

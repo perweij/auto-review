@@ -5,7 +5,139 @@ both replay acceptance criteria failed (partial improvement). Live PR retest def
 [evaluation](../evaluations/owner-compatibility/README.md).
 This is a program-improvement plan, not a plan to manually finish PR #11.
 
+## Follow-up: boundary cases and visible execution stops (2026-10-31)
+
+The live `p3-t1` run passes all 12 ratified saved-choice checks. Its second
+review correctly rejected two remaining defects: individual processing fields
+lose to a simultaneously supplied processing object, and malformed reviewer-slot
+shapes escape as internal errors. Both existed before the bounded repair; the
+first review missed them. This is not evidence of a lost repair prompt.
+
+Implemented follow-up:
+
+1. Strengthen the shared planner/fixer/reviewer instructions to exercise competing
+   input forms together and malformed public input shapes through the error
+   boundary. Keep the eight-case cap, existing models and repair budget. Request
+   all confirmed material findings in the first review; do not claim exhaustive
+   coverage from a handful of passing cases.
+2. Include unfinished tasks' saved cases and implementation/review findings when
+   explicitly replanning. Previously only the current diff and completed tasks
+   reached the planner. Historical findings remain evidence to check against
+   current code, not new authority or permission to expand the approved scope.
+3. Publish execution pauses to the issue through the existing guarded write
+   journal, with blockers and CLI recovery guidance. Keep execution notices
+   separate from clarification questions and approval requests. Deduplicate the
+   same stop and preserve uncertainty/recovery behavior. Exact receipted notices
+   are excluded from requirement hashing, just like other workflow publications.
+4. Return the current next action in the nested eligibility result while retaining
+   its original checked-facts snapshot. A preflight `await_approval` must not
+   contradict a subsequent `inspect_owner` stop.
+
+Validation: real-Git/mock-provider tests cover an exhausted repair, one issue
+notice across repeated resumes, retained history on explicit replan, failure
+context supplied to planning, and publication errors retaining Owner diagnostics.
+Existing contract tests continue to gate commits on current-tree verification.
+These tests establish orchestration behavior, not improved model quality.
+
+Live evaluation: run the updated main-checkout CLI with `-i 10 --replan` and the
+same desired runtime flags. Do not manually patch PR #11, reset counters, or
+change saved model settings for this experiment. The new plan can repair the
+existing generated code; old tasks/cases remain archived and completed work is
+preserved. Replanning does not itself approve changed issue requirements.
+Check all 12 saved-choice cases plus combined processing object/field precedence
+and malformed slot rejection for both providers. Record whether the first review
+and bounded repair succeed; prompt changes cannot guarantee success. The next
+invocation publishes a notice if it pauses; no retroactive live comment was sent
+as part of this implementation.
+
 ## Evidence and root-cause assessment
+
+### Automatic recovery follow-up
+
+The `p4-t1` dogfood run verified the new combined-input and malformed-input cases,
+but its bounded repair left a normalized-configuration round-trip regression.
+The technical stop should not require the issue author to inspect local files or
+replan the entire issue. The earlier CLI-oriented pause guidance is superseded by
+the following implementation:
+
+- Continue concrete rejected task reviews with focused repair and independent
+  review, preserving task identity, cases, completed work and final-tree gates.
+- Two extra repair credits are shared by the issue workflow across batches and
+  replans. Persist each reservation before execution, with findings and source
+  tree, so restart/crash cannot replenish the allowance. Models remain unchanged.
+- At exhaustion, post the findings and a one-time GitHub retry token. Only a new,
+  standalone reply by the initiator to the outstanding request grants two more
+  credits. Keep its receipt; old tokens cannot grant again. Retry control replies
+  are distinct from requirements and plan approval.
+- Keep incomplete evidence, questions, manual changes, interrupted execution,
+  integrity failures and publication uncertainty outside this repair mechanism.
+  No automatic adoption, broad replanning, scheduler installation or live PR patch.
+- Test old paused-task recovery, durable exhaustion, GitHub authorization,
+  duplicate invocation, interruption, contract preservation and final-tree gating.
+  Ordinary Owner task and final integration bounds remain unchanged.
+
+Next live test: invoke the updated CLI for issue #10 without `--replan`. Its saved
+rejected task is eligible for recovery in place. This is not a promise that two
+additional attempts will repair it; model quality remains the dogfood measurement.
+
+The next live attempt consumed one recovery credit and returned an incomplete
+implementation report about distinguishing normalized compatibility fields from
+explicit same-value overrides. It did not request clarification. Previously this
+stopped before independent review. Now issue tasks with such reports go to review
+for a technical assessment against the existing approved contract. Concrete
+defects use the same repair allowance; true missing external choices require a
+plain-language clarification, and unavailable evidence remains incomplete.
+Saved partial reports resume assessment only when their source/case identity is
+current. Reused assessments also bind the implementation report identity, so an
+older review of the same source cannot silently dismiss a new limitation. The
+fixer report is preserved rather than relabeled successful. Tests cover internal
+ambiguity followed by repair, saved-partial assessment and retry without blind
+fixing, and existing publication/error handling. No live state or PR code is patched.
+
+The following dogfood run changed the fixer's outcome to `clarify`, bypassing that
+assessment path. The coordinator also promoted raw fixer evidence and final-review
+blockers into questions. Both paths are now gated: fixer clarification proposals
+go through independent review, and only current reviewer-confirmed clarification
+outcomes reach the issue as questions. Review prompts challenge contradictory
+expectations and demand an observable signal for explicit intent, grounded in
+approved scope and actual callers. They must not freeze the fixer's representation
+or require identical payloads to encode two different invisible intentions.
+
+Previously published fixer-only blockers can be retired by the coordinator when
+no current review confirms them. Their history is archived, any user replies stay
+in the discussion, and normal issue assessment/approval runs again. Neither repair
+credits nor task history are reset. Genuine missing product decisions still pause
+with `await_answers`; technical failures remain recovery/maintenance conditions.
+Regression tests cover both outcomes, stale-question suppression, and resumption
+of a saved waiting state without a blind fixer invocation or manual PR patch.
+
+### Verification dependency recovery (2026-11-01)
+
+The next stop was `p4-t2`: its legacy-artifact verification required slot execution
+and resume assigned to later tasks `p4-t4`/`p4-t5`, which themselves depended on
+`p4-t2`. This is a task-plan deadlock rather than unavailable infrastructure.
+
+Implemented: reviewers receive compact remaining-task descriptions and can report
+an unavailable case with its downstream prerequisite and concrete evidence.
+Only issue-managed automatic execution can reserve a planning repair. The backend
+checks case identity, unavailability and the actual downstream dependency before
+allowing one durable planning-repair operation per workflow. The ordinary bounded
+planner correction loop is reused. Replacement plans must retain each supplied
+case exactly once, all case text, original item coverage and every original task
+outcome, and put the prerequisite implementation before or alongside the case.
+Cases use stable recovery IDs; history retains their original identities.
+
+Completed tasks and proofs remain intact. The unfinished source checkpoint is
+retained, and the first replacement task includes accumulated unfinished changes
+in its commit boundary. Existing repair counts and workflow repair credits are not
+reset. Repaired tasks and the combined tree must still pass independent review.
+No skipped/provisional-success state is used to escape the dependency.
+
+Tests cover recovery from a simulated legacy pause, preserved completed commits,
+case and outcome loss/change rejection, unresolved dependency rejection, unknown
+prerequisites, and persisted allowance consumption on planner failure. Model
+quality remains a live dogfood question. Resume issue #10 normally without
+`--replan`; no live PR or workflow state was modified during implementation.
 
 Issue #10 / PR #11 now has eleven implementation steps. Step `p2-t1` introduced
 canonical reviewer slots and independent processing settings. Its first review

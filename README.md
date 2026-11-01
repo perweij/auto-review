@@ -160,6 +160,16 @@ Questions and revisioned plans remain on the issue. A draft PR is bootstrapped
 with an empty commit after approval; implementation runs in an isolated Owner
 worktree. Successful verification and configured full reviews mark the PR ready.
 
+Rejected tasks receive focused automatic recovery with a durable allowance of
+two additional repairs shared across the issue workflow. Each repair is reviewed
+before execution can advance. If that allowance is exhausted, the issue receives
+a notice with a one-time `/fix-issue retry <token>` command: the initiator can reply
+there to authorize another two repairs on the next invocation. Restarting or
+replanning does not reset this allowance. Requirement questions and plan approval
+remain separate from technical recovery.
+Verification blocked by later planned work can also trigger one automatic repair
+of the unfinished task plan, preserving completed work and verification obligations.
+
 `--yolo` skips plan approval for that invocation; unanswered questions still
 block. `--force` overrides assignment checks only. See the
 [issue workflow](docs/manual.md#issue-fixing) for eligibility, settings, and recovery.

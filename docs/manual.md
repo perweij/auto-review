@@ -822,9 +822,70 @@ criteria. Skipping a step cannot complete the issue, and partial task commits do
 not mark it handled.
 
 When implementation or verification stops, the result includes its stage, task,
-blockers, and attempt directory. `next_action: retry` means rerun the same command;
-`inspect_owner` means inspect the saved Owner reports before resuming. An
-incomplete implementation is not automatically posted as a question to the user.
+blockers, and diagnostic details. `next_action: retry` means a later invocation
+can retry; `inspect_owner` signals a technical failure requiring maintainer
+attention. An incomplete implementation is not automatically posted as a
+requirement question to the user.
+
+For concrete task verification defects, `fix-issue` automatically continues with
+focused repairs after the normal task-local repair is consumed. An issue-wide
+allowance permits two additional repairs across all its batches, using the saved
+models, findings and case contracts. Reservations are persisted before execution;
+crashes, normal resumes, and explicit replanning do not replenish the allowance.
+Completed tasks remain intact and final-tree verification still gates publication.
+An incomplete fixer report or proposed clarification goes to independent
+technical review rather than immediately becoming a user-facing stop. The reviewer
+checks architectural-ambiguity claims against approved requirements and actual
+callers. A concrete implementation defect enters the same bounded repair path;
+an independently verified implementation can proceed. Neither the fixer's passing
+tests nor its uncertainty alone decides completion. A genuine missing product
+decision requires a plain-language question; unavailable verification remains a
+technical limitation. Resuming a saved partial implementation with current source
+and case identity retries assessment rather than blindly running the fixer again.
+Only clarification outcomes from a current independent review are published as
+implementation questions. Fixer claims, stale review questions, and ordinary
+technical blockers are not user questions. Reviewers must ground expectations in
+approved behavior and actual callers: identical input/state cannot be required to
+produce different results based on invisible intent. Internal representation
+choices remain implementation work. A confirmed missing observable decision is
+asked in plain language with alternatives and effects, and the result reports
+`await_answers`. Older waiting states whose blockers came solely from unreviewed
+fixer claims are archived and reassessed; user replies and approval checks remain.
+This policy does not automatically adopt interrupted/manual edits or override
+permissions, approval, integrity checks, or incomplete verification. Ordinary
+standalone Owner batches retain their existing policy; final integration repair
+also retains its existing bound.
+
+If the allowance is exhausted, `next_action: await_recovery_authorization` reports
+the stop and a deduplicated issue notice gives a one-time command:
+`/fix-issue retry <token>`. The workflow initiator can post that exact command as
+an issue comment to authorize up to two more focused repairs. The next invocation
+consumes it once; no CLI access is needed to authorize recovery. Other authors,
+quoted commands, old tokens, and comments containing additional prose cannot
+authorize it. This authorizes repair effort, not a changed plan or new requirements.
+The command does not start a process itself; a manual or periodic invocation must
+run the workflow. No scheduler is installed by this feature.
+
+If a task's verification requires implementation assigned to a later dependent
+task, the reviewer can identify that internal planning deadlock. `fix-issue` permits
+one automatic planning-repair operation per issue workflow. The planner can reorder
+or repartition unfinished work; it must retain every existing case unchanged and
+every original task outcome. The backend checks that the reported blocked case
+now follows its prerequisite (or shares its task). Completed work stays verified,
+and final combined verification still gates publication; no provisional pass is
+introduced. Retained cases receive stable recovery IDs to avoid collisions when
+moved between tasks, with their original IDs preserved in history.
+
+The planning reservation is persisted before the model runs. The existing planner
+may correct invalid output at most twice (three calls total); restart does not grant
+another automatic operation. Task-local repair counts are conservatively carried
+forward, and issue-wide code-repair credits are unchanged. A new task starts its
+implementation against the retained source, including partial unfinished changes.
+If planning repair fails or another deadlock remains, it needs maintainer attention
+or an explicit replan; the program does not repeatedly replenish planning attempts.
+Environment failures, requirement questions, and ordinary failed tests do not
+trigger this mechanism. Older incomplete reviews are reassessed on resume using
+the current task plan, so an existing paused workflow can use it without a PR patch.
 On the first resume of an older, paused one-task issue attempt that made no code
 changes and completed no verification, the planner can replace that task with
 smaller dependent steps. Earlier plans/reports remain in history. Modified,

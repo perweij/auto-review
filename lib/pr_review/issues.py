@@ -8,7 +8,7 @@ import uuid
 
 from .common import ApiError, atomic_json, command, digest, git, locked, now, read_json, state_root
 from .repository import Repository, normalize_remote, repository_name
-from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion
+from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, owner_recovery
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
 from .issue_planning import assess_issue
@@ -64,6 +64,8 @@ def semantic_comments(comments, state):
                 if a.get('receipt') and 'body' in a}
     return [semantic_comment(c) for c in comments
             if not (c.get('id') in receipts and matches_receipt(c, receipts[c['id']]))
+            and not (c.get('user', {}).get('login', '').lower() == state['viewer'].lower()
+                     and owner_recovery.RETRY.fullmatch((c.get('body') or '').strip()))
             and approval_revision(c, state) is None]
 
 
@@ -158,7 +160,9 @@ class Workflow:
                 'issue_url': f'https://{self.repo.identity}/issues/{self.state["issue"]}',
                 'pr_url': f'https://{self.repo.identity}/pull/{self.state["pr"]}' if self.state.get('pr') else None,
                 'session': str(self.path), 'worktree': self.state.get('worktree'), 'next_action': next_action,
-                'eligibility': self.eligibility, **extra}
+                # Keep the checked facts/snapshot intact, but report the current
+                # action rather than the action saved before this invocation.
+                'eligibility': {**self.eligibility, 'next_action': next_action}, **extra}
 
     def guard(self):
         target = {'issue': self.state['issue']}
@@ -179,6 +183,33 @@ class Workflow:
             if not self.request.get('yolo') and not any(approval_comment(c, self.state) for c in facts['comments']):
                 raise ApiError('stale_approval', 'Approval was removed or changed; approve the current plan again.')
         return facts
+
+    def notify_owner_pause(self, batch, failure):
+        """Publish an actionable status, not a new requirement or approval request."""
+        if failure.get('recovery_request'):
+            guidance = ('The automatic recovery allowance is exhausted. To authorize up to two more '
+                        'focused repair attempts, the workflow initiator can reply here with:\n\n'
+                        f'`/fix-issue retry {failure["recovery_request"]["token"]}`\n\n'
+                        'The next invocation will consume this authorization once and continue from '
+                        'the saved work. No requirement change or manual code patch is requested.')
+        elif failure['next_action'] == 'retry':
+            guidance = 'Automation could not complete execution. A later invocation can retry after the reported limitation is resolved.'
+        else:
+            guidance = ('Automation needs maintainer attention for the reported technical failure. '
+                        'This is not a requirement question; automatic continuation is blocked.')
+        body = (f'## fix-issue paused: {failure["stage"]}\n\n'
+                + (f'Task: `{failure["task"]}`\n\n' if failure.get('task') else '')
+                + failure['summary'] + '\n\n'
+                + '\n'.join('- ' + reason for reason in failure['blocking'])
+                + '\n\n' + guidance
+                + '\n\nThis is an execution stop, not a request for plan approval.')
+        # Attempt paths are local diagnostics, not public identifiers. A retry of
+        # the same saved stop must reconcile its receipt instead of posting again.
+        key = 'owner-pause:' + digest([batch['id'], body])
+        try:
+            self.writes.comment(body, key)
+        except ApiError as exc:
+            raise ApiError(exc.code, str(exc), **{**exc.details, 'owner_failure': failure}) from exc
 
     def clean(self, path, expected):
         if self.repo.git('status', '--porcelain', '--untracked-files=all', cwd=path).stdout or self.repo.git('rev-parse', 'HEAD', cwd=path).stdout.strip() != expected:
@@ -211,6 +242,34 @@ class Workflow:
                 self.save()
         self.clean(path, state.get('planning_head', state.get('bootstrap_sha', state['planning_base'])))
         return path
+
+    def reconcile_unreviewed_questions(self):
+        """Retire old fixer-only blockers; retain their history and all user replies."""
+        state = self.state
+        blockers = state.get('execution_blockers')
+        if not blockers or not state.get('owner'):
+            return
+        owner = owner_state.OwnerSession({'session': state['owner']})
+        with locked(owner.execution_lock):
+            data = owner.load()
+            if data.get('issue_workflow') != state['id']:
+                raise ApiError('invalid_session', 'Owner workflow identity changed.')
+            batch = next((b for b in reversed(list(required_batches(data))) if not execution_complete(b)), None)
+            if not batch or owner_fixes.clarification_questions(batch):
+                return
+            proposals = [o['evidence'] for task in batch.get('tasks', [])
+                         if task.get('status') == 'needs_attention'
+                         for o in task.get('implementation', {}).get('outcomes', [])
+                         if o.get('status') == 'clarify']
+            if not proposals or any(b not in proposals for b in blockers):
+                return
+        state.setdefault('retired_execution_blockers', []).append({
+            'blockers': blockers, 'at': now(), 'reason': 'Pending independent clarification assessment'})
+        state.pop('execution_blockers')
+        # Reassess with the original discussion, including any human replies.
+        # Do not reuse a cached question or bypass plan approval/freshness checks.
+        state['reassessment_generation'] = state.get('reassessment_generation', 0) + 1
+        self.save()
 
     def plan(self):
         self.writes.reconcile()
@@ -390,7 +449,10 @@ class Workflow:
             # feedback must be assessed in a new batch from the current HEAD.
             pending = next((b for b in reversed(list(required_batches(data)))
                             if b['items'] == keys and not execution_complete(b, current_discussion=False)), None)
-            request = {'items': keys, 'auto_commit': True, 'trusted_snapshot': self.request.get('trusted_snapshot')}
+            if owner_recovery.authorize(data, self.facts['comments'], self.state['viewer']):
+                owner.save(data)
+            request = {'items': keys, 'auto_commit': True, 'automatic_recovery': True,
+                       'trusted_snapshot': self.request.get('trusted_snapshot')}
             explicit_replan = self.request.get('replan') and not getattr(self, '_replan_used', False)
             if explicit_replan:
                 if not pending or pending['id'] != getattr(self, '_replan_batch', pending['id']):
@@ -408,19 +470,18 @@ class Workflow:
             state['worktree'] = view['worktree']
             self.save()
             if not execution_complete(batch):
-                blockers = batch.get('review', {}).get('blocking', [])
-                for task in batch.get('tasks', []):
-                    for report in ('implementation', 'review'):
-                        for outcome in task.get(report, {}).get('outcomes', []):
-                            if outcome.get('status') == 'clarify':
-                                blockers.append(outcome['evidence'])
+                blockers = owner_fixes.clarification_questions(batch)
                 if blockers:
                     state['execution_blockers'] = blockers
                     state['reassessment_generation'] = state.get('reassessment_generation', 0) + 1
-                    self.writes.comment('Implementation needs clarification or verification:\n\n' + '\n'.join('- ' + b for b in blockers), 'blockers:' + digest(blockers))
+                    self.writes.comment('Implementation needs clarification:\n\n' + '\n'.join('- ' + b for b in blockers), 'blockers:' + digest(blockers))
                     state.update(phase='waiting', waiting='answers')
                     self.save()
                 failure = owner_fixes.execution_failure(batch)
+                if blockers:
+                    failure['next_action'] = 'await_answers'
+                else:
+                    self.notify_owner_pause(batch, failure)
                 reason = '; '.join(failure['blocking']) or failure['summary']
                 raise ApiError('needs_attention', f"Owner {failure['stage']} paused: {reason}",
                                owner=str(owner.path), **failure)
@@ -571,6 +632,7 @@ class Workflow:
             return self.result('noop')
         if state.get('phase') == 'blocked' and state.get('waiting') != 'unsuitable':
             state['phase'] = 'intake'
+        self.reconcile_unreviewed_questions()
         if not self.plan():
             return self.result(state.get('waiting') or state['phase'], 0 if state['phase'] == 'complete' else 3 if state['phase'] == 'blocked' else 2,
                                'none' if state['phase'] in ('complete', 'blocked') else 'await_answers' if state.get('waiting') == 'answers' else 'await_approval')

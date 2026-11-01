@@ -70,9 +70,17 @@ class ReplanIntegrationTest(unittest.TestCase):
         with patch('pr_review.owner_providers.invoke', side_effect=rejected):
             first = dispatch({**self.t.req, 'yolo': True})
             self.assertEqual(3, first['exit_code'])
+            self.assertEqual('await_recovery_authorization', first['next_action'])
+            self.assertEqual(first['next_action'], first['eligibility']['next_action'])
+            notices = [c for c in self.t.f['comments'] if '## fix-issue paused:' in c['body']]
+            self.assertEqual(1, len(notices))
+            self.assertIn('Concrete defect remains', notices[0]['body'])
+            self.assertIn('/fix-issue retry ', notices[0]['body'])
+            self.assertNotIn('CLI', notices[0]['body'])
+            self.assertNotIn(str(self.t.path), notices[0]['body'])
             owner = owner_state.OwnerSession({'session': self.t.path})
             old = copy.deepcopy(owner.load()['batches'][-1])
-            self.assertEqual(1, old['tasks'][0]['repairs'])
+            self.assertEqual(3, old['tasks'][0]['repairs'])
             # Initial bootstrap adds PR context. Keep requirements unchanged
             # when that context is reassessed, rather than requesting a new plan.
             self.t.assessment['decision'] = 'continue'
@@ -80,6 +88,7 @@ class ReplanIntegrationTest(unittest.TestCase):
             again = dispatch({**self.t.req, 'yolo': True})
             self.assertEqual(3, again['exit_code'])
             self.assertEqual(calls, len(self.t.calls))
+            self.assertEqual(notices, [c for c in self.t.f['comments'] if '## fix-issue paused:' in c['body']])
         waiting = dispatch({**self.t.req, 'replan': True})
         self.assertEqual(3, waiting['exit_code'])
         self.assertEqual('stale_approval', waiting['error']['code'])
@@ -90,9 +99,11 @@ class ReplanIntegrationTest(unittest.TestCase):
         self.assertEqual(old['id'], batch['id'])
         self.assertEqual(2, len(batch['plans']))
         self.assertEqual(old['tasks'], batch['plans'][-1]['previous_tasks'])
-        self.assertEqual(1, batch['plans'][-1]['previous_tasks'][0]['repairs'])
+        self.assertEqual(3, batch['plans'][-1]['previous_tasks'][0]['repairs'])
         self.assertEqual(0, batch['tasks'][0]['repairs'])
         self.assertEqual('complete', batch['tasks'][0]['status'])
+        self.assertEqual(2, len(owner.load()['issue_recovery']['attempts']))
+        self.assertEqual(2, owner.load()['issue_recovery']['limit'])
 
 
 class ReplanStepTest(unittest.TestCase):

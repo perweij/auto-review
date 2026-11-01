@@ -165,6 +165,29 @@ class ContractWorkflowTest(unittest.TestCase):
         self.assertEqual('failed',seen[0]['review_findings']['case_results'][0]['status'])
         self.assertEqual(batch['baseline'],self.fixture.fixture.git('rev-parse','HEAD',cwd=view['worktree']))
 
+    def test_issue_recovery_preserves_cases_and_final_tree_gate(self):
+        original = self.provider.side_effect
+        reviews = 0
+        recovery_cases = []
+        def model(session, state, batch, role, context):
+            nonlocal reviews
+            value = original(session, state, batch, role, context)
+            if role == 'review' and not context.get('scope'):
+                reviews += 1
+                if reviews <= 2:
+                    value['blocking'] = ['Concrete regression']
+                    value['case_results'][0]['status'] = 'failed'
+            if role == 'fix' and context.get('focused_recovery'):
+                recovery_cases.append(copy.deepcopy(context['verification_cases']))
+            return value
+        self.provider.side_effect = model
+        view = self.fixture.start(auto_commit=True, automatic_recovery=True)
+        batch = view['batches'][-1]
+        self.assertEqual([[case()]], recovery_cases)
+        self.assertEqual('ready', batch['status'])
+        self.assertTrue(contracts.current(batch))
+        self.assertTrue(batch['commit_progress']['complete'])
+
     def test_integration_repair_keeps_task_proofs_and_verifies_final_tree(self):
         original=self.provider.side_effect
         repaired=False

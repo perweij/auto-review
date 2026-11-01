@@ -647,7 +647,9 @@ class BlockerReassessmentTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.batch = {'id': 'fix', 'items': ['issue:12'], 'status': 'paused',
-                      'review': {'complete': False, 'blocking': ['Which format?']}, 'tasks': [],
+                      'checkpoint': {'tree': 'current'}, 'review_tree': 'current',
+                      'review': {'complete': False, 'blocking': ['Which format?'],
+                                 'outcomes': [{'status': 'clarify', 'evidence': 'Which format?'}]}, 'tasks': [],
                       'commit_plan': {'units': []}}
         self.data = {'batches': [self.batch], 'feedback': [], 'worktree': str(self.root)}
         self.owner = SimpleNamespace(path=self.root / 'owner', execution_lock=self.root / 'owner.lock',
@@ -704,7 +706,8 @@ class BlockerReassessmentTest(unittest.TestCase):
         self.assertEqual(2, self.assess.call_count)
         self.assertEqual(applied, self.flow().state['applied_assessment'])
         # A later occurrence of the same blocker is a new reassessment request.
-        self.batch.update(status='paused', review={'complete': False, 'blocking': ['Which format?']})
+        self.batch.update(status='paused', review={'complete': False, 'blocking': ['Which format?'],
+                          'outcomes': [{'status': 'clarify', 'evidence': 'Which format?'}]})
         with self.assertRaises(ApiError):
             self.flow().fix(self.owner, ['issue:12'])
         self.assessment.update(decision='questions', questions=['Which format now?'])
