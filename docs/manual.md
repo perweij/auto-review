@@ -38,10 +38,16 @@ Use authenticated CLI installations (`gh auth login`, `codex login`, and
 The intended environment is a container sandbox (such as podman) and trusted
 organization repositories. Every Codex model invocation (including probes,
 review, planning, fixes, suggestions, and verification) explicitly uses
-`sandbox_mode=danger-full-access` and `approval_policy=never`. This avoids an
-additional bubblewrap sandbox inside the container. The backend calls plain
+`sandbox_mode=danger-full-access` and `approval_policy=never`. Independent
+reviewers additionally require `bwrap`: each runs in a private writable clone
+with saved reviews hidden. If the required namespace cannot be created, the
+review fails instead of running without isolation. The backend calls plain
 `codex`; no `codex-dangerous` wrapper is required. Project agent settings load
 normally. The CLI requires confirmation when the PR changes agent configuration.
+Independent reviewers use a private home and an empty `/proc`. Their provider
+authentication files and configuration are mounted read-only; host user-session
+keyring sockets are unavailable inside the reviewer. Configure file-based or
+environment-based provider authentication if a CLI otherwise depends on one.
 Claude defaults to `auto`;
 use `PR_REVIEW_CLAUDE_PERMISSION_MODE=dontAsk` when running directly on a host.
 
@@ -57,6 +63,8 @@ pr-review 123 --repo github.example.com/org/repository
 pr-review 123 --codex-model gpt-6.1-sol --claude-model opus
 pr-review 123 --reviewers codex --codex-model gpt-6-luna --codex-effort medium
 pr-review 123 --processing-provider codex --claude-effort medium
+pr-review 123 --reviewers claude,claude --processing-provider claude --reviewer-2-model sonnet --reviewer-2-effort medium
+pr-review 123 --reviewers codex,codex --processing-provider codex --reviewer-2-model gpt-6.1-terra --reviewer-2-effort high
 pr-review 123 --economical
 pr-review 123 --expensive
 pr-review 123 --economical --codex-effort medium
@@ -68,12 +76,17 @@ Repository discovery uses `gh repo view`; specify `--repo` when it is ambiguous.
 Exactly one Git remote must match the target repository. Fork PRs are fetched
 through the base repository's `refs/pull/<N>/head`, without adding a fork remote.
 New reviews default to both reviewers, `gpt-6.1-sol` and `opus`, at high effort,
-with Codex/Sol processing. `--reviewers claude` or `--reviewers codex` selects one
-reviewer: it produces structured findings directly and handles discussion matching,
-without an adversarial synthesis phase. `--processing-provider claude|codex`
-chooses synthesis and discussion matching when both reviewers are enabled; its
-model and effort are inherited from that provider's review settings. Thread
-adaptation and fresh-discussion reassessment use the same provider.
+with Codex/Sol processing. `--reviewers` takes one or two ordered providers,
+including two instances of the same provider. Slot-specific `--reviewer-1-model`,
+`--reviewer-2-model`, and corresponding `--reviewer-1-effort` and
+`--reviewer-2-effort` options configure the reviews independently. Individual
+providers can also be changed with `--reviewer-1-provider` and
+`--reviewer-2-provider`.
+`--processing-provider`, `--processing-model` and `--processing-effort` select
+the separate synthesis and discussion role. A fresh single-reviewer selection
+defaults to that provider; if the reviewer and processing choices differ, the
+reviewer runs first and its report is supplied to the structured review. Thread
+adaptation and fresh-discussion reassessment use the same processing choice.
 
 `--economical` supplies new-review defaults: Haiku + GPT-6.1 Terra, both at high
 effort, with Terra processing. `--expensive` instead supplies Fable + GPT-6 Astra,
@@ -414,6 +427,9 @@ The handoff copies saved wording, original findings, and code/discussion context
 without changing reviewer staging or publishing anything. Repeating it does not
 duplicate unchanged findings. Explicitly re-importing an edited draft retains the
 previous copy and marks dependent fix assessments stale.
+When the handoff creates an Owner session, its initial roles use the saved
+review's processing provider, model, and effort. Existing Owner role settings
+remain independent and are not overwritten by later imports.
 
 You can also fix GitHub feedback you posted yourself. After `G`, it appears under
 **Your GitHub comments** without an unread alert. Select it and press `f`, or use
@@ -661,8 +677,10 @@ invalidate the affected stages.
 Replacement reviews are built under `<session-directory>-history/attempt-<id>/`.
 The previous review, edited drafts, and completed review-stage records stay in
 place. A changed independent review restarts that phase and its downstream stages;
-restarting Claude also restarts Codex to preserve independence. The candidate
-contains only the reports appropriate to those stages.
+the candidate preserves unaffected slot reports and reruns only the invalid slots. Legacy
+provider-named reports stay in place; they are copied to a slot only when their
+original inputs and output can be verified. Unverifiable reports are retained
+and the affected work is rerun.
 
 Only after the selected review pipeline, discussion matching, and draft preparation
 succeed does an atomic `.current-review` symlink update make the replacement

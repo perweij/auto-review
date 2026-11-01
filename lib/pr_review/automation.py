@@ -325,7 +325,8 @@ def _execute(request, controller):
             if result:
                 return result
         configured = settings.resolve({**request, 'session': str(root) if root else None})['settings']
-        catalogs = {p: models.discover({'provider': p}) for p in configured['reviewers']}
+        required = set(configured['reviewers']) | {configured['processing_provider']}
+        catalogs = {p: models.discover({'provider': p}) for p in sorted(required)}
         models.validate_selection(configured, catalogs)
         session = reviews.execute({**request, **configured, 'catalogs': catalogs})
         return controller.publish(session)

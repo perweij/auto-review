@@ -9,7 +9,7 @@ copy_tool() {
 }
 
 legacy_cache_records() {
-    jq '.phases |= with_entries(.value |= (del(.inputs) | .fingerprint="legacy-installation-hash"))' "$saved/manifest.json" > "$FIXTURE/manifest.tmp"
+    jq '.phases |= with_entries(if .key=="synthesis" or .key=="contributions" then .value |= (del(.inputs) | .fingerprint="legacy-installation-hash") else . end)' "$saved/manifest.json" > "$FIXTURE/manifest.tmp"
     mv "$FIXTURE/manifest.tmp" "$saved/manifest.json"
 }
 
@@ -25,11 +25,11 @@ legacy_cache_records() {
     run_review --claude-model claude-haiku-5-5 --codex-model gpt-6-luna; assert_success
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
     [ "$(cat "$saved/publication/review-body.md")" = 'My edited main review' ]
-    manifest_is '.review_history==null and .phases.claude.inputs.version==1'
-    [[ $output == *'Reusing completed Claude review'* && $output == *'Reusing completed Codex review'* && $output == *'Reusing completed synthesis'* ]]
+    manifest_is '.review_history==null and .phases["reviewer-1"].inputs.version==1'
+    [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Reusing completed Reviewer-2 review'* && $output == *'Reusing completed synthesis'* ]]
 }
 
-@test "legacy completed reviews upgrade without calls or loss of human edits" {
+@test "legacy synthesis without slot attribution reruns without losing human edits" {
     run_review; assert_success
     saved=$(run_directory)
     stages=$(cat "$FIXTURE/stages")
@@ -37,10 +37,11 @@ legacy_cache_records() {
     printf 'Human edited body\n' > "$saved/publication/review-body.md"
     export PR_REVIEW_CLAUDE_BUDGET=5
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(cat "$FIXTURE/stages")" = "$stages"$'\nsynthesis\ncontributions' ]
     [ "$(cat "$saved/publication/review-body.md")" = 'Human edited body' ]
-    manifest_is 'all(.phases | to_entries[] | select(.key=="claude" or .key=="codex" or .key=="synthesis" or .key=="contributions"); .value.inputs.version==1) and .review_history==null'
-    [[ $output == *'Verified saved contributions inputs'* ]]
+    manifest_is 'all(.phases | to_entries[] | select(.key=="reviewer-1" or .key=="reviewer-2" or .key=="synthesis" or .key=="contributions"); .value.inputs.version==1) and .review_history==null'
+    [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Reusing completed Reviewer-2 review'* ]]
+    stages=$(cat "$FIXTURE/stages")
     run_review; assert_success
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
 }
@@ -50,7 +51,7 @@ legacy_cache_records() {
     saved=$(run_directory)
     legacy_cache_records
     run_review --codex-model other-codex; assert_success
-    [[ $output == *'Reusing completed Claude review'* && $output == *'Restarting reviews from codex'* ]]
+    [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Restarting reviewer slots: reviewer-2'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\ncodex\nsynthesis\ncontributions' ]
 }
 
@@ -59,7 +60,7 @@ legacy_cache_records() {
     run_review; assert_success
     printf '\nCheck retry behavior.\n' >> "$FIXTURE/tool/prompts/independent.txt"
     run_review; assert_success
-    [[ $output == *'Restarting reviews from claude'* ]]
+    [[ $output == *'Restarting reviewer slots: reviewer-1, reviewer-2'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
 }
 
@@ -68,7 +69,7 @@ legacy_cache_records() {
     run_review; assert_success
     printf '\nExplain retry behavior.\n' >> "$FIXTURE/tool/prompts/synthesis.txt"
     run_review; assert_success
-    [[ $output == *'Reusing completed Claude review'* && $output == *'Reusing completed Codex review'* ]]
+    [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Reusing completed Reviewer-2 review'* ]]
     # The replacement also prepares its discussion-aware drafts before commit.
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
 }
@@ -79,6 +80,6 @@ legacy_cache_records() {
     legacy_cache_records
     printf '\nUnrecorded alteration\n' >> "$saved/prompts/synthesis-prompt.txt"
     run_review; assert_success
-    [[ $output == *'Reusing completed Claude review'* && $output == *'Reusing completed Codex review'* ]]
+    [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Reusing completed Reviewer-2 review'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
 }

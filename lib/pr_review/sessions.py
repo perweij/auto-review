@@ -222,9 +222,9 @@ class Store:
             self.clear_pending()
         self.begin()
         self.reset_directories(('reviews', 'publication', 'prompts'))
-        for name in ('claude', 'codex', 'synthesis', 'contributions', 'followup'):
+        for name in ('claude', 'codex', 'reviewer-1', 'reviewer-2', 'synthesis', 'contributions', 'followup'):
             self.manifest['phases'].pop(name, None)
-        for name in ('reassessment', 'publication_reset'):
+        for name in ('reassessment', 'publication_reset', 'review_restart', 'slot_restart'):
             self.manifest.pop(name, None)
         self.manifest.update(analysis_kind=kind, followup_threads=threads, publication=dict(status='not_published'))
         self.save()
@@ -268,7 +268,8 @@ class Store:
         self.manifest.setdefault('snapshot_history', []).append(dict(archive=str(archive), worktree=str(saved), snapshot=journal['from']))
         self.manifest.update(previous_review=dict(archive=str(archive), worktree=str(saved)), snapshot=journal['to'], run_id=journal['run_id'],
                              phases={}, publication=dict(status='not_published'), generated_files=[], warnings=[])
-        for key in ('snapshot_update', 'reassessment', 'review_restart', 'agent_config_confirmed', 'integrity_failed', 'publication_reset'):
+        for key in ('snapshot_update', 'reassessment', 'review_restart', 'slot_restart', 'legacy_review_artifacts',
+                    'agent_config_confirmed', 'integrity_failed', 'publication_reset'):
             self.manifest.pop(key, None)
         self.save()
         say(f'Previous review and drafts preserved: {archive}\nPrevious worktree preserved: {saved}\nReviewing the updated snapshot from scratch.')
@@ -277,7 +278,8 @@ class Store:
         if self.pending != self.path:
             return
         for stage in stages:
-            name = {'claude': 'claude-independent.md', 'codex': 'codex.md'}.get(stage, stage + '.json')
+            name = {'claude': 'claude-independent.md', 'codex': 'codex.md'}.get(
+                stage, stage + ('.md' if stage in ('reviewer-1', 'reviewer-2') else '.json'))
             path = self.path / 'reviews' / name
             record = self.manifest['phases'].get(stage, {})
             if record.get('status') != 'completed' or not path.is_file() or record.get('output_hash') != hash_file(path):

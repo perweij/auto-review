@@ -55,6 +55,17 @@ class SuggestionTest(unittest.TestCase):
             settings.validate({**settings.DEFAULTS, 'suggested_changes': 'true'})
         self.assertIn('automatic-review', dispatch({'command': 'capabilities'})['commands'])
 
+    def test_verification_identity_tracks_processing_model_and_effort(self):
+        comment = self.attach()
+        configuration = settings.validate(settings.from_manifest(self.session.manifest))
+        self.session.manifest['configuration'] = configuration
+        original = s.identity(self.session, comment)
+        configuration['processing']['model'] = 'another-processor-model'
+        self.assertNotEqual(original, s.identity(self.session, comment))
+        changed = s.identity(self.session, comment)
+        configuration['processing']['effort'] = 'low'
+        self.assertNotEqual(changed, s.identity(self.session, comment))
+
     def test_git_lines_do_not_split_unicode_separators(self):
         self.assertEqual(s.lines('one\u2028two\nthree\vfour\n'), ['one\u2028two\n', 'three\vfour\n'])
 

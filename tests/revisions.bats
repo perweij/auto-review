@@ -85,7 +85,7 @@ SH
 @test "a run stopped at the removed comparison stage can resume to publication preparation" {
     run_review; assert_success
     saved=$(run_directory)
-    jq '.phases.revision={status:"failed"} | .phases.claude.fingerprint="old-implementation"' "$saved/manifest.json" > "$FIXTURE/manifest"
+    jq '.phases.revision={status:"failed"} | .phases["reviewer-1"].fingerprint="old-implementation"' "$saved/manifest.json" > "$FIXTURE/manifest"
     cp "$FIXTURE/manifest" "$saved/manifest.json"
     echo 'Earlier invalid comparison response' > "$saved/logs/revision-result.json"
     run_review; assert_success
@@ -94,7 +94,7 @@ SH
     manifest_is '.phases.revision==null and .status=="complete"'
     archive=$(jq -r '.review_history[-1].archive' "$saved/manifest.json")
     [ "$(cat "$archive/logs/revision-result.json")" = 'Earlier invalid comparison response' ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
     [ ! -e "$FIXTURE/post-count" ]
 }
 

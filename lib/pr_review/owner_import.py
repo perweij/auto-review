@@ -14,8 +14,16 @@ def from_review(request):
         raise ApiError("invalid_request", "automatic must be a Boolean.")
     source = Session(request)
     repo = Repository.from_manifest(source.manifest)
+    defaults = request.get("defaults") or {}
+    if not isinstance(defaults, dict):
+        raise ApiError("invalid_request", "Owner defaults must be a settings object.")
+    from .settings import from_manifest, validate
+    # An imported review has a saved processing choice. It takes precedence
+    # over frontend defaults when creating a new Owner session; an existing
+    # Owner session keeps its separately configured roles.
+    defaults = {**defaults, "processing": validate(from_manifest(source.manifest))["processing"]}
     opened = open_session({"cwd": str(repo.cwd), "repository": repo.identity, "pr": repo.pr,
-                           "defaults": request.get("defaults")})
+                           "defaults": defaults})
     owner = OwnerSession({"session": opened["session"]})
     # Follow execution -> PR -> state order. Never modify the review's drafts.
     with locked(owner.execution_lock):

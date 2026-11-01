@@ -3,7 +3,7 @@
 load helpers/fixture
 
 review_hashes() {
-    sha256sum "$1"/reviews/{claude-independent.md,codex.md,synthesis.json,contributions.json} "$1/publication/drafts.json"
+    sha256sum "$1"/reviews/{reviewer-1.md,reviewer-2.md,synthesis.json,contributions.json} "$1/publication/drafts.json"
 }
 
 @test "Ctrl-C during replacement leaves completed review and edited draft in place" {
@@ -21,7 +21,7 @@ review_hashes() {
     [ "$(jq -c '.phases | {claude,codex,synthesis,contributions}' "$previous/manifest.json")" = "$phases" ]
     [ ! -L "$previous/.current-review" ]
     [ -L "$previous/.pending-review" ]
-    manifest_is '.phases.claude.status=="interrupted" and .attempt.status=="building"'
+    manifest_is '.phases["reviewer-1"].status=="interrupted" and .attempt.status=="building"'
     unset MOCK_SLEEP_STAGE
     run_review --claude-model replacement; assert_success
     [ "$(run_directory)" = "$candidate" ]

@@ -142,7 +142,7 @@ api_mutate() {
     export MOCK_SLEEP_STAGE=claude MOCK_SLEEP_SECONDS=30
     run python3 "$PROJECT_ROOT/tests/helpers/api-cancel.py" "$CLI"
     assert_success
-    manifest_is '.phases.claude.status=="interrupted" and .phases.claude.exit_status==143'
+    manifest_is '.phases["reviewer-1"].status=="interrupted" and .phases["reviewer-1"].exit_status==143'
     unset MOCK_SLEEP_STAGE MOCK_SLEEP_SECONDS
     run_review; assert_success
 }
@@ -165,7 +165,7 @@ api_mutate() {
     mkdir -p "$candidate"
     cp -a "$saved/manifest.json" "$saved/context" "$saved/prompts" "$saved/reviews" "$saved/publication" "$saved/logs" "$saved/discussion" "$candidate/"
     jq --arg saved "$saved" '.session_directory=$saved | .attempt={status:"building",previous:$saved} |
-        .configuration.claude_model="haiku" | .configuration.processing_provider="codex"' "$candidate/manifest.json" > "$FIXTURE/manifest.tmp"
+        .configuration.claude_model="haiku" | .configuration.reviewer_slots[0].model="haiku" | .configuration.processing_provider="codex"' "$candidate/manifest.json" > "$FIXTURE/manifest.tmp"
     mv "$FIXTURE/manifest.tmp" "$candidate/manifest.json"
     ln -s "$candidate" "$saved/.pending-review"
     export MOCK_FAIL_STAGE=claude

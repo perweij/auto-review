@@ -35,6 +35,10 @@ def parser():
     presets.add_argument('--expensive', action='store_true')
     result.add_argument('--reviewers', type=lambda value: value.split(','), default=argparse.SUPPRESS,
                         help='Shared configuration compatibility; issue verification uses Owner review settings, not a post-push PR review')
+    for key in ('reviewer-1-provider', 'reviewer-1-model', 'reviewer-1-effort',
+                'reviewer-2-provider', 'reviewer-2-model', 'reviewer-2-effort',
+                'processing-model', 'processing-effort'):
+        result.add_argument('--' + key, default=argparse.SUPPRESS)
     for key in ('codex-model', 'claude-model', 'processing-provider', 'claude-effort', 'codex-effort', 'synthesis-tests'):
         result.add_argument('--' + key, default=argparse.SUPPRESS)
     return result

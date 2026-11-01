@@ -53,28 +53,37 @@ def environment(provider):
 
 
 def provider_for(settings, stage):
+    for slot in settings.get("reviewer_slots", []):
+        if slot["id"] == stage:
+            return slot["provider"]
     return stage if stage in ("claude", "codex") else settings["processing_provider"]
 
 
 def review_command(settings, runtime, stage, directory, base_ref):
     text = lambda name: (ROOT / "prompts" / name).read_text().rstrip("\n")
-    codex = ["codex", "exec", "-m", settings["codex_model"], "--strict-config",
-             "-c", "model_reasoning_effort=" + settings["codex_effort"],
+    slot = next((s for s in settings.get("reviewer_slots", []) if s["id"] == stage), None)
+    provider = slot["provider"] if slot else provider_for(settings, stage)
+    independent = slot is not None or stage in ("claude", "codex")
+    choice = slot if slot else (None if independent else settings.get("processing"))
+    model = choice["model"] if choice else settings[provider + "_model"]
+    effort = choice["effort"] if choice else settings[provider + "_effort"]
+    codex = ["codex", "exec", "-m", model if provider == "codex" else settings["codex_model"], "--strict-config",
+             "-c", "model_reasoning_effort=" + (effort if provider == "codex" else settings["codex_effort"]),
              "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never"]
-    if stage == "codex":
+    if independent and provider == "codex":
         codex.insert(2, "review")
         return codex + ["-c", "developer_instructions=" + json.dumps((ROOT / "prompts/independent.txt").read_text(), ensure_ascii=False),
-                        "--ephemeral", "--json", "-o", str(directory / "reviews/codex.md.tmp"), "--base", base_ref]
-    if stage != "claude" and settings["processing_provider"] == "codex":
+                        "--ephemeral", "--json", "-o", str(directory / f"reviews/{stage if slot else 'codex'}.md.tmp"), "--base", base_ref]
+    if not independent and provider == "codex":
         return codex + ["--ephemeral", "--json", "--output-schema", str(ROOT / f"prompts/{stage}.schema.json"),
                         "-o", str(directory / f"reviews/{stage}.codex.tmp"), "-"]
-    args = ["claude", "-p", "--model", settings["claude_model"], "--effort", settings["claude_effort"],
+    args = ["claude", "-p", "--model", model, "--effort", effort,
             "--permission-mode", runtime.permission, "--no-session-persistence"]
     if runtime.budget:
         args += ["--max-budget-usd", runtime.budget]
-    if stage == "claude":
+    if independent:
         return args + ["--output-format", "stream-json", "--verbose", "--append-system-prompt", text("independent.txt"),
-                       "--disallowed-tools", *DENIED_TOOLS, "--", f"/code-review {settings['claude_effort']} --max-findings default {base_ref}"]
+                       "--disallowed-tools", *DENIED_TOOLS, "--", f"/code-review {effort} --max-findings default {base_ref}"]
     if stage in ("synthesis", "followup"):
         policy = "focused" if stage == "followup" else settings["synthesis_tests"]
         args += ["--append-system-prompt", text(f"synthesis-testing-{policy}.txt")]
@@ -122,8 +131,9 @@ def probe_command(provider, runtime, response):
 
 
 def adaptation_command(settings):
-    provider = settings["processing_provider"]
-    model, effort = settings[provider + "_model"], settings[provider + "_effort"]
+    from .settings import validate
+    choice = validate(settings)['processing']
+    provider, model, effort = choice['provider'], choice['model'], choice['effort']
     if provider == "codex":
         return ["codex", "exec", "-m", model, "--strict-config", "--skip-git-repo-check", "-c", "model_reasoning_effort=" + effort,
                 "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never", "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-"]

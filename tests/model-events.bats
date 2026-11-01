@@ -2,13 +2,12 @@
 # shellcheck disable=SC2030,SC2031
 load helpers/fixture
 
-@test "Ctrl-C escalates and returns when a model ignores both INT and TERM" {
+@test "Ctrl-C stops isolated model descendants even when they ignore signals" {
     export MOCK_SLEEP_STAGE=codex MOCK_SLEEP_SECONDS=30 MOCK_IGNORE_SIGNALS=1
     run python3 "$PROJECT_ROOT/tests/helpers/interrupt_runner.py" "$CLI" 7 --no-publish
     [ "$status" = 130 ]
-    [[ $output == *'Stopping remaining model processes with KILL'* ]]
-    manifest_is '.phases.codex.status=="interrupted" and .phases.codex.exit_status==130'
-    [ -s "$(run_directory)/reviews/claude-independent.md" ]
+    manifest_is '.phases["reviewer-2"].status=="interrupted" and .phases["reviewer-2"].exit_status==130'
+    [ -s "$(run_directory)/reviews/reviewer-1.md" ]
     unset MOCK_SLEEP_STAGE MOCK_SLEEP_SECONDS MOCK_IGNORE_SIGNALS
     run_review; assert_success
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\ncodex\nsynthesis\ncontributions' ]
@@ -19,8 +18,8 @@ load helpers/fixture
     run timeout --kill-after=2s 22s "$CLI" 7 --no-publish
     [ "$status" = 1 ]
     [[ $output == *'Codex rejected the working directory as a Git repository'* ]]
-    manifest_is '.phases.codex.status=="failed" and .phases.codex.failure_reason=="git_repository_unavailable" and .phases.codex.exit_status!=0'
-    [ -s "$(run_directory)/reviews/claude-independent.md" ]
+    manifest_is '.phases["reviewer-2"].status=="failed" and .phases["reviewer-2"].failure_reason=="git_repository_unavailable" and .phases["reviewer-2"].exit_status!=0'
+    [ -s "$(run_directory)/reviews/reviewer-1.md" ]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex' ]
     unset MOCK_CODEX_EVENT MOCK_CODEX_EVENT_HANG
     run_review; assert_success
@@ -30,8 +29,8 @@ load helpers/fixture
 @test "terminal Codex event fails even if the CLI exits zero with a report" {
     export MOCK_CODEX_EVENT=failed
     run_review; assert_failure
-    manifest_is '.phases.codex.failure_reason=="codex_turn_failed" and .phases.codex.process_exit_status==0 and .phases.codex.exit_status==1'
-    [ ! -e "$(run_directory)/reviews/codex.md" ]
+    manifest_is '.phases["reviewer-2"].failure_reason=="codex_turn_failed" and .phases["reviewer-2"].process_exit_status==0 and .phases["reviewer-2"].exit_status==1'
+    [ ! -e "$(run_directory)/reviews/reviewer-2.md" ]
     [ ! -e "$(run_directory)/reviews/synthesis.json" ]
     [[ $output != *fixture-provider-error-do-not-replay* ]]
 }
@@ -43,7 +42,7 @@ load helpers/fixture
     [[ $output == *'Process running:'* ]]
     [[ $output =~ [0-2]s\ since\ last\ output\ \(stdout/stderr\) ]]
     [[ $output != *'Working:'* && $output != *fixture-provider-error-do-not-replay* && $output != *fixture-stderr-do-not-replay* ]]
-    manifest_is '.phases.codex.status=="completed"'
+    manifest_is '.phases["reviewer-2"].status=="completed"'
 }
 
 
@@ -78,15 +77,15 @@ load helpers/fixture
         [ "$status" = 1 ]
     done
     manifest_is '.removed_environment.codex | index("GIT_CONFIG_COUNT")!=null and index("GIT_CONFIG_KEY_0")!=null and index("GIT_CONFIG_VALUE_0")!=null and index("GIT_CONFIG_PARAMETERS")!=null'
-    [ -s "$(run_directory)/logs/codex.git-preflight.log" ]
+    [ -s "$(run_directory)/logs/reviewer-2.git-preflight.log" ]
 }
 
 @test "successful provider exit with a sandbox failure report cannot complete analysis" {
     export MOCK_CODEX_EVENT=sandbox
     run_review; assert_failure
     [[ $output == *'model reported a sandbox launch failure'* ]]
-    manifest_is '.phases.codex.status=="failed" and .phases.codex.failure_reason=="sandbox_unavailable"'
-    [ ! -e "$(run_directory)/reviews/codex.md" ]
+    manifest_is '.phases["reviewer-2"].status=="failed" and .phases["reviewer-2"].failure_reason=="sandbox_unavailable"'
+    [ ! -e "$(run_directory)/reviews/reviewer-2.md" ]
     [ ! -e "$(run_directory)/reviews/synthesis.json" ]
     [ ! -f "$FIXTURE/post-count" ]
     unset MOCK_CODEX_EVENT

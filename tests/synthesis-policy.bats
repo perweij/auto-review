@@ -4,10 +4,10 @@ load helpers/fixture
 
 assert_focused_independent_reviews() {
     local saved=$1
-    jq -e 'all(.phases.claude,.phases.codex; .testing_policy=="focused")' "$saved/manifest.json"
+    jq -e 'all(.phases["reviewer-1"],.phases["reviewer-2"]; .testing_policy=="focused")' "$saved/manifest.json"
     jq -e --rawfile policy "$PROJECT_ROOT/prompts/independent.txt" '
-        [.[]|select(.stage=="claude")][-1].argv as $claude |
-        [.[]|select(.stage=="codex")][-1].argv as $codex |
+        [.[]|select(.stage=="reviewer-1")][-1].argv as $claude |
+        [.[]|select(.stage=="reviewer-2")][-1].argv as $codex |
         $claude[$claude|index("--append-system-prompt")+1]==($policy|rtrimstr("\n")) and
         ([$codex[]|select(startswith("developer_instructions="))|ltrimstr("developer_instructions=")|fromjson]==[$policy]) and
         $codex[$codex|index("--base")+1]=="refs/pr-review/7/base" and
@@ -19,7 +19,7 @@ assert_focused_independent_reviews() {
     saved=$(run_directory)
     manifest_is '.phases.synthesis.testing_policy=="focused"'
     assert_focused_independent_reviews "$saved"
-    manifest_is '.phases.claude.model=="haiku" and .phases.codex.model=="gpt-6-luna"'
+    manifest_is '.phases["reviewer-1"].model=="haiku" and .phases["reviewer-2"].model=="gpt-6-luna"'
     jq -e --rawfile policy "$PROJECT_ROOT/prompts/synthesis-testing-focused.txt" '
         [.[]|select(.stage=="synthesis")][-1].argv as $args |
         $args[$args|index("--append-system-prompt")+1]==($policy|rtrimstr("\n"))' "$saved/logs/commands.json"

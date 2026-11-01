@@ -593,13 +593,20 @@ checks, or have no executed checks and a justified `inspection_only_reason`.
   Unrelated resolution or review-status metadata does not unstage drafts. No LLM
   calls or automatic rewriting.
 - `run`: run/resume with `session` or `cwd` plus `pr` (number or URL), optional
-  `repository`, `reviewers` (nonempty array containing `claude`, `codex`, or both),
-  `processing_provider`, `claude_model`, `codex_model`, `claude_effort`,
-  `codex_effort`, and `synthesis_tests` (`focused` or `full`). Missing settings come
-  from the pending/current generation, then backend defaults. With one reviewer,
-  its provider is always the processor. With both, the selected processor handles
-  synthesis and discussion matching, using its selected model/effort. The same
-  provider handles reassessment and adaptation. Always runs with `--no-publish`.
+  `repository`, and one or two ordered `reviewers` (`claude` or `codex`, including
+  duplicate providers). The version 1 configuration also accepts `reviewer_slots`,
+  each with `id` (`reviewer-1` or `reviewer-2` in order), `provider`, `model`, and
+  `effort`, plus an independent `processing` object with `provider`, `model`, and
+  `effort`. Individual `reviewer_1_*`, `reviewer_2_*`, and `processing_*` fields
+  override these choices; legacy provider-wide model and effort fields remain
+  supported. If an explicit `processing_provider` differs from a supplied
+  `processing` object's provider, the new provider's defaults replace that
+  object's model and effort, unless individually overridden. Null values inside
+  `defaults` are treated as unset; an explicit null role or version is invalid.
+  Missing choices come from the pending/current generation, then defaults or a
+  preset. A fresh sole reviewer supplies the processing provider only when no
+  processing choice was made. Processing handles synthesis, discussion matching,
+  reassessment, and adaptation. Always runs with `--no-publish`.
   An optional `catalogs` object, keyed by provider and containing the `models`
   responses below, validates menu selections before starting work. Testing limits
   are model instructions, not enforced timers. Both independent reviews always

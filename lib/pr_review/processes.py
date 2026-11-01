@@ -110,7 +110,7 @@ class Result:
 
 
 def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
-        stderr_path=None, model_events=False, stage="", on_line=None):
+        stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=()):
     """Run without a shell; log raw bytes while interpreting complete records."""
     from .issue_resources import check as check_issue_resources, active as issue_resources_active
     check_issue_resources()
@@ -135,7 +135,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                 files[name] = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb")
         child = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 start_new_session=True, close_fds=True)
+                                 start_new_session=True, close_fds=True, pass_fds=pass_fds)
         with selectors.DefaultSelector() as selector:
             for name in pending:
                 os.set_blocking(getattr(child, name).fileno(), False)

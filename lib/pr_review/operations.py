@@ -107,7 +107,7 @@ def run(request):
         raise ApiError('invalid_request', 'A positive PR number or GitHub PR URL is required.')
     configuration = resolve(request)['settings']
     if 'catalogs' in request:
-        validate_selection(configuration, request['catalogs'])
+        validate_selection(configuration, request['catalogs'], reviewers=not bool(request.get('followup_threads')))
     request = {**request, **configuration}
     if request.get('session'):
         session = Session({'session': request['session']})

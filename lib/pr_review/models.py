@@ -137,11 +137,16 @@ def discover(request):
     return {"provider": provider, "models": choices}
 
 
-def validate_selection(settings, catalogs):
-    for provider in settings["reviewers"]:
+def validate_selection(settings, catalogs, *, reviewers=True):
+    from .settings import validate
+    config = validate(settings)
+    if not isinstance(catalogs, dict):
+        raise ApiError("invalid_request", "Refresh model choices before running.")
+    for selection in [*(config["reviewer_slots"] if reviewers else []), config["processing"]]:
+        provider = selection["provider"]
         catalog = catalogs.get(provider, {})
-        if catalog.get("provider") != provider:
+        if not isinstance(catalog, dict) or catalog.get("provider") != provider or not isinstance(catalog.get('models'), list):
             raise ApiError("invalid_request", f"Refresh {provider} choices before running.")
-        model = next((m for m in catalog.get("models", []) if m["value"] == settings[provider + "_model"]), None)
-        if not model or settings[provider + "_effort"] not in model["efforts"]:
+        model = next((m for m in catalog["models"] if isinstance(m, dict) and m.get("value") == selection["model"]), None)
+        if not model or not isinstance(model.get('efforts'), list) or selection["effort"] not in model['efforts']:
             raise ApiError("invalid_request", f"Choose a listed {provider} model and one of its supported efforts.")

@@ -2,7 +2,18 @@
 set -euo pipefail
 tool=${0##*/}
 args=$(jq -cn --args '$ARGS.positional' -- "$@")
-jq -nc --arg tool "$tool" --argjson args "$args" '{tool:$tool,args:$args}' >> "$FIXTURE/calls.jsonl"
+call=$(jq -nc --arg tool "$tool" --argjson args "$args" '{tool:$tool,args:$args}')
+mock_bridge() {
+    local response
+    printf '%s\n' "$1" > "$FIXTURE/mock-bridge-request"
+    IFS= read -r response < "$FIXTURE/mock-bridge-response"
+    [[ $response == ok ]] || { printf '%s\n' "$response" >&2; return 1; }
+}
+if [[ $HOME == /tmp/review-private/home ]]; then
+    mock_bridge "$(jq -nc --arg value "$call" '{kind:"call",value:$value}')"
+else
+    printf '%s\n' "$call" >> "$FIXTURE/calls.jsonl"
+fi
 if [[ $* == *--version* ]]; then printf '%s test-1.0\n' "$tool"; exit; fi
 if [[ $* == *--help* ]]; then
     cat <<'EOF'
@@ -183,10 +194,16 @@ elif [[ $tool == codex && $* == *synthesis.schema.json* ]]; then stage=synthesis
 elif [[ $tool == codex ]]; then stage=codex
 elif [[ $* == *validity_conflicts* ]]; then stage=contributions
 elif [[ $* == *--json-schema* ]]; then stage=synthesis; fi
-printf '%s\n' "$stage" >> "$FIXTURE/stages"
-# Record only names; assertions can verify scrubbing without logging secrets.
-compgen -e | sort > "$FIXTURE/environment-$stage"
-git rev-parse HEAD >> "$FIXTURE/reviewed-heads"
+if [[ $HOME == /tmp/review-private/home ]]; then
+    environment=$(compgen -e | sort)
+    head=$(git rev-parse HEAD)
+    mock_bridge "$(jq -nc --arg stage "$stage" --arg environment "$environment" --arg head "$head" '{kind:"stage",stage:$stage,environment:$environment,head:$head}')"
+else
+    printf '%s\n' "$stage" >> "$FIXTURE/stages"
+    # Record only names; assertions can verify scrubbing without logging secrets.
+    compgen -e | sort > "$FIXTURE/environment-$stage"
+    git rev-parse HEAD >> "$FIXTURE/reviewed-heads"
+fi
 if [[ $stage == claude ]]; then
     for manifest in "$FIXTURE/state/pr-review/${MOCK_HOST:-github.com}/org/repo/"*/manifest.json; do
         [[ -f $manifest ]] || continue
@@ -213,7 +230,11 @@ fi
 if [[ ${MOCK_SLEEP_STAGE:-} == "$stage" ]]; then
     if [[ ${MOCK_IGNORE_SIGNALS:-} == 1 ]]; then trap '' INT TERM
     else trap 'exit 130' INT; trap 'exit 143' TERM; fi
-    touch "$FIXTURE/model-started"
+    if [[ $HOME == /tmp/review-private/home ]]; then
+        mock_bridge '{"kind":"marker"}'
+    else
+        touch "$FIXTURE/model-started"
+    fi
     sleep "${MOCK_SLEEP_SECONDS:-2}" &
     wait $!
 fi
@@ -262,14 +283,22 @@ emit_structured() {
 }
 if [[ $stage == codex ]]; then
     if [[ ${MOCK_REWRITE_BASE:-} == 1 ]]; then
-        git --git-dir="$FIXTURE/remote.git" update-ref refs/heads/main "$(git rev-parse HEAD)"
+        if [[ $HOME == /tmp/review-private/home ]]; then
+            mock_bridge "$(jq -nc --arg head "$(git rev-parse HEAD)" '{kind:"move-ref",ref:"refs/heads/main",head:$head}')"
+        else
+            git --git-dir="$FIXTURE/remote.git" update-ref refs/heads/main "$(git rev-parse HEAD)"
+        fi
     fi
     if [[ ${MOCK_MOVE_HEAD:-} == 1 || ${MOCK_MOVE_BASE:-} == 1 ]]; then
         ref=refs/heads/main
         [[ ${MOCK_MOVE_HEAD:-} != 1 ]] || ref=refs/pull/7/head
-        parent=$(git --git-dir="$FIXTURE/remote.git" rev-parse "$ref")
-        new=$(printf 'advanced\n' | git --git-dir="$FIXTURE/remote.git" commit-tree "$parent^{tree}" -p "$parent")
-        git --git-dir="$FIXTURE/remote.git" update-ref "$ref" "$new"
+        if [[ $HOME == /tmp/review-private/home ]]; then
+            mock_bridge "$(jq -nc --arg ref "$ref" '{kind:"move-ref",ref:$ref}')"
+        else
+            parent=$(git --git-dir="$FIXTURE/remote.git" rev-parse "$ref")
+            new=$(printf 'advanced\n' | git --git-dir="$FIXTURE/remote.git" commit-tree "$parent^{tree}" -p "$parent")
+            git --git-dir="$FIXTURE/remote.git" update-ref "$ref" "$new"
+        fi
     fi
     while (($#)); do if [[ $1 == -o ]]; then echo 'Codex finding: inspect source.txt:1' > "$2"; break; fi; shift; done
     echo '{"type":"review.completed"}'

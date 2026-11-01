@@ -140,7 +140,7 @@ anchored_findings() {
     [ "$status" = 130 ]
     result=$(tail -n 1 "$FIXTURE/interrupt-output")
     jq -e '.outcome=="interrupted" and .exit_code==130 and .session' <<< "$result"
-    manifest_is '.status=="failed" and .phases.claude.status=="completed"'
+    manifest_is '.status=="failed" and .phases["reviewer-1"].status=="completed"'
 }
 
 @test "automatic trust failure is saved and recoverable with an exact snapshot token" {

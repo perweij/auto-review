@@ -22,6 +22,7 @@ A standalone command-line interface uses the same backend and saved reviews.
 ## Requirements
 
 - Linux, Python 3.9+, Git, and the GitHub CLI (`gh`).
+- Bubblewrap (`bwrap`) and kernel namespace support for independent reviews.
 - Authenticated Claude Code and/or Codex CLI installations for the providers you
   enable. New reviews default to both. Claude requires its `/code-review` skill
   and support for `auto` permission mode.
@@ -33,8 +34,9 @@ Model runs and live authentication probes consume provider usage. Code and revie
 context are sent to the selected providers.
 
 Use trusted repositories in a container sandbox, such as Podman. Codex runs with
-`sandbox_mode=danger-full-access` and `approval_policy=never`, relying on that
-container for isolation instead of starting an additional sandbox. Project agent
+`sandbox_mode=danger-full-access` and `approval_policy=never`. Independent
+reviewers also run in separate bubblewrap snapshots with private writable files;
+the review stops if that isolation cannot be established. Project agent
 settings load normally, and changes to agent configuration require explicit
 trust. See the [trust and credential details](docs/manual.md#trust-credentials-and-github-access).
 
@@ -91,6 +93,8 @@ Run from a checkout of the repository you want to review:
 ```sh
 pr-review 123
 pr-review 123 --reviewers codex
+pr-review 123 --reviewers claude,claude --processing-provider claude
+pr-review 123 --reviewers codex,codex --processing-provider codex
 pr-review https://github.com/org/repository/pull/123 --no-publish
 pr-review 123 --resume /absolute/path/to/run
 pr-review drafts /absolute/path/to/run

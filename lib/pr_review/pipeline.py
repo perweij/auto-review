@@ -3,21 +3,35 @@ from pathlib import Path
 import shutil
 import tempfile
 from .common import ApiError, ROOT, locked, now, read_json
-from . import cache, discussion, followup, validation
+from . import cache, discussion, followup, providers, validation
 from .sessions import say
 from .storage import atomic_bytes, hash_file, json_bytes, write_json
 
 
 def render_synthesis(run):
     path, snapshot = run.path, run.manifest['snapshot']
-    content = (ROOT / ('prompts/synthesis.txt' if run.dual else 'prompts/single-review.txt')).read_bytes()
+    reports = cache.completed_slot_reports(run)
+    slots = run.settings.get('reviewer_slots', [])
+    if not reports and any(slot['id'] in run.manifest.get('phases', {}) for slot in slots):
+        raise ApiError('incomplete_review', 'All configured reviewer slots must complete before synthesis')
+    prompt = ('synthesis.txt' if run.dual else
+              'single-review-with-report.txt' if reports else 'single-review.txt')
+    content = (ROOT / 'prompts' / prompt).read_bytes()
     if run.settings['processing_provider'] == 'codex':
         content += (ROOT / f'prompts/synthesis-testing-{run.settings["synthesis_tests"]}.txt').read_bytes()
     metadata = dict(repository=run.repo.identity, pr=str(run.repo.pr), head=snapshot['head'], merge_base=snapshot['merge_base'],
                     context_directory=str(path / 'context'), codex_review=str(path / 'reviews/codex.md'), claude_review=str(path / 'reviews/claude-independent.md'),
                     context_files=['pr.json', 'pr-discussion.json', 'pr-reviews.json', 'pr-inline-comments.json', 'ci-actions-runs.json', 'ci-statuses.json', 'pr.diff', 'diffstat.txt'],
                     warnings=run.manifest['warnings'], reviewers=run.settings['reviewers'])
-    if not run.dual:
+    if reports:
+        metadata.pop('codex_review')
+        metadata.pop('claude_review')
+        metadata['reviewer_reports'] = [dict(slot=slot['id'], provider=slot['provider'], path=str(report))
+                                        for slot, report in reports]
+        content = content.replace(b'source (Codex, Claude, Both, New)', b'source (reviewer slot ID, both slots, or New)')
+        if run.dual:
+            content += b'\nAttribute each original finding to its reviewer slot ID, including when providers match.\n'
+    elif not run.dual:
         metadata.pop('codex_review')
         metadata.pop('claude_review')
     content += json_bytes(metadata)
@@ -66,14 +80,8 @@ def protect(run, stage):
     if run.pending or run.manifest['phases'].get('contributions', {}).get('status') != 'completed':
         return
     run.begin()
-    if run.dual:
-        for name in ('claude', 'codex'):
-            inputs = cache.inputs(run, name)
-            run.manifest['phases'][name].update(inputs=inputs, fingerprint=cache.fingerprint(inputs))
-    if stage == 'contributions':
-        render_synthesis(run)
-        inputs = cache.inputs(run, 'synthesis')
-        run.manifest['phases']['synthesis'].update(inputs=inputs, fingerprint=cache.fingerprint(inputs))
+    # A copied phase keeps the identity under which it actually ran. Rewriting
+    # its fingerprint from current settings could certify stale work as new.
     run.save()
 
 
@@ -100,6 +108,18 @@ def restart(run):
                        reason='saved model, prompt, output or review inputs changed', staged=True)
         run.manifest['review_restart'] = journal
         run.save()
+    if journal.get('staged') and not journal.get('preserved'):
+        # A pending candidate can contain reports that never existed in its
+        # predecessor. Preserve those bytes inside the candidate before removal.
+        history = run.path / 'restart-history'
+        history.mkdir(exist_ok=True, mode=0o700)
+        journal['preserved'] = tempfile.mkdtemp(prefix='restart-', dir=history)
+        run.save()
+    if journal.get('staged'):
+        history = (run.path / 'restart-history').resolve()
+        preserved = Path(journal['preserved']).resolve()
+        if preserved.parent != history:
+            raise ApiError('invalid_artifact', 'Invalid review restart preservation path')
     say(f"Restarting reviews from {journal['from']}: {journal.get('reason', 'finishing the previously requested restart')}.\nPrevious reports and drafts are preserved in: {journal['archive']}")
     for value in journal['files']:
         path = Path(value)
@@ -108,6 +128,8 @@ def restart(run):
             raise ApiError('invalid_artifact', 'Invalid review restart journal path')
         if path.is_file():
             if journal.get('staged'):
+                destination = Path(journal['preserved']) / path.relative_to(run.path)
+                atomic_bytes(destination, path.read_bytes())
                 path.unlink()
             else:
                 destination = Path(journal['archive']) / path.relative_to(run.path)
@@ -117,13 +139,112 @@ def restart(run):
         if stage != 'claude' or journal['from'] == 'claude':
             run.manifest['phases'].pop(stage, None)
     run.manifest.pop('reassessment', None)
-    run.manifest.setdefault('review_history', []).append(dict(**{'from': journal['from']}, archive=journal['archive'], restarted_at=now()))
+    run.manifest.setdefault('review_history', []).append(dict(**{'from': journal['from']}, archive=journal['archive'],
+        preserved=journal.get('preserved'), restarted_at=now()))
     run.manifest.pop('review_restart')
     run.save()
 
 
+def adopt_legacy_slots(run, slots):
+    """Copy only legacy reports verified under their original phase rules."""
+    if (run.manifest.get('legacy_review_artifacts') and not run.pending and
+            any(run.manifest['phases'].get(stage, {}).get('status') == 'completed'
+                for stage in ('synthesis', 'contributions'))):
+        run.begin()
+    for slot in slots:
+        stage = slot['id']
+        item = run.manifest.get('legacy_review_artifacts', {}).get(stage)
+        if not item or stage in run.manifest['phases'] or (run.path / 'reviews' / (stage + '.md')).exists():
+            continue
+        if any(slot[key] != item[key] for key in ('provider', 'model', 'effort')):
+            continue
+        source, old_stage = run.path / item['output'], item['phase']
+        if not cache.reusable(run, old_stage, source, cache.inputs(run, old_stage)):
+            continue
+        old = run.manifest['phases'][old_stage]
+        report = run.path / 'reviews' / (stage + '.md')
+        atomic_bytes(report, source.read_bytes())
+        record = dict(status='completed', output_hash=hash_file(report), exit_status=0,
+                      legacy_source=dict(phase=old_stage, output=item['output'],
+                                         fingerprint=old.get('fingerprint'), output_hash=hash_file(source)))
+        run.manifest['phases'][stage] = record
+        record['inputs'] = cache.inputs(run, stage)
+        record['fingerprint'] = cache.fingerprint(record['inputs'])
+        run.save()
+
+
+def prepare_slots(run, slots):
+    """Preserve invalid slot and downstream artifacts without invalidating peers."""
+    journal = run.manifest.get('slot_restart')
+    if not journal:
+        invalid = []
+        for slot in slots:
+            stage = slot['id']
+            output = run.path / 'reviews' / (stage + '.md')
+            if not cache.reusable(run, stage, output, cache.inputs(run, stage)):
+                invalid.append(stage)
+        phases = run.manifest['phases']
+        if not invalid or not (any((run.path / 'reviews' / (stage + '.md')).exists() or stage in phases for stage in invalid)
+                               or any(stage in phases for stage in ('synthesis', 'contributions', 'revision'))):
+            return
+        run.reset_publication()
+        run.begin()
+        history = run.path / 'restart-history'
+        if history.is_symlink():
+            raise ApiError('invalid_artifact', 'Invalid slot restart preservation directory')
+        history.mkdir(exist_ok=True, mode=0o700)
+        if history.resolve().parent != run.path.resolve():
+            raise ApiError('invalid_artifact', 'Invalid slot restart preservation directory')
+        archive = Path(tempfile.mkdtemp(prefix='slots-', dir=history))
+        affected = invalid + ['synthesis', 'contributions', 'revision']
+        files = []
+        for folder in ('reviews', 'prompts', 'logs'):
+            for path in (run.path / folder).iterdir():
+                if path.is_file() and any(path.name.startswith(name + '.') or path.name.startswith(name + '-') for name in affected):
+                    files.append(str(path.relative_to(run.path)))
+        journal = dict(stages=affected, files=files, archive=str(archive))
+        run.manifest['slot_restart'] = journal
+        run.save()
+    say('Restarting reviewer slots: ' + ', '.join(stage for stage in journal['stages'] if stage.startswith('reviewer-'))
+        + f". Previous artifacts are preserved in: {journal['archive']}")
+    archive = Path(journal['archive']).resolve()
+    history = run.path / 'restart-history'
+    if history.is_symlink() or history.resolve().parent != run.path.resolve() or archive.parent != history.resolve():
+        raise ApiError('invalid_artifact', 'Invalid slot restart preservation path')
+    if any(stage not in ('reviewer-1', 'reviewer-2', 'synthesis', 'contributions', 'revision') for stage in journal['stages']):
+        raise ApiError('invalid_artifact', 'Invalid slot restart stage')
+    for name in journal['files']:
+        relative = Path(name)
+        if relative.is_absolute() or len(relative.parts) != 2 or relative.parts[0] not in ('reviews', 'prompts', 'logs'):
+            raise ApiError('invalid_artifact', 'Invalid slot restart artifact')
+        if not any(relative.name.startswith(stage + '.') or relative.name.startswith(stage + '-') for stage in journal['stages']):
+            raise ApiError('invalid_artifact', 'Invalid slot restart artifact')
+        source, destination = run.path / relative, archive / relative
+        if (source.parent.is_symlink() or source.parent.resolve() != run.path.resolve() / relative.parts[0]
+                or source.is_symlink() or destination.is_symlink()):
+            raise ApiError('invalid_artifact', 'Symlink in slot restart artifacts')
+        if source.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.parent.resolve() != archive / relative.parts[0]:
+                raise ApiError('invalid_artifact', 'Invalid slot restart destination')
+            if not destination.exists():
+                atomic_bytes(destination, source.read_bytes())
+            elif not destination.is_file() or hash_file(source) != hash_file(destination):
+                raise ApiError('invalid_artifact', 'Slot restart artifact changed during preservation')
+            source.unlink()
+    for stage in journal['stages']:
+        run.manifest['phases'].pop(stage, None)
+    run.manifest.pop('reassessment', None)
+    run.manifest.setdefault('review_history', []).append(dict(stages=journal['stages'], archive=str(archive), restarted_at=now()))
+    run.manifest.pop('slot_restart')
+    run.save()
+
+
 def independent(run, stage):
-    output = run.path / ('reviews/claude-independent.md' if stage == 'claude' else 'reviews/codex.md')
+    slot = next((item for item in run.settings.get('reviewer_slots', []) if item['id'] == stage), None)
+    provider = providers.provider_for(run.settings, stage)
+    output = run.path / (f'reviews/{stage}.md' if slot else
+                         'reviews/claude-independent.md' if stage == 'claude' else 'reviews/codex.md')
     if cache.reusable(run, stage, output, cache.inputs(run, stage)):
         say(f'Reusing completed {stage.title()} review')
         return
@@ -132,7 +253,7 @@ def independent(run, stage):
     output.with_suffix(output.suffix + '.tmp').unlink(missing_ok=True)
     say(f'[{stage}] Running independent {stage.title()} review')
     result, _ = run.model(stage, run.command(stage))
-    if stage == 'claude':
+    if provider == 'claude':
         body = claude_result(run, stage, result).get('result')
         if not isinstance(body, str) or not body.strip():
             raise ApiError('model_failed', 'Claude returned an empty independent review')
@@ -259,7 +380,14 @@ def contributions(run):
         state = session.load()
         session.save(state)
     run.reload()
-    run.promote((['claude', 'codex'] if run.dual else []) + ['synthesis', 'contributions'])
+    slots = [slot['id'] for slot in run.settings.get('reviewer_slots', [])]
+    if any(slot in run.manifest.get('phases', {}) for slot in slots):
+        if not cache.completed_slot_reports(run):
+            raise ApiError('incomplete_review', 'Reviewer reports changed before promotion')
+        review_stages = slots
+    else:
+        review_stages = ['claude', 'codex'] if run.dual else []
+    run.promote(review_stages + ['synthesis', 'contributions'])
     return True
 
 

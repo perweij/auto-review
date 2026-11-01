@@ -20,6 +20,226 @@ from pr_review.storage import hash_file, json_bytes
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class SlotCommandTest(unittest.TestCase):
+    def test_protection_does_not_relabel_old_phase_inputs(self):
+        from pr_review import pipeline
+        from unittest.mock import Mock
+        phases = {'contributions': {'status': 'completed'},
+                  'reviewer-1': {'status': 'completed', 'fingerprint': 'old-choice'},
+                  'reviewer-2': {'status': 'completed', 'fingerprint': 'old-choice-2'}}
+        run = SimpleNamespace(pending=None, manifest={'phases': phases}, begin=Mock(), save=Mock())
+        pipeline.protect(run, 'synthesis')
+        run.begin.assert_called_once()
+        self.assertEqual(phases['reviewer-1']['fingerprint'], 'old-choice')
+        self.assertEqual(phases['reviewer-2']['fingerprint'], 'old-choice-2')
+
+    def test_synthesis_rejects_partial_slot_results(self):
+        from pr_review import pipeline, settings
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            slots = [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'first', 'effort': 'low'},
+                     {'id': 'reviewer-2', 'provider': 'claude', 'model': 'second', 'effort': 'high'}]
+            run = SimpleNamespace(path=path, settings=settings.validate({'reviewer_slots': slots}), dual=True,
+                manifest={'snapshot': {'head': 'head', 'merge_base': 'base'}, 'warnings': [],
+                          'phases': {'reviewer-1': {'status': 'completed'}, 'reviewer-2': {'status': 'failed'}}},
+                repo=SimpleNamespace(identity='repo', pr=1))
+            with self.assertRaises(ApiError) as error:
+                pipeline.render_synthesis(run)
+            self.assertEqual(error.exception.code, 'incomplete_review')
+
+    def test_single_reviewer_report_is_supplied_and_invalidates_structured_review(self):
+        from pr_review import pipeline, settings
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            for name in ('reviews', 'prompts', 'context'):
+                (path / name).mkdir()
+            slot = {'id': 'reviewer-1', 'provider': 'claude', 'model': 'first', 'effort': 'low'}
+            config = settings.validate({'reviewer_slots': [slot],
+                'processing': {'provider': 'codex', 'model': 'processor', 'effort': 'high'}})
+            report = path / 'reviews/reviewer-1.md'
+            report.write_text('first finding')
+            run = SimpleNamespace(path=path, settings=config, dual=False,
+                manifest={'snapshot': {'head': 'head', 'merge_base': 'base'}, 'warnings': [],
+                          'phases': {'reviewer-1': {'status': 'completed', 'output_hash': hash_file(report)}}},
+                tools={'codex': 'version'}, repo=SimpleNamespace(identity='repo', pr=1))
+            run.command = lambda stage: providers.review_command(config, providers.Runtime(), stage, path, 'base')
+            pipeline.render_synthesis(run)
+            prompt = (path / 'prompts/synthesis-prompt.txt').read_text()
+            self.assertIn(str(report), prompt)
+            self.assertIn('Evaluate EVERY\nfinding in that report individually', prompt)
+            self.assertIn('Account\nfor every original finding', prompt)
+            self.assertIn('attribute it to the supplied reviewer slot ID', prompt)
+            self.assertIn('findings array covering every original reviewer finding', prompt)
+            self.assertIn('never claim independent agreement', prompt)
+            self.assertNotIn('You are the sole reviewer', prompt)
+            before = cache.inputs(run, 'synthesis')
+            report.write_text('changed finding')
+            with self.assertRaises(ApiError):
+                pipeline.render_synthesis(run)
+
+    def test_single_review_handoff_prompt_for_both_provider_directions(self):
+        from pr_review import pipeline, settings
+        for reviewer, processor in (('claude', 'codex'), ('codex', 'claude'),
+                                    ('claude', 'claude'), ('codex', 'codex')):
+            with self.subTest(reviewer=reviewer, processor=processor), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)
+                for name in ('reviews', 'prompts', 'context'):
+                    (path / name).mkdir()
+                slot = {'id': 'reviewer-1', 'provider': reviewer, 'model': 'review-model', 'effort': 'low'}
+                config = settings.validate({'reviewer_slots': [slot],
+                    'processing': {'provider': processor, 'model': 'process-model', 'effort': 'high'}})
+                report = path / 'reviews/reviewer-1.md'
+                report.write_text('F1: original finding\nF2: another original finding\n')
+                run = SimpleNamespace(path=path, settings=config, dual=False,
+                    manifest={'snapshot': {'head': 'head', 'merge_base': 'base'}, 'warnings': [],
+                              'phases': {'reviewer-1': {'status': 'completed', 'output_hash': hash_file(report)}}},
+                    tools={processor: 'version'}, repo=SimpleNamespace(identity='repo', pr=1))
+                run.command = lambda stage: providers.review_command(config, providers.Runtime(), stage, path, 'base')
+                pipeline.render_synthesis(run)
+                prompt = (path / 'prompts/synthesis-prompt.txt').read_text()
+                self.assertIn('Evaluate EVERY\nfinding in that report individually', prompt)
+                self.assertIn('Account\nfor every original finding', prompt)
+                self.assertIn('REJECTED, or UNVERIFIED', prompt)
+                self.assertIn('"slot": "reviewer-1"', prompt)
+                self.assertIn('"provider": "' + reviewer + '"', prompt)
+                self.assertIn(str(report), prompt)
+                with_report = cache.inputs(run, 'synthesis')
+                run.manifest['phases'].clear()
+                pipeline.render_synthesis(run)
+                direct = (path / 'prompts/synthesis-prompt.txt').read_text()
+                self.assertIn('You are the sole reviewer', direct)
+                self.assertNotIn('reviewer_reports', direct)
+                self.assertNotEqual(cache.fingerprint(with_report), cache.fingerprint(cache.inputs(run, 'synthesis')))
+
+    def test_synthesis_attributes_and_hashes_both_slot_reports(self):
+        from pr_review import pipeline, settings
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            for name in ('reviews', 'prompts', 'context'):
+                (path / name).mkdir()
+            slots = [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'first', 'effort': 'low'},
+                     {'id': 'reviewer-2', 'provider': 'claude', 'model': 'second', 'effort': 'high'}]
+            config = settings.validate({'reviewer_slots': slots})
+            for slot in slots:
+                (path / 'reviews' / (slot['id'] + '.md')).write_text(slot['id'])
+            run = SimpleNamespace(path=path, settings=config, dual=True,
+                manifest={'snapshot': {'head': 'head', 'merge_base': 'base'}, 'warnings': [],
+                          'phases': {s['id']: {'status': 'completed',
+                              'output_hash': hash_file(path / 'reviews' / (s['id'] + '.md'))} for s in slots}},
+                tools={'codex': 'version'}, repo=SimpleNamespace(identity='repo', pr=1))
+            run.command = lambda stage: providers.review_command(config, providers.Runtime(), stage, path, 'base')
+            pipeline.render_synthesis(run)
+            prompt = (path / 'prompts/synthesis-prompt.txt').read_text()
+            for slot in slots:
+                self.assertIn(slot['id'], prompt)
+                self.assertIn(str(path / 'reviews' / (slot['id'] + '.md')), prompt)
+            before = cache.inputs(run, 'synthesis')
+            self.assertEqual(set(before['artifacts']['reviewers']), {'reviewer-1', 'reviewer-2'})
+            run.manifest['phases']['reviewer-1']['fingerprint'] = 'new-execution-identity'
+            self.assertNotEqual(cache.fingerprint(before), cache.fingerprint(cache.inputs(run, 'synthesis')))
+            run.manifest['phases']['reviewer-1'].pop('fingerprint')
+            (path / 'reviews/reviewer-2.md').write_text('changed')
+            run.manifest['phases']['reviewer-2']['output_hash'] = hash_file(path / 'reviews/reviewer-2.md')
+            after = cache.inputs(run, 'synthesis')
+            self.assertNotEqual(cache.fingerprint(before), cache.fingerprint(after))
+            self.assertEqual(before['artifacts']['reviewers']['reviewer-1'], after['artifacts']['reviewers']['reviewer-1'])
+
+    def test_independent_slot_reports_follow_each_provider(self):
+        from pr_review import pipeline, settings
+        for first, second in [('claude', 'claude'), ('codex', 'codex'), ('claude', 'codex')]:
+            with self.subTest(providers=(first, second)), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)
+                (path / 'reviews').mkdir()
+                (path / 'logs').mkdir()
+                slots = [{'id': f'reviewer-{i}', 'provider': provider, 'model': f'model-{i}', 'effort': 'low'}
+                         for i, provider in enumerate((first, second), 1)]
+                config = settings.validate({'reviewer_slots': slots})
+                run = SimpleNamespace(path=path, settings=config, manifest={'phases': {}}, save=lambda: None)
+                run.command = lambda stage: providers.review_command(config, providers.Runtime(), stage, path, 'base')
+                def model(stage, argv):
+                    self.assertIn(next(s['model'] for s in slots if s['id'] == stage), argv)
+                    run.manifest['phases'][stage] = {}
+                    if providers.provider_for(config, stage) == 'codex':
+                        (path / 'reviews' / f'{stage}.md.tmp').write_text(stage)
+                    return SimpleNamespace(events=[{'type': 'result', 'subtype': 'success', 'result': stage}]), None
+                run.model = model
+                run.complete = lambda stage, output: self.assertEqual(output.read_text().strip(), stage)
+                with patch.object(pipeline.cache, 'inputs', return_value={}), patch.object(pipeline.cache, 'reusable', return_value=False):
+                    for slot in slots:
+                        pipeline.independent(run, slot['id'])
+                self.assertEqual((path / 'reviews/reviewer-1.md').read_text().strip(), 'reviewer-1')
+                self.assertEqual((path / 'reviews/reviewer-2.md').read_text().strip(), 'reviewer-2')
+
+    def test_required_providers_include_processing_and_deduplicate_slots(self):
+        from pr_review import settings
+        from pr_review.reviews import required_providers
+        for reviewer, processor in (('claude', 'codex'), ('codex', 'claude')):
+            for count in (1, 2):
+                slots = [{'id': f'reviewer-{i}', 'provider': reviewer,
+                          'model': 'model', 'effort': 'low'} for i in range(1, count + 1)]
+                config = settings.validate({'reviewer_slots': slots,
+                    'processing': {'provider': processor, 'model': 'model', 'effort': 'low'}})
+                self.assertEqual(required_providers(config, 'full'), [reviewer, processor])
+                self.assertEqual(required_providers(config, 'followup'), [processor])
+                config['processing_provider'] = reviewer
+                self.assertEqual(required_providers(config, 'full'), [reviewer])
+
+    def test_slot_cache_identity_tracks_each_role_and_snapshot(self):
+        from pr_review import settings
+        from types import SimpleNamespace
+        slots = [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'first', 'effort': 'low'},
+                 {'id': 'reviewer-2', 'provider': 'codex', 'model': 'second', 'effort': 'high'}]
+        config = settings.validate({'reviewer_slots': slots})
+        run = SimpleNamespace(path=Path('/run'), settings=config,
+                              manifest={'snapshot': {'head': 'head', 'merge_base': 'base'}},
+                              tools={'codex': 'version'})
+        run.command = lambda stage: providers.review_command(config, providers.Runtime(), stage, run.path, 'base')
+        first = cache.inputs(run, 'reviewer-1')
+        second = cache.inputs(run, 'reviewer-2')
+        self.assertEqual(first['slot'], slots[0])
+        self.assertEqual(second['slot'], slots[1])
+        self.assertNotEqual(cache.fingerprint(first), cache.fingerprint(second))
+        config['reviewer_slots'][0]['effort'] = 'medium'
+        self.assertNotEqual(cache.fingerprint(first), cache.fingerprint(cache.inputs(run, 'reviewer-1')))
+        self.assertEqual(second, cache.inputs(run, 'reviewer-2'))
+        run.manifest['snapshot']['base'] = 'new-base'
+        self.assertNotEqual(cache.fingerprint(second), cache.fingerprint(cache.inputs(run, 'reviewer-2')))
+        run.manifest['snapshot'].pop('base')
+        run.manifest['snapshot']['head'] = 'new-head'
+        self.assertNotEqual(cache.fingerprint(second), cache.fingerprint(cache.inputs(run, 'reviewer-2')))
+
+    def test_structured_command_uses_processing_model_and_effort(self):
+        from pr_review import settings
+        for provider in ('claude', 'codex'):
+            with self.subTest(provider=provider):
+                config = settings.validate({'processing': {'provider': provider, 'model': 'processor-model', 'effort': 'high'}})
+                cmd = providers.review_command(config, providers.Runtime(), 'synthesis', Path('/run'), 'base')
+                self.assertIn('processor-model', cmd)
+                if provider == 'codex':
+                    self.assertIn('model_reasoning_effort=high', cmd)
+                else:
+                    self.assertEqual(cmd[cmd.index('--effort') + 1], 'high')
+
+    def test_independent_commands_use_slot_choices_and_distinct_outputs(self):
+        from pr_review import settings
+        for first, second in [('claude', 'claude'), ('codex', 'codex'), ('claude', 'codex')]:
+            with self.subTest(providers=(first, second)):
+                slots = [{'id': 'reviewer-1', 'provider': first, 'model': 'first-model', 'effort': 'low'},
+                         {'id': 'reviewer-2', 'provider': second, 'model': 'second-model', 'effort': 'high'}]
+                config = settings.validate({'reviewer_slots': slots})
+                for slot in slots:
+                    stage = slot['id']
+                    cmd = providers.review_command(config, providers.Runtime(), stage, Path('/run'), 'base')
+                    self.assertEqual(providers.provider_for(config, stage), slot['provider'])
+                    self.assertIn(slot['model'], cmd)
+                    if slot['provider'] == 'codex':
+                        self.assertIn('model_reasoning_effort=' + slot['effort'], cmd)
+                        self.assertIn('/run/reviews/' + stage + '.md.tmp', cmd)
+                    else:
+                        self.assertEqual(cmd[cmd.index('--effort') + 1], slot['effort'])
+                        self.assertIn('/code-review ' + slot['effort'], cmd[-1])
+
+
 class LegacyBytesTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -48,6 +268,78 @@ class LegacyBytesTest(unittest.TestCase):
         for stage, name in [('claude', 'claude-independent.md'), ('codex', 'codex.md'), ('synthesis', 'synthesis.json')]:
             with self.subTest(stage=stage):
                 self.assertFalse(cache.reusable(self.run, stage, self.path / 'reviews' / name, cache.inputs(self.run, stage)))
+
+    def test_mapped_legacy_reuse_requires_original_slot_and_cache_identity(self):
+        from pr_review import settings
+        self.run.manifest['legacy_review_artifacts'] = settings.legacy_review_artifacts(self.run.manifest)
+        self.run.settings = settings.validate(settings.from_manifest(self.run.manifest))
+        output = self.path / 'reviews/claude-independent.md'
+        expected = cache.inputs(self.run, 'claude')
+        self.assertTrue(cache.reusable(self.run, 'claude', output, expected))
+        self.run.settings['reviewer_slots'][0]['model'] = 'different'
+        self.assertFalse(cache.reusable(self.run, 'claude', output, expected))
+        self.run.settings['reviewer_slots'][0]['model'] = self.run.manifest['legacy_review_artifacts']['reviewer-1']['model']
+        output.write_text('changed artifact')
+        self.assertFalse(cache.reusable(self.run, 'claude', output, expected))
+
+    def test_legacy_slots_adopt_only_verified_provider_named_reports(self):
+        from pr_review import pipeline, settings
+        self.run.manifest['legacy_review_artifacts'] = settings.legacy_review_artifacts(self.run.manifest)
+        self.run.settings = settings.validate(settings.from_manifest(self.run.manifest))
+        self.run.pending = self.path
+        old_command = self.run.command
+        self.run.command = lambda stage: (old_command(stage) if stage in ('claude', 'codex') else
+            providers.review_command(self.run.settings, providers.Runtime(), stage, self.path, 'refs/pr-review/7/base'))
+        original = {item['phase']: (self.path / item['output']).read_bytes()
+                    for item in self.run.manifest['legacy_review_artifacts'].values()}
+        pipeline.adopt_legacy_slots(self.run, self.run.settings['reviewer_slots'])
+        for slot in self.run.settings['reviewer_slots']:
+            stage = slot['id']
+            phase = self.run.manifest['legacy_review_artifacts'][stage]['phase']
+            report = self.path / 'reviews' / (stage + '.md')
+            self.assertEqual(report.read_bytes(), original[phase])
+            self.assertEqual(self.run.manifest['phases'][stage]['inputs']['isolation'], 'legacy-original-verification')
+            self.assertTrue(cache.reusable(self.run, stage, report, cache.inputs(self.run, stage)))
+
+    def test_pre_input_synthesis_is_not_adopted_for_slot_reports(self):
+        from pr_review import pipeline, settings
+        self.run.settings = settings.validate(settings.from_manifest(self.run.manifest))
+        self.run.repo = SimpleNamespace(identity='repo', pr=1)
+        for slot in self.run.settings['reviewer_slots']:
+            (self.path / 'reviews' / (slot['id'] + '.md')).write_text(slot['id'])
+            self.run.manifest['phases'][slot['id']] = {'status': 'completed',
+                'output_hash': hash_file(self.path / 'reviews' / (slot['id'] + '.md'))}
+        self.run.manifest['phases']['synthesis'].pop('inputs', None)
+        pipeline.render_synthesis(self.run)
+        self.run.original_prompts['synthesis'] = (self.path / 'prompts/synthesis-prompt.txt').read_bytes()
+        expected = cache.inputs(self.run, 'synthesis')
+        self.assertIn('reviewers', expected['artifacts'])
+        self.assertFalse(cache.reusable(self.run, 'synthesis', self.path / 'reviews/synthesis.json', expected))
+
+    def test_pending_restart_preserves_unique_unverifiable_report(self):
+        from pr_review import pipeline
+        from pr_review.sessions import Store
+        from unittest.mock import Mock
+        root = self.path / 'session'
+        root.mkdir()
+        (root / '.pending-review').symlink_to(self.path, target_is_directory=True)
+        run = Store.__new__(Store)
+        run.root, run.path = root, self.path
+        run.manifest, run.original_manifest = self.run.manifest, self.run.original_manifest
+        run.settings, run.tools, run.original_prompts = self.run.settings, self.run.tools, self.run.original_prompts
+        run.dual = True
+        run.command = self.run.command
+        run.save, run.reset_publication = Mock(), Mock()
+        run.manifest['attempt'] = {'previous': str(root)}
+        output = self.path / 'reviews/codex.md'
+        output.write_text('unique pending report')
+        pipeline.restart(run)
+        history = run.manifest['review_history'][-1]
+        preserved = Path(history['preserved']) / 'reviews/codex.md'
+        self.assertEqual(preserved.read_text(), 'unique pending report')
+        self.assertFalse(output.exists())
+        self.assertNotIn('codex', run.manifest['phases'])
+        self.assertEqual(run.manifest['phases']['claude']['status'], 'completed')
 
     def test_saved_sandbox_failure_report_is_not_reused(self):
         for stage, name in [('codex', 'codex.md'), ('synthesis', 'synthesis.json')]:
