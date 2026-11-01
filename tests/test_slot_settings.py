@@ -117,7 +117,31 @@ class SlotSettingsTest(unittest.TestCase):
             self.assertEqual(result['reviewer_slots'], slots)
             self.assertEqual(result['processing'], {'provider': other, 'model': 'individual', 'effort': 'low'})
             result = dispatch({**base, 'processing_provider': other})['settings']
-            self.assertEqual(result['processing'], {'provider': other, 'model': 'object', 'effort': 'high'})
+            self.assertEqual(result['processing'], {'provider': other,
+                'model': settings.DEFAULTS[other + '_model'], 'effort': settings.DEFAULTS[other + '_effort']})
+            self.assertEqual(result['reviewer_slots'], slots)
+            result = dispatch({**base, 'processing_provider': other, 'processing_model': 'new-model'})['settings']
+            self.assertEqual(result['processing'], {'provider': other, 'model': 'new-model',
+                                                   'effort': settings.DEFAULTS[other + '_effort']})
+            resolved = dispatch(base)['settings']
+            result = dispatch({**resolved, 'protocol': 1, 'command': 'settings',
+                               'processing_provider': other})['settings']
+            self.assertEqual(result['reviewer_slots'], slots)
+            self.assertEqual(result['processing'], {'provider': other,
+                'model': settings.DEFAULTS[other + '_model'], 'effort': settings.DEFAULTS[other + '_effort']})
+
+    def test_null_structured_defaults_are_unset_but_explicit_null_is_invalid(self):
+        from pr_review.api import dispatch
+        for provider in ('claude', 'codex'):
+            for key in ('version', 'reviewer_slots', 'processing', 'processing_provider'):
+                with self.subTest(provider=provider, key=key):
+                    result = dispatch({'protocol': 1, 'command': 'settings',
+                                       'defaults': {'reviewers': [provider], key: None}})['settings']
+                    self.assertEqual(result['reviewers'], [provider])
+                    self.assertEqual(result['processing']['provider'], provider)
+            for key in ('version', 'reviewer_slots', 'processing'):
+                with self.subTest(provider=provider, explicit=key), self.assertRaises(ApiError):
+                    dispatch({'protocol': 1, 'command': 'settings', 'reviewers': [provider], key: None})
 
     def test_public_rejects_malformed_structured_choices(self):
         from pr_review.api import dispatch
@@ -228,6 +252,10 @@ class SlotSettingsTest(unittest.TestCase):
                     result = dispatch({"protocol": 1, "command": "settings", "session": "/saved", "defaults": defaults})["settings"]
                     self.assertEqual(result["processing"], saved["processing"])
                     self.assertEqual(read.call_args.args[0], Path('/pending' if pending else '/saved') / 'manifest.json')
+                    result = dispatch({"protocol": 1, "command": "settings", "session": "/saved",
+                        "defaults": {**defaults, "processing": None, "reviewer_slots": None, "version": None}})["settings"]
+                    self.assertEqual(result['reviewer_slots'], saved['reviewer_slots'])
+                    self.assertEqual(result['processing'], saved['processing'])
                     again = dispatch({"protocol": 1, "command": "settings", "session": "/saved", **result})["settings"]
                     self.assertEqual(again["processing"], saved["processing"])
 

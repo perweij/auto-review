@@ -126,12 +126,17 @@ def validate(settings):
     return result
 
 
-def initial_settings(request):
-    """Expand new-review defaults consistently for CLI and API entry points."""
-    settings = dict(DEFAULTS)
+def request_defaults(request):
     defaults = request.get("defaults", {})
     if not isinstance(defaults, dict):
         raise ApiError("invalid_request", "defaults must be an object.")
+    return {key: value for key, value in defaults.items() if value is not None}
+
+
+def initial_settings(request):
+    """Expand new-review defaults consistently for CLI and API entry points."""
+    settings = dict(DEFAULTS)
+    defaults = request_defaults(request)
     settings.update({k: v for k, v in defaults.items() if k in DEFAULTS and v is not None})
     for name in PRESETS:
         if type(request.get(name, False)) is not bool:
@@ -194,7 +199,7 @@ def apply_overrides(settings, request, *, fresh=False):
             if key in request:
                 slot[field] = request[key]
     processing = dict(current["processing"])
-    defaults = request.get("defaults", {})
+    defaults = request_defaults(request)
     if (fresh and len(slots) == 1 and
             not any(k in request or k in defaults for k in ("processing", "processing_provider"))):
         provider = slots[0]["provider"]
@@ -208,11 +213,8 @@ def apply_overrides(settings, request, *, fresh=False):
     if provider not in ("claude", "codex"):
         raise ApiError("invalid_request", "Choose a Claude or Codex processing provider.")
     if provider != processing["provider"]:
-        if "processing" in overrides:
-            processing["provider"] = provider
-        else:
-            processing = {"provider": provider, "model": current[provider + "_model"],
-                          "effort": current[provider + "_effort"]}
+        processing = {"provider": provider, "model": current[provider + "_model"],
+                      "effort": current[provider + "_effort"]}
     for field in ("model", "effort"):
         key = provider + "_" + field
         if key in overrides:

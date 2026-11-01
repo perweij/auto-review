@@ -1,5 +1,6 @@
 """Shared review service. Terminal and API invoke this directly, without a CLI subprocess."""
 import json
+from contextlib import ExitStack
 from pathlib import Path
 import re
 import shutil
@@ -88,23 +89,43 @@ class Review(Store):
                 raise ApiError('integrity_failed', f"Git cannot read the worktree with {provider}'s filtered environment. See {self.path}/logs/{stage}.git-preflight.log")
         sandbox = None
         try:
-            actual_argv = argv
-            if slot:
-                from .isolation import IndependentSandbox
-                sandbox = IndependentSandbox(self, stage, provider)
-                before_names = set(env)
-                actual_argv, env = sandbox.wrap(argv, env)
-                self.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
-                self.save()
-                commands[-1].update(cwd='/tmp/review-private/checkout',
-                                    source_worktree=str(self.worktree),
-                                    isolation='private-snapshot-bwrap-v1', sandbox_argv=actual_argv)
-                write_json(self.path / 'logs/commands.json', commands)
-            result = process(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
-                             timeout=self.runtime.auth_timeout if probe else self.runtime.model_timeout,
-                             stdout_path=output, stderr_path=stderr, model_events=True, stage=stage)
+            with ExitStack() as resources:
+                actual_argv, pass_fds = argv, ()
+                if slot:
+                    from .isolation import IndependentSandbox, startup_confirmed
+                    sandbox = IndependentSandbox(self, stage, provider)
+                    before_names = set(env)
+                    actual_argv, env = sandbox.wrap(argv, env)
+                    startup = resources.enter_context(tempfile.TemporaryFile())
+                    pass_fds = (startup.fileno(),)
+                    actual_argv[1:1] = ['--info-fd', str(startup.fileno())]
+                    self.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
+                    self.save()
+                    commands[-1].update(cwd='/tmp/review-private/checkout',
+                                        source_worktree=str(self.worktree),
+                                        isolation='private-snapshot-bwrap-v1', sandbox_argv=actual_argv)
+                    write_json(self.path / 'logs/commands.json', commands)
+                result = process(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
+                                 timeout=self.runtime.auth_timeout if probe else self.runtime.model_timeout,
+                                 stdout_path=output, stderr_path=stderr, model_events=True, stage=stage,
+                                 pass_fds=pass_fds)
+                if sandbox:
+                    if not startup_confirmed(startup):
+                        record.update(status='failed', failure_reason='independence_failed',
+                                      exit_status=result.returncode, finished_at=now())
+                        self.active = None
+                        self.save()
+                        raise ApiError('independence_failed', f'Cannot start isolated {stage}; inspect {stderr}')
             if sandbox:
-                sandbox.verify()
+                try:
+                    sandbox.verify()
+                except ApiError as exc:
+                    if exc.code == 'independence_failed':
+                        record.update(status='failed', failure_reason=exc.code,
+                                      exit_status=result.returncode, finished_at=now())
+                        self.active = None
+                        self.save()
+                    raise
                 private_result = sandbox.root / 'result.md'
                 if result.returncode == 0 and provider == 'codex' and private_result.is_file() and not private_result.is_symlink():
                     atomic_bytes(self.path / f'reviews/{stage}.md.tmp', private_result.read_bytes())
@@ -112,6 +133,13 @@ class Review(Store):
             record.update(status='interrupted', exit_status=exc.details['exit_code'], finished_at=now())
             self.active = None
             self.save()
+            raise
+        except ApiError as exc:
+            if exc.code == 'independence_failed' and self.active:
+                record.update(status='failed', failure_reason=exc.code,
+                              exit_status=record.get('exit_status', 1), finished_at=now())
+                self.active = None
+                self.save()
             raise
         finally:
             if sandbox:

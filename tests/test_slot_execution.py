@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from pr_review import isolation, models, pipeline, providers, settings
+from pr_review.common import ApiError
 from pr_review.reviews import Review
 from pr_review.sessions import Store
 
@@ -65,6 +66,11 @@ class IsolationTest(unittest.TestCase):
                         result = subprocess.run(argv, env=env, text=True, capture_output=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         box.verify()
+                        with patch('pr_review.isolation.process',
+                                   return_value=SimpleNamespace(returncode=1, stderr='bwrap: namespace denied')):
+                            with self.assertRaises(ApiError) as error:
+                                box.verify()
+                        self.assertEqual(error.exception.code, 'independence_failed')
                     finally:
                         box.close()
                 box = isolation.IndependentSandbox(run, 'reviewer-1', 'codex')
@@ -150,6 +156,38 @@ class IsolationTest(unittest.TestCase):
                 with patch.object(run, 'model', side_effect=AssertionError('valid work must be reused')):
                     pipeline.independent(run, 'reviewer-1')
                     pipeline.independent(run, 'reviewer-2')
+                with patch.object(isolation, 'IndependentSandbox',
+                                  side_effect=ApiError('independence_failed', 'bubblewrap missing')):
+                    with self.assertRaises(ApiError) as error:
+                        run.model('reviewer-1', command('reviewer-1'))
+                self.assertEqual(error.exception.code, 'independence_failed')
+                self.assertEqual(run.manifest['phases']['reviewer-1']['failure_reason'], 'independence_failed')
+                fake_bin = root / 'fake-bin'
+                fake_bin.mkdir()
+                fake_bwrap = fake_bin / 'bwrap'
+                fake_bwrap.touch()
+                fake_bwrap.chmod(0o755)
+                for status in (0, 1):
+                    fake_bwrap.write_text(f'#!/bin/sh\necho "bwrap: cannot create namespace" >&2\nexit {status}\n')
+                    with patch.dict(os.environ, {'PATH': str(fake_bin) + os.pathsep + os.environ['PATH']}), \
+                         patch.object(isolation.IndependentSandbox, 'verify', side_effect=AssertionError('must not verify')):
+                        with self.assertRaises(ApiError) as error:
+                            run.model('reviewer-1', command('reviewer-1'))
+                    self.assertEqual(error.exception.code, 'independence_failed')
+                    self.assertEqual(run.manifest['phases']['reviewer-1']['failure_reason'], 'independence_failed')
+                    self.assertEqual(run.manifest['phases']['reviewer-1']['exit_status'], status)
+                # A provider that really started cannot evade snapshot checks
+                # by printing a diagnostic that resembles a bwrap failure.
+                with self.assertRaises(ApiError) as error:
+                    run.model('reviewer-1', ['/bin/sh', '-c',
+                        'echo changed > source; echo "bwrap: fake error" >&2; exit 1'])
+                self.assertEqual(error.exception.code, 'integrity_failed')
+                with patch.object(isolation.IndependentSandbox, 'verify',
+                                  side_effect=ApiError('independence_failed', 'verifier did not start')):
+                    with self.assertRaises(ApiError) as error:
+                        run.model('reviewer-1', command('reviewer-1'))
+                self.assertEqual(error.exception.code, 'independence_failed')
+                self.assertEqual(run.manifest['phases']['reviewer-1']['failure_reason'], 'independence_failed')
 
 
 class SlotRecoveryTest(unittest.TestCase):

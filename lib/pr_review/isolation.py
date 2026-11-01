@@ -1,4 +1,5 @@
 """Private filesystem and snapshot for independent reviewer processes."""
+import json
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +19,16 @@ def _executable(name, path):
     if not executable or not os.path.isabs(executable):
         raise ApiError('independence_failed', f'Cannot locate trusted executable {name}')
     return executable
+
+
+def startup_confirmed(stream):
+    """Only bubblewrap's dedicated info descriptor can confirm startup."""
+    stream.seek(0)
+    try:
+        info = json.load(stream)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(info, dict) and type(info.get('child-pid')) is int and info['child-pid'] > 0
 
 
 def _git(cwd, *args, check=True):
@@ -158,7 +169,12 @@ class IndependentSandbox:
         clean_env, _ = environment(self.provider)
         def invoke(*args):
             argv, env = self.wrap(prefix + list(args), clean_env)
-            return process(argv, cwd=self.run.worktree, env=env)
+            with tempfile.TemporaryFile() as startup:
+                argv[1:1] = ['--info-fd', str(startup.fileno())]
+                result = process(argv, cwd=self.run.worktree, env=env, pass_fds=(startup.fileno(),))
+                if not startup_confirmed(startup):
+                    raise ApiError('independence_failed', 'Cannot start isolated snapshot verification: ' + result.stderr.strip())
+            return result
         head = invoke('rev-parse', 'HEAD')
         base = invoke('rev-parse', self.run.repo.base_ref)
         tracked = invoke('diff', '--no-ext-diff', '--quiet', 'HEAD', '--')
