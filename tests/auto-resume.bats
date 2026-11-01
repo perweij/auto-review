@@ -6,12 +6,12 @@ load helpers/fixture
     export MOCK_FAIL_STAGE=synthesis
     run_review; assert_failure
     saved=$(run_directory)
-    reports=$(sha256sum "$saved/reviews/claude-independent.md" "$saved/reviews/codex.md")
+    reports=$(sha256sum "$saved/reviews/reviewer-1.md" "$saved/reviews/reviewer-2.md")
     unset MOCK_FAIL_STAGE
     run_review; assert_success
     [[ $output == *"Automatically resuming PR #7 from $saved"* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
-    [ "$(sha256sum "$saved/reviews/claude-independent.md" "$saved/reviews/codex.md")" = "$reports" ]
+    [ "$(sha256sum "$saved/reviews/reviewer-1.md" "$saved/reviews/reviewer-2.md")" = "$reports" ]
     [ "$(find "$FIXTURE/state" -name manifest.json | wc -l)" = 1 ]
 }
 

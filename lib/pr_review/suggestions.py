@@ -91,13 +91,13 @@ def validate(session, comment):
 
 
 def identity(session, comment):
-    configuration = settings.from_manifest(session.manifest)
-    provider = configuration['processing_provider']
+    configuration = settings.validate(settings.from_manifest(session.manifest))
+    processing = configuration['processing']
     return digest(dict(version=VERSION, head=session.git.head, base=session.git.base,
                        finding_ids=comment.get('finding_ids'), evidence=comment.get('evidence'),
                        classification=comment.get('classification'), body=comment['body'], placement=comment['placement'],
                        suggestion={k: comment['suggestion'].get(k) for k in ('head', 'target', 'original', 'replacement')},
-                       provider=provider, model=configuration[provider + '_model'], effort=configuration[provider + '_effort'],
+                       provider=processing['provider'], model=processing['model'], effort=processing['effort'],
                        tools=session.manifest.get('tools'),
                        prompt=(ROOT / 'prompts/suggestion-verify.txt').read_text(),
                        policy=(ROOT / 'prompts/synthesis-testing-focused.txt').read_text(),
@@ -190,7 +190,7 @@ def checkout(session, comments):
 
 def invoke(session, stage, context, cwd):
     """Use existing provider/environment policy; retain every attempt's evidence."""
-    configuration = settings.from_manifest(session.manifest)
+    configuration = settings.validate(settings.from_manifest(session.manifest))
     runtime = providers.Runtime.environment()
     directory = session.path / 'suggestions' / uuid.uuid4().hex
     directory.mkdir(parents=True)
@@ -206,7 +206,7 @@ def invoke(session, stage, context, cwd):
         argv[2:2] = ['--ignore-rules']
     env, removed = providers.environment(configuration['processing_provider'])
     from .sessions import say
-    say(f'[{stage}] {configuration["processing_provider"]} / {configuration[configuration["processing_provider"] + "_model"]}; artifacts: {directory}')
+    say(f'[{stage}] {configuration["processing_provider"]} / {configuration["processing"]["model"]}; artifacts: {directory}')
     atomic_json(directory / 'invocation.json', dict(argv=argv, cwd=str(cwd), removed_environment=removed))
     result = process(argv, cwd=cwd, env=env, input_bytes=prompt.encode(), timeout=runtime.model_timeout,
                      stdout_path=directory / 'stdout.jsonl', stderr_path=directory / 'stderr.log',

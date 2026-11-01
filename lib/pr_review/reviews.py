@@ -23,16 +23,20 @@ class Review(Store):
 
     @property
     def dual(self):
-        return self.settings['reviewers'] == ['claude', 'codex']
+        return len(self.settings['reviewers']) == 2
 
     def command(self, stage):
         return providers.review_command(self.settings, self.runtime, stage, self.path, self.repo.base_ref)
 
     def configure(self, kind, threads):
         self.scope(kind, threads)
-        if (settings.from_manifest(self.manifest) != self.settings and
+        if (settings.validate(settings.from_manifest(self.manifest)) != self.settings and
                 any(self.manifest['phases'].get(s, {}).get('status') == 'completed' for s in ('synthesis', 'followup'))):
             self.begin()
+        if getattr(self, 'resuming', False) and 'legacy_review_artifacts' not in self.manifest:
+            mapping = settings.legacy_review_artifacts(self.manifest)
+            if mapping is not None:
+                self.manifest['legacy_review_artifacts'] = mapping
         self.manifest.update(configuration=self.settings, tools=self.tools,
             models=dict(codex=self.settings['codex_model'], claude=self.settings['claude_model'],
                         claude_effort=self.settings['claude_effort'], codex_effort=self.settings['codex_effort'], claude_permission_mode=self.runtime.permission),
@@ -42,7 +46,10 @@ class Review(Store):
 
     def model(self, stage, argv, input_bytes=b'', probe=False):
         provider = stage.split('_')[0] if probe else providers.provider_for(self.settings, stage)
-        model = ('haiku' if provider == 'claude' else self.runtime.probe_model) if probe else self.settings[provider + '_model']
+        slot = next((s for s in self.settings.get('reviewer_slots', []) if s['id'] == stage), None)
+        choice = slot or (self.settings.get('processing') if stage not in ('claude', 'codex') else None)
+        model = (('haiku' if provider == 'claude' else self.runtime.probe_model) if probe else
+                 choice['model'] if choice else self.settings[provider + '_model'])
         output = self.path / ('reviews/claude-independent.jsonl' if stage == 'claude' else
                               'logs/codex.events.jsonl' if stage == 'codex' else
                               f'logs/{stage}.jsonl' if probe else f'logs/{stage}.raw.json')
@@ -52,6 +59,11 @@ class Review(Store):
         record = dict(status='running', fingerprint='', started_at=now(), stdout_log=str(output), stderr_log=str(stderr), model=model)
         if not probe:
             record['inputs'] = cache.inputs(self, stage)
+            if slot:
+                # A new invocation is isolated even when replacing an adopted
+                # legacy record; its identity must not inherit that provenance.
+                record['inputs'].pop('legacy_source', None)
+                record['inputs']['isolation'] = 'private-snapshot-bwrap-v1'
             record['fingerprint'] = cache.fingerprint(record['inputs'])
             if stage != 'contributions':
                 record['testing_policy'] = self.settings['synthesis_tests'] if stage == 'synthesis' else 'focused'
@@ -74,15 +86,44 @@ class Review(Store):
             atomic_bytes(self.path / f'logs/{stage}.git-preflight.log.stderr', identity.stderr.encode())
             if identity.returncode or identity.stdout.splitlines() != [str(self.worktree), str(self.repo.common), self.manifest['snapshot']['head']]:
                 raise ApiError('integrity_failed', f"Git cannot read the worktree with {provider}'s filtered environment. See {self.path}/logs/{stage}.git-preflight.log")
+        sandbox = None
         try:
-            result = process(argv, cwd=cwd, env=env, input_bytes=input_bytes,
+            actual_argv = argv
+            if slot:
+                from .isolation import IndependentSandbox
+                sandbox = IndependentSandbox(self, stage, provider)
+                before_names = set(env)
+                actual_argv, env = sandbox.wrap(argv, env)
+                self.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
+                self.save()
+                commands[-1].update(cwd='/tmp/review-private/checkout',
+                                    source_worktree=str(self.worktree),
+                                    isolation='private-snapshot-bwrap-v1', sandbox_argv=actual_argv)
+                write_json(self.path / 'logs/commands.json', commands)
+            result = process(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
                              timeout=self.runtime.auth_timeout if probe else self.runtime.model_timeout,
                              stdout_path=output, stderr_path=stderr, model_events=True, stage=stage)
+            if sandbox:
+                sandbox.verify()
+                private_result = sandbox.root / 'result.md'
+                if result.returncode == 0 and provider == 'codex' and private_result.is_file() and not private_result.is_symlink():
+                    atomic_bytes(self.path / f'reviews/{stage}.md.tmp', private_result.read_bytes())
         except Cancelled as exc:
             record.update(status='interrupted', exit_status=exc.details['exit_code'], finished_at=now())
             self.active = None
             self.save()
             raise
+        finally:
+            if sandbox:
+                try:
+                    archive, generated = sandbox.preserve_generated()
+                    if generated:
+                        record['generated_archive'] = str(archive)
+                        self.manifest['generated_files'] = sorted(set(self.manifest.get('generated_files', [])) |
+                            {f'{stage}: {name} (saved in {archive})' for name in generated})
+                        self.save()
+                finally:
+                    sandbox.close()
         record.update(exit_status=result.returncode, finished_at=now())
         if result.reason:
             record.update(failure_reason=result.reason, process_exit_status=result.process_exit_status)
@@ -95,6 +136,11 @@ class Review(Store):
                 say('Warning: Model created untracked or ignored files (retained): ' + '\n'.join(sorted(after - before)))
         self.save()
         if result.returncode:
+            if slot and stderr.read_text(errors='replace').lstrip().startswith('bwrap:'):
+                record.update(status='failed', failure_reason='independence_failed')
+                self.active = None
+                self.save()
+                raise ApiError('independence_failed', f'Cannot start isolated {stage}; inspect {stderr}')
             self.model_failure(stage, provider, result.returncode, output, stderr, probe)
         # A provider can exit successfully after reporting that none of its
         # commands ran. Do not cache that diagnostic as completed analysis.
@@ -280,7 +326,8 @@ class Review(Store):
         return Session({'session': str(self.root), 'generation': generation(self.path, self.manifest)})
 
 
-def capabilities(enabled, processing, runtime, cwd):
+def capabilities(enabled, processing, runtime, cwd, *, independent_providers=None):
+    independent_providers = enabled if independent_providers is None else independent_providers
     required = ['git', 'gh', *enabled]
     for tool in required:
         if shutil.which(tool) is None:
@@ -294,8 +341,9 @@ def capabilities(enabled, processing, runtime, cwd):
               (['git', 'worktree', '-h'], ['--detach']),
               (['git', 'fetch', '-h'], ['--refmap', 'write-fetch-head', '--no-tags'])]
     if 'codex' in enabled:
-        checks += [(['codex', 'exec', 'review', '--help'], ['--base', '--output-last-message', '--json', '--ephemeral', '--model', '--config', '--strict-config']),
-                   (['codex', 'exec', '--help'], ['--skip-git-repo-check', '--output-last-message', '--json', '--ephemeral'] + (['--output-schema'] if processing == 'codex' else [])),
+        if 'codex' in independent_providers:
+            checks.append((['codex', 'exec', 'review', '--help'], ['--base', '--output-last-message', '--json', '--ephemeral', '--model', '--config', '--strict-config']))
+        checks += [(['codex', 'exec', '--help'], ['--skip-git-repo-check', '--output-last-message', '--json', '--ephemeral'] + (['--output-schema'] if processing == 'codex' else [])),
                    (['codex', 'login', '--help'], ['status'])]
     if 'claude' in enabled:
         checks += [(['claude', '--help'], ['--print', '--model', '--effort', '--permission-mode', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -308,6 +356,21 @@ def capabilities(enabled, processing, runtime, cwd):
                 raise ApiError('missing_capability', f'Installed CLI lacks required capability: {flag}')
     say('; '.join(versions.values()))
     return versions
+
+
+def required_providers(configuration, kind):
+    """Providers used by the selected review stages, without duplicates."""
+    providers_needed = [configuration['processing_provider']]
+    if kind != 'followup':
+        providers_needed = [slot['provider'] for slot in configuration['reviewer_slots']] + providers_needed
+    return list(dict.fromkeys(providers_needed))
+
+
+def requires_independent(configuration, manifest):
+    slots = configuration['reviewer_slots']
+    reviewer = {key: slots[0][key] for key in ('provider', 'model', 'effort')}
+    return (len(slots) == 2 or reviewer != configuration['processing'] or
+            any(slot['id'] in manifest.get('phases', {}) for slot in slots))
 
 
 def execute(request, *, confirm_trust=None):
@@ -325,16 +388,21 @@ def execute(request, *, confirm_trust=None):
         from .automation import check_existing
         check_existing(root)
         configuration = settings.initial_settings(request)
+        saved_manifest = {}
         if root:
             from .sessions import selected
-            configuration.update(settings.from_manifest(read_json(selected(root) / 'manifest.json', {})))
-        configuration.update({k: request[k] for k in settings.DEFAULTS if k in request})
+            saved_manifest = read_json(selected(root) / 'manifest.json', {})
+            configuration.update(settings.validate(settings.from_manifest(saved_manifest)))
+        settings.apply_overrides(configuration, request, fresh=not root)
         configuration = settings.validate(configuration)
         if request.get('catalogs') is not None:
             from .models import validate_selection
-            validate_selection(configuration, request['catalogs'])
-        enabled = [configuration['processing_provider']] if kind == 'followup' else configuration['reviewers']
-        tools = capabilities(enabled, configuration['processing_provider'], runtime, repo.cwd)
+            validate_selection(configuration, request['catalogs'], reviewers=kind != 'followup')
+        enabled = required_providers(configuration, kind)
+        independent_providers = (configuration['reviewers'] if kind != 'followup' and
+                                 requires_independent(configuration, saved_manifest) else [])
+        tools = capabilities(enabled, configuration['processing_provider'], runtime, repo.cwd,
+                             independent_providers=independent_providers)
         say(f'PR Review: #{repo.pr}; Repository: {repo.identity}; Remote: {repo.remote}')
         checks = [(['gh', 'auth', 'status', '--hostname', repo.host], f'GitHub authentication failed for {repo.host}')]
         if 'codex' in enabled:
@@ -369,10 +437,15 @@ def execute(request, *, confirm_trust=None):
                     pipeline.focused(run)
                     ready = True
                 else:
-                    if run.dual:
+                    if run.manifest.get('review_restart'):
                         pipeline.restart(run)
-                        pipeline.independent(run, 'claude')
-                        pipeline.independent(run, 'codex')
+                    slots = configuration['reviewer_slots']
+                    independent = requires_independent(configuration, run.manifest)
+                    if independent:
+                        pipeline.adopt_legacy_slots(run, slots)
+                        pipeline.prepare_slots(run, slots)
+                        for slot in slots:
+                            pipeline.independent(run, slot['id'])
                     pipeline.synthesis(run)
                     ready = pipeline.contributions(run)
                     if ready and configuration['suggested_changes']:

@@ -5,7 +5,11 @@ setup() {
     PROJECT_ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd)
     export FIXTURE="$BATS_TEST_TMPDIR/fixture"
     mkdir -p "$FIXTURE"/{bin,home,state}
+    mkfifo "$FIXTURE/mock-bridge-request" "$FIXTURE/mock-bridge-response"
+    python3 "$PROJECT_ROOT/tests/helpers/mock-review-bridge.py" "$FIXTURE" </dev/null >/dev/null 2>&1 &
+    MOCK_BRIDGE_PID=$!
     export HOME="$FIXTURE/home" XDG_STATE_HOME="$FIXTURE/state"
+    export CODEX_HOME="$HOME/.codex" CLAUDE_CONFIG_DIR="$HOME/.claude"
     export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$FIXTURE/gitconfig"
     export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
     unset GH_REPO GH_HOST VISUAL EDITOR PR_REVIEW_MODEL_TIMEOUT PR_REVIEW_CLAUDE_BUDGET PR_REVIEW_CLAUDE_PERMISSION_MODE
@@ -26,6 +30,10 @@ setup() {
     for tool in gh codex claude; do ln -s "$PROJECT_ROOT/tests/helpers/mock-cli" "$FIXTURE/bin/$tool"; done
     export PATH="$FIXTURE/bin:$PATH"
     CLI="$PROJECT_ROOT/bin/pr-review"
+}
+teardown() {
+    kill "$MOCK_BRIDGE_PID" 2>/dev/null || true
+    wait "$MOCK_BRIDGE_PID" 2>/dev/null || true
 }
 run_review() { run "$CLI" 7 --no-publish "$@"; }
 session_directory() { find "$FIXTURE/state" -type d -name '*-history' -prune -o -name manifest.json -printf '%h\n' | head -n1; }

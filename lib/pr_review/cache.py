@@ -50,12 +50,35 @@ def prompt_hash(stage, content, directory, *, legacy=False):
     return hash_bytes(json_bytes(content.decode().replace(str(directory), '<run>')))
 
 
+def completed_slot_reports(run):
+    """Return slot reports only when every configured slot has completed."""
+    slots = run.settings.get('reviewer_slots', [])
+    phases = run.manifest.get('phases', {})
+    if not slots:
+        return []
+    reports = [(slot, run.path / 'reviews' / (slot['id'] + '.md')) for slot in slots]
+    if not all(phases.get(slot['id'], {}).get('status') == 'completed'
+               and report.is_file()
+               and phases[slot['id']].get('output_hash') == hash_file(report)
+               for slot, report in reports):
+        return []
+    return reports
+
+
 def inputs(run, stage, *, followup_input=None, followup_prompt=None):
     path, artifacts = run.path, {}
+    slot = next((item for item in run.settings.get('reviewer_slots', []) if item['id'] == stage), None)
     if stage == 'synthesis':
-        artifacts = dict(context=context_hash(path / 'context'),
-                         claude=hash_file(path / 'reviews/claude-independent.md') if run.dual else '',
-                         codex=hash_file(path / 'reviews/codex.md') if run.dual else '')
+        reports = completed_slot_reports(run)
+        if reports:
+            artifacts = dict(context=context_hash(path / 'context'),
+                             reviewers={slot['id']: dict(output=hash_file(report),
+                                 fingerprint=run.manifest['phases'][slot['id']].get('fingerprint'))
+                                 for slot, report in reports})
+        else:
+            artifacts = dict(context=context_hash(path / 'context'),
+                             claude=hash_file(path / 'reviews/claude-independent.md') if run.dual else '',
+                             codex=hash_file(path / 'reviews/codex.md') if run.dual else '')
     if stage == 'contributions':
         artifacts = dict(synthesis=hash_file(path / 'reviews/synthesis.json'), discussion=run.manifest['discussion']['hash'])
     if stage == 'followup':
@@ -64,10 +87,20 @@ def inputs(run, stage, *, followup_input=None, followup_prompt=None):
         content = followup_prompt if followup_prompt is not None else (path / f'prompts/{stage}-prompt.txt').read_bytes()
         artifacts.update(prompt=prompt_hash(stage, content, path), validator=VALIDATORS[stage],
                          schema=hash_file(ROOT / f'prompts/{stage}.schema.json'))
-    return canonical(dict(version=1, stage=stage, head=run.manifest['snapshot']['head'],
-                          merge_base=run.manifest['snapshot']['merge_base'],
-                          cli_version=run.tools[provider_for(run.settings, stage)],
-                          command=cache_command(run.command(stage)), artifacts=artifacts), path)
+    identity = dict(version=1, stage=stage, head=run.manifest['snapshot']['head'],
+                    merge_base=run.manifest['snapshot']['merge_base'],
+                    cli_version=run.tools[provider_for(run.settings, stage)],
+                    command=cache_command(run.command(stage)), artifacts=artifacts)
+    if slot is not None:
+        identity['slot'] = {key: slot[key] for key in ('id', 'provider', 'model', 'effort')}
+        identity['base'] = run.manifest['snapshot'].get('base')
+        legacy = run.manifest.get('phases', {}).get(stage, {}).get('legacy_source')
+        if legacy:
+            identity['legacy_source'] = legacy
+            identity['isolation'] = 'legacy-original-verification'
+        else:
+            identity['isolation'] = 'private-snapshot-bwrap-v1'
+    return canonical(identity, path)
 
 
 def semantic(inputs):
@@ -80,6 +113,19 @@ def semantic(inputs):
 
 
 def reusable(run, stage, output, expected):
+    mapping = run.manifest.get('legacy_review_artifacts')
+    if mapping and stage in ('claude', 'codex'):
+        # Provider-named records predate slots. A matching provider alone is not
+        # enough to assign one to a new slot after configuration changes.
+        matches = [(slot_id, item) for slot_id, item in mapping.items()
+                   if item.get('phase') == stage and run.path / item.get('output', '') == output]
+        slots = run.settings.get('reviewer_slots', [])
+        if len(matches) != 1:
+            return False
+        slot_id, item = matches[0]
+        if not any(slot.get('id') == slot_id and all(slot.get(k) == item.get(k)
+                   for k in ('provider', 'model', 'effort')) for slot in slots):
+            return False
     record = run.manifest.get('phases', {}).get(stage, {})
     if not output.is_file() or not output.stat().st_size or record.get('status') != 'completed' or record.get('output_hash') != hash_file(output):
         return False
@@ -110,6 +156,10 @@ def reusable(run, stage, output, expected):
         if comparable != expected:
             return False
     else:
+        if any(slot['id'] == stage for slot in run.settings.get('reviewer_slots', [])):
+            # Slot records have always carried inputs. A missing record cannot
+            # establish their provider, model, effort or isolation identity.
+            return False
         original = run.original_manifest
         snapshot = original.get('snapshot', {})
         provider = provider_for(run.settings, stage)
@@ -127,6 +177,8 @@ def reusable(run, stage, output, expected):
             if stage == 'synthesis':
                 if expected['artifacts']['context'] != original.get('phases', {}).get('context', {}).get('output_hash'):
                     return False
+                if 'reviewers' in expected['artifacts']:
+                    return False  # Legacy synthesis cannot establish slot attribution.
                 if run.dual and any(expected['artifacts'][p] != original.get('phases', {}).get(p, {}).get('output_hash') for p in ('claude', 'codex')):
                     return False
             else:

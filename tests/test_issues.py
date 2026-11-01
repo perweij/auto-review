@@ -28,6 +28,19 @@ def facts():
 
 
 class EligibilityTest(unittest.TestCase):
+    def test_issue_assessment_uses_independent_processor(self):
+        from pr_review.issue_planning import assess_issue
+        for provider in ('claude', 'codex'):
+            choice = {'provider': provider, 'model': 'processor-model', 'effort': 'low'}
+            result = {'decision': 'no_change', 'summary': 'Done', 'questions': [], 'acceptance': []}
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as directory, \
+                 patch('pr_review.issue_planning.configuration_snapshot', return_value={}), \
+                 patch('pr_review.issue_planning.argv', return_value=['mock']) as build, \
+                 patch('pr_review.issue_planning.run'), \
+                 patch('pr_review.issue_planning.response', return_value=result.copy()):
+                assess_issue({}, {'processing': choice}, Path(directory), directory)
+                self.assertEqual(build.call_args.args[0], choice)
+
     def test_scanner_and_execution_same_facts(self):
         f = facts()
         self.assertEqual(evaluate_eligibility(f), evaluate_eligibility(collect_eligibility_facts({}, None, f)))

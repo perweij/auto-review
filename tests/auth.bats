@@ -7,7 +7,7 @@ load helpers/fixture
     run_review; assert_success
     [ "$(cat "$FIXTURE/probes")" = $'claude\ncodex' ]
     manifest_is '.phases.claude_auth_probe.status=="completed" and .phases.claude_auth_probe.model=="haiku" and .phases.codex_auth_probe.model=="gpt-6-luna"'
-    jq -e '.[0].stage=="claude_auth_probe" and .[1].stage=="codex_auth_probe" and .[2].stage=="claude"' "$(run_directory)/logs/commands.json"
+    jq -e '.[0].stage=="claude_auth_probe" and .[1].stage=="codex_auth_probe" and .[2].stage=="reviewer-1"' "$(run_directory)/logs/commands.json"
     run grep -q GH_TOKEN "$FIXTURE/environment-claude-probe"; [ "$status" = 1 ]
     run grep -q OPENAI_API_KEY "$FIXTURE/environment-claude-probe"; [ "$status" = 1 ]
     run grep -q ANTHROPIC_API_KEY "$FIXTURE/environment-codex-probe"; [ "$status" = 1 ]

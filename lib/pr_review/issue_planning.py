@@ -15,8 +15,8 @@ SCHEMA = obj({'decision': {'type': 'string', 'enum': ['plan', 'questions', 'unsu
 
 def assess_issue(context, configuration, directory, cwd, previous_assessment=None, trusted_snapshot=None):
     """No writes to source; cache ownership and publication belong to the caller."""
-    choice = {'provider': configuration['processing_provider']}
-    choice.update(model=configuration[choice['provider'] + '_model'], effort=configuration[choice['provider'] + '_effort'])
+    from .settings import validate
+    choice = validate(configuration)['processing']
     before = configuration_snapshot(cwd)
     token = digest(before)
     if previous_assessment and previous_assessment.get('agent_configuration') != before and trusted_snapshot != token:

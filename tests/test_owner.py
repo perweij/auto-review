@@ -727,6 +727,29 @@ class OwnerTest(unittest.TestCase):
         request["defaults"]["codex_model"] = "different"
         self.assertEqual(dispatch(request)["settings"]["fix"]["model"], "chosen")
 
+    def test_owner_defaults_use_independent_processing_choice(self):
+        from pr_review.owner_state import default_settings
+        for provider in ("claude", "codex"):
+            choice = {"provider": provider, "model": "processor", "effort": "low"}
+            result = default_settings({"defaults": {"processing": choice}})
+            self.assertEqual(result["fix"], choice)
+            self.assertEqual(result["review"], choice)
+
+    def test_handoff_defaults_to_saved_processor_without_overwriting_owner_roles(self):
+        from pr_review import owner_import, owner_state, settings
+        review = self.saved_review()
+        choice = {"provider": "claude", "model": "saved-processor", "effort": "low"}
+        manifest = read_json(review.path / 'manifest.json')
+        manifest['configuration'] = settings.validate({'reviewers': ['claude'], 'processing': choice})
+        atomic_json(review.path / 'manifest.json', manifest)
+        review = ReviewSession({'session': str(review.root)})
+        original = self.request('owner-read')['settings']
+        with patch.object(owner_import, 'open_session', wraps=owner_import.open_session) as opened:
+            self.handoff(review, ['p1'], defaults={'processing_provider': 'codex'})
+        defaults = opened.call_args.args[0]['defaults']
+        self.assertEqual(owner_state.default_settings({'defaults': defaults})['fix'], choice)
+        self.assertEqual(self.request('owner-read')['settings'], original)
+
     def test_cli_session_actions_share_the_application_and_cancel_uses_owned_id(self):
         with redirect_stdout(StringIO()) as output:
             self.assertEqual(owner_cli(["--session", self.path, "triage", "--operation", "defer", "--item", "thread:T1"]), 0)

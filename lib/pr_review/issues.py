@@ -507,8 +507,10 @@ class Workflow:
     def run(self):
         state = self.state
         configuration = settings.initial_settings(self.request)
-        configuration.update(state.get('configuration', {}))
-        configuration.update({k: self.request[k] for k in settings.DEFAULTS if k in self.request})
+        saved_configuration = state.get('configuration')
+        if saved_configuration:
+            configuration.update(settings.validate(settings.from_manifest({'configuration': saved_configuration})))
+        settings.apply_overrides(configuration, self.request, fresh=not saved_configuration)
         configuration = settings.validate(configuration)
         if configuration != state.get('configuration') and state.get('owner'):
             owner = owner_state.OwnerSession({'session': state['owner']})

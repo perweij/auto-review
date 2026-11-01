@@ -12,8 +12,9 @@ load helpers/fixture
     manifest_is '.status == "complete" and .phases.synthesis.status == "completed"'
     manifest_is '.configuration | .claude_model=="opus" and .codex_model=="gpt-6.1-sol" and .processing_provider=="codex" and .claude_effort=="high" and .codex_effort=="high"'
     jq -e '.findings | all(.[]; .severity == "Medium")' "$(run_directory)/reviews/synthesis.json"
-    grep -q 'Codex' "$(run_directory)/reviews/codex.md"
-    grep -q 'codex.md' "$FIXTURE/synthesis-stdin"
+    grep -q 'Codex' "$(run_directory)/reviews/reviewer-2.md"
+    grep -q 'reviewer-2.md' "$FIXTURE/synthesis-stdin"
+    grep -q 'reviewer-1.md' "$FIXTURE/synthesis-stdin"
     grep -q 'pr-discussion.json' "$FIXTURE/synthesis-stdin"
     jq -se 'any(.[]; .tool == "claude" and (.args | index("/code-review high --max-findings default refs/pr-review/7/base")))' "$FIXTURE/calls.jsonl"
     jq -se 'any(.[]; .tool == "codex" and (.args | index("sandbox_mode=danger-full-access")) and (.args | index("--ephemeral")) and (.args | index("--strict-config")))' "$FIXTURE/calls.jsonl"
@@ -80,8 +81,8 @@ load helpers/fixture
 @test "Codex failure preserves independent Claude and exit status" {
     export MOCK_FAIL_STAGE=codex
     run_review; assert_failure
-    manifest_is '.phases.codex.status == "failed" and .phases.codex.exit_status == 42'
-    [ -s "$(run_directory)/reviews/claude-independent.md" ]
+    manifest_is '.phases["reviewer-2"].status == "failed" and .phases["reviewer-2"].exit_status == 42'
+    [ -s "$(run_directory)/reviews/reviewer-1.md" ]
     [ ! -f "$(run_directory)/reviews/synthesis.json" ]
 }
 
@@ -89,7 +90,7 @@ load helpers/fixture
     export MOCK_FAIL_STAGE=claude
     run_review; assert_failure
     [ "$(cat "$FIXTURE/stages")" = claude ]
-    manifest_is '.phases.claude.status == "failed"'
+    manifest_is '.phases["reviewer-1"].status == "failed"'
 }
 
 @test "Claude result error is a failure despite process exit zero" {
@@ -114,8 +115,8 @@ load helpers/fixture
     [[ $output == *'logs/synthesis.raw.json'* && $output == *'Captured stderr is empty:'* ]]
     [[ $output == *'model: opus'* && $output != *'fixture-provider-error-do-not-replay'* ]]
     manifest_is '.phases.synthesis.status=="failed" and .phases.synthesis.exit_status==1 and (.phases.synthesis.stdout_log|endswith("logs/synthesis.raw.json"))'
-    [ -s "$(run_directory)/reviews/codex.md" ]
-    [ -s "$(run_directory)/reviews/claude-independent.md" ]
+    [ -s "$(run_directory)/reviews/reviewer-2.md" ]
+    [ -s "$(run_directory)/reviews/reviewer-1.md" ]
     [ ! -s "$(run_directory)/logs/synthesis.stderr.log" ]
     unset MOCK_STDOUT_ERROR_STAGE
     run_review --resume "$(run_directory)"; assert_success
@@ -146,20 +147,20 @@ load helpers/fixture
 @test "tracked source modification stops subsequent stages and publication" {
     export MOCK_MUTATE_STAGE=claude
     run_review; assert_failure
-    [[ $output == *'publication blocked'* ]]
+    [[ $output == *'changed its isolated snapshot'* ]]
     [ "$(cat "$FIXTURE/stages")" = claude ]
-    manifest_is '.integrity_failed == true and .phases.claude.status == "failed"'
+    manifest_is '.phases["reviewer-1"].status == "failed"'
 }
 
 @test "index and HEAD mutations are detected" {
     export MOCK_INDEX_STAGE=claude
     run_review; assert_failure
-    manifest_is '.integrity_failed == true'
+    manifest_is '.phases["reviewer-1"].status == "failed"'
     unset MOCK_INDEX_STAGE
     git -C "$FIXTURE/repo-review-pr-7" reset --hard "$HEAD_SHA"
     export MOCK_HEAD_STAGE=claude
     run_review --resume "$(run_directory)"; assert_failure
-    [[ $output == *'publication blocked'* ]]
+    [[ $output == *'changed its isolated snapshot'* ]]
 }
 
 @test "ignored model files are retained and disclosed" {
@@ -167,13 +168,14 @@ load helpers/fixture
     run_review; assert_success
     manifest_is '.generated_files | any(.[]; contains("__pycache__"))'
     grep -q __pycache__ "$(run_directory)/reviews/synthesis.md"
-    [ -s "$FIXTURE/repo-review-pr-7/__pycache__/compiled" ]
+    generated=$(jq -r '.phases["reviewer-1"].generated_archive' "$(run_directory)/manifest.json")
+    [ -s "$generated/files/__pycache__/compiled" ]
 }
 
 @test "changing private snapshot refs blocks subsequent stages" {
     export MOCK_REF_STAGE=claude
     run_review; assert_failure
-    manifest_is '.integrity_failed == true'
+    manifest_is '.phases["reviewer-1"].status == "failed"'
     [ "$(cat "$FIXTURE/stages")" = claude ]
 }
 
@@ -237,15 +239,15 @@ load helpers/fixture
 @test "explicit optional model timeout fails resumably" {
     export MOCK_SLEEP_STAGE=claude MOCK_SLEEP_SECONDS=10 PR_REVIEW_MODEL_TIMEOUT=1
     run_review; assert_failure
-    manifest_is '.phases.claude.exit_status == 124'
+    manifest_is '.phases["reviewer-1"].exit_status == 124'
 }
 
 @test "Ctrl-C marks active stage interrupted and permits resume" {
     export MOCK_SLEEP_STAGE=claude MOCK_SLEEP_SECONDS=4
     run python3 "$PROJECT_ROOT/tests/helpers/interrupt_runner.py" "$CLI" 7 --no-publish
     [ "$status" = 130 ]
-    manifest_is '.phases.claude.status == "interrupted" and .phases.claude.exit_status == 130'
-    [ -f "$(run_directory)/reviews/claude-independent.jsonl" ]
+    manifest_is '.phases["reviewer-1"].status == "interrupted" and .phases["reviewer-1"].exit_status == 130'
+    [ -f "$(run_directory)/logs/reviewer-1.raw.json" ]
     unset MOCK_SLEEP_STAGE
     run_review --resume "$(run_directory)"; assert_success
 }
@@ -298,8 +300,8 @@ load helpers/fixture
 @test "resume restarts changed independent inputs and updates a changed head" {
     run_review; assert_success
     run_review --resume "$(run_directory)" --claude-model different; assert_success
-    [[ $output == *'Restarting reviews from claude'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
+    [[ $output == *'Restarting reviewer slots: reviewer-1'* ]]
+    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force
     run_review --resume "$(run_directory)"; assert_success
     [[ $output == *'Updating this review'* ]]

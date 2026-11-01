@@ -173,8 +173,9 @@ and short result, plus the included feedback for a group fix. **Verification and
 folded; older failed reviews remain in history without obscuring the final result.
 `?` offers actions for the selected feedback, fix, or reply, with its next step
 above the menu. `+` opens the complete command reference. Settings default from the
-customized processing-provider defaults when a session is first opened and then
-remain independent of reviewer settings. Model/effort choices come from fresh
+customized processing-provider defaults when a session is first opened. A new
+session created by a review handoff instead uses that review's saved processing
+choice. Existing Owner roles remain independent. Model/effort choices come from fresh
 provider metadata. Owner verification uses focused checks.
 
 After a pause, inspect the saved patch with `d`, current partial changes with
@@ -353,17 +354,24 @@ and the [roadmap](../docs/roadmap.md#interactive-owner-fixes) for planned intera
 new reviews use `magit-auto-review-reviewers`, `magit-auto-review-claude-model`,
 `magit-auto-review-codex-model`, the corresponding `*-effort` variables,
 `magit-auto-review-processing-provider`, `magit-auto-review-synthesis-tests`,
-and `magit-auto-review-suggested-changes` (default nil).
+and `magit-auto-review-suggested-changes` (default nil). The processing-provider
+customization defaults to nil (automatic): it follows a fresh sole reviewer or
+uses Codex for a pair. Set it to `"claude"` or `"codex"` to select a provider
+explicitly; saved and pending processing choices remain independent of reviewer changes.
 New reviews use Opus + GPT-6.1 Sol at high effort, with Codex/Sol processing.
 The model customizations default to nil, inheriting the backend models. Explicit
 customizations and saved session settings take precedence. Menu changes do not
 alter these defaults.
 
+In setup, `c`, `m`, and `e` select the first reviewer's provider, model, and
+effort. `x` adds or removes the second reviewer; `C`, `M`, and `E` configure its
+independent choices. `p`, `o`, and `O` configure the processing role. Both
+reviewer slots may use the same provider.
+
 In reviewer setup, `b` applies the Economical preset: Haiku + GPT-6.1 Terra at
 high effort with Terra processing. `B` applies the Expensive preset: Fable +
-GPT-6 Astra at high effort with Astra processing. Either action updates the
-displayed settings, including when configuring an existing review, and refreshes
-model choices. It does not
+GPT-6 Astra at high effort with Astra processing. Saved role choices take precedence over these presets; fresh setup defaults use
+the preset values. Either action refreshes model choices. It does not
 launch work or save changes until you run; individual settings remain editable,
 and testing/suggestion options are preserved. `s` toggles suggested changes.
 `r` runs analysis for inspection;
@@ -386,10 +394,11 @@ in the previous buffer.
 
 | Setup key | Setting |
 | --- | --- |
-| `c` / `x` | Enable or disable Claude / Codex; at least one remains enabled |
-| `m` / `M` | Select Claude / Codex model |
-| `e` / `E` | Select that model's supported effort |
-| `p` | Choose the shared synthesis and discussion provider when both reviewers are enabled |
+| `c` / `C` | Choose the provider for reviewer 1 / 2 |
+| `x` | Add or remove reviewer 2 |
+| `m` / `M` | Select reviewer 1 / 2 model |
+| `e` / `E` | Select reviewer 1 / 2 effort |
+| `p` / `o` / `O` | Choose processing provider, model, and effort |
 | `t` | Select focused checks or permit one full-suite attempt |
 | `g` | Refresh model choices or retry discovery |
 | `r` / `q` | Run/resume / cancel setup |
@@ -402,10 +411,10 @@ refresh succeeds. Run stays disabled while an enabled provider is loading or has
 failed, or a saved model/effort is no longer supported. Choose a listed replacement
 explicitly; the tool never silently substitutes a model. `q` cancels discovery too.
 
-With both reviewers enabled, the processing provider uses its selected model and
-effort for synthesis, discussion matching, reassessment, and thread adaptation.
-With only one enabled, it handles the full pipeline without cross-review synthesis;
-the disabled provider requires neither installation nor authentication.
+The processing provider uses its selected model and effort for synthesis, discussion
+matching, reassessment, and thread adaptation. A single reviewer runs without
+cross-review synthesis; a different explicitly selected processing provider remains
+independent. Only selected providers need installation and authentication.
 
 Focused verification permits checks of at most 60 seconds each and five minutes
 total, without broad suites or timeout retries. Full permits one suite attempt

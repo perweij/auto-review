@@ -51,6 +51,22 @@ class AutomationTest(unittest.TestCase):
                 patch.object(reviews, 'execute', return_value=self.session, side_effect=execute_error):
             return automation.run({'pr': 7})
 
+    def test_automatic_discovers_distinct_processing_provider(self):
+        from pr_review import models, reviews, settings
+        from pr_review.repository import Repository
+        config = settings.validate({'reviewers': ['claude'], 'processing_provider': 'codex'})
+        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock)
+        with patch.object(Repository, 'resolve', return_value=repo), \
+                patch('pr_review.sessions.locate', return_value=(None, self.f.repo)), \
+                patch.object(settings, 'resolve', return_value={'settings': config}), \
+                patch.object(models, 'discover', side_effect=lambda request: request) as discover, \
+                patch.object(models, 'validate_selection') as validate, \
+                patch.object(reviews, 'execute', return_value=self.session), \
+                patch.object(self.run, 'publish', return_value={'outcome': 'done'}):
+            self.assertEqual(automation._execute({'pr': 7}, self.run), {'outcome': 'done'})
+        self.assertEqual(discover.call_args_list, [call({'provider': 'claude'}), call({'provider': 'codex'})])
+        self.assertEqual(set(validate.call_args.args[1]), {'claude', 'codex'})
+
     def github_with_urls(self):
         github, posts = self.f.fake_github()
         def call(*args, **kwargs):
@@ -780,6 +796,7 @@ class AutomationTest(unittest.TestCase):
         with patch.object(reviews.Repository, 'resolve', return_value=repo), \
                 patch.object(reviews, 'locate', return_value=(store.root, self.f.repo)), \
                 patch.object(reviews, 'capabilities', return_value={}), \
+                patch.object(reviews, 'requires_independent', return_value=False), \
                 patch.object(reviews, 'command', return_value=SimpleNamespace(returncode=0, stdout='reviewer')), \
                 patch.object(reviews, 'Review', return_value=store), \
                 patch.object(pipeline, 'synthesis'), \

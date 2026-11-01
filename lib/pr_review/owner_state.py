@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .common import ApiError, digest, git, locked, now, read_json, require_text, state_root
 from .repository import Repository, normalize_remote, repository_name
-from .settings import DEFAULTS, validate as validate_reviewer_settings
+from .settings import resolve as resolve_reviewer_settings
 from .storage import write_json
 
 
@@ -17,10 +17,8 @@ def default_settings(request):
     defaults = request.get("defaults") or {}
     if not isinstance(defaults, dict):
         raise ApiError("invalid_request", "Owner defaults must be a settings object.")
-    resolved = validate_reviewer_settings({**DEFAULTS, **{k: v for k, v in defaults.items() if k in DEFAULTS and v is not None}})
-    provider = resolved["processing_provider"]
-    value = {"provider": provider, "model": resolved[provider + "_model"],
-             "effort": resolved[provider + "_effort"]}
+    resolved = resolve_reviewer_settings({"defaults": defaults})["settings"]
+    value = resolved["processing"]
     return {"fix": dict(value), "review": dict(value), "verification": "focused"}
 
 

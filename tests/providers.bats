@@ -2,12 +2,72 @@
 # shellcheck disable=SC2030,SC2031
 load helpers/fixture
 
+@test "two Claude slots use independent settings without Codex and reuse an unchanged slot" {
+    export MOCK_AUTH_FAIL=codex
+    run_review --reviewers claude,claude --processing-provider claude \
+        --reviewer-1-model haiku --reviewer-1-effort low --reviewer-2-model sonnet --reviewer-2-effort high
+    assert_success
+    jq -se 'all(.[]; .tool!="codex")' "$FIXTURE/calls.jsonl"
+    manifest_is '.phases["reviewer-1"].model=="haiku" and .phases["reviewer-2"].model=="sonnet"'
+    [ -s "$(run_directory)/reviews/reviewer-1.md" ]
+    [ -s "$(run_directory)/reviews/reviewer-2.md" ]
+    grep -q 'reviewer-1.md' "$FIXTURE/synthesis-stdin"
+    grep -q 'reviewer-2.md' "$FIXTURE/synthesis-stdin"
+    run_review --reviewers claude,claude --reviewer-2-model opus; assert_success
+    [[ $output == *'Reusing completed Reviewer-1 review'* ]]
+    manifest_is '.configuration.reviewer_slots[0].model=="haiku" and .configuration.reviewer_slots[1].model=="opus" and .configuration.processing.provider=="claude"'
+    [ "$(grep -c '^claude$' "$FIXTURE/stages")" = 3 ]
+}
+
+@test "two Codex slots use independent settings without Claude" {
+    export MOCK_AUTH_FAIL=claude
+    run_review --reviewers codex,codex --processing-provider codex \
+        --reviewer-1-model gpt-6-luna --reviewer-1-effort low --reviewer-2-model gpt-6.1-sol --reviewer-2-effort high
+    assert_success
+    jq -se 'all(.[]; .tool!="claude")' "$FIXTURE/calls.jsonl"
+    manifest_is '.phases["reviewer-1"].model=="gpt-6-luna" and .phases["reviewer-2"].model=="gpt-6.1-sol"'
+    [ -s "$(run_directory)/reviews/reviewer-1.md" ]
+    [ -s "$(run_directory)/reviews/reviewer-2.md" ]
+    grep -q 'reviewer-1.md' "$FIXTURE/synthesis-stdin"
+    grep -q 'reviewer-2.md' "$FIXTURE/synthesis-stdin"
+    run_review --reviewers codex,codex; assert_success
+    [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Reusing completed Reviewer-2 review'* ]]
+}
+
+@test "single reviewer and separate processor both run with their configured choices" {
+    run_review --reviewers claude --reviewer-1-model haiku --reviewer-1-effort low \
+        --processing-provider codex --processing-model gpt-6.1-sol --processing-effort high
+    assert_success
+    manifest_is '.configuration.reviewer_slots[0].model=="haiku" and .configuration.processing.model=="gpt-6.1-sol" and .phases["reviewer-1"].status=="completed"'
+    [ "$(cat "$FIXTURE/stages")" = $'claude\nsynthesis\ncontributions' ]
+    grep -q 'reviewer-1.md' "$FIXTURE/synthesis-stdin"
+    grep -q 'Evaluate EVERY' "$FIXTURE/synthesis-stdin"
+    grep -q 'for every original finding' "$FIXTURE/synthesis-stdin"
+    grep -q 'attribute it to the supplied reviewer slot ID' "$FIXTURE/synthesis-stdin"
+    run ! grep -q 'You are the sole reviewer' "$FIXTURE/synthesis-stdin"
+    jq -se 'any(.[]; .tool=="claude" and (.args|index("haiku"))) and any(.[]; .tool=="codex" and (.args|index("gpt-6.1-sol")) and (.args|index("--output-schema")))' "$FIXTURE/calls.jsonl"
+}
+
+@test "single Codex reviewer can use independent Claude processing" {
+    run_review --reviewers codex --reviewer-1-model gpt-6-luna --reviewer-1-effort low \
+        --processing-provider claude --processing-model haiku --processing-effort high
+    assert_success
+    manifest_is '.configuration.reviewer_slots[0].model=="gpt-6-luna" and .configuration.processing.model=="haiku" and .phases["reviewer-1"].status=="completed"'
+    [ "$(cat "$FIXTURE/stages")" = $'codex\nsynthesis\ncontributions' ]
+    grep -q 'reviewer-1.md' "$FIXTURE/synthesis-stdin"
+    grep -q 'Evaluate EVERY' "$FIXTURE/synthesis-stdin"
+    grep -q 'for every original finding' "$FIXTURE/synthesis-stdin"
+    grep -q 'attribute it to the supplied reviewer slot ID' "$FIXTURE/synthesis-stdin"
+    run ! grep -q 'You are the sole reviewer' "$FIXTURE/synthesis-stdin"
+    jq -se 'any(.[]; .tool=="codex" and (.args|index("gpt-6-luna")) and (.args|index("review"))) and any(.[]; .tool=="claude" and (.args|index("haiku")) and (.args|index("--json-schema")))' "$FIXTURE/calls.jsonl"
+}
+
 @test "Codex alone needs no Claude calls and resumes its structured review" {
     discussion_fixture
     export MOCK_AUTH_FAIL=claude
     run_review --reviewers codex --codex-model gpt-6-luna --codex-effort medium
     assert_success
-    manifest_is '.configuration.reviewers==["codex"] and .configuration.processing_provider=="codex" and .phases.claude==null and .phases.codex==null'
+    manifest_is '.configuration.reviewers==["codex"] and .configuration.processing_provider=="codex" and .phases["reviewer-1"]==null and .phases["reviewer-2"]==null'
     jq -se 'all(.[]; .tool!="claude")' "$FIXTURE/calls.jsonl"
     jq -se '[.[]|select(.tool=="codex" and (.args|index("--output-schema")))] | length==2 and all(.[]; .args|index("model_reasoning_effort=medium"))' "$FIXTURE/calls.jsonl"
     [[ $(cat "$FIXTURE/stages") == $'synthesis\ncontributions' ]]

@@ -212,7 +212,7 @@ class ApiTest(unittest.TestCase):
             run.assert_not_called()
 
     def test_setup_resolves_saved_and_pending_configuration_without_mutating_drafts(self):
-        from pr_review.settings import DEFAULTS
+        from pr_review.settings import DEFAULTS, validate
         from pr_review import operations
         config = {**DEFAULTS, "reviewers": ["codex"], "processing_provider": "codex",
                   "codex_effort": "low", "synthesis_tests": "full"}
@@ -220,13 +220,13 @@ class ApiTest(unittest.TestCase):
         atomic_json(self.path / "manifest.json", self.manifest)
         before = (self.path / "manifest.json").read_bytes()
         resolved = dispatch(self.request("settings", defaults={"codex_effort": "high"}))
-        self.assertEqual(resolved["settings"], config)
+        self.assertEqual(resolved["settings"], validate(config))
         self.assertEqual((self.path / "manifest.json").read_bytes(), before)
         pending = Path(str(self.path) + "-history/attempt-new")
         pending_config = {**config, "codex_model": "another-model", "codex_effort": "medium"}
         atomic_json(pending / "manifest.json", {**self.manifest, "configuration": pending_config})
         (self.path / ".pending-review").symlink_to(pending)
-        self.assertEqual(dispatch(self.request("settings"))["settings"], pending_config)
+        self.assertEqual(dispatch(self.request("settings"))["settings"], validate(pending_config))
         with patch("pr_review.reviews.execute", return_value=self.session) as run:
             dispatch(self.request("run"))
             configuration = run.call_args.args[0]
@@ -246,7 +246,7 @@ class ApiTest(unittest.TestCase):
     def test_new_defaults_and_economical_preset_preserve_saved_settings(self):
         from pr_review.cli import parser
         from pr_review.owner_state import default_settings
-        from pr_review.settings import from_manifest
+        from pr_review.settings import from_manifest, validate
         fresh = {"protocol": 1, "command": "settings", "cwd": str(self.repo), "pr": 8}
         standard = dispatch(fresh)["settings"]
         self.assertEqual((standard['claude_model'], standard['codex_model'], standard['processing_provider']),
@@ -262,7 +262,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual((legacy['processing_provider'], legacy['claude_model'], legacy['codex_model']),
                          ('claude', 'fable', 'gpt-6-astra'))
         before = (self.path / 'manifest.json').read_bytes()
-        self.assertEqual(dispatch(self.request('settings', economical=True))['settings'], legacy)
+        self.assertEqual(dispatch(self.request('settings', economical=True))['settings'], validate(legacy))
         self.assertEqual((self.path / 'manifest.json').read_bytes(), before)
         with self.assertRaises(ApiError):
             dispatch({**fresh, 'economical': 'yes'})
@@ -293,7 +293,7 @@ class ApiTest(unittest.TestCase):
         configuration = {**DEFAULTS, "reviewers": ["codex"], "processing_provider": "codex", "codex_effort": "low"}
         atomic_json(external, {**self.manifest, "configuration": configuration})
         from pr_review.settings import from_manifest, validate
-        self.assertEqual(validate(from_manifest(read_json(external))), configuration)
+        self.assertEqual(validate(from_manifest(read_json(external))), validate(configuration))
 
     def test_api_rejects_unsupported_menu_selection_before_starting(self):
         from pr_review import operations
