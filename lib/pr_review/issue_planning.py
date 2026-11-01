@@ -33,13 +33,9 @@ def assess_issue(context, configuration, directory, cwd, previous_assessment=Non
               'Return unsuitable for unrelated or unintelligible goals, no_change only with concrete verification evidence. '
               'When previous_plan is supplied, return continue if new comments do not change scope or acceptance; '
               'return a complete replacement plan or questions for material changes. '
-              'For execution_blockers, explain them as questions to the user if clarification is needed. '
-              'Older execution_blockers may be unreviewed fixer claims, not missing requirements. '
-              'Internal representation choices belong to implementation when observable behavior is clear; '
-              'return continue for these rather than asking the user to design the code. '
-              'Challenge contradictory expectations: identical inputs cannot reveal invisible intent. '
-              'Distinguish resolved state from explicit invocation changes without weakening supported overrides. '
-              'Ask only for an unresolved externally observable choice, explaining alternatives and effects. '
+              'For product questions reported by the implementation harness in execution_blockers, clarify only '
+              'unresolved requirements or externally observable behavior; explain the alternatives and their effects. '
+              'Leave implementation choices and technical repairs to the harness; return continue when scope and acceptance remain clear. '
               'Do not interpret approval commands as requirements.\n' + json.dumps(context))
     atomic_bytes(directory / 'prompt.txt', prompt.encode())
     env, _ = environment(choice['provider'])

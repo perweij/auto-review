@@ -824,13 +824,13 @@ design and verification problems remain implementation work.
 
 Recorded partial work and provider session identity survive interruption. Source
 or Git changes not accounted for in saved checkpoints require inspection and
-`--adopt` before continuation. Existing completed task boundaries survive migration
-from the earlier task pipeline, but future work is not split by that pipeline.
+`--adopt` before continuation. Unfinished sessions from the retired task pipeline
+are no longer automatically migrated; their worktrees and artifacts remain available
+for manual recovery.
 
 Resume unfinished implementation with the normal command. The former issue
 `--replan` option and repair-credit authorization have been removed. Existing
-attempts and plans remain readable history; migration does not require a new
-approval unless the approved scope changed. Interactive Owner retains its own
+attempts and plans remain readable history. Interactive Owner retains its own
 explicit replanning controls.
 
 Shared reviewer flags and economical/expensive presets use normal precedence:
@@ -935,9 +935,8 @@ reviews. Use `bin/pr-review` separately when an additional PR review is wanted.
 
 The coordinator retains approval and eligibility checks, isolated worktrees,
 source/Git integrity checks, exact final-tree verification, journaled commits and
-pushes, and GitHub questions/status messages. Existing completed task boundaries
-are preserved when a paused legacy batch migrates; its remaining work becomes one
-whole-specification execution. New executions normally produce one verified commit
+pushes, and GitHub questions/status messages. Completed commit boundaries remain
+recorded; new work uses one whole-specification execution. New executions normally produce one verified commit
 per candidate, without model-generated task commits. Final verification is required
 before any implementation claim can be published.
 

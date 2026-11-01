@@ -1,0 +1,12 @@
+Planner verification cases:
+Provide at most eight verification_cases per task, each with a stable id, scenario,
+expected behavior, supporting basis, and preserve/change intent. An empty list is
+allowed when no additional case is useful; broad compatibility work needs explicit
+representative cases derived from requirements and public entry points.
+Each task must be implementable and verifiable using its prerequisites. Combine
+mutually dependent work, or assign integration verification to a later task
+explicitly. Do not make an earlier task depend on unfinished later work.
+When replanning, inspect unfinished_tasks and their saved review findings. Retain
+known failing cases and already-passing requirements where still applicable;
+previous findings are evidence to check, not additional requirements. Describe the
+remaining repair rather than making the next attempt rediscover it.

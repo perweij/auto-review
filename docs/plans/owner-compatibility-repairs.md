@@ -322,7 +322,7 @@ that adding more retry attempts or changing models is warranted. The live retest
 and any CLI recovery extension remain deferred until the stated acceptance
 criterion passes; do not silently broaden this experiment.
 
-The subsequently authorized [planning-first follow-up](../evaluations/owner-compatibility/PLANNED.md)
+The subsequently authorized [planning-first follow-up](../evaluations/owner-compatibility/README.md#planning-before-implementation)
 used the production task loop with eight planned cases and one repair. It passed
 15/19 external checks but still failed explicit-default precedence, and independent
 review rejected additional saved-setting losses. The live recovery prerequisite
@@ -333,8 +333,7 @@ No live state was reset and no additional unrecorded retries were run.
 A subsequent tool-free Fable consultation found underspecified precedence rules
 and overly broad, conflicting repair instructions. Read-only frontend inspection
 confirmed that Emacs always sends the legacy processing default, even without
-customization; presence alone is not explicit user intent. See the consultation
-section of the follow-up report. Before further trials, ratify the disputed
+customization; presence alone is not explicit user intent. The consultation is retained in the Git archive identified by the evaluation summary. Before further trials, ratify the disputed
 semantics, encode concrete layered cases, and rescore frozen candidates with zero
 model calls. The old oracle's score is not an unconditional recovery prerequisite
 until its policy assumptions are settled. No live recovery or manual adoption
@@ -345,7 +344,7 @@ alone must not reset saved independent processing, and repeating the same ordere
 reviewer list must retain its models and efforts. A separate public-API checker
 rescored all four frozen candidates against six concrete scenarios for each
 provider: each passed 2/12. The manual reference also remains defective. See
-the follow-up report's ratified saved-choice contract and `results/saved-choices/`.
+the evaluation summary's clarified saved-choice contract and linked rescore results.
 Historical oracle results are retained without being treated as ratified policy.
 No new model calls, live plan changes, manual patches or counter resets were made.
 The remaining feature fix should follow this contract through a journaled replan;

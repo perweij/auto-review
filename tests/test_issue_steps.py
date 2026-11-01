@@ -1,4 +1,4 @@
-"""Interactive Owner issue tasks and migration of legacy CLI execution."""
+"""Interactive Owner issue tasks and issue execution boundaries."""
 import copy
 from pathlib import Path
 import unittest
@@ -168,45 +168,11 @@ class IssueStepsTest(unittest.TestCase):
         self.assertEqual('paused', view['batches'][-1]['status'])
         self.assertFalse(any(c.get('scope') for _,c in self.calls))
 
-    def test_legacy_attempt_migrates_on_issue_resume_and_keeps_history(self):
-        self.legacy = True
-        self.start()
-        data = self.owner.load()
-        batch = data['batches'][-1]
-        batch.pop('issue_task_format', None)
-        old_id = batch['id']
-        self.owner.save(data)
-        self.legacy = False
-        self.calls.clear()
-        result = self.flow().fix(self.owner, [self.key])
-        self.assertEqual(old_id, result['id'])
-        self.assertEqual(2, len(result['plans']))
-        self.assertEqual('whole', result['plans'][1]['previous_tasks'][0]['rationale'])
-        self.assertEqual('issue_harness', result['execution_kind'])
-        self.assertEqual(['approved-specification'], [t['id'] for t in result['tasks']])
-        self.assertEqual('ready', result['status'])
-        self.assertFalse(self.fixture.posts)
-
-
     def test_manual_issue_selection_prepares_first_step(self):
         view = self.start()
         prepared = self.fixture.request('owner-prepare-commit', item=self.key)
         self.assertTrue(prepared['ready'])
         self.assertEqual((1, 2), (prepared['position'], prepared['total']))
-
-    def test_legacy_migration_refuses_unadopted_manual_changes(self):
-        self.legacy = True
-        view = self.start()
-        data = self.owner.load()
-        data['batches'][-1].pop('issue_task_format', None)
-        self.owner.save(data)
-        source = Path(view['worktree']) / 'source.txt'
-        source.write_text('manual changes must survive\n')
-        self.calls.clear()
-        with self.assertRaises(ApiError):
-            self.flow().fix(self.owner, [self.key])
-        self.assertEqual('manual changes must survive\n', source.read_text())
-        self.assertEqual([], self.calls)
 
     def test_issue_error_exposes_assessed_blocker_and_posts_status(self):
         self.blocked_task = 'config'

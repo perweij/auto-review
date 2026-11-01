@@ -781,8 +781,8 @@ publishes; a separate `issue-run` resumes execution.
 The linked Owner batch stores source identity, completed commit boundaries and
 publication evidence; unfinished tasks do not control execution. A saved review
 phase resumes review without repeating implementation. A source or context change
-invalidates that candidate. Legacy tasks are migrated once, retaining completed
-boundaries and archiving unfinished task records.
+invalidates that candidate. Unfinished pre-harness issue sessions are rejected with
+`unsupported_session`; their worktrees and artifacts are retained for manual recovery.
 
 The independent harness reviewer is the sole acceptance gate, configured by the
 Owner review settings. After verification the coordinator commits, pushes, and

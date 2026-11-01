@@ -323,6 +323,13 @@ def execute(session, state, request):
                 if not batch:
                     raise ApiError("invalid_request", "Choose an existing owner batch.")
                 is_harness = is_harness or batch.get("execution_kind") == "issue_harness"
+                if is_harness:
+                    from . import issue_harness
+                    try:
+                        issue_harness.require_supported(batch)
+                    except ApiError:
+                        batch = None  # Reject without rewriting the retired record.
+                        raise
                 replacements = superseded_batches(state).get(batch["id"])
                 if replacements:
                     batch = None  # Preserve the original stop reason and artifacts.
@@ -422,6 +429,9 @@ def execute(session, state, request):
                          "verify_only": bool(request.get("verify_only")),
                          "auto_commit": request.get("auto_commit", False),
                          "plans": [], "attempts": [], "repairs": 0, "status": "planning"}
+                if is_harness:
+                    batch.update(execution_kind='issue_harness', harness_phase='implement',
+                                 harness_before=copy.deepcopy(snapshot))
                 state["batches"].append(batch)
                 session.save(state)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))

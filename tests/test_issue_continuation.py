@@ -1,37 +1,14 @@
-"""Harness continuation and read-only compatibility with old issue records."""
+"""Autonomous issue continuation, interruption, and user-facing stops."""
 import unittest
 from unittest.mock import patch
 
 import test_issues
-from pr_review import issue_migration, owner_state
-from pr_review.common import ApiError, digest
-from pr_review.issues import dispatch, semantic_comments
+from pr_review import owner_state
+from pr_review.common import ApiError
+from pr_review.issues import dispatch
 
 
-class LegacyRecordTest(unittest.TestCase):
-    def test_question_publication_requires_current_independent_review(self):
-        question = {'status': 'clarify', 'evidence': 'Choose behavior A or B?'}
-        implementation = {'outcomes': [question]}
-        task = {'status': 'needs_attention', 'implementation': implementation,
-                'after': {'tree': 'current'}, 'review': {'outcomes': [question]}}
-        batch = {'tasks': [task], 'checkpoint': {'tree': 'current'},
-                 'review': {'blocking': ['Technical defect, not a question']}}
-        self.assertEqual([], issue_migration.reviewed_questions(batch))
-        task['assessment_review_report'] = digest(implementation)
-        self.assertEqual(['Choose behavior A or B?'], issue_migration.reviewed_questions(batch))
-        task['after']['tree'] = 'old'
-        self.assertEqual([], issue_migration.reviewed_questions(batch))
-
-
-    def test_only_standalone_initiator_control_is_excluded_from_requirements(self):
-        state = {'viewer': 'author', 'actions': {}}
-        control = {'id': 1, 'user': {'login': 'author'}, 'body': '/fix-issue retry ' + 'a' * 16}
-        self.assertEqual([], semantic_comments([control], state))
-        for change in ({'user': {'login': 'other'}}, {'body': control['body'] + '\nNew requirement'}):
-            self.assertEqual(1, len(semantic_comments([{**control, **change}], state)))
-
-
-class RecoveryIntegrationTest(unittest.TestCase):
+class ContinuationIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.t = test_issues.IssueIntegrationTest()
         self.t.setUp()
@@ -41,7 +18,7 @@ class RecoveryIntegrationTest(unittest.TestCase):
     def run_issue(self):
         return dispatch({**self.t.req, 'yolo': True})
 
-    def test_review_repairs_continue_without_task_planning_or_retry_tokens(self):
+    def test_review_findings_return_to_implementation_until_verified(self):
         original = self.t.harness
         reviews = 0
         calls = []
@@ -61,8 +38,6 @@ class RecoveryIntegrationTest(unittest.TestCase):
         self.assertEqual(['Round-trip regression'], calls[2][1])
         batch = self.owner.load()['batches'][-1]
         self.assertTrue(batch['commit_progress']['complete'])
-        self.assertNotIn('issue_recovery', self.owner.load())
-        self.assertFalse(any('/fix-issue retry ' in c['body'] for c in self.t.f['comments']))
 
     def test_unchanged_rejected_candidate_stops_without_publishing_success(self):
         original = self.t.harness

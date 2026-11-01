@@ -6,7 +6,7 @@ import uuid
 
 from .common import ApiError, atomic_json, command, digest, git, locked, now, read_json, state_root
 from .repository import Repository, normalize_remote, repository_name
-from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness, issue_migration
+from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
 from .issue_planning import assess_issue
@@ -58,13 +58,11 @@ def approval_revision(comment, state):
 
 
 def semantic_comments(comments, state):
-    # Only exact receipted publications and standalone commands are excluded.
+    # Only exact receipted publications and standalone approvals are excluded.
     receipts = {a['receipt']['id']: a['receipt'] for a in state.get('actions', {}).values()
                 if a.get('receipt') and 'body' in a}
     return [semantic_comment(c) for c in comments
             if not (c.get('id') in receipts and matches_receipt(c, receipts[c['id']]))
-            and not (c.get('user', {}).get('login', '').lower() == state['viewer'].lower()
-                     and re.fullmatch(r'/fix-issue retry [a-f0-9]{16}', (c.get('body') or '').strip()))
             and approval_revision(c, state) is None]
 
 
@@ -540,7 +538,12 @@ class Workflow:
             return self.result('noop')
         if state.get('phase') == 'blocked' and state.get('waiting') != 'unsuitable':
             state['phase'] = 'intake'
-        issue_migration.questions(self)
+        if state.get('owner'):
+            owner = owner_state.OwnerSession({'session': state['owner']})
+            with locked(owner.execution_lock):
+                for batch in required_batches(owner.load()):
+                    if not execution_complete(batch):
+                        issue_harness.require_supported(batch)
         if not self.plan():
             return self.result(state.get('waiting') or state['phase'], 0 if state['phase'] == 'complete' else 3 if state['phase'] == 'blocked' else 2,
                                'none' if state['phase'] in ('complete', 'blocked') else 'await_answers' if state.get('waiting') == 'answers' else 'await_approval')

@@ -1,101 +1,13 @@
-Behavioral verification cases:
-Use a small set of concrete cases tied to this task's approved requirements.
-For representation, configuration, persistence or migration changes, inspect the
-actual public callers and distinguish absent inputs from explicit values,
-provisional defaults from saved state, and old formats from new formats. Consider
-precedence, normalization round trips, and resume behavior where relevant.
-Do not invent a requirement to preserve every historical behavior: label intended
-changes as change and preserved behavior as preserve, with a supporting basis
-(requirement or observed baseline/source). Challenge conflicting expectations.
-
-Planner: provide verification_cases for each task (at most eight). Each has a
-stable id, scenario, expected behavior, basis, and intent. Cases are task-scoped,
-not exhaustive combinations. An empty list is allowed when no useful additional
-case is justified; broad compatibility work needs explicit representative cases.
-Every task must be implementable and verifiable using its prerequisites, not
-work assigned to a later task. Check verification dependencies as well as code
-dependencies. Combine mutually dependent implementation work, or assign full
-integration verification to a later task without dropping it.
-Before implementation, derive cases from the requirements and existing public
-entry points, not from a proposed patch or a list of reported bugs. For a
-representation change, trace which input sources reach normalization and loading,
-and where precedence is decided. Select examples crossing those boundaries,
-including persisted older inputs competing with current defaults. State the
-expected winner and its source of authority. Keep the existing case limit;
-group related scenarios instead of expanding into an exhaustive matrix.
-For overlapping input forms, include a case supplying them together with
-conflicting values (for example a full configuration object plus individual
-field overrides); testing each form separately does not establish precedence.
-For public structured inputs, include representative malformed shapes such as
-null, a wrong container type, and an invalid element. Trace the actual public
-error boundary: rejection must use the documented request error, not an internal
-exception or a successful fallback. Only require these cases where applicable;
-derive the expected precedence and error contract from approved scope/callers.
-When replanning, use unfinished_tasks and their saved review findings to retain
-known failing cases and already-passing requirements. Check those findings
-against the current code; they are evidence from the previous attempt, not new
-requirements. Make the remaining repair explicit rather than planning a fresh
-implementation that must rediscover the same defects.
-
-Fixer: implement the assigned scope. Use supplied verification_cases; do not
-rewrite their expectations. You may propose additional cases in verification_cases,
-including for a legacy task that has none. An empty proposal means retain supplied
-cases. Reproduce reported failures where feasible and identify the shared invariant;
-repair the defect class, not only the reported example. Add focused regressions
-for relevant neighboring cases and already-correct behavior. Trace public entry
-points rather than testing only a normalization helper. Do not weaken tests to fit
-new output. During final combined repair, keep the supplied namespaced cases and
-return an empty proposal list; propose contract changes through clarification.
-
-Fixer and reviewer: case_results must cover each supplied case (and fixer additions)
-exactly once. Use tested with the actual command and result, source_traced with
-specific code/path reasoning, failed with the observed mismatch, or unavailable
-with the limitation. Do not claim unexecuted tests or infer coverage from unrelated
-passing tests. Missing material evidence requires incomplete verification; concrete
-implementation defects require changes_requested in review. No automatic shell
-execution is attached to these reports. Existing focused-check limits still apply.
-
-Reviewer: independently verify the expected behavior and its basis.
-The fixer's
-clarify outcome is a proposed question, not an instruction to ask the user.
-Adjudicate it before publication: internal representations, algorithms and
-implementation approaches are your responsibility when the approved observable
-behavior is clear. Challenge earlier review findings as well as fixer claims.
-Do not turn a representation chosen by the fixer into an immutable requirement.
-For alleged precedence conflicts, trace actual callers and identify the observable
-input that establishes explicit intent. Identical input and state cannot be
-required to yield different outputs based on invisible user intent. Keep resolved
-state and explicit invocation changes separate where necessary; do not require
-generated compatibility fields to count as newly explicit requests merely because
-they are present. Preserve actual supported explicit overrides, including values
-equal to defaults. Tie any blocking expectation to approved scope or a supported
-caller contract; a synthetic reproduction alone does not establish that contract.
-If previous findings conflict, identify the conflicting assumption and a repair
-within scope rather than repeating the contradiction or weakening requirements.
-Only return clarify when a concrete externally observable decision cannot be
-settled from the approved requirements and repository evidence. Its outcome
-evidence must be the actual plain-language question with alternatives and effects,
-not a technical status summary or a request to design an internal data structure.
-The fixer's
-incomplete report or claim of an architectural ambiguity is not itself a reason
-to stop. Assess the current implementation against the approved requirements and
-actual callers. If an internal representation or separation of normalized state
-from explicit input can satisfy the existing contract, report the concrete defect
-and technical repair direction as changes_requested. Do not invent new public
-semantics or weaken approved behavior. Use passed only after independently
-verifying the implementation, including the fixer's reported limitations. If a
-genuine externally observable choice is absent from the approved requirements,
-use clarify with a plain-language question explaining the alternatives and their
-effects; do not ask the user to resolve internal data structures. Unavailable
-verification remains incomplete, not a concrete repair request.
-The fixer's
-case results are claims to check, not authority. Check for omitted relevant cases
-and regressions outside the supplied examples. During the first review, inspect
-interacting input forms and invalid-input boundaries as well as happy paths;
-report all confirmed material defects together so a bounded repair can address
-them. Passing the supplied cases alone is not evidence of complete coverage.
-If a case contradicts approved
-scope, report the conflict rather than silently changing it or accepting the fix.
-Task-level cases cover that step; the final review must verify the whole approved
-issue and the combined cases, including interactions. Use exactly the supplied
-case IDs (final-review IDs include the task ID prefix).
+Behavioral verification:
+Derive expected behavior from approved requirements and supported public callers.
+Distinguish intentional changes from behavior that must be preserved; state the
+basis rather than assuming every historical behavior is a requirement.
+For configuration, representation, persistence or migration changes, check relevant
+input boundaries, precedence, normalization round trips and resume behavior.
+Consider interacting input forms and malformed requests where the public contract
+makes them relevant. Use representative cases, not an exhaustive matrix.
+Implementation choices and technical repairs belong to the coding workflow.
+Ask the user only about an unresolved externally observable choice that cannot be
+settled from requirements or repository evidence; explain alternatives and effects.
+Do not invent requirements from a proposed representation or a synthetic example.
+Report only verification actually performed. The focused-check policy still applies.

@@ -20,9 +20,8 @@ Existing Owner records and commit/publication transactions are shared primitives
 Harness resumption branches before legacy task transitions. A commit-boundary
 record is created only after final review; no synthetic unfinished task controls
 the harness.
-Interactive Owner planning and focused verification stay separate. Migration keeps
-completed task checkpoints and archives the old unfinished task records. Remaining
-scope becomes a single whole-specification execution. New candidates use one
+Interactive Owner planning and focused verification stay separate. Unfinished sessions from the retired task pipeline are rejected without modifying
+their worktrees or artifacts. New candidates use one
 verified commit rather than synthetic task partitions.
 
 ## Acceptance scenarios
@@ -38,10 +37,8 @@ verified commit rather than synthetic task partitions.
 - Provider interruption: retain exact session and post-interruption source identity;
   resume only recorded changes. External edits require adoption.
 - Protected Git changes or read-only review edits: block publication.
-- Legacy paused run: preserve completed boundaries and partial source, replace the
-  unfinished task pipeline with whole-specification implementation.
-- Publication: exact reviewed final tree required, including after migration or
-  integration changes; uncertain remote writes use existing read-back recovery.
+- Retired paused run: reject with `unsupported_session`, preserving saved work.
+- Publication: exact reviewed final tree required, including after integration changes; uncertain remote writes use existing read-back recovery.
 - Runtime/quota guards: preserve cumulative accounting across invocations, with
   explicit runtime fallback when subscription telemetry is unavailable.
 - Logs: human progress and active elapsed time on stderr; one JSON result on stdout.
@@ -59,7 +56,8 @@ live run; prior consumed time is not refunded.
 
 Removed issue recovery credits, retry authorization, automatic task-plan repair,
 old task-format upgrades, their provider schema/prompt fields, and the issue
-`--replan` control. `issue_migration` alone reads old task/question records.
+`--replan` control. The temporary legacy task/question migration module has also
+been removed after the development sessions completed.
 Interactive Owner's explicit planning, bounded task repair and verification
 contracts remain separate. Runtime/quota controls remain explicit; no fixed
 implementation-turn budget was added.

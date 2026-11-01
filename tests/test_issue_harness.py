@@ -82,21 +82,30 @@ class ExecutionTest(unittest.TestCase):
         self.assertEqual(['Acceptance regression'], self.calls[2][1])
         self.assertEqual('ready', view['batches'][-1]['status'])
 
-    def test_legacy_interruption_preserves_completed_commit_boundary(self):
+
+    def test_interactive_owner_batch_cannot_resume_as_issue_harness(self):
+        from pr_review.common import ApiError
         self.f.blocked_task = 'pipeline'
-        view = self.f.start()
-        old = view['batches'][-1]
-        completed = old['tasks'][0]
+        self.f.start()
+        before = self.f.owner.load()['batches'][-1]
+        with patch('pr_review.issue_harness.invoke') as invoke:
+            for adopt in (False, True):
+                with self.assertRaisesRegex(ApiError, 'retired task pipeline') as caught:
+                    self.f.start(batch=before['id'], issue_harness=True, adopt=adopt)
+                self.assertEqual('unsupported_session', caught.exception.code)
+                self.assertEqual(before, self.f.owner.load()['batches'][-1])
+            invoke.assert_not_called()
+
+    def test_old_synthetic_task_is_rejected_without_restarting_implementation(self):
+        from pr_review.common import ApiError
+        batch = self.stop_in_review()
         state = self.f.owner.load()
-        state['batches'][-1]['tasks'][-1]['status'] = 'repairing'
+        state['batches'][-1]['tasks'] = [{'id': 'approved-specification', 'status': 'fixing',
+            'items': batch['items'], 'before': batch['harness_before']}]
         self.f.owner.save(state)
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
-            result = self.f.start(batch=old['id'], issue_harness=True, auto_commit=True)
-        batch = result['batches'][-1]
-        self.assertEqual(completed, batch['tasks'][0])
-        self.assertEqual('issue_harness', batch['plans'][-1]['migration'])
-        self.assertEqual(2, len(batch['commit_progress']['commits']))
-        self.assertTrue(owner_contracts.current(batch))
+        with patch('pr_review.issue_harness.invoke') as invoke, self.assertRaisesRegex(ApiError, 'retired task pipeline'):
+            self.f.start(batch=batch['id'])
+        invoke.assert_not_called()
 
     def test_invalid_completion_report_is_corrected_without_task_replanning(self):
         from pr_review.common import ApiError
@@ -143,16 +152,6 @@ class ExecutionTest(unittest.TestCase):
         self.assertEqual(['review'], [r for r, _ in self.calls])
         self.assertEqual('ready', view['batches'][-1]['status'])
 
-    def test_early_harness_synthetic_task_cannot_restart_implementation(self):
-        batch = self.stop_in_review()
-        state = self.f.owner.load()
-        state['batches'][-1]['tasks'] = [{'id': 'approved-specification', 'status': 'fixing',
-            'before': batch['harness_before'], 'items': batch['items']}]
-        self.f.owner.save(state)
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
-            view = self.f.start(batch=batch['id'])
-        self.assertEqual(['review'], [r for r, _ in self.calls])
-        self.assertEqual(1, len(view['batches'][-1]['tasks']))
 
     def test_adopted_source_invalidates_candidate_and_unadopted_source_blocks(self):
         from pr_review.common import ApiError
@@ -202,25 +201,6 @@ class ExecutionTest(unittest.TestCase):
             self.f.start(issue_harness=True)
         self.assertEqual(['fix', 'review'] * 3, [r for r, _ in self.calls])
 
-    def test_legacy_partial_edits_can_be_adopted_without_losing_completed_boundary(self):
-        from pr_review.common import ApiError
-        self.f.blocked_task = 'pipeline'
-        view = self.f.start()
-        batch = view['batches'][-1]
-        completed = batch['tasks'][0]
-        (Path(view['worktree']) / 'partial.txt').write_text('Interrupted old fixer')
-        with patch('pr_review.issue_harness.invoke') as invoke, self.assertRaises(ApiError):
-            self.f.start(batch=batch['id'], issue_harness=True)
-        invoke.assert_not_called()
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
-            result = self.f.start(batch=batch['id'], issue_harness=True, adopt=True, auto_commit=True)
-        migrated = result['batches'][-1]
-        self.assertEqual(completed, migrated['tasks'][0])
-        self.assertEqual(batch['baseline'], migrated['baseline'])
-        self.assertEqual(2, len(migrated['commit_progress']['commits']))
-        self.assertEqual(completed['after']['tree'], migrated['commit_plan']['units'][0]['tree'])
-        self.assertEqual('Interrupted old fixer', (Path(view['worktree']) / 'partial.txt').read_text())
-
 
     def test_review_question_answer_resumes_without_replan(self):
         from pr_review import owner_import
@@ -244,45 +224,6 @@ class ExecutionTest(unittest.TestCase):
         self.assertEqual(['fix', 'review'], [r for r, _ in self.calls])
         self.assertNotIn('harness_questions', view['batches'][-1])
         self.assertEqual('ready', view['batches'][-1]['status'])
-
-    def test_changed_scope_preserves_completed_migration_boundaries(self):
-        from pr_review import owner_import
-        from pr_review.common import ApiError
-        self.f.blocked_task = 'pipeline'
-        old = self.f.start()['batches'][-1]
-        completed = old['tasks'][0]
-        def interrupted(*args):
-            if args[3] == 'review':
-                raise ApiError('model_failed', 'Review interrupted')
-            return self.model(*args)
-        with patch('pr_review.issue_harness.invoke', side_effect=interrupted), self.assertRaises(ApiError):
-            self.f.start(batch=old['id'], issue_harness=True)
-        state = self.f.owner.load()
-        item = next(i for i in state['feedback'] if i['kind'] == 'issue_plan')
-        owner_import.from_issue(self.f.owner, {**item['source']['plan'], 'revision': 2, 'body': 'Revised approved scope'},
-            {'title': item['title'], 'html_url': item['source']['issue']}, 'workflow')
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
-            view = self.f.start(batch=old['id'], auto_commit=True)
-        batch = view['batches'][-1]
-        self.assertEqual(completed, batch['tasks'][0])
-        self.assertEqual(2, len(batch['commit_progress']['commits']))
-        self.assertTrue(all(t['status'] == 'complete' for t in batch['tasks']))
-
-
-    def test_legacy_final_review_without_edits_preserves_task_commits(self):
-        view = self.f.start()
-        state = self.f.owner.load()
-        old = state['batches'][-1]
-        old['status'] = 'paused'
-        old['review']['complete'] = False
-        tasks = list(old['tasks'])
-        self.f.owner.save(state)
-        with patch('pr_review.issue_harness.invoke', return_value=self.report()):
-            result = self.f.start(batch=old['id'], issue_harness=True, auto_commit=True)
-        batch = result['batches'][-1]
-        self.assertEqual(tasks, batch['tasks'])
-        self.assertEqual(2, len(batch['commit_progress']['commits']))
-        self.assertEqual('tasks', batch['commit_plan']['mode'])
 
 
 

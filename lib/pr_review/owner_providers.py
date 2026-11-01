@@ -239,6 +239,7 @@ def invoke(session, state, batch, role, context):
                          "allow writes to the owner checkout, its real index, shared object store, or other existing "
                          "repositories. Any fixture worktrees and shared object stores must also stay inside scratch.\n")
     instructions += (ROOT / "prompts/owner-compatibility.txt").read_text() + "\n"
+    instructions += (ROOT / "prompts" / f"owner-compatibility-{role}.txt").read_text() + "\n"
     prompt, context_directory = context_prompt(instructions, context, directory)
     atomic_bytes(directory / "prompt.txt", prompt.encode())
     args = argv(choice, Runtime.environment(), role, directory, schema)

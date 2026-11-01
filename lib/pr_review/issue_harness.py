@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .common import ApiError, digest, now
 from .events import emit
-from . import owner_git, owner_providers, owner_commit_plan, owner_auto_commit, issue_migration
+from . import owner_git, owner_providers, owner_commit_plan, owner_auto_commit
 from .providers import Runtime, environment
 from .processes import run
 from .storage import write_json, atomic_bytes
@@ -196,6 +196,15 @@ def report(session, state, batch, role, specification, feedback):
                       list(feedback) + ['Correct the completion report to the supplied schema: ' + str(exc)])
 
 
+def require_supported(batch):
+    if (batch.get('execution_kind') != 'issue_harness'
+            or any(t.get('status') != 'complete' for t in batch.get('tasks', []))):
+        raise ApiError('unsupported_session',
+                       'This unfinished issue session uses the retired task pipeline. '
+                       'Automatic migration is no longer supported; preserve its worktree '
+                       'and artifacts for manual recovery.')
+
+
 def resume(batch, request, snapshot, identity):
     """Shared guards checked HEAD, index and Git identity; retain the saved phase."""
     if request.get('skip') or request.get('replan') or request.get('verify_only'):
@@ -211,8 +220,7 @@ def resume(batch, request, snapshot, identity):
         for attempt in batch['attempts']:
             if attempt.get('status') in ('failed', 'interrupted'):
                 attempt.setdefault('adopted_at', now())
-    # An early harness saved a ready candidate and an unfinished synthetic task.
-    # Only source/context changes invalidate that candidate, not the task status.
+    # Source changes invalidate the candidate awaiting review.
     if (batch.get('harness_phase') == 'review' and
             batch.get('harness_candidate_tree') != snapshot['tree']):
         batch['harness_phase'] = 'implement'
@@ -234,7 +242,7 @@ def execute(session, state, batch, remote):
                      if i['kind'] == 'issue_plan' and not i.get('missing')), None)
     if not approved:
         raise ApiError('invalid_state', 'Issue execution requires its approved specification.')
-    issue_migration.batch(batch)
+    require_supported(batch)
     if batch.pop('harness_questions', None):
         batch['harness_phase'] = 'implement'
     batch.pop('error', None)

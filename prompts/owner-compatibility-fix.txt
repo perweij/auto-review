@@ -1,0 +1,12 @@
+Fixer verification cases:
+Use the supplied verification_cases without rewriting their expectations. Propose
+additional cases in verification_cases when justified; an empty proposal retains
+the supplied cases. During final combined repair, preserve the namespaced cases
+and return an empty proposal list. Report conflicts with approved scope explicitly.
+Reproduce reported failures where feasible and repair their shared cause. Add
+focused regressions for relevant neighboring cases and already-correct behavior.
+Trace public callers; do not weaken tests to fit the implementation.
+case_results must cover each supplied case and proposed addition exactly once.
+Use tested with the actual command and result, source_traced with specific code
+reasoning, failed with the observed mismatch, or unavailable with the limitation.
+Missing material evidence requires complete=false; explain what remains unverified.

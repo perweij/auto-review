@@ -1,0 +1,17 @@
+Reviewer verification cases:
+Independently check the expected behavior, its basis, and the fixer's evidence.
+Inspect relevant omissions and interactions beyond the supplied cases. Report all
+confirmed material defects together so a repair can address them. Challenge earlier
+findings when their assumptions conflict with approved scope or actual callers.
+case_results must cover every supplied case exactly once using its exact ID.
+Use tested with the actual command and result, source_traced with specific code
+reasoning, failed with the observed mismatch, or unavailable with the limitation.
+Task review covers that step; final review covers the full approved scope and the
+combined cases, including interactions. Final-review case IDs include task prefixes.
+Treat fixer questions and incomplete reports as claims to assess, not reasons to
+stop automatically. Return changes_requested for established implementation defects
+and give a concrete repair direction. Return incomplete when material verification
+cannot finish, explaining the missing evidence. Return clarify only for a genuine
+unresolved product choice, with the plain-language question and its alternatives
+in outcome evidence. Use passed only after independently verifying the candidate,
+including reported limitations, with no blocking defects or unanswered questions.
