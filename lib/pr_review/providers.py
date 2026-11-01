@@ -48,7 +48,7 @@ def environment(provider):
         if git_override or (secret and name not in allowed):
             removed.append(name)
             result.pop(name)
-    result.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
+    result.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1", PYTHONDONTWRITEBYTECODE="1")
     return result, sorted(removed)
 
 

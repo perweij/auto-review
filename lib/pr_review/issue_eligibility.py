@@ -68,10 +68,10 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
                         'link_error': 'issue_link_missing' if not refs else 'issue_link_ambiguous'}
             issue_number = refs[0]['number']
         issue = get(f'repos/{repo.name}/issues/{issue_number}')
+        if issue.get('pull_request'):
+            raise ApiError('invalid_request', 'The -i/--issue selector names a pull request. Use the linked issue number, or -p/--pr for a pull request.')
         if issue.get('number') != issue_number or (issue.get('html_url') or '').lower() != f'https://{repo.identity}/issues/{issue_number}':
             raise ApiError('facts_incomplete', 'Issue identity mismatch.')
-        if issue.get('pull_request'):
-            raise ApiError('invalid_request', 'The issue selector names a pull request.')
         linked = connection(repo, issue_number)
         if any(r['repository']['nameWithOwner'].lower() != repo.name for r in linked):
             return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue,

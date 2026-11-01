@@ -1,0 +1,13 @@
+Behavioral verification:
+Derive expected behavior from approved requirements and supported public callers.
+Distinguish intentional changes from behavior that must be preserved; state the
+basis rather than assuming every historical behavior is a requirement.
+For configuration, representation, persistence or migration changes, check relevant
+input boundaries, precedence, normalization round trips and resume behavior.
+Consider interacting input forms and malformed requests where the public contract
+makes them relevant. Use representative cases, not an exhaustive matrix.
+Implementation choices and technical repairs belong to the coding workflow.
+Ask the user only about an unresolved externally observable choice that cannot be
+settled from requirements or repository evidence; explain alternatives and effects.
+Do not invent requirements from a proposed representation or a synthetic example.
+Report only verification actually performed. The focused-check policy still applies.

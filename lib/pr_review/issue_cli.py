@@ -11,7 +11,7 @@ from .processes import cancellation_scope
 
 
 def parser():
-    result = argparse.ArgumentParser(prog='fix-issue', description='Plan GitHub issues and implement approved fixes through Owner.')
+    result = argparse.ArgumentParser(prog='fix-issue', description='Plan GitHub issues and delegate approved implementation to a coding harness.')
     target = result.add_mutually_exclusive_group(required=True)
     target.add_argument('-i', '--issue', type=int)
     target.add_argument('-p', '--pr', type=int)
@@ -24,13 +24,17 @@ def parser():
     recovery = result.add_mutually_exclusive_group()
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
     recovery.add_argument('--retry-absent', metavar='ACTION', help='confirm after inspection that this uncertain action was not sent; allow a later retry')
+    result.add_argument('--min-weekly-quota-remaining', type=float, help='stop at this remaining account weekly percentage')
+    result.add_argument('--max-weekly-quota-use', type=float, help='maximum observed weekly percentage-point increase during execution')
+    result.add_argument('--max-runtime', help='cumulative active execution allowance, e.g. 30m or 2h')
     result.add_argument('--json', action='store_true')
     result.add_argument('--settings-file', help='Owner fix/review settings JSON')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     presets = result.add_mutually_exclusive_group()
     presets.add_argument('--economical', action='store_true')
     presets.add_argument('--expensive', action='store_true')
-    result.add_argument('--reviewers', type=lambda value: value.split(','), default=argparse.SUPPRESS)
+    result.add_argument('--reviewers', type=lambda value: value.split(','), default=argparse.SUPPRESS,
+                        help='Shared configuration compatibility; issue verification uses Owner review settings, not a post-push PR review')
     for key in ('reviewer-1-provider', 'reviewer-1-model', 'reviewer-1-effort',
                 'reviewer-2-provider', 'reviewer-2-model', 'reviewer-2-effort',
                 'processing-model', 'processing-effort'):

@@ -3,10 +3,10 @@ import copy
 import re
 import uuid
 
-from .common import ApiError, now
+from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
-from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit
+from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts
 from .owner_state import refresh, superseded_batches, active_feedback_keys
 
 
@@ -15,12 +15,14 @@ def validate_plan(value, items):
     keys = [i["key"] for i in items]
     if not isinstance(tasks, list) or not tasks:
         raise ApiError("invalid_plan", "Planner returned no tasks.")
+    issue_keys = {i["key"] for i in items if i.get("kind") == "issue_plan"}
     found, covered = {}, []
     for task in tasks:
         if (not isinstance(task, dict) or not isinstance(task.get("id"), str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", task["id"]) or task["id"] in found
                 or not isinstance(task.get("items"), list) or not task["items"]
                 or any(not isinstance(k, str) for k in task["items"])
+                or len(set(task["items"])) != len(task["items"])
                 or not isinstance(task.get("depends_on"), list)
                 or any(not isinstance(k, str) for k in task["depends_on"])
                 or len(set(task["depends_on"])) != len(task["depends_on"])
@@ -31,10 +33,12 @@ def validate_plan(value, items):
             raise ApiError("invalid_plan", "Invalid or duplicate task in owner plan.")
         if sorted(e["item"] for e in task["expected"]) != sorted(task["items"]):
             raise ApiError("invalid_plan", "Each task requires an expected outcome for every original item exactly once.")
+        if "verification_cases" in task:
+            owner_contracts.cases(task["verification_cases"], code="invalid_plan")
         found[task["id"]] = copy.deepcopy(task)
         covered.extend(task["items"])
-    if sorted(covered) != sorted(keys):
-        raise ApiError("invalid_plan", "Plan must cover each selected feedback item exactly once.")
+    if set(covered) != set(keys) or any(covered.count(k) != 1 for k in keys if k not in issue_keys):
+        raise ApiError("invalid_plan", "Plan must cover every selected item; ordinary feedback must occur exactly once.")
     unknown = [f"{task['id']} -> {dep}" for task in tasks for dep in task["depends_on"] if dep not in found]
     if unknown:
         raise ApiError("invalid_plan", "Unknown task prerequisites: " + "; ".join(unknown)
@@ -48,6 +52,14 @@ def validate_plan(value, items):
         task.update(status="queued", repairs=0)
         ordered.append(task)
         done.add(task["id"])
+    # Repeated issue outcomes are ordered implementation steps, not independent
+    # claims that the whole issue is fixed. Require an explicit dependency chain.
+    previous = {}
+    for task in ordered:
+        for key in set(task['items']) & issue_keys:
+            if key in previous and previous[key] not in task['depends_on']:
+                raise ApiError('invalid_plan', 'Successive steps for an issue must depend on its previous task ID.')
+            previous[key] = task['id']
     return ordered
 
 
@@ -90,7 +102,7 @@ def repairable(value):
     return value['complete'] and value['blocking'] and all(o['status'] != 'clarify' for o in value['outcomes'])
 
 
-def implementation_ready(session, state, task):
+def implementation_ready(session, state, batch, task):
     report = task["implementation"]
     if not report["complete"] or any(o["status"] == "clarify" for o in report["outcomes"]):
         task["status"] = "needs_attention"
@@ -124,7 +136,8 @@ def run_task(session, state, batch, task):
     saved_review = None
     if (task["status"] == "needs_attention" and task.get('review')
             and task.get("implementation", {}).get("complete") is True
-            and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]):
+            and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]
+            and owner_contracts.matches(task["review"], owner_contracts.task_cases(task), batch["checkpoint"]["tree"])):
         task["status"] = "reviewing"
         if task['review']['complete'] and task['review']['blocking']:
             saved_review = task['review']
@@ -136,18 +149,23 @@ def run_task(session, state, batch, task):
         session.save(state)
         data = context(session, state, batch, task["items"], task["before"]["tree"])
         data["task"] = {k: task[k] for k in ("id", "rationale", "expected")}
+        data["verification_cases"] = owner_contracts.task_cases(task)
         task["implementation"] = validate_result(models.invoke(session, state, batch, "fix", data), task["items"])
-        if not implementation_ready(session, state, task):
+        owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
+        if not implementation_ready(session, state, batch, task):
             return False
         task["status"] = "reviewing"
         session.save(state)
     while True:
         data = context(session, state, batch, task["items"], task["before"]["tree"])
+        data["task"] = {k: task[k] for k in ("id", "rationale", "expected")}
+        data["verification_cases"] = owner_contracts.task_cases(task)
         data["implementation_report"] = task["implementation"]
         if task.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = task["review"]
         review = saved_review if saved_review is not None else validate_result(models.invoke(session, state, batch, "review", data), task["items"])
         saved_review = None
+        owner_contracts.bind(review, owner_contracts.task_cases(task), batch["checkpoint"]["tree"])
         task["review"] = review
         task["after"] = batch["checkpoint"]
         session.save(state)
@@ -155,13 +173,16 @@ def run_task(session, state, batch, task):
             task["status"] = "complete"
             session.save(state)
             return True
-        if not batch.get("verify_only") and repairable(review) and task["repairs"] < 1:
+        can_repair = not batch.get('verify_only') and repairable(review)
+        if can_repair and task['repairs'] < 1:
             task["repairs"] += 1  # Persist before launching; crashes do not grant extra repairs.
             task["status"] = "repairing"
             session.save(state)
             data["review_findings"] = review
+            data["verification_cases"] = owner_contracts.task_cases(task)
             task["implementation"] = validate_result(models.invoke(session, state, batch, "fix", data), task["items"])
-            if not implementation_ready(session, state, task):
+            owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
+            if not implementation_ready(session, state, batch, task):
                 return False
             task["status"] = "reviewing"
             session.save(state)
@@ -174,7 +195,12 @@ def run_task(session, state, batch, task):
 
 
 def final_review(session, state, batch):
-    keys = [k for t in batch["tasks"] if t["status"] == "complete" for k in t["items"]]
+    issue_keys = {i['key'] for i in state['feedback'] if i['kind'] == 'issue_plan'}
+    if any(set(t['items']) & issue_keys and t['status'] != 'complete' for t in batch['tasks']):
+        batch['status'] = 'paused'
+        batch['error'] = 'Every approved issue step must complete before final verification; replan unfinished work.'
+        return
+    keys = list(dict.fromkeys(k for t in batch["tasks"] if t["status"] == "complete" for k in t["items"]))
     if not keys:
         batch["status"] = "paused"
         return
@@ -182,11 +208,14 @@ def final_review(session, state, batch):
         batch["status"] = "reviewing"
         session.save(state)
         data = context(session, state, batch, keys, batch["baseline"])
-        data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks."
+        data["verification_cases"] = owner_contracts.combined(batch["tasks"])
+        data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks. For approved issues, verify the entire approved plan and every acceptance criterion, not just individual step outcomes."
         if batch.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = batch["review"]
         review = validate_result(models.invoke(session, state, batch, "review", data), keys)
+        owner_contracts.bind(review, data["verification_cases"], batch["checkpoint"]["tree"])
         batch["review"] = review
+        batch['review_tree'] = batch['checkpoint']['tree']
         if successful(review):
             batch.update(status="ready", final_tree=batch["checkpoint"]["tree"], completed_at=now(),
                          verified_items=keys, verified_fingerprints={i["key"]: i["fingerprint"] for i in session.items(state, keys)},
@@ -202,6 +231,9 @@ def final_review(session, state, batch):
             session.save(state)
             data["review_findings"] = review
             result = validate_result(models.invoke(session, state, batch, "fix", data), keys)
+            if result.get('verification_cases'):
+                raise ApiError('invalid_result', 'Integration repair must preserve the completed task contracts; explicitly replan new requirements.')
+            owner_contracts.bind(result, data["verification_cases"], batch["checkpoint"]["tree"])
             if not result["complete"] or any(o["status"] == "clarify" for o in result["outcomes"]):
                 batch["status"] = "paused"
                 return
@@ -217,7 +249,10 @@ def check_fresh(session, state, batch):
     if state["metadata"]["headRefOid"] != batch["remote_head"]:
         raise ApiError("stale_source", "GitHub head changed during the batch; reconcile in Magit before continuing.")
     if batch.get("discussion_stale"):
-        raise ApiError("stale_discussion", "Selected feedback changed during the batch; inspect and replan unfinished work.")
+        message = ("Selected feedback changed during execution; resume the issue to reassess it."
+                   if batch.get('execution_kind') == 'issue_harness' else
+                   "Selected feedback changed during the batch; inspect and replan unfinished work.")
+        raise ApiError("stale_discussion", message)
 
 
 def plan_tasks(session, state, batch, keys):
@@ -241,11 +276,20 @@ def plan_tasks(session, state, batch, keys):
         if any(i["fingerprint"] != fingerprints[i["key"]] for i in session.items(state, keys)):
             raise ApiError("stale_discussion", "Selected feedback changed during planning; inspect and replan.")
         data = context(session, state, batch, keys, batch["baseline"])
+        # An explicit replan must retain known failures, not just the resulting
+        # diff. Omit checkpoint inventories and local attempt paths.
+        data['unfinished_tasks'] = [
+            {field: copy.deepcopy(task[field]) for field in
+             ('id', 'rationale', 'expected', 'status', 'verification_cases', 'implementation', 'review')
+             if field in task}
+            for task in batch.get('tasks', [])
+            if task['status'] not in ('complete', 'skipped') and set(task['items']) & set(keys)]
         if correction:
             data["plan_correction"] = correction
         plan = models.invoke(session, state, batch, "plan", data)
         try:
-            return plan, validate_plan(plan, items)
+            tasks = validate_plan(plan, items)
+            return plan, tasks
         except ApiError as exc:
             if exc.code != "invalid_plan":
                 raise
@@ -269,6 +313,7 @@ def execute(session, state, request):
         batch = None
         completing = False
         preserve_ready = False
+        is_harness = bool(request.get("issue_harness"))
         try:
             # Refresh before creating a worktree; failure leaves existing source untouched.
             refresh(session, state)
@@ -277,6 +322,14 @@ def execute(session, state, request):
                 batch = next((b for b in state["batches"] if b["id"] == request["batch"]), None)
                 if not batch:
                     raise ApiError("invalid_request", "Choose an existing owner batch.")
+                is_harness = is_harness or batch.get("execution_kind") == "issue_harness"
+                if is_harness:
+                    from . import issue_harness
+                    try:
+                        issue_harness.require_supported(batch)
+                    except ApiError:
+                        batch = None  # Reject without rewriting the retired record.
+                        raise
                 replacements = superseded_batches(state).get(batch["id"])
                 if replacements:
                     batch = None  # Preserve the original stop reason and artifacts.
@@ -312,45 +365,49 @@ def execute(session, state, request):
                 if (batch.get("integrity_failure") or batch.get("git_admin", identity) != identity) and not request.get("adopt"):
                     raise ApiError("integrity_failed", "Protected state changed; inspect Git and source changes, then explicitly adopt and reverify.")
                 snapshot = workspace.checkpoint(session, state, "resume")
-                skip = request.get('skip', [])
-                if not isinstance(skip, list) or any(t not in {x['id'] for x in batch['tasks']} for t in skip):
-                    raise ApiError('invalid_request', 'Choose existing tasks to skip.')
-                interrupted = {t['id'] for t in batch['tasks'] if t['status'] in ('fixing', 'repairing')}
-                # Older versions did not persist a combined-repair marker.
-                last = batch['attempts'][-1] if batch['attempts'] else {}
-                if (last.get('role') == 'fix' and last.get('status') in ('failed', 'interrupted') and not last.get('adopted_at')
-                        and batch['tasks'] and all(t['status'] in ('complete', 'skipped') for t in batch['tasks'])):
-                    batch['combined_repair_pending'] = True
-                if orphaned or batch.get('combined_repair_pending') or batch.get("status") == "running" or interrupted:
-                    batch["status"] = "interrupted"
-                    if not request.get('adopt') and (batch.get('combined_repair_pending') or not interrupted or not interrupted <= set(skip)):
-                        raise ApiError('interrupted_task', 'Inspect retained changes, then adopt and reverify; task skips must cover every interrupted task. A failed combined repair requires adoption.')
-                if snapshot["tree"] != batch["checkpoint"]["tree"] and not request.get("adopt"):
-                    raise ApiError("worktree_changed", "Inspect partial/manual changes, then explicitly adopt and reverify.")
-                if request.get("adopt"):
-                    batch["checkpoint"] = snapshot
-                    batch["git_admin"] = identity
-                    batch.pop("integrity_failure", None)
-                    batch.pop('combined_repair_pending', None)
-                    for attempt in batch['attempts']:
-                        if attempt.get('role') == 'fix' and attempt.get('status') in ('failed', 'interrupted'):
-                            attempt.setdefault('adopted_at', now())
+                if is_harness:
+                    from . import issue_harness
+                    issue_harness.resume(batch, request, snapshot, identity)
+                else:
+                    skip = request.get('skip', [])
+                    if not isinstance(skip, list) or any(t not in {x['id'] for x in batch['tasks']} for t in skip):
+                        raise ApiError('invalid_request', 'Choose existing tasks to skip.')
+                    interrupted = {t['id'] for t in batch['tasks'] if t['status'] in ('fixing', 'repairing')}
+                    # Older versions did not persist a combined-repair marker.
+                    last = batch['attempts'][-1] if batch['attempts'] else {}
+                    if (last.get('role') == 'fix' and last.get('status') in ('failed', 'interrupted') and not last.get('adopted_at')
+                            and batch['tasks'] and all(t['status'] in ('complete', 'skipped') for t in batch['tasks'])):
+                        batch['combined_repair_pending'] = True
+                    if orphaned or batch.get('combined_repair_pending') or batch.get("status") == "running" or interrupted:
+                        batch["status"] = "interrupted"
+                        if not request.get('adopt') and (batch.get('combined_repair_pending') or not interrupted or not interrupted <= set(skip)):
+                            raise ApiError('interrupted_task', 'Inspect retained changes, then adopt and reverify; task skips must cover every interrupted task. A failed combined repair requires adoption.')
+                    if snapshot["tree"] != batch["checkpoint"]["tree"] and not request.get("adopt"):
+                        raise ApiError("worktree_changed", "Inspect partial/manual changes, then explicitly adopt and reverify.")
+                    if request.get("adopt"):
+                        batch["checkpoint"] = snapshot
+                        batch["git_admin"] = identity
+                        batch.pop("integrity_failure", None)
+                        batch.pop('combined_repair_pending', None)
+                        for attempt in batch['attempts']:
+                            if attempt.get('role') == 'fix' and attempt.get('status') in ('failed', 'interrupted'):
+                                attempt.setdefault('adopted_at', now())
+                        for task in batch["tasks"]:
+                            if task["status"] not in ("queued", "skipped", "blocked"):
+                                task.setdefault("before", {"tree": batch["baseline"]})
+                                task.setdefault("implementation", {"summary": "Manually adopted changes"})
+                                task.update(status="reviewing", verification_superseded=True)
                     for task in batch["tasks"]:
-                        if task["status"] not in ("queued", "skipped", "blocked"):
-                            task.setdefault("before", {"tree": batch["baseline"]})
-                            task.setdefault("implementation", {"summary": "Manually adopted changes"})
-                            task.update(status="reviewing", verification_superseded=True)
-                for task in batch["tasks"]:
-                    if task["id"] in skip:
-                        task["status"] = "skipped"
-                if batch.get("discussion_stale"):
-                    if not request.get("replan"):
-                        raise ApiError("stale_discussion", "Feedback changed; inspect it and explicitly replan unfinished work.")
-                    # Completed outcomes with changed source feedback must also be reconsidered.
-                    current = {i["key"]: i["fingerprint"] for i in state["feedback"] if not i.get('missing')}
-                    for task in batch["tasks"]:
-                        if task['status'] != 'skipped' and any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
-                            task["status"] = "queued"
+                        if task["id"] in skip:
+                            task["status"] = "skipped"
+                    if batch.get("discussion_stale"):
+                        if not request.get("replan"):
+                            raise ApiError("stale_discussion", "Feedback changed; inspect it and explicitly replan unfinished work.")
+                        # Completed outcomes with changed source feedback must also be reconsidered.
+                        current = {i["key"]: i["fingerprint"] for i in state["feedback"] if not i.get('missing')}
+                        for task in batch["tasks"]:
+                            if task['status'] != 'skipped' and any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
+                                task["status"] = "queued"
                 if batch["settings"] != state["settings"]:
                     if batch.get("attempts") or batch.get("plans") or batch.get("tasks"):
                         raise ApiError("settings_changed", "Model work has already started. Restore the batch's saved provider settings (shown in its details) before resuming it.")
@@ -372,6 +429,9 @@ def execute(session, state, request):
                          "verify_only": bool(request.get("verify_only")),
                          "auto_commit": request.get("auto_commit", False),
                          "plans": [], "attempts": [], "repairs": 0, "status": "planning"}
+                if is_harness:
+                    batch.update(execution_kind='issue_harness', harness_phase='implement',
+                                 harness_before=copy.deepcopy(snapshot))
                 state["batches"].append(batch)
                 session.save(state)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
@@ -381,9 +441,21 @@ def execute(session, state, request):
             models.preflight(session, state)
             preserve_ready = False
             batch.pop('preflight_error', None)
+            if is_harness:
+                from . import issue_harness
+                try:
+                    return issue_harness.execute(session, state, batch, remote)
+                finally:
+                    completing = bool(batch.get('commit_execution'))
             if not batch["tasks"] or request.get("replan"):
                 retained = [t for t in batch["tasks"] if t["status"] in ('complete', 'skipped')]
-                covered = {k for t in retained for k in t["items"]}
+                unfinished = {k for t in batch['tasks'] if t['status'] not in ('complete', 'skipped') for k in t['items']}
+                skipped_issues = {k for t in retained if t['status'] == 'skipped' for k in t['items']
+                                  if any(i['key'] == k and i['kind'] == 'issue_plan' for i in state['feedback'])}
+                # An issue cannot be completed by skipping an implementation step.
+                retained = [t for t in retained if not (t['status'] == 'skipped' and set(t['items']) & skipped_issues)]
+                unfinished |= skipped_issues
+                covered = {k for t in retained for k in t["items"]} - unfinished
                 keys = [k for k in batch["items"] if k not in covered]
                 if keys:
                     plan, tasks = plan_tasks(session, state, batch, keys)
@@ -395,6 +467,12 @@ def execute(session, state, request):
                     retained_ids = {t['id'] for t in retained}
                     for task in retained:
                         task['depends_on'] = [dep for dep in task['depends_on'] if dep in retained_ids]
+                    predecessors = {k: t['id'] for t in retained for k in t['items']}
+                    for task in tasks:
+                        for key in task['items']:
+                            if key in predecessors and predecessors[key] not in task['depends_on']:
+                                task['depends_on'].append(predecessors[key])
+                            predecessors[key] = task['id']
                     batch["tasks"] = retained + tasks
                 batch["discussion_stale"] = False
                 active = active_feedback_keys(batch)
