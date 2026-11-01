@@ -33,7 +33,6 @@ RESULT = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS,
               "verification_cases": CASES, "case_results": CASE_RESULTS,
               "complete": {"type": "boolean"}, "blocking": STRINGS})
 REVIEW = obj({"summary": TEXT, "outcomes": OUTCOMES, "checks": STRINGS, "case_results": CASE_RESULTS,
-              "plan_dependencies": {"type": "array", "items": obj({"case_id": TEXT, "requires_task": TEXT, "evidence": TEXT})},
               "assessment": {"type": "string", "enum": ["passed", "changes_requested", "incomplete"]},
               "blocking": STRINGS})
 

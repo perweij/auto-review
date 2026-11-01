@@ -1,5 +1,9 @@
 # Cases established before implementation
 
+Historical record: the issue task-recovery and `fix-issue --replan` mechanisms
+described below were retired by the [harness delegation design](../../plans/issue-autonomy.md).
+Interactive Owner verification remains supported.
+
 Follow-up authorized after the repair-only experiment. This is a sequential
 experiment, not an additional repair of that candidate or of the live PR.
 

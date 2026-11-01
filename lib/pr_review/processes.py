@@ -112,6 +112,8 @@ class Result:
 def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
         stderr_path=None, model_events=False, stage="", on_line=None):
     """Run without a shell; log raw bytes while interpreting complete records."""
+    from .issue_resources import check as check_issue_resources, active as issue_resources_active
+    check_issue_resources()
     cancellation = _cancellation.get() or Cancellation()
     cancellation.check()
     argv = [str(a) for a in argv]
@@ -172,6 +174,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
 
             while selector.get_map() or child.poll() is None:
                 cancellation.check()
+                check_issue_resources()
                 current = time.monotonic()
                 if not stopped and timeout is not None and current - started >= timeout:
                     reason = "timeout"
@@ -231,7 +234,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                             if index < len(parts) - 1:
                                 line_received(name, pending[name])
                                 pending[name].clear()
-                if stage and current - heartbeat >= 5:
+                if stage and current - heartbeat >= (10 if issue_resources_active() else 5):
                     emit("progress", message=f"[{stage}] Process running: {int(current-started)}s elapsed; {max(0, int(current-activity))}s since last output (stdout/stderr)")
                     if current - activity >= 60 and not silence_warned:
                         emit("progress", message="Warning: No output for 60s; progress is unconfirmed. Ctrl-C stops this stage and retains completed reviews.")

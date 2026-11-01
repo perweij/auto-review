@@ -50,8 +50,7 @@ def bind(report, required, tree):
                 raise ApiError('invalid_result', 'Every case requires a supported status and concrete evidence.')
         if any(r['status'] in ('failed', 'unavailable') for r in supplied) and report.get('complete') and not report.get('blocking'):
             raise ApiError('invalid_result', 'Failed or unavailable case evidence cannot support a passed outcome.')
-        if any(r['status'] == 'unavailable' for r in supplied) and report.get('assessment') == 'changes_requested':
-            raise ApiError('invalid_result', 'Unavailable verification evidence requires an incomplete assessment.')
+        # Defects and unavailable checks are independent; verified() still rejects missing evidence.
     if required or supplied is not None:
         report.update(case_contract=digest(required), case_tree=tree)
     return report
@@ -95,6 +94,15 @@ def verified(report, required, tree):
 
 
 def current(batch):
+    if batch.get('execution_kind') == 'issue_harness':
+        return (batch.get('harness_candidate', {}).get('status') == 'ready'
+                and batch.get('harness_candidate_tree') == batch.get('final_tree')
+                and batch.get('harness_review', {}).get('status') == 'ready'
+                and bool(batch.get('final_tree'))
+                and batch.get('harness_review_tree') == batch['final_tree']
+                and batch.get('review_tree') == batch['final_tree']
+                and not batch.get('harness_review', {}).get('findings')
+                and not batch.get('harness_review', {}).get('questions'))
     for task in batch.get('tasks', []):
         if task['status'] == 'complete' and not verified(task.get('review', {}), task_cases(task), task.get('after', {}).get('tree')):
             return False

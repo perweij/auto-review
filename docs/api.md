@@ -777,29 +777,31 @@ history. A now-accepted write is receipted instead. Ambiguous/changed results an
 read failures cannot authorize a resend. Recovery never runs models, pushes, or
 publishes; a separate `issue-run` resumes execution.
 
-Issue-plan feedback may appear in multiple Owner tasks, with unique task IDs,
-per-task expected outcomes and a dependency on the previous task for that issue.
-Ordinary feedback retains exactly-once task coverage. Task reviews receive `task`
-context; the final review deduplicates issue keys and verifies the whole approved
-plan. `issue_task_format: 2` records plans using these semantics. Replanning keeps
-completed steps and plans only unfinished outcomes, retaining prior plans/reports.
+`issue-run` delegates the approved scope to a persistent implementation harness.
+The linked Owner batch stores source identity, completed commit boundaries and
+publication evidence; unfinished tasks do not control execution. A saved review
+phase resumes review without repeating implementation. A source or context change
+invalidates that candidate. Legacy tasks are migrated once, retaining completed
+boundaries and archiving unfinished task records.
 
-`issue-run` accepts Boolean `replan` (CLI `fix-issue --replan`). It requires an
-existing linked Owner batch with unfinished tasks and delegates to `owner-fix`
-with that batch and `replan: true`. The target is selected before model work or
-remote writes and rechecked before execution. The explicit request is consumed
-once per invocation; it does not apply to later corrective batches or persist
-across a wait for issue-plan approval. Prior attempts/plans and completed tasks
-remain in the Owner journal. Old task repair counts remain in archived tasks;
-new tasks use the existing allowance. Workspace adoption, approval, frozen-model,
-trust and commit guards are unchanged. `replan: true` is invalid for other issue
-operations, including `issue-recover`.
+The independent harness reviewer is the sole acceptance gate, configured by the
+Owner review settings. After verification the coordinator commits, pushes, and
+marks the PR ready; it does not invoke the separate PR-review/synthesis pipeline.
+Legacy `review_session` references are retained as history and are not resumed.
 
-Issue execution errors include `stage`, `task` where available, `summary`,
-`blocking`, and `attempt` where available in `error`. The top-level `next_action`
-uses `retry` for incomplete assessments without clarification or integrity failures,
-and `inspect_owner` for stops needing inspection; uncertain writes still use
-`recover`. These diagnostic fields do not grant publication or bypass verification.
+The former issue `replan` control is obsolete and rejected before I/O. Resume with
+an ordinary `issue-run`; `adopt` still explicitly accepts inspected workspace
+changes. Interactive `owner-fix` retains its separate explicit replanning and task
+controls. Harness batches reject those task controls instead of entering the
+interactive task engine.
+
+Issue product questions use `next_action: await_answers`. Commit failures report
+`stage: commit`, `summary` and `blocking`, with `inspect_owner`; uncertain writes
+still use `recover`. These diagnostic fields never bypass source verification or
+authorize publication. Older task diagnostics remain in saved history.
+
+The following verification-case contract applies to interactive Owner tasks,
+not to issue-harness execution.
 
 New Owner tasks carry up to eight `verification_cases`, each with a stable `id`,
 `scenario`, `expected`, supporting `basis`, and `intent` (`preserve` or `change`).

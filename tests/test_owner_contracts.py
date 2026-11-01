@@ -40,9 +40,20 @@ class ContractTest(unittest.TestCase):
             with self.assertRaises(ApiError): contracts.bind(result([case()],status), [case()], 'tree')
             value = contracts.bind(result([case()],status,False), [case()], 'tree')
             self.assertFalse(contracts.verified(value,[case()],'tree'))
-        with self.assertRaises(ApiError):
-            contracts.bind({**result([case()],'unavailable',False),
-                            'assessment':'changes_requested'},[case()],'tree')
+        mixed = contracts.bind({**result([case()],'unavailable',False),
+                                'assessment':'changes_requested'},[case()],'tree')
+        self.assertFalse(contracts.verified(mixed, [case()], 'tree'))
+
+    def test_confirmed_defects_survive_unavailable_coverage(self):
+        required = [case(), case('pending')]
+        report = result(required, complete=False)
+        report.update(assessment='changes_requested', blocking=['Wrong provider selected'])
+        report['case_results'][0]['status'] = 'failed'
+        report['case_results'][1]['status'] = 'unavailable'
+        bound = contracts.bind(report, required, 'tree')
+        self.assertEqual(['Wrong provider selected'], bound['blocking'])
+        self.assertTrue(contracts.matches(bound, required, 'tree'))
+        self.assertFalse(contracts.verified(bound, required, 'tree'))
 
     def test_identity_binds_case_expectations_and_source(self):
         value = contracts.bind(result([case()]),[case()],'tree')
@@ -120,13 +131,13 @@ class ContractWorkflowTest(unittest.TestCase):
         self.assertFalse(owner_publication.automatic_proof(session,data,reply))
 
     def test_paused_step_retains_case_contract_and_resume_verifies_it(self):
-        self.fixture.fail='pipeline'
+        self.fixture.blocked_task='pipeline'
         view=self.fixture.start()
         batch=view['batches'][-1]
         self.assertEqual('paused',batch['status'])
         self.assertEqual([case()],batch['tasks'][1]['verification_cases'])
         before=copy.deepcopy(batch['tasks'][0])
-        self.fixture.fail=None
+        self.fixture.blocked_task=None
         view=self.fixture.fixture.request('owner-fix',batch=batch['id'])
         self.assertEqual(before['review'],view['batches'][-1]['tasks'][0]['review'])
         self.assertEqual(before['after'],view['batches'][-1]['tasks'][0]['after'])
@@ -165,28 +176,6 @@ class ContractWorkflowTest(unittest.TestCase):
         self.assertEqual('failed',seen[0]['review_findings']['case_results'][0]['status'])
         self.assertEqual(batch['baseline'],self.fixture.fixture.git('rev-parse','HEAD',cwd=view['worktree']))
 
-    def test_issue_recovery_preserves_cases_and_final_tree_gate(self):
-        original = self.provider.side_effect
-        reviews = 0
-        recovery_cases = []
-        def model(session, state, batch, role, context):
-            nonlocal reviews
-            value = original(session, state, batch, role, context)
-            if role == 'review' and not context.get('scope'):
-                reviews += 1
-                if reviews <= 2:
-                    value['blocking'] = ['Concrete regression']
-                    value['case_results'][0]['status'] = 'failed'
-            if role == 'fix' and context.get('focused_recovery'):
-                recovery_cases.append(copy.deepcopy(context['verification_cases']))
-            return value
-        self.provider.side_effect = model
-        view = self.fixture.start(auto_commit=True, automatic_recovery=True)
-        batch = view['batches'][-1]
-        self.assertEqual([[case()]], recovery_cases)
-        self.assertEqual('ready', batch['status'])
-        self.assertTrue(contracts.current(batch))
-        self.assertTrue(batch['commit_progress']['complete'])
 
     def test_integration_repair_keeps_task_proofs_and_verifies_final_tree(self):
         original=self.provider.side_effect

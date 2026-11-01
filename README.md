@@ -146,8 +146,8 @@ See [LICENSE](LICENSE) for the full text.
 
 ## Fix an issue from the terminal
 
-`fix-issue` plans on the GitHub issue, then uses the shared Owner backend to
-implement, commit, push, and review the approved fix:
+`fix-issue` plans on the GitHub issue, then delegates the approved specification to a
+persistent Codex or Claude Code session, with guarded commits, pushes and review:
 
 ```sh
 bin/fix-issue -i 123
@@ -158,18 +158,28 @@ bin/fix-issue -p 456
 Repeat the command after answering questions or receiving review feedback.
 Questions and revisioned plans remain on the issue. A draft PR is bootstrapped
 with an empty commit after approval; implementation runs in an isolated Owner
-worktree. Successful verification and configured full reviews mark the PR ready.
+worktree. Successful independent harness verification marks the PR ready after a guarded push.
 
-Rejected tasks receive focused automatic recovery with a durable allowance of
-two additional repairs shared across the issue workflow. Each repair is reviewed
-before execution can advance. If that allowance is exhausted, the issue receives
-a notice with a one-time `/fix-issue retry <token>` command: the initiator can reply
-there to authorize another two repairs on the next invocation. Restarting or
-replanning does not reset this allowance. Requirement questions and plan approval
-remain separate from technical recovery.
-Verification blocked by later planned work can also trigger one automatic repair
-of the unfinished task plan, preserving completed work and verification obligations.
+### Autonomous issue execution
 
-`--yolo` skips plan approval for that invocation; unanswered questions still
-block. `--force` overrides assignment checks only. See the
-[issue workflow](docs/manual.md#issue-fixing) for eligibility, settings, and recovery.
+After approval, one implementation harness owns planning the code changes, coding,
+testing and debugging until the entire specification is ready. A fresh independent
+review checks the candidate; findings return to the same implementation session.
+The coordinator handles safeguards and GitHub communication. There is no second
+post-push PR-review pipeline. It does not launch a new coding agent for each task or replay test suites.
+Real product questions still require an answer. Interactive Owner retains its
+existing task workflow and focused verification policy.
+
+Progress goes to stderr; `--json` emits one final result on stdout. Optional limits:
+
+```sh
+bin/fix-issue -i 10 --max-runtime 2h --json
+bin/fix-issue -i 10 --min-weekly-quota-remaining 20 --max-weekly-quota-use 5 --max-runtime 2h --json
+```
+
+Runtime is cumulative active execution across resumes. Weekly usage is an
+account-wide observation in percentage points, not a token-derived estimate or
+exact attribution to this job. Codex quota monitoring uses its supported local
+account interface. Claude weekly monitoring currently uses the explicitly supplied
+runtime fallback. Delayed telemetry and concurrent account activity can affect
+quota observations; a time limit does not guarantee a particular quota spend.

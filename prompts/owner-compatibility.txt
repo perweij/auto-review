@@ -16,14 +16,6 @@ Every task must be implementable and verifiable using its prerequisites, not
 work assigned to a later task. Check verification dependencies as well as code
 dependencies. Combine mutually dependent implementation work, or assign full
 integration verification to a later task without dropping it.
-When planning_repair is supplied, reorder or repartition only unfinished work.
-Keep every retained_cases.case exactly once, including its supplied new stable ID
-and all text. Keep every requirements.outcome verbatim in exactly one expected
-outcome for its item; concatenate original outcome strings when merging work.
-Additional cases are allowed, within eight cases per task. Ensure each reported
-blocked case runs in the same task as, or after, the implementation required by
-requires_task (identified by the original task's outcomes). Preserve completed
-work and approved scope. Do not pass or skip unverified work to break a cycle.
 Before implementation, derive cases from the requirements and existing public
 entry points, not from a proposed patch or a list of reported bugs. For a
 representation change, trace which input sources reach normalization and loading,
@@ -63,15 +55,7 @@ passing tests. Missing material evidence requires incomplete verification; concr
 implementation defects require changes_requested in review. No automatic shell
 execution is attached to these reports. Existing focused-check limits still apply.
 
-Reviewer: independently verify the expected behavior and its basis. Your
-plan_dependencies must normally be empty. If a supplied case is unavailable
-because its implementation prerequisite is an unfinished downstream task listed
-in remaining_tasks, report assessment=incomplete and identify that case_id,
-requires_task (the exact remaining task ID), and concrete evidence explaining the
-dependency in plan_dependencies. This is a plan-ordering defect, not a missing user
-requirement or an environment failure. Do not invent dependencies to bypass a
-failed test. Do not require later-task behavior at an earlier task gate unless
-the supplied case actually requires it. Final combined reviews use an empty list.
+Reviewer: independently verify the expected behavior and its basis.
 The fixer's
 clarify outcome is a proposed question, not an instruction to ask the user.
 Adjudicate it before publication: internal representations, algorithms and

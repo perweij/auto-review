@@ -1,5 +1,9 @@
 # Prevent incomplete compatibility repairs in Owner
 
+Historical record: the issue task-recovery and `fix-issue --replan` mechanisms
+described below were retired by the [harness delegation design](issue-autonomy.md).
+Interactive Owner verification remains supported.
+
 Status: implementation, paired repair replay and planning-first follow-up complete;
 both replay acceptance criteria failed (partial improvement). Live PR retest deferred. See
 [evaluation](../evaluations/owner-compatibility/README.md).

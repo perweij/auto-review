@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 
 from .common import ApiError, command, locked, now, read_json
@@ -78,21 +79,25 @@ class Review(Store):
             result = process(argv, cwd=cwd, env=env, input_bytes=input_bytes,
                              timeout=self.runtime.auth_timeout if probe else self.runtime.model_timeout,
                              stdout_path=output, stderr_path=stderr, model_events=True, stage=stage)
-        except Cancelled as exc:
-            record.update(status='interrupted', exit_status=exc.details['exit_code'], finished_at=now())
+        except ApiError as exc:
+            record.update(status='interrupted' if isinstance(exc, Cancelled) or exc.code == 'resource_limit' else 'failed',
+                          exit_status=exc.details.get('exit_code', 1), finished_at=now())
             self.active = None
-            self.save()
             raise
+        finally:
+            # process() has stopped and reaped the child. Inventory its artifacts
+            # even when cancellation or the resource guard prevents normal tools.
+            # This bounded local read cannot launch another model or publish work.
+            try:
+                if not probe:
+                    self.record_generated_files(stage, before)
+            finally:
+                self.save()
         record.update(exit_status=result.returncode, finished_at=now())
         if result.reason:
             record.update(failure_reason=result.reason, process_exit_status=result.process_exit_status)
         if not probe:
             self.repo.verify(self.manifest, self.path)
-            after = set(self.repo.git('status', '--porcelain=v1', '--untracked-files=all', '--ignored', cwd=self.worktree).stdout.splitlines())
-            atomic_bytes(self.path / f'logs/{stage}.files-after.txt', ('\n'.join(sorted(after)) + ('\n' if after else '')).encode())
-            if after - before:
-                self.manifest['generated_files'] = sorted(set(self.manifest.get('generated_files', [])) | (after - before))
-                say('Warning: Model created untracked or ignored files (retained): ' + '\n'.join(sorted(after - before)))
         self.save()
         if result.returncode:
             self.model_failure(stage, provider, result.returncode, output, stderr, probe)
@@ -111,6 +116,19 @@ class Review(Store):
                            "(bwrap cannot mount /proc). Review inputs could not be inspected. "
                            f"Repair the provider execution environment and retry. See {output}")
         return result, output
+
+    def record_generated_files(self, stage, before):
+        result = subprocess.run(
+            ['git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false',
+             'status', '--porcelain=v1', '--untracked-files=all', '--ignored'],
+            cwd=self.worktree, capture_output=True, text=True, timeout=10, check=True)
+        after = set(result.stdout.splitlines())
+        atomic_bytes(self.path / f'logs/{stage}.files-after.txt',
+                     ('\n'.join(sorted(after)) + ('\n' if after else '')).encode())
+        generated = {line for line in after - before if line.startswith(('?? ', '!! '))}
+        if generated:
+            self.manifest['generated_files'] = sorted(set(self.manifest.get('generated_files', [])) | generated)
+            say('Warning: Model created untracked or ignored files (retained): ' + '\n'.join(sorted(generated)))
 
     def model_failure(self, stage, provider, rc, output, stderr, probe=False):
         text = output.read_text(errors='replace') + stderr.read_text(errors='replace')

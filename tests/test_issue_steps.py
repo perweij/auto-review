@@ -1,4 +1,4 @@
-"""Approved issues can span tasks without weakening whole-issue verification."""
+"""Interactive Owner issue tasks and migration of legacy CLI execution."""
 import copy
 from pathlib import Path
 import unittest
@@ -56,11 +56,25 @@ class IssueStepsTest(unittest.TestCase):
         self.owner.save(data)
         self.calls = []
         self.legacy = False
-        self.fail = None
+        self.blocked_task = None
         self.final_failure = False
         p = patch('pr_review.owner_providers.invoke', side_effect=self.model)
         p.start()
         self.addCleanup(p.stop)
+        p = patch('pr_review.issue_harness.invoke', side_effect=self.harness)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def harness(self, session, state, batch, role, specification, feedback):
+        from pr_review import owner_providers
+        report = owner_providers.invoke(session, state, batch, role, {
+            'feedback': session.items(state, batch['items']), 'scope': role == 'review',
+            'task': {'rationale': 'specification'}, 'approved_issue_plan': {'plan': specification}})
+        return {'status': 'ready' if report['complete'] and not report['blocking'] else
+                'working' if role == 'fix' else 'changes_requested',
+                'outcomes': report.get('outcomes', []),
+                'summary': report['summary'], 'checks': report['checks'],
+                'findings': report['blocking'], 'questions': []}
 
     def model(self, session, state, batch, role, context):
         self.calls.append((role, copy.deepcopy(context)))
@@ -71,7 +85,7 @@ class IssueStepsTest(unittest.TestCase):
                      [task('config', self.key), task('pipeline', self.key, ['config'])])
             return {'tasks': tasks}
         name = context.get('task', {}).get('rationale')
-        incomplete = (role == 'fix' and (self.legacy or name == self.fail)
+        incomplete = (role == 'fix' and (self.legacy or name == self.blocked_task)
                       or role == 'review' and getattr(self, 'incomplete_review', False))
         if role == 'fix' and not incomplete:
             path = Path(state['worktree']) / (name + '.txt')
@@ -112,13 +126,13 @@ class IssueStepsTest(unittest.TestCase):
         self.assertFalse(self.fixture.posts)
 
     def test_partial_issue_resume_reuses_completed_step(self):
-        self.fail = 'pipeline'
+        self.blocked_task = 'pipeline'
         view = self.start()
         batch = view['batches'][-1]
         self.assertEqual(['complete', 'needs_attention'], [t['status'] for t in batch['tasks']])
         self.assertFalse(any(c.get('scope') for _,c in self.calls))
         self.calls.clear()
-        self.fail = None
+        self.blocked_task = None
         view = self.fixture.request('owner-fix', batch=batch['id'], replan=True, auto_commit=True)
         self.assertEqual('ready', view['batches'][-1]['status'])
         self.assertEqual(['pipeline'], [c['task']['rationale'] for role,c in self.calls if role == 'fix'])
@@ -146,7 +160,7 @@ class IssueStepsTest(unittest.TestCase):
         self.assertFalse(self.fixture.request('owner-prepare-commit')['ready'])
 
     def test_skipped_issue_step_cannot_pass_final_review(self):
-        self.fail = 'pipeline'
+        self.blocked_task = 'pipeline'
         view = self.start()
         batch = view['batches'][-1]
         self.calls.clear()
@@ -154,12 +168,12 @@ class IssueStepsTest(unittest.TestCase):
         self.assertEqual('paused', view['batches'][-1]['status'])
         self.assertFalse(any(c.get('scope') for _,c in self.calls))
 
-    def test_legacy_unchanged_attempt_replans_on_issue_resume_and_keeps_history(self):
+    def test_legacy_attempt_migrates_on_issue_resume_and_keeps_history(self):
         self.legacy = True
         self.start()
         data = self.owner.load()
         batch = data['batches'][-1]
-        batch.pop('issue_task_format')
+        batch.pop('issue_task_format', None)
         old_id = batch['id']
         self.owner.save(data)
         self.legacy = False
@@ -168,21 +182,11 @@ class IssueStepsTest(unittest.TestCase):
         self.assertEqual(old_id, result['id'])
         self.assertEqual(2, len(result['plans']))
         self.assertEqual('whole', result['plans'][1]['previous_tasks'][0]['rationale'])
-        self.assertEqual(2, result['issue_task_format'])
-        self.assertEqual(['config', 'pipeline'], [t['rationale'] for t in result['tasks']])
+        self.assertEqual('issue_harness', result['execution_kind'])
+        self.assertEqual(['approved-specification'], [t['id'] for t in result['tasks']])
         self.assertEqual('ready', result['status'])
         self.assertFalse(self.fixture.posts)
 
-    def test_legacy_upgrade_does_not_replan_changed_or_completed_work(self):
-        self.legacy = True
-        self.start()
-        data = self.owner.load()
-        batch = data['batches'][-1]
-        batch.pop('issue_task_format')
-        self.assertTrue(owner_fixes.legacy_issue_replan(self.owner, data, batch))
-        for change in [{'checkpoint':{'tree':'different'}}, {'commit_execution':{'status':'paused'}},
-                       {'integrity_failure':'unsafe'}, {'issue_task_format':2}]:
-            self.assertFalse(owner_fixes.legacy_issue_replan(self.owner, data, {**batch, **change}))
 
     def test_manual_issue_selection_prepares_first_step(self):
         view = self.start()
@@ -190,11 +194,11 @@ class IssueStepsTest(unittest.TestCase):
         self.assertTrue(prepared['ready'])
         self.assertEqual((1, 2), (prepared['position'], prepared['total']))
 
-    def test_legacy_replan_still_refuses_unadopted_manual_changes(self):
+    def test_legacy_migration_refuses_unadopted_manual_changes(self):
         self.legacy = True
         view = self.start()
         data = self.owner.load()
-        data['batches'][-1].pop('issue_task_format')
+        data['batches'][-1].pop('issue_task_format', None)
         self.owner.save(data)
         source = Path(view['worktree']) / 'source.txt'
         source.write_text('manual changes must survive\n')
@@ -205,32 +209,35 @@ class IssueStepsTest(unittest.TestCase):
         self.assertEqual([], self.calls)
 
     def test_issue_error_exposes_assessed_blocker_and_posts_status(self):
-        self.fail = 'config'
+        self.blocked_task = 'config'
         self.incomplete_review = True
         flow = self.flow()
-        with self.assertRaises(ApiError) as caught:
+        view = self.start()
+        view['batches'][-1]['commit_execution'] = {'error': 'Commit hook failed'}
+        with patch('pr_review.owner_fixes.execute', return_value=view), self.assertRaises(ApiError) as caught:
             flow.fix(self.owner, [self.key])
-        self.assertIn('Implement remaining scope', str(caught.exception))
-        self.assertEqual('verification', caught.exception.details['stage'])
-        self.assertEqual('retry', caught.exception.details['next_action'])
-        self.assertEqual('p1-config', caught.exception.details['task'])
-        self.assertEqual(['Implement remaining scope'], caught.exception.details['blocking'])
+        self.assertIn('Commit hook failed', str(caught.exception))
+        self.assertEqual('commit', caught.exception.details['stage'])
+        self.assertEqual('inspect_owner', caught.exception.details['next_action'])
+        self.assertEqual(['Commit hook failed'], caught.exception.details['blocking'])
         body, key = flow.writes.comment.call_args.args
         self.assertIn('execution stop, not a request for plan approval', body)
         self.assertNotIn('CLI', body)
-        self.assertIn('Implement remaining scope', body)
+        self.assertIn('Commit hook failed', body)
         self.assertTrue(key.startswith('owner-pause:'))
         self.assertNotIn('execution_blockers', flow.state)
 
     def test_notice_failure_preserves_owner_diagnostics(self):
-        self.fail = 'config'
+        self.blocked_task = 'config'
         self.incomplete_review = True
         flow = self.flow()
         flow.writes.comment.side_effect = ApiError('uncertain', 'Read-back failed')
-        with self.assertRaises(ApiError) as caught:
+        view = self.start()
+        view['batches'][-1]['commit_execution'] = {'error': 'Commit hook failed'}
+        with patch('pr_review.owner_fixes.execute', return_value=view), self.assertRaises(ApiError) as caught:
             flow.fix(self.owner, [self.key])
         self.assertEqual('uncertain', caught.exception.code)
-        self.assertEqual('p1-config', caught.exception.details['owner_failure']['task'])
+        self.assertEqual('commit', caught.exception.details['owner_failure']['stage'])
 
 
 if __name__ == '__main__':

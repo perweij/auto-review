@@ -815,109 +815,23 @@ local issue session. State is stored in `issues-v1` below the normal state root,
 with execution state in the linked `owners-v1` session. Resume from another
 machine or without those local records is not supported.
 
-An approved issue can be split into dependent implementation steps, each with its
-own expected outcome and review. Ordinary PR feedback still occurs in one task.
-The final combined review verifies the entire approved issue and all acceptance
-criteria. Skipping a step cannot complete the issue, and partial task commits do
-not mark it handled.
+The entire approved specification is delegated to one persistent implementation
+session. The harness handles its own decomposition, coding, testing and debugging.
+A fresh independent review assesses a completed candidate; actionable findings go
+back to the implementation session. There are no per-task repair credits or
+intermediate user checkpoints. Product questions are published on GitHub; internal
+design and verification problems remain implementation work.
 
-When implementation or verification stops, the result includes its stage, task,
-blockers, and diagnostic details. `next_action: retry` means a later invocation
-can retry; `inspect_owner` signals a technical failure requiring maintainer
-attention. An incomplete implementation is not automatically posted as a
-requirement question to the user.
+Recorded partial work and provider session identity survive interruption. Source
+or Git changes not accounted for in saved checkpoints require inspection and
+`--adopt` before continuation. Existing completed task boundaries survive migration
+from the earlier task pipeline, but future work is not split by that pipeline.
 
-For concrete task verification defects, `fix-issue` automatically continues with
-focused repairs after the normal task-local repair is consumed. An issue-wide
-allowance permits two additional repairs across all its batches, using the saved
-models, findings and case contracts. Reservations are persisted before execution;
-crashes, normal resumes, and explicit replanning do not replenish the allowance.
-Completed tasks remain intact and final-tree verification still gates publication.
-An incomplete fixer report or proposed clarification goes to independent
-technical review rather than immediately becoming a user-facing stop. The reviewer
-checks architectural-ambiguity claims against approved requirements and actual
-callers. A concrete implementation defect enters the same bounded repair path;
-an independently verified implementation can proceed. Neither the fixer's passing
-tests nor its uncertainty alone decides completion. A genuine missing product
-decision requires a plain-language question; unavailable verification remains a
-technical limitation. Resuming a saved partial implementation with current source
-and case identity retries assessment rather than blindly running the fixer again.
-Only clarification outcomes from a current independent review are published as
-implementation questions. Fixer claims, stale review questions, and ordinary
-technical blockers are not user questions. Reviewers must ground expectations in
-approved behavior and actual callers: identical input/state cannot be required to
-produce different results based on invisible intent. Internal representation
-choices remain implementation work. A confirmed missing observable decision is
-asked in plain language with alternatives and effects, and the result reports
-`await_answers`. Older waiting states whose blockers came solely from unreviewed
-fixer claims are archived and reassessed; user replies and approval checks remain.
-This policy does not automatically adopt interrupted/manual edits or override
-permissions, approval, integrity checks, or incomplete verification. Ordinary
-standalone Owner batches retain their existing policy; final integration repair
-also retains its existing bound.
-
-If the allowance is exhausted, `next_action: await_recovery_authorization` reports
-the stop and a deduplicated issue notice gives a one-time command:
-`/fix-issue retry <token>`. The workflow initiator can post that exact command as
-an issue comment to authorize up to two more focused repairs. The next invocation
-consumes it once; no CLI access is needed to authorize recovery. Other authors,
-quoted commands, old tokens, and comments containing additional prose cannot
-authorize it. This authorizes repair effort, not a changed plan or new requirements.
-The command does not start a process itself; a manual or periodic invocation must
-run the workflow. No scheduler is installed by this feature.
-
-If a task's verification requires implementation assigned to a later dependent
-task, the reviewer can identify that internal planning deadlock. `fix-issue` permits
-one automatic planning-repair operation per issue workflow. The planner can reorder
-or repartition unfinished work; it must retain every existing case unchanged and
-every original task outcome. The backend checks that the reported blocked case
-now follows its prerequisite (or shares its task). Completed work stays verified,
-and final combined verification still gates publication; no provisional pass is
-introduced. Retained cases receive stable recovery IDs to avoid collisions when
-moved between tasks, with their original IDs preserved in history.
-
-The planning reservation is persisted before the model runs. The existing planner
-may correct invalid output at most twice (three calls total); restart does not grant
-another automatic operation. Task-local repair counts are conservatively carried
-forward, and issue-wide code-repair credits are unchanged. A new task starts its
-implementation against the retained source, including partial unfinished changes.
-If planning repair fails or another deadlock remains, it needs maintainer attention
-or an explicit replan; the program does not repeatedly replenish planning attempts.
-Environment failures, requirement questions, and ordinary failed tests do not
-trigger this mechanism. Older incomplete reviews are reassessed on resume using
-the current task plan, so an existing paused workflow can use it without a PR patch.
-On the first resume of an older, paused one-task issue attempt that made no code
-changes and completed no verification, the planner can replace that task with
-smaller dependent steps. Earlier plans/reports remain in history. Modified,
-verified, committing, or integrity-blocked batches are not automatically replanned;
-normal workspace and frozen-setting checks still apply.
-
-To explicitly replace the unfinished Owner task plan after inspecting a stopped
-attempt, use:
-
-```sh
-fix-issue -i 123 --replan
-# Or select the associated PR:
-fix-issue -p 456 --replan
-```
-
-This delegates to Owner's existing replanning operation. Completed tasks remain;
-superseded tasks, their consumed repair allowances, prior plans and attempts stay
-in history. Normal implementation, verification, automatic commits, pushes and
-publication continue after replanning, subject to the existing safeguards.
-New tasks receive the normal repair allowance. It is an explicit
-planning decision, not an automatic retry-budget reset. The flag applies only to
-the selected unfinished batch, once in this invocation; subsequent corrective
-batches run normally. It is not queued if this invocation waits for answers or
-approval. Re-run with `--replan` when ready in that case.
-
-Replanning does not change the approved issue scope, approve a new issue plan,
-adopt edits, or bypass frozen settings, trust, or commit-recovery checks. Publish
-requirement clarifications through the normal issue discussion/approval flow
-before replanning against them. Use `--adopt` as well only when you have inspected
-and intend to retain partial/manual workspace changes. A new issue, a completed
-batch, or a batch with only final verification/committing left has no unfinished
-tasks to replan. `--replan` cannot be combined with write inspection/recovery.
+Resume unfinished implementation with the normal command. The former issue
+`--replan` option and repair-credit authorization have been removed. Existing
+attempts and plans remain readable history; migration does not require a new
+approval unless the approved scope changed. Interactive Owner retains its own
+explicit replanning controls.
 
 Shared reviewer flags and economical/expensive presets use normal precedence:
 defaults, preset, saved settings, then explicit individual flags. Owner settings
@@ -935,12 +849,12 @@ processing provider. `--settings-file` accepts the existing Owner JSON shape:
 Started batches retain their settings. Agent configuration changes require the
 normal `--trust-agent-config TOKEN` approval, reported with the blocker details.
 
-Each invocation uses Owner verification, pushes verified commits, and runs the
-configured full review. Eligible findings enter Owner locally; uncertain or
-revisited findings require attention. One additional corrective batch is allowed
-per invocation, followed by another review. Further findings leave the PR draft
-until the next invocation. Later PR feedback is processed the same way; verified
-replies are published, while human thread resolution remains manual.
+After independent harness verification, the coordinator commits, pushes, and marks
+the PR ready. Review findings return to the same implementation session before
+publication; there is no separate post-push review loop. Verified
+replies are published, while human thread resolution remains manual. The saved
+Owner `verification` setting remains compatible with interactive Owner; its focused
+testing policy does not constrain whole-issue implementation.
 
 Unexpected remote commits stop execution even between batches. Neither `--force`
 nor `--yolo` authorizes them. Interrupted model edits remain in the Owner worktree;
@@ -1001,3 +915,58 @@ may fetch dedicated `refs/fix-issue/` snapshots but never changes working files
 or publishes. Unknown facts never pass. Semantic intake is a separate provider
 operation. A future scanner can add its own label filter and reuse these checks;
 execution always refreshes eligibility before writes.
+
+## Autonomous issue execution and resource controls
+
+After approval, one persistent Codex or Claude Code implementation session owns
+the whole specification: exploration, decomposition, coding, test setup, tests and
+debugging. The coordinator does not split it into independently launched tasks,
+generate test contracts, or replay reported test commands. It resumes the exact
+implementation session when more work is needed; it never selects a global “last”
+session. Interactive Owner keeps its existing task workflow and focused policy.
+
+When the harness reports a complete candidate, a fresh independent reviewer checks
+the whole approved scope and the source tree. Findings go back to the same
+implementation session. The reviewer inspects existing evidence and runs additional
+checks where needed, rather than automatically repeating the entire test suite.
+The harness reviewer is the sole acceptance gate. Its model and provider come from
+the saved Owner review settings; `--reviewers` does not start additional post-push
+reviews. Use `bin/pr-review` separately when an additional PR review is wanted.
+
+The coordinator retains approval and eligibility checks, isolated worktrees,
+source/Git integrity checks, exact final-tree verification, journaled commits and
+pushes, and GitHub questions/status messages. Existing completed task boundaries
+are preserved when a paused legacy batch migrates; its remaining work becomes one
+whole-specification execution. New executions normally produce one verified commit
+per candidate, without model-generated task commits. Final verification is required
+before any implementation claim can be published.
+
+Real product choices are asked on GitHub. Repeated returns without source progress
+end with a diagnostic; provider failures and resource limits preserve partial work
+and the exact implementation session. Recorded interrupted changes can resume;
+unrecorded external edits still require explicit inspection/adoption. A process
+exit is not a routine implementation checkpoint or a scheduling requirement.
+
+`--max-runtime 30m` (or `2h`, `90s`) limits cumulative active time after approval,
+including provider calls, checks and automatic recovery. Invocation gaps and
+approval waits do not consume it. Saved limits remain in effect unless explicitly
+replaced; increasing `--max-runtime` increases the total allowance, not just the
+next invocation. Runtime expiry cancels owned subprocesses and returns
+`resource_limit`; interrupted work is unverified.
+
+`--min-weekly-quota-remaining 20` preserves an observed 20% weekly reserve.
+`--max-weekly-quota-use 5` stops after an observed five-percentage-point increase
+during active execution. Both may be used together and apply independently to
+provider allowance pools. Observations may include simultaneous account activity.
+Resuming does not replenish consumed allowance. Reset/telemetry gaps are reported
+as unknown, never zero; configured runtime provides the fallback. A requested
+quota guard without available telemetry or an explicit runtime fallback stops
+before unmonitored model work. Codex weekly telemetry uses local app-server
+account/rateLimits/read without model turns; Claude weekly telemetry is presently
+unavailable in this adapter. No private endpoint or extracted credential is used.
+
+Quota polling is at most once per minute. Provider reporting delays and requests
+already in flight can overshoot a threshold. Tokens are not converted into quota
+percentages. Neither percentage monitoring nor a runtime limit guarantees an exact
+subscription spend. With `--json`, human progress stays on stderr and stdout has
+one final result, including a versioned execution/resource summary.
