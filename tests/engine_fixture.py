@@ -1,6 +1,6 @@
 """Disposable Git fixture and scripted providers for the shared review engine.
 
-The engine runs real subprocesses, real bubblewrap and real Git. Only the provider
+The engine runs real subprocesses, private workspaces and real Git. Only the provider
 CLIs are replaced: ``CandidateReview.command`` returns small shell scripts that act
 as reviewers and synthesis. Scenarios are selected through environment variables so a
 test can change behavior between resumes.
@@ -24,14 +24,13 @@ REAL_REVIEW_OWNER = acceptance.review_owner
 REAL_REVIEW_ISSUE = acceptance.review_issue
 KEYS = ['thread:T1', 'thread:T2']
 
-# A reviewer. HIDDEN_PATHS must not exist from inside its sandbox. The body proves what it could read.
+# A reviewer. The body records the checkout and explicitly supplied context.
 SLOT_SCRIPT = r'''
 stage=$1; out=${2:-}
-for p in ${HIDDEN_PATHS:-}; do if [ -e "$p" ]; then echo "visible: $p" >&2; exit 41; fi; done
 case " ${FAIL_STAGES:-} " in *" $stage "*) exit 7 ;; esac
 case " ${EDIT_STAGES:-} " in *" $stage "*) echo hacked >> source.txt ;; esac
-ctx=$(cat /tmp/review-private/context/selected_feedback.json 2>/dev/null | tr -d '"\\\n' | head -c 40)
-body="stage=$stage head=$(git rev-parse HEAD 2>/dev/null | head -c 12) source=$(tr '\n' , < source.txt) new=$(tr '\n' , < new.txt 2>/dev/null) context=$ctx root=$(ls /tmp/review-private 2>/dev/null | tr '\n' ,) files=$(ls /tmp/review-private/context 2>/dev/null | tr '\n' ,)"
+ctx=$(cat ../context/selected_feedback.json 2>/dev/null | tr -d '"\\\n' | head -c 40)
+body="stage=$stage head=$(git rev-parse HEAD 2>/dev/null | head -c 12) source=$(tr '\n' , < source.txt) new=$(tr '\n' , < new.txt 2>/dev/null) context=$ctx root=$(ls .. 2>/dev/null | tr '\n' ,) files=$(ls ../context 2>/dev/null | tr '\n' ,)"
 if [ -n "$out" ]; then printf '%s\n' "$body" > "$out"; printf '%s\n' '{"type":"review.completed"}'
 else printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$body"; fi
 '''
@@ -164,10 +163,6 @@ class ScriptedProviders:
 
     def marks_text(self):
         return self.marks.read_text() if self.marks.exists() else ''
-
-    def needs_bubblewrap(self):
-        if not shutil.which('bwrap'):
-            self.skipTest('bubblewrap unavailable')
 
     def failing_process(self, stage, error):
         """A runner that raises ``error`` for ``stage`` and otherwise runs the real process."""

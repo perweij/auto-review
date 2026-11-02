@@ -9,16 +9,21 @@ from contextlib import contextmanager
 
 from .common import ApiError
 from .processes import cancellation_scope, stop_group, Cancelled
-from .providers import environment
+from .providers import environment, claude_settings
+
+
+def discovery_command(provider):
+    """Metadata only: Codex app-server receives no execution requests."""
+    return (["codex", "app-server", "--listen", "stdio://"] if provider == "codex" else
+               ["claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                "--no-session-persistence", "--permission-mode", "dontAsk", "--tools", "",
+                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "user",
+                *claude_settings(disableAllHooks=True), "--disable-slash-commands"])
 
 
 @contextmanager
 def connection(provider, timeout=30):
-    command = (["codex", "app-server", "--listen", "stdio://"] if provider == "codex" else
-               ["claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                "--no-session-persistence", "--permission-mode", "dontAsk", "--tools", "",
-                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "user",
-                "--settings", '{"disableAllHooks":true}', "--disable-slash-commands"])
+    command = discovery_command(provider)
     with tempfile.TemporaryDirectory(prefix="pr-review-models-") as cwd, cancellation_scope() as cancellation:
         cancellation.check()
         try:

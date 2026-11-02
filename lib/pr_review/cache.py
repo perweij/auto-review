@@ -107,7 +107,7 @@ def inputs(run, stage, *, followup_input=None, followup_prompt=None):
             identity['legacy_source'] = legacy
             identity['isolation'] = 'legacy-original-verification'
         else:
-            identity['isolation'] = 'private-snapshot-bwrap-v1'
+            identity['isolation'] = 'private-snapshot-container-v1'
     return canonical(identity, path)
 
 

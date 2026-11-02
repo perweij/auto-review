@@ -96,7 +96,7 @@ class Review(Store):
             self.save()
             raise ApiError('model_failed', f"{stage}: model reported a sandbox launch failure "
                            "(bwrap cannot mount /proc). Review inputs could not be inspected. "
-                           f"Repair the provider execution environment and retry. See {output}")
+                           f"The provider environment is incompatible with outer-container execution; check managed sandbox policy and provider diagnostics before retrying. See {output}")
         return result, output
 
     def record_generated_files(self, stage, before):
@@ -254,7 +254,7 @@ def capabilities(enabled, processing, runtime, cwd, *, independent_providers=Non
                    (['codex', 'login', '--help'], ['status'])]
     if 'claude' in enabled:
         checks += [(['claude', '--help'], ['--print', '--model', '--effort', '--permission-mode', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-                   '--no-session-persistence', '--disallowed-tools', '--add-dir', '--json-schema', '--append-system-prompt', '--tools', '--disable-slash-commands', '--strict-mcp-config', '--system-prompt', '--setting-sources'] + (['--max-budget-usd'] if runtime.budget else [])),
+                   '--no-session-persistence', '--disallowed-tools', '--add-dir', '--json-schema', '--append-system-prompt', '--tools', '--disable-slash-commands', '--strict-mcp-config', '--system-prompt', '--setting-sources', '--settings'] + (['--max-budget-usd'] if runtime.budget else [])),
                    (['claude', 'auth', '--help'], ['status'])]
     for argv, flags in checks:
         result = command(argv, cwd=cwd, check=False, timeout=90)

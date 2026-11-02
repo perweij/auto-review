@@ -210,8 +210,7 @@ JSON
 bin/fix-issue -i 42 --settings-file /tmp/owner-claude.json --max-runtime 2h --json
 ```
 
-One slot that matches the synthesis choice uses the direct path and needs no
-bubblewrap. For Codex-only work with two independent Codex reviewers of different
+One slot that matches the synthesis choice uses the direct path. For Codex-only work with two independent Codex reviewers of different
 models and a Sol synthesis:
 
 ```sh
@@ -234,8 +233,8 @@ JSON
 bin/fix-issue -i 42 --settings-file /tmp/owner-codex.json --max-runtime 2h --json
 ```
 
-Two or more independent reviewers require bubblewrap and each provider's review
-capability; preflight names anything missing before any model work starts.
+Independent reviewers use separate checkouts inside the enclosing sandbox container
+and require each provider's review capability; preflight names anything missing before any model work starts.
 
 The shared reviewer flags now configure acceptance review. `--reviewers`,
 `--reviewer-N-provider/model/effort`, `--processing-*`, `--claude-*`, `--codex-*`,

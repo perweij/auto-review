@@ -684,7 +684,7 @@ def dispatch(request):
                 'invalid_result': 'The provider could not supply a usable completion report after correction. No implementation was published.',
                 'integrity_failed': 'Protected worktree or Git state changed. Inspect the retained changes before continuing.',
                 'review_incomplete': 'Acceptance review could not finish. Its partial result is retained; resume to rerun only the stages without valid evidence.',
-                'independence_failed': 'Independent reviewer isolation could not be established. Fix the isolation problem and resume; the review never runs without it.',
+                'independence_failed': 'The independent reviewer workspace could not be prepared. Fix the workspace problem and resume; the review never runs without its workspace.',
                 'review_checkout_modified': 'A reviewer changed its disposable candidate checkout, so its result was discarded. The live worktree is unchanged and no adoption is needed; resume to rerun in a fresh checkout.',
                 'worktree_changed': 'The worktree differs from the saved execution checkpoint. Inspect and adopt the retained changes before continuing.',
                 'interrupted_task': 'An older interrupted run left unverified changes. Inspect and adopt the retained changes before continuing.',

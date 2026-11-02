@@ -1,6 +1,5 @@
-"""Private filesystem and snapshot for independent reviewer processes."""
+"""Separate reviewer workspaces inside the caller-provided sandbox container."""
 from dataclasses import dataclass, field
-import json
 import os
 from pathlib import Path
 import shutil
@@ -22,23 +21,13 @@ def _executable(name, path):
     return executable
 
 
-def startup_confirmed(stream):
-    """Only bubblewrap's dedicated info descriptor can confirm startup."""
-    stream.seek(0)
-    try:
-        info = json.load(stream)
-    except (ValueError, UnicodeDecodeError):
-        return False
-    return isinstance(info, dict) and type(info.get('child-pid')) is int and info['child-pid'] > 0
-
-
 def _git(cwd, *args, check=True):
     # The clone is disposable; do not execute host-configured checkout filters
     # while constructing it from an untrusted PR snapshot.
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith('GIT_')}
     env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null', GIT_TERMINAL_PROMPT='0')
     env['PATH'] = _safe_path(env.get('PATH', ''))
-    result = process([_executable('git', env['PATH']), '-c', 'core.hooksPath=/dev/null', *args], cwd=cwd, env=env)
+    result = process([_executable('git', env['PATH']), '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', *args], cwd=cwd, env=env)
     if check and result.returncode:
         raise ApiError('independence_failed', 'Could not prepare or verify the isolated Git snapshot: ' + result.stderr.strip())
     return result
@@ -49,7 +38,7 @@ def prepare_checkout(source, head_ref, base_ref, head, base, destination, cwd):
 
     The clone is disposable and never shares objects with its source. Refs named
     by the caller are fetched, ``head`` is checked out detached and ``base_ref``
-    is pinned to ``base``. It serves sandboxed reviewers and direct stages.
+    is pinned to ``base``. It serves independent reviewers and direct stages.
     """
     _git(cwd, 'clone', '--no-local', '--no-checkout', '--', str(source), str(destination))
     # PR refs are outside refs/heads and are not included by clone's
@@ -97,8 +86,8 @@ def preserve_generated(checkout, tracked, logs, run_path, stage):
 
 
 @dataclass
-class SandboxInputs:
-    """Everything a sandboxed reviewer needs from its workflow, without PR attributes."""
+class WorkspaceInputs:
+    """Everything a reviewer workspace needs from its workflow, without PR attributes."""
     source: Path            # repository whose objects feed the disposable clone
     head_ref: str
     base_ref: str
@@ -107,7 +96,7 @@ class SandboxInputs:
     scratch: Path           # parent of the private root
     cwd: Path               # host-side working directory; never the candidate itself
     output: Path            # run directory receiving ``reviews/<stage>.md.tmp`` and generated archives
-    protected: list = field(default_factory=list)
+    protected: list = field(default_factory=list)  # exclude workflow state from copied provider config
     context: dict = field(default_factory=dict)   # private context files: relative name -> bytes
 
 
@@ -124,34 +113,33 @@ def pr_inputs(run):
         history_paths.extend((snapshot.get('archive'), snapshot.get('worktree')))
     protected.extend(Path(value).resolve() for value in history_paths if value and Path(value).is_dir())
     snapshot = run.manifest['snapshot']
-    return SandboxInputs(source=run.repo.common, head_ref=run.repo.head_ref, base_ref=run.repo.base_ref,
+    return WorkspaceInputs(source=run.repo.common, head_ref=run.repo.head_ref, base_ref=run.repo.base_ref,
                          head=snapshot['head'], base=snapshot['base'], scratch=run.scratch, cwd=run.worktree,
                          output=run.path, protected=protected)
 
 
-class IndependentSandbox:
-    """A disposable clone inside a mount namespace, with private writable files.
+class IndependentWorkspace:
+    """A disposable clone and fresh provider home inside the outer container.
 
-    The host filesystem is read-only and review state and the original review
-    worktree are hidden. A new HOME and temporary directory prevent one provider
-    invocation from leaving files for another. Provider authentication files are
-    exposed read-only; review transcripts and provider session directories are not.
+    This separates inputs and sessions, not filesystem access. The enclosing
+    container supplies the security boundary; peers are not deliberately given
+    each other's reports or session state.
     """
     def __init__(self, run, stage, provider, inputs=None):
         self.temp = None
         try:
             self._initialize(run, stage, provider, inputs)
-        except BaseException:
+        except BaseException as exc:
             if self.temp is not None:
                 self.temp.cleanup()
+            if isinstance(exc, OSError):
+                raise ApiError("independence_failed", f"Cannot prepare reviewer workspace: {exc}") from exc
             raise
 
     def _initialize(self, run, stage, provider, inputs):
         self.run, self.stage, self.provider = run, stage, provider
-        if not shutil.which('bwrap'):
-            raise ApiError('independence_failed', 'Independent reviews require bubblewrap for filesystem isolation')
         self.inputs = inputs if inputs is not None else pr_inputs(run)
-        self.git = _executable('git', os.environ.get('PATH', ''))
+        _executable('git', os.environ.get('PATH', ''))
         self.temp = tempfile.TemporaryDirectory(prefix='isolated-review-', dir=self.inputs.scratch)
         self.root = Path(self.temp.name)
         self.checkout = self.root / 'checkout'
@@ -164,13 +152,16 @@ class IndependentSandbox:
         inputs = self.inputs
         self.tracked = prepare_checkout(inputs.source, inputs.head_ref, inputs.base_ref, inputs.head,
                                         inputs.base, self.checkout, inputs.cwd)
+        self.verifier = self.root / 'verification.git'
+        shutil.copytree(self.checkout / '.git', self.verifier)
         # Specification and feedback reach a reviewer only through files in its
         # private root; no prompt argument exists for ``codex exec review --base``.
         for name, content in inputs.context.items():
+            if Path(name).is_absolute() or ".." in Path(name).parts:
+                raise ApiError("independence_failed", "Invalid reviewer context path")
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             target.write_bytes(content)
-        self.mounts = []
         self.protected = list(inputs.protected)
         home = Path.home()
         source_home = Path(os.environ.get('CODEX_HOME', home / '.codex')) if provider == 'codex' else Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude'))
@@ -186,8 +177,8 @@ class IndependentSandbox:
                     raise ApiError('independence_failed', 'Provider configuration overlaps protected review files')
                 dest = self.home / name
                 dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                dest.touch(mode=0o600)
-                self.mounts += ['--ro-bind', str(source), '/tmp/review-private/home/' + name]
+                shutil.copyfile(source, dest)
+                dest.chmod(0o600)
         directories = [(source_home / 'skills', '.codex/skills')] if provider == 'codex' else [
             (source_home / 'skills', '.claude/skills'), (source_home / 'commands', '.claude/commands'),
             (source_home / 'plugins', '.claude/plugins')]
@@ -200,67 +191,44 @@ class IndependentSandbox:
                     raise ApiError('independence_failed', 'Provider configuration overlaps protected review files')
                 dest = self.home / target
                 dest.mkdir(parents=True, exist_ok=True, mode=0o700)
-                self.mounts += ['--ro-bind', str(source), '/tmp/review-private/home/' + target]
+                shutil.copytree(source, dest, dirs_exist_ok=True)
 
     def wrap(self, argv, env):
-        selected = []
-        for path in sorted(set(self.protected), key=lambda p: len(p.parts)):
-            if path == Path('/') or not path.is_dir():
-                raise ApiError('independence_failed', 'Cannot establish reviewer filesystem isolation')
-            if path.is_relative_to(Path('/tmp')) or any(path.is_relative_to(parent) for parent in selected):
-                continue
-            selected.append(path)
-        # An empty /proc blocks access to host process roots and file
-        # descriptors even on systems that cannot mount a private procfs.
         safe_path = _safe_path(env.get('PATH', ''))
-        sandbox = [_executable('bwrap', safe_path), '--die-with-parent', '--unshare-user', '--unshare-pid', '--unshare-ipc', '--cap-drop', 'ALL', '--ro-bind', '/', '/',
-                   '--dev', '/dev', '--tmpfs', '/proc', '--tmpfs', '/tmp']
-        if Path('/run/user').is_dir():
-            sandbox += ['--tmpfs', '/run/user']
-        for path in selected:
-            if path.is_relative_to(Path('/run/user')):
-                continue
-            sandbox += ['--tmpfs', str(path)]
-        sandbox += ['--dir', '/tmp/review-private', '--bind', str(self.root), '/tmp/review-private', *self.mounts,
-                    '--chdir', '/tmp/review-private/checkout', '--']
         env = {key: value for key, value in env.items() if key.upper() not in {
             'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
             'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_SHALLOW_FILE',
             'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES', 'GIT_CONFIG_SYSTEM', 'GIT_EXTERNAL_DIFF',
             'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS'}
             and not key.upper().startswith(('GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_'))}
-        env = dict(env, HOME='/tmp/review-private/home', TMPDIR='/tmp/review-private/tmp',
-                   CODEX_HOME='/tmp/review-private/home/.codex', CLAUDE_CONFIG_DIR='/tmp/review-private/home/.claude',
-                   XDG_CACHE_HOME='/tmp/review-private/home/.cache', XDG_CONFIG_HOME='/tmp/review-private/home/.config',
-                   XDG_STATE_HOME='/tmp/review-private/home/.local/state', XDG_RUNTIME_DIR='/tmp/review-private/runtime',
+        env = dict(env, HOME=str(self.home), TMPDIR=str(self.root / 'tmp'),
+                   CODEX_HOME=str(self.home / '.codex'), CLAUDE_CONFIG_DIR=str(self.home / '.claude'),
+                   XDG_CACHE_HOME=str(self.home / '.cache'), XDG_CONFIG_HOME=str(self.home / '.config'),
+                   XDG_STATE_HOME=str(self.home / '.local/state'), XDG_RUNTIME_DIR=str(self.root / 'runtime'),
                    GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', PATH=safe_path)
         output = str(self.inputs.output / f'reviews/{self.stage}.md.tmp')
         command = [_executable(argv[0], safe_path), *argv[1:]]
-        return sandbox + [('/tmp/review-private/result.md' if arg == output else arg) for arg in command], env
+        return [(str(self.root / 'result.md') if arg == output else arg) for arg in command], env
 
     def verify(self):
         gitdir = self.checkout / '.git'
         if gitdir.is_symlink() or not gitdir.is_dir():
             raise ApiError('integrity_failed', 'Independent reviewer changed its isolated Git directory')
-        prefix = [self.git, '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
-                  '--git-dir=/tmp/review-private/checkout/.git', '--work-tree=/tmp/review-private/checkout']
-        from .providers import environment
-        clean_env, _ = environment(self.provider)
+        # Verify content using a saved Git directory and fresh index, never the
+        # reviewer's index, filters, hooks or config. These are integrity guards,
+        # not protection from a process deliberately attacking the controller.
+        prefix = ['--git-dir=' + str(self.verifier), '--work-tree=' + str(self.checkout)]
         def invoke(*args):
-            argv, env = self.wrap(prefix + list(args), clean_env)
-            with tempfile.TemporaryFile() as startup:
-                argv[1:1] = ['--info-fd', str(startup.fileno())]
-                result = process(argv, cwd=self.inputs.cwd, env=env, pass_fds=(startup.fileno(),))
-                if not startup_confirmed(startup):
-                    raise ApiError('independence_failed', 'Cannot start isolated snapshot verification: ' + result.stderr.strip())
-            return result
-        head = invoke('rev-parse', 'HEAD')
-        base = invoke('rev-parse', self.inputs.base_ref)
-        tracked = invoke('diff', '--no-ext-diff', '--quiet', 'HEAD', '--')
-        staged = invoke('diff', '--no-ext-diff', '--cached', '--quiet', '--')
-        if (head.returncode or head.stdout.strip() != self.inputs.head or
-                base.returncode or base.stdout.strip() != self.inputs.base or
-                tracked.returncode or staged.returncode):
+            return _git(self.checkout, *prefix, *args)
+        head = _git(self.checkout, 'rev-parse', 'HEAD')
+        base = _git(self.checkout, 'rev-parse', self.inputs.base_ref)
+        (self.verifier / 'index').unlink(missing_ok=True)
+        invoke('read-tree', self.inputs.head)
+        invoke('add', '-u', '--', '.')
+        staged = _git(self.checkout, 'write-tree').stdout.strip()
+        tree = invoke('write-tree').stdout.strip()
+        expected = invoke('rev-parse', self.inputs.head + '^{tree}').stdout.strip()
+        if (head.stdout.strip() != self.inputs.head or base.stdout.strip() != self.inputs.base or tree != expected or staged != expected):
             raise ApiError('integrity_failed', 'Independent reviewer changed its isolated snapshot')
 
     def preserve_generated(self):

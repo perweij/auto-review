@@ -37,6 +37,7 @@ class ReviewInterruptionTest(unittest.TestCase):
                 if stage == 'reviewer-1':
                     run.settings['reviewer_slots'] = [{'id': stage, 'provider': 'codex', 'model': 'test', 'effort': 'high'}]
                 sandbox = Mock()
+                sandbox.checkout = worktree
                 sandbox.wrap.side_effect = lambda argv, env: (list(argv), env)
                 archive = root / 'private-artifacts'
                 sandbox.preserve_generated.return_value = (archive, ['private.pyc'])
@@ -54,7 +55,7 @@ class ReviewInterruptionTest(unittest.TestCase):
                     raise error
 
                 with patch('pr_review.reviews.cache.inputs', return_value={}), patch('pr_review.reviews.process', side_effect=process), \
-                        patch('pr_review.isolation.IndependentSandbox', return_value=sandbox):
+                        patch('pr_review.isolation.IndependentWorkspace', return_value=sandbox):
                     with self.assertRaises(ApiError) as caught:
                         run.model(stage, ['fake-provider'])
                 self.assertIs(error, caught.exception)

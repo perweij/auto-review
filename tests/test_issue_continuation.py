@@ -137,7 +137,7 @@ class ContinuationIntegrationTest(unittest.TestCase):
         self.engine_stop('review_incomplete', None, 'rerun only the stages without valid evidence')
 
     def test_an_independence_failure_stop_is_visible_and_never_falls_back(self):
-        self.engine_stop('independence_failed', ApiError('independence_failed', 'bubblewrap missing'), 'never runs without it')
+        self.engine_stop('independence_failed', ApiError('independence_failed', 'workspace preparation failed'), 'never runs without its workspace')
 
     def test_a_modified_checkout_stop_says_no_adoption_is_needed(self):
         self.engine_stop('review_checkout_modified', ApiError('review_checkout_modified', 'checkout changed'), 'no adoption is needed')

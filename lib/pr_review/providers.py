@@ -59,6 +59,16 @@ def provider_for(settings, stage):
     return stage if stage in ("claude", "codex") else settings["processing_provider"]
 
 
+def codex_settings():
+    """Execution policy for every Codex turn, including resumed sessions."""
+    return ["-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never"]
+
+
+def claude_settings(**settings):
+    """Use the enclosing container, preserving all other invocation settings."""
+    return ["--settings", json.dumps(dict(settings, sandbox={"enabled": False}), separators=(",", ":"))]
+
+
 def review_command(settings, runtime, stage, directory, base_ref, instructions=""):
     """``instructions`` extends the independent reviewer's system text for a non-PR workflow."""
     text = lambda name: (ROOT / "prompts" / name).read_text().rstrip("\n")
@@ -71,7 +81,7 @@ def review_command(settings, runtime, stage, directory, base_ref, instructions="
     effort = choice["effort"] if choice else settings[provider + "_effort"]
     codex = ["codex", "exec", "-m", model if provider == "codex" else settings["codex_model"], "--strict-config",
              "-c", "model_reasoning_effort=" + (effort if provider == "codex" else settings["codex_effort"]),
-             "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never"]
+             *codex_settings()]
     if independent and provider == "codex":
         codex.insert(2, "review")
         return codex + ["-c", "developer_instructions=" + json.dumps((ROOT / "prompts/independent.txt").read_text() + (("\n" + instructions.strip() + "\n") if instructions else ""), ensure_ascii=False),
@@ -79,7 +89,7 @@ def review_command(settings, runtime, stage, directory, base_ref, instructions="
     if not independent and provider == "codex":
         return codex + ["--ephemeral", "--json", "--output-schema", str(ROOT / f"prompts/{stage}.schema.json"),
                         "-o", str(directory / f"reviews/{stage}.codex.tmp"), "-"]
-    args = ["claude", "-p", "--model", model, "--effort", effort,
+    args = ["claude", *claude_settings(), "-p", "--model", model, "--effort", effort,
             "--permission-mode", runtime.permission, "--no-session-persistence"]
     if runtime.budget:
         args += ["--max-budget-usd", runtime.budget]
@@ -123,12 +133,12 @@ def cache_command(argv):
 def probe_command(provider, runtime, response):
     prompt = "Reply with exactly PR_REVIEW_AUTH_OK. Do not use tools or inspect files."
     if provider == "claude":
-        return ["claude", "-p", "--model", "haiku", "--effort", "low", "--permission-mode", "dontAsk",
+        return ["claude", *claude_settings(), "-p", "--model", "haiku", "--effort", "low", "--permission-mode", "dontAsk",
                 "--no-session-persistence", "--output-format", "json", "--tools", "", "--disable-slash-commands",
                 "--strict-mcp-config", "--setting-sources", "user", "--system-prompt",
                 "You are an authentication diagnostic. Follow the requested output exactly.", "--", prompt]
     return ["codex", "exec", "-m", runtime.probe_model, "--strict-config", "--skip-git-repo-check",
-            "-c", "model_reasoning_effort=low", "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never",
+            "-c", "model_reasoning_effort=low", *codex_settings(),
             "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-o", str(response), "--", prompt]
 
 
@@ -138,8 +148,8 @@ def adaptation_command(settings):
     provider, model, effort = choice['provider'], choice['model'], choice['effort']
     if provider == "codex":
         return ["codex", "exec", "-m", model, "--strict-config", "--skip-git-repo-check", "-c", "model_reasoning_effort=" + effort,
-                "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never", "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-"]
-    return ["claude", "-p", "--model", model, "--effort", effort, "--tools", "", "--strict-mcp-config",
+                *codex_settings(), "-c", "project_doc_max_bytes=0", "--ephemeral", "--json", "-"]
+    return ["claude", *claude_settings(), "-p", "--model", model, "--effort", effort, "--tools", "", "--strict-mcp-config",
             "--mcp-config", '{"mcpServers":{}}', "--no-session-persistence", "--output-format", "json"]
 
 

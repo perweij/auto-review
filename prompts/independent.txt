@@ -42,3 +42,8 @@ If a check fails, times out, or needs unavailable dependencies, continue with th
 available evidence and finish the review. State which commands actually ran,
 their outcomes, and any verification gaps. Do not treat a timeout as a defect,
 invent passing results, or present an unverified suspicion as an established bug.
+
+
+Review only the supplied candidate and context. Do not inspect peer reports,
+implementation sessions, or workflow state outside your assigned workspace.
+Separate reviewer directories do not imply permission to inspect other stages.

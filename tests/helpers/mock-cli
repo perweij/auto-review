@@ -9,7 +9,7 @@ mock_bridge() {
     IFS= read -r response < "$FIXTURE/mock-bridge-response"
     [[ $response == ok ]] || { printf '%s\n' "$response" >&2; return 1; }
 }
-if [[ $HOME == /tmp/review-private/home ]]; then
+if [[ $HOME == */isolated-review-*/home ]]; then
     mock_bridge "$(jq -nc --arg value "$call" '{kind:"call",value:$value}')"
 else
     printf '%s\n' "$call" >> "$FIXTURE/calls.jsonl"
@@ -22,7 +22,7 @@ if [[ $* == *--help* ]]; then
 --no-session-persistence --disallowed-tools --add-dir --json-schema --max-budget-usd
 --append-system-prompt --hostname --paginate --slurp --method --field --raw-field
 --repo --comments status --output-schema
---skip-git-repo-check --tools --disable-slash-commands --strict-mcp-config --system-prompt --setting-sources
+--skip-git-repo-check --tools --disable-slash-commands --strict-mcp-config --system-prompt --setting-sources --settings
 EOF
     exit
 fi
@@ -194,7 +194,7 @@ elif [[ $tool == codex && $* == *synthesis.schema.json* ]]; then stage=synthesis
 elif [[ $tool == codex ]]; then stage=codex
 elif [[ $* == *validity_conflicts* ]]; then stage=contributions
 elif [[ $* == *--json-schema* ]]; then stage=synthesis; fi
-if [[ $HOME == /tmp/review-private/home ]]; then
+if [[ $HOME == */isolated-review-*/home ]]; then
     environment=$(compgen -e | sort)
     head=$(git rev-parse HEAD)
     mock_bridge "$(jq -nc --arg stage "$stage" --arg environment "$environment" --arg head "$head" '{kind:"stage",stage:$stage,environment:$environment,head:$head}')"
@@ -230,7 +230,7 @@ fi
 if [[ ${MOCK_SLEEP_STAGE:-} == "$stage" ]]; then
     if [[ ${MOCK_IGNORE_SIGNALS:-} == 1 ]]; then trap '' INT TERM
     else trap 'exit 130' INT; trap 'exit 143' TERM; fi
-    if [[ $HOME == /tmp/review-private/home ]]; then
+    if [[ $HOME == */isolated-review-*/home ]]; then
         mock_bridge '{"kind":"marker"}'
     else
         touch "$FIXTURE/model-started"
@@ -283,7 +283,7 @@ emit_structured() {
 }
 if [[ $stage == codex ]]; then
     if [[ ${MOCK_REWRITE_BASE:-} == 1 ]]; then
-        if [[ $HOME == /tmp/review-private/home ]]; then
+        if [[ $HOME == */isolated-review-*/home ]]; then
             mock_bridge "$(jq -nc --arg head "$(git rev-parse HEAD)" '{kind:"move-ref",ref:"refs/heads/main",head:$head}')"
         else
             git --git-dir="$FIXTURE/remote.git" update-ref refs/heads/main "$(git rev-parse HEAD)"
@@ -292,7 +292,7 @@ if [[ $stage == codex ]]; then
     if [[ ${MOCK_MOVE_HEAD:-} == 1 || ${MOCK_MOVE_BASE:-} == 1 ]]; then
         ref=refs/heads/main
         [[ ${MOCK_MOVE_HEAD:-} != 1 ]] || ref=refs/pull/7/head
-        if [[ $HOME == /tmp/review-private/home ]]; then
+        if [[ $HOME == */isolated-review-*/home ]]; then
             mock_bridge "$(jq -nc --arg ref "$ref" '{kind:"move-ref",ref:$ref}')"
         else
             parent=$(git --git-dir="$FIXTURE/remote.git" rev-parse "$ref")

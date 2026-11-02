@@ -842,8 +842,8 @@ reports are reused.
 `final_review`, `status`, `path`, `candidate`, `choice`, `result`, `assessment`). New
 batches record `review_engine: 1`; an unfinished batch with attempts and no marker is
 rejected with `unsupported_session`, and a `ready` one can still commit and publish.
-Engine stop codes: `review_incomplete`, `independence_failed` (isolation could not be
-established; no unisolated fallback) and `review_checkout_modified` (a stage changed its
+Engine stop codes: `review_incomplete`, `independence_failed` (the independent reviewer workspace could not be
+prepared; the stage never falls back to the live worktree) and `review_checkout_modified` (a stage changed its
 disposable checkout; its result is discarded, `integrity_failure` is not set and no
 `adopt` is needed). A live-tree or Git-admin change during a review records
 `integrity_failure` and requires `adopt`.

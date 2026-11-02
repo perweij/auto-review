@@ -111,3 +111,11 @@ for behavior changes, and update the manual, Emacs reference, or API contract wh
 the corresponding interface changes. Keep future features in the
 [roadmap](docs/roadmap.md), separate from implemented behavior. Avoid committing
 local state, credentials, compiled caches, or machine-specific setup.
+
+
+Provider execution relies on the enclosing sandbox container. Tests should verify
+separate reviewer inputs, checkouts and sessions, plus integrity and publication
+guards. Do not assert that peer artifacts are inaccessible at the OS level.
+Claude command builders must retain the per-invocation sandbox-off settings;
+Codex execution uses full access with approval prompting disabled. Test both fresh
+and resumed commands without changing global provider or container configuration.

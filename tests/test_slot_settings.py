@@ -391,7 +391,7 @@ class OwnerFinalReviewSettingsTest(unittest.TestCase):
         self.assertNotIn('final_review', saved)                  # so batch['settings'] != state['settings'] keeps working
         from pr_review import review_engine
         config = settings.final_review_configuration(effective)
-        self.assertFalse(review_engine.requires_independent(config, {}))   # one slot matching synthesis: no bubblewrap
+        self.assertFalse(review_engine.requires_independent(config, {}))   # one slot matching synthesis: direct review
 
     def test_claude_only_and_codex_only_users_need_no_second_provider(self):
         from pr_review import owner_state
@@ -415,7 +415,7 @@ class OwnerFinalReviewSettingsTest(unittest.TestCase):
 
 
 class OwnerPreflightTest(unittest.TestCase):
-    """Preflight names a missing provider, capability or bubblewrap before any model work starts."""
+    """Preflight names a missing provider, or capability before any model work starts."""
 
     def run_preflight(self, final_review, *, bwrap=True, help_text=None, models=None):
         import tempfile
@@ -434,7 +434,7 @@ class OwnerPreflightTest(unittest.TestCase):
             seen.append(' '.join(argv))
             text = help_text if help_text is not None else (
                 '--sandbox --output-schema --ephemeral --strict-config --cd --skip-git-repo-check --ignore-rules --add-dir '
-                '--permission-prompts --json-schema --no-session-persistence --disallowed --base --output-last-message --json '
+                '--settings --permission-prompts --json-schema --no-session-persistence --disallowed --base --output-last-message --json '
                 '--model --config --append-system-prompt --output-format stream-json --verbose --disallowed-tools --effort --permission-mode')
             return SimpleNamespace(stdout=text)
         def run(argv, **kwargs):
@@ -466,13 +466,11 @@ class OwnerPreflightTest(unittest.TestCase):
         with self.assertRaisesRegex(ApiError, 'final review reviewer-1'):
             self.run_preflight(final)
 
-    def test_bubblewrap_is_required_only_when_isolation_is_needed(self):
+    def test_bubblewrap_is_not_required_in_any_configuration(self):
         two = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
                                   {'id': 'reviewer-2', 'provider': 'claude', 'model': 'sonnet', 'effort': 'high'}],
                'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'focused'}
-        with self.assertRaises(ApiError) as caught:
-            self.run_preflight(two, bwrap=False)
-        self.assertEqual('missing_dependency', caught.exception.code)
+        self.run_preflight(two, bwrap=False)
         self.run_preflight(two, bwrap=True)
         single = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}],
                   'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'focused'}
@@ -484,6 +482,6 @@ class OwnerPreflightTest(unittest.TestCase):
                                     {'id': 'reviewer-2', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}],
                  'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'focused'}
         owner_flags = '--sandbox --output-schema --ephemeral --strict-config --cd --skip-git-repo-check --ignore-rules --add-dir ' \
-                      '--permission-prompts --json-schema --no-session-persistence --disallowed'
+                      '--settings --permission-prompts --json-schema --no-session-persistence --disallowed'
         with self.assertRaisesRegex(ApiError, 'review capabilities'):
             self.run_preflight(final, help_text=owner_flags)

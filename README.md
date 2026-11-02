@@ -22,7 +22,7 @@ A standalone command-line interface uses the same backend and saved reviews.
 ## Requirements
 
 - Linux, Python 3.9+, Git, and the GitHub CLI (`gh`).
-- Bubblewrap (`bwrap`) and kernel namespace support for independent reviews.
+- A user-managed sandbox container as the execution security boundary.
 - Authenticated Claude Code and/or Codex CLI installations for the providers you
   enable. New reviews default to both. Claude requires its `/code-review` skill
   and support for `auto` permission mode.
@@ -35,8 +35,10 @@ context are sent to the selected providers.
 
 Use trusted repositories in a container sandbox, such as Podman. Codex runs with
 `sandbox_mode=danger-full-access` and `approval_policy=never`. Independent
-reviewers also run in separate bubblewrap snapshots with private writable files;
-the review stops if that isolation cannot be established. Project agent
+reviewers use separate disposable checkouts and fresh provider homes. Claude
+launches explicitly set `sandbox.enabled=false`; neither the application nor its
+provider execution settings add a nested OS sandbox. Reviewer independence is
+input/session separation, not kernel-enforced peer secrecy. Project agent
 settings load normally, and changes to agent configuration require explicit
 trust. See the [trust and credential details](docs/manual.md#trust-credentials-and-github-access).
 

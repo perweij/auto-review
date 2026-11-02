@@ -15,7 +15,6 @@
   (let ((python (specification->package "python"))
         (git (specification->package "git"))
         (github-cli (specification->package "github-cli"))
-        (bubblewrap (specification->package "bubblewrap"))
         (openssh (specification->package "openssh"))
         (certs (specification->package "nss-certs")))
     (package
@@ -83,7 +82,7 @@
                  (string-append
                   "import sys\nimport os\n"
                   "os.environ['PATH'] = '"
-                  #$git "/bin:" #$github-cli "/bin:" #$bubblewrap "/bin:" #$openssh
+                  #$git "/bin:" #$github-cli "/bin:" #$openssh
                   "/bin:' + os.environ.get('PATH', '')\n"
                   "os.environ.setdefault('SSL_CERT_DIR', '"
                   #$certs "/etc/ssl/certs')\n"
@@ -97,7 +96,7 @@
              '("pr-review" "fix-issue")))))
       ;; These are private runtime inputs, not extra commands in the user's
       ;; profile.  Host model CLIs, credentials, signing and editor stay inherited.
-      (inputs (list python git github-cli bubblewrap openssh certs))
+      (inputs (list python git github-cli openssh certs))
       (home-page "https://github.com/perweij/auto-review")
       (synopsis "Local GitHub review orchestration and versioned frontend API")
       (description
