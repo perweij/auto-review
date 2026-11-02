@@ -15,8 +15,24 @@ The deterministic suite mocks GitHub and model CLIs; credentials are not require
 
 Frontend checks require Emacs 29.1+, Magit 4.6+, Transient 0.13+, and Forge on the
 Emacs load path. `EMACS` selects the executable. `AUTO_REVIEW_TEST_LOAD_FILE` may
-name an Emacs Lisp file that configures those dependencies for a test run;
-otherwise the profile/site load path applies.
+name an Emacs Lisp file that configures those dependencies for a test run.
+Both compilation and ERT disable site startup with `--no-site-file`; dependencies
+registered only by a site-start file must be supplied explicitly. Environment/profile
+load paths remain available. For example, a dependency setup file can add the
+directories for Magit, Forge, Transient and their dependencies:
+
+```elisp
+(setq load-path (append '("/path/to/magit/lisp"
+                          "/path/to/forge/lisp"
+                          ;; Add Transient and the remaining dependency directories.
+                          ) load-path))
+```
+
+Run it with `AUTO_REVIEW_TEST_LOAD_FILE=/absolute/path/to/dependencies.el make check-emacs`.
+The setup file must load only third-party dependencies, not an installed auto-review
+package or its autoloads. The runner restores checkout load-path precedence and
+checks module and function origins in both processes. A preloaded foreign copy
+fails with `Auto-review test contamination` rather than silently testing mixed code.
 
 ## Architecture
 
@@ -69,7 +85,10 @@ compilation uses a temporary directory removed at exit. The Git fixtures and
 compiled Emacs files still require writable scratch; set `TMPDIR` to an existing
 permitted directory if the default temporary storage is unavailable. Set
 `AUTO_REVIEW_TEST_LOAD_FILE` when Magit/Forge are installed outside the default
-Emacs load path. A completely read-only model sandbox cannot run the full suite
+Emacs load path or normally supplied by site startup. Runner-isolation regression
+tests use small Lisp fixtures and real Emacs without Magit/Forge; they are skipped
+in backend-only environments without a supported Emacs executable.
+A completely read-only model sandbox cannot run the full suite
 merely by disabling Python bytecode. Do not relax its restrictions: report the
 missing permission/dependency and continue code assessment or use supplied results
 for the exact snapshot. A failed suite launcher does not mean its tests executed.
