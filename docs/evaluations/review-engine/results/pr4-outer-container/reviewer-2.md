@@ -1,0 +1,12 @@
+Four focused reproductions using `timeout --signal=TERM --kill-after=5s 60s env PYTHONDONTWRITEBYTECODE=1 python3 -` completed and confirmed these three defects. Inspection covered fix/resume/adoption, cancellation, staging/publication/recovery, and frontend dispatch; live GitHub/provider behavior and Emacs execution remain untested.
+
+Full review comments:
+
+- [P2] Freeze uncertain replies until publication recovery completes — /tmp/pr-review-6k1qc1ar/isolated-review-qiehb1v2/checkout/lib/pr_review/owner_publication.py:75-78
+  If a generated timeline reply is posted but its response is lost, amending and force-pushing the fix followed by `owner-associate` rewrites the uncertain reply's commits and body here. `owner-recover` then attaches the original receipt and marks the rewritten wording Published, although GitHub contains the original SHA. This was reproduced with the posted timeline comment included in refreshed feedback. Exclude replies with submitting/ambiguous actions from reassociation, as local reply mutations already do.
+
+- [P2] Detect dirty submodules before accepting a checkpoint — /tmp/pr-review-6k1qc1ar/isolated-review-qiehb1v2/checkout/lib/pr_review/owner_git.py:105-107
+  For an initialized submodule, tracked-file edits without a submodule HEAD change leave the recorded gitlink unchanged. These commands therefore produce the same tree despite changed source. Both resume's worktree-change guard and the planner/reviewer integrity guard accept those edits as unchanged, and checkpoints do not retain them. A focused reproduction through the provider adapter accepted a reviewer edit inside a submodule without recording an integrity failure. Reject dirty submodules or snapshot and compare their contents explicitly.
+
+- [P2] Preserve valid dependencies when replacing replanned tasks — /tmp/pr-review-6k1qc1ar/isolated-review-qiehb1v2/checkout/lib/pr_review/owner_fixes.py:261-261
+  When completed task B depends on A and only A's feedback changes, replanning retains B but replaces A with a newly prefixed task ID. B still references the removed ID. A subsequent `--adopt` moves B back to reviewing, where dependency lookup raises `KeyError` and leaves valid manual changes unable to resume through the documented adoption path. This sequence was reproduced through dispatch. Invalidate transitive dependents for replanning too, or otherwise rebuild a valid, topologically ordered graph.

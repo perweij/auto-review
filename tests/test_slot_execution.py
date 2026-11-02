@@ -19,9 +19,7 @@ class IsolationTest(unittest.TestCase):
         return subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', *args], cwd=cwd,
                               check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.strip()
 
-    def test_reviewer_cannot_read_reports_or_previous_private_files(self):
-        if not shutil.which('bwrap'):
-            self.skipTest('bubblewrap unavailable')
+    def test_reviewers_get_fresh_checkouts_and_homes_without_hiding_host_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo, state, scratch = root / 'repo', root / 'state', root / 'scratch'
@@ -50,20 +48,26 @@ class IsolationTest(unittest.TestCase):
                                          'CLAUDE_CONFIG_DIR': str(root / 'home/.claude'),
                                          'GIT_DIR': str(root / 'unrelated-git')}):
                 (root / 'xdg' / 'pr-review').mkdir(parents=True)
-                (root / 'home').mkdir()
+                (root / 'home/.codex/sessions').mkdir(parents=True)
+                original_auth = root / 'home/.codex/auth.json'
+                original_auth.write_text('original credential')
+                (root / 'home/.codex/sessions/previous.json').write_text('previous session')
                 for stage in ('reviewer-1', 'reviewer-2'):
-                    box = isolation.IndependentSandbox(run, stage, 'codex')
+                    box = isolation.IndependentWorkspace(run, stage, 'codex')
                     try:
-                        script = ('test ! -e "$SECRET_REPORT" && test ! -e "$ORIGINAL_TREE/source" '
-                                  '&& test ! -e /tmp/review-private/previous '
-                                  '&& test ! -e /proc/1/root && ! touch "$HOST_WRITE" 2>/dev/null '
+                        self.assertEqual('original credential', (box.home / '.codex/auth.json').read_text())
+                        self.assertFalse((box.home / '.codex/sessions').exists())
+                        (box.home / '.codex/auth.json').write_text('private change')
+                        self.assertEqual('original credential', original_auth.read_text())
+                        script = ('test -e "$SECRET_REPORT" && test -e "$ORIGINAL_TREE/source" '
+                                  '&& test ! -e "$HOME/previous" '
                                   '&& test "$(cat source)" = "snapshot at PR head" '
-                                  '&& printf finding > /tmp/review-private/previous')
+                                  '&& printf finding > "$HOME/previous"')
                         argv, env = box.wrap(['/bin/sh', '-c', script], dict(os.environ,
                             SECRET_REPORT=str(state / 'other-review.md'), ORIGINAL_TREE=str(repo),
                             HOST_WRITE=str(root / 'host-write')))
                         self.assertNotIn('GIT_DIR', env)
-                        result = subprocess.run(argv, env=env, text=True, capture_output=True)
+                        result = subprocess.run(argv, cwd=box.checkout, env=env, text=True, capture_output=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         box.verify()
                         with patch('pr_review.isolation.process',
@@ -73,36 +77,34 @@ class IsolationTest(unittest.TestCase):
                         self.assertEqual(error.exception.code, 'independence_failed')
                     finally:
                         box.close()
-                box = isolation.IndependentSandbox(run, 'reviewer-1', 'codex')
+                box = isolation.IndependentWorkspace(run, 'reviewer-1', 'codex')
                 try:
                     # A reviewer-controlled Git filter must not run on the host
                     # during post-review integrity verification.
                     (box.checkout / '.gitattributes').write_text('source filter=evil\n')
                     (box.checkout / 'source').write_text('modified')
                     marker = root / 'host-filter-ran'
-                    filter_command = f'touch /tmp/review-private/checkout/filter-ran; touch {marker}; cat'
+                    filter_command = f'touch filter-ran; touch {marker}; cat'
                     git_env = {key: value for key, value in os.environ.items() if key != 'GIT_DIR'}
                     subprocess.run(['git', '-C', str(box.checkout), 'config', 'filter.evil.clean', filter_command],
                                    env=git_env, check=True)
                     with self.assertRaisesRegex(Exception, 'changed its isolated snapshot'):
                         box.verify()
-                    self.assertTrue((box.checkout / 'filter-ran').exists())
+                    self.assertFalse((box.checkout / 'filter-ran').exists())
                     self.assertFalse(marker.exists())
                 finally:
                     box.close()
-                (root / 'home/.codex').mkdir()
+                original_auth.unlink()
                 (root / 'home/.codex/auth.json').symlink_to(state / 'other-review.md')
                 with self.assertRaisesRegex(Exception, 'overlaps protected review files'):
-                    isolation.IndependentSandbox(run, 'reviewer-1', 'codex')
+                    isolation.IndependentWorkspace(run, 'reviewer-1', 'codex')
 
-    def test_missing_isolation_fails_closed(self):
+    def test_missing_git_cannot_prepare_a_workspace(self):
         with patch('pr_review.isolation.shutil.which', return_value=None):
-            with self.assertRaisesRegex(Exception, 'require bubblewrap'):
-                isolation.IndependentSandbox(None, 'reviewer-1', 'codex')
+            with self.assertRaisesRegex(Exception, 'Cannot locate trusted executable git'):
+                isolation.IndependentWorkspace(None, 'reviewer-1', 'codex', inputs=SimpleNamespace())
 
     def test_slot_reports_are_produced_and_reused_independently(self):
-        if not shutil.which('bwrap'):
-            self.skipTest('bubblewrap unavailable')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo, state, scratch = root / 'repo', root / 'state', root / 'scratch'
@@ -156,8 +158,8 @@ class IsolationTest(unittest.TestCase):
                 with patch.object(run, 'model', side_effect=AssertionError('valid work must be reused')):
                     pipeline.independent(run, 'reviewer-1')
                     pipeline.independent(run, 'reviewer-2')
-                with patch.object(isolation, 'IndependentSandbox',
-                                  side_effect=ApiError('independence_failed', 'bubblewrap missing')):
+                with patch.object(isolation, 'IndependentWorkspace',
+                                  side_effect=ApiError('independence_failed', 'workspace preparation failed')):
                     with self.assertRaises(ApiError) as error:
                         run.model('reviewer-1', command('reviewer-1'))
                 self.assertEqual(error.exception.code, 'independence_failed')
@@ -168,21 +170,18 @@ class IsolationTest(unittest.TestCase):
                 fake_bwrap.touch()
                 fake_bwrap.chmod(0o755)
                 for status in (0, 1):
-                    fake_bwrap.write_text(f'#!/bin/sh\necho "bwrap: cannot create namespace" >&2\nexit {status}\n')
-                    with patch.dict(os.environ, {'PATH': str(fake_bin) + os.pathsep + os.environ['PATH']}), \
-                         patch.object(isolation.IndependentSandbox, 'verify', side_effect=AssertionError('must not verify')):
-                        with self.assertRaises(ApiError) as error:
-                            run.model('reviewer-1', command('reviewer-1'))
-                    self.assertEqual(error.exception.code, 'independence_failed')
-                    self.assertEqual(run.manifest['phases']['reviewer-1']['failure_reason'], 'independence_failed')
-                    self.assertEqual(run.manifest['phases']['reviewer-1']['exit_status'], status)
+                    fake_bwrap.write_text(f'#!/bin/sh\necho invoked > "{root / "bwrap-invoked"}"\nexit {status}\n')
+                    with patch.dict(os.environ, {'PATH': str(fake_bin) + os.pathsep + os.environ['PATH']}):
+                        run.model('reviewer-1', command('reviewer-1'))
+                    self.assertEqual(run.manifest['phases']['reviewer-1']['exit_status'], 0)
+                    self.assertFalse((root / 'bwrap-invoked').exists())
                 # A provider that really started cannot evade snapshot checks
                 # by printing a diagnostic that resembles a bwrap failure.
                 with self.assertRaises(ApiError) as error:
                     run.model('reviewer-1', ['/bin/sh', '-c',
                         'echo changed > source; echo "bwrap: fake error" >&2; exit 1'])
                 self.assertEqual(error.exception.code, 'integrity_failed')
-                with patch.object(isolation.IndependentSandbox, 'verify',
+                with patch.object(isolation.IndependentWorkspace, 'verify',
                                   side_effect=ApiError('independence_failed', 'verifier did not start')):
                     with self.assertRaises(ApiError) as error:
                         run.model('reviewer-1', command('reviewer-1'))

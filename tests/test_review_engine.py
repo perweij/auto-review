@@ -1,6 +1,6 @@
 """The shared review engine against disposable Git fixtures and scripted providers.
 
-Providers are small shell scripts. Everything else is real: Git, bubblewrap, the
+Providers are small shell scripts. Everything else is real: Git, private workspaces, the
 Owner checkpoint, the bridge commit, the disposable checkouts and the guards.
 """
 import json
@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 
 import engine_fixture
 from engine_fixture import EngineFixture, KEYS, finding
-from pr_review import acceptance, owner_commit, owner_contracts, owner_git, providers, review_engine, review_workspace
+from pr_review import cache, acceptance, owner_commit, owner_contracts, owner_git, providers, review_engine, review_workspace
 from pr_review.common import ApiError, read_json
 from pr_review.processes import Cancelled
 from pr_review.repository import Repository
@@ -22,7 +22,6 @@ from pr_review.repository import Repository
 
 class SlotTest(EngineFixture):
     def test_two_slots_have_independent_choices_and_a_separate_synthesis_choice(self):
-        self.needs_bubblewrap()
         self.configure([{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
                         {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-a', 'effort': 'low'}],
                        {'provider': 'codex', 'model': 'gpt-synthesis', 'effort': 'medium'})
@@ -31,15 +30,16 @@ class SlotTest(EngineFixture):
         self.assertEqual({'reviewer-1': 1, 'reviewer-2': 1, 'synthesis': 1}, self.counts())
         phases = self.manifest()['phases']
         self.assertEqual(['opus', 'gpt-a', 'gpt-synthesis'], [phases[s]['model'] for s in ('reviewer-1', 'reviewer-2', 'synthesis')])
+        workspaces = {c['stage']: c['cwd'] for c in self.commands()}
+        self.assertNotEqual(workspaces['reviewer-1'], workspaces['reviewer-2'])
         argv = {c['stage']: c['argv'] for c in self.commands()}
         self.assertIn('--effort=high', argv['reviewer-1'])
         self.assertIn('--effort=low', argv['reviewer-2'])
         self.assertIn('--effort=medium', argv['synthesis'])
-        self.assertEqual('isolated', 'isolated' if phases['reviewer-1']['inputs']['isolation'] == 'private-snapshot-bwrap-v1' else '')
+        self.assertEqual('private-snapshot-container-v1', phases['reviewer-1']['inputs']['isolation'])
         self.assertEqual('candidate-checkout-v1', phases['synthesis']['inputs']['isolation'])
 
     def test_two_slots_of_the_same_provider_stay_independent(self):
-        self.needs_bubblewrap()
         for provider in ('claude', 'codex'):
             with self.subTest(provider=provider):
                 self.candidate(content=f'edit for {provider}\n')
@@ -50,12 +50,13 @@ class SlotTest(EngineFixture):
                 phases = self.manifest()['phases']
                 self.assertEqual(['model-a', 'model-b'], [phases[s]['model'] for s in ('reviewer-1', 'reviewer-2')])
                 self.assertNotEqual(phases['reviewer-1']['fingerprint'], phases['reviewer-2']['fingerprint'])
+                workspaces = {c['stage']: c['cwd'] for c in self.commands()}
+                self.assertNotEqual(workspaces['reviewer-1'], workspaces['reviewer-2'])
                 reports = [(self.workspace() / f'reviews/reviewer-{n}.md').read_text() for n in (1, 2)]
                 self.assertIn('stage=reviewer-1', reports[0])
                 self.assertIn('stage=reviewer-2', reports[1])
 
-    def test_local_candidate_content_reaches_sandbox_and_synthesis_checkout(self):
-        self.needs_bubblewrap()
+    def test_local_candidate_content_reaches_private_and_synthesis_checkouts(self):
         self.review()
         marker = self.candidate_sha()[:12]
         for number in (1, 2):
@@ -69,18 +70,34 @@ class SlotTest(EngineFixture):
         self.assertIn('content=feature,local edit,new file,', self.marks_text())
         self.assertIn(f'cwd={self.workspace() / "stages/synthesis/checkout"}', self.marks_text())
 
-    def test_reviewers_cannot_read_the_peer_report_owner_state_or_live_worktree(self):
-        self.needs_bubblewrap()
+    def test_private_reviewer_editing_the_live_candidate_still_blocks_acceptance(self):
+        original = self.command
+        checkpoint = self.batch['checkpoint']
+        def command(run, stage):
+            argv = original(run, stage)
+            if stage == 'reviewer-1':
+                argv[2] = 'echo changed >> "$OWNER_WORKTREE/source.txt"\n' + argv[2]
+            return argv
+        with patch.object(review_workspace.CandidateReview, 'command', command), self.assertRaises(ApiError) as caught:
+            self.review()
+        self.assertEqual('integrity_failed', caught.exception.code)
+        batch = self.session.load()['batches'][-1]
+        self.assertTrue(batch['integrity_failure'])
+        self.assertEqual(checkpoint, batch['checkpoint'])
+        self.assertNoAcceptance()
+
+    def test_reviewers_get_only_their_own_context_and_checkout(self):
+        self.review()
         workspace = self.workspace()
-        hidden = [workspace / 'reviews/reviewer-1.md', workspace / 'manifest.json', self.session.path / 'session.json',
-                  self.worktree / 'source.txt', self.worktree / 'new.txt']
-        with patch.dict(os.environ, {'HIDDEN_PATHS': ' '.join(map(str, hidden))}):
-            self.review()    # a visible path makes the scripted reviewer exit 41, failing the review
-        self.assertTrue((workspace / 'reviews/reviewer-1.md').is_file())
+        for stage in ('reviewer-1', 'reviewer-2'):
+            report = (workspace / f'reviews/{stage}.md').read_text()
+            root_names = report.split('root=')[1].split(' files=')[0]
+            self.assertIn('checkout,', root_names)
+            for withheld in ('reviews,', 'session.json,', 'manifest.json,'):
+                self.assertNotIn(withheld, root_names)
         self.assertEqual('feature\nlocal edit\n', (self.worktree / 'source.txt').read_text())
 
     def test_reviewers_receive_specification_and_feedback_but_nothing_from_the_implementer(self):
-        self.needs_bubblewrap()
         self.data.update(verification_cases=[self.case()], approved_issue_plan={'plan': 'The approved plan'},
                          completed_tasks=[{'id': 't1', 'rationale': 'r', 'expected': [], 'implementation': {'summary': 'claim'}}])
         self.verdict()
@@ -92,7 +109,6 @@ class SlotTest(EngineFixture):
             self.assertNotIn(withheld, files)
 
     def test_synthesis_receives_both_reports_attributed_by_slot(self):
-        self.needs_bubblewrap()
         self.review()
         prompt = self.stdin_copy.read_text()
         self.assertIn('Attribute each original finding to its reviewer slot ID', prompt)
@@ -104,8 +120,7 @@ class SlotTest(EngineFixture):
         self.assertIn('stage=reviewer-2', Path(reports[1]['path']).read_text())
         self.assertEqual(KEYS, metadata['selected_keys'])
 
-    def test_one_slot_differing_from_synthesis_is_sandboxed_and_synthesis_reads_its_report(self):
-        self.needs_bubblewrap()
+    def test_one_slot_differing_from_synthesis_has_its_own_workspace_and_synthesis_reads_its_report(self):
         self.configure([{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}], self.SYNTHESIS)
         self.review()
         self.assertEqual({'reviewer-1': 1, 'synthesis': 1}, self.counts())
@@ -216,14 +231,15 @@ class SingleReviewerTest(EngineFixture):
                 self.assertNotEqual(str(self.worktree), checkout)
                 self.assertNotIn(str(self.worktree), ' '.join(argv))
 
-    def test_two_slots_without_bubblewrap_fail_before_any_model_work(self):
+    def test_two_slots_work_without_bubblewrap(self):
         self.configure(self.SLOTS, self.SYNTHESIS)
-        with patch('pr_review.isolation.shutil.which', return_value=None), \
-                patch('pr_review.review_workspace.process') as launched, self.assertRaises(ApiError) as caught:
-            self.review()
-        self.assertEqual('independence_failed', caught.exception.code)
-        launched.assert_not_called()
-        self.assertNoAcceptance()
+        real = shutil.which
+        def which(name, *args, **kwargs):
+            return None if name == 'bwrap' else real(name, *args, **kwargs)
+        with patch('pr_review.isolation.shutil.which', side_effect=which):
+            result = self.review()
+        self.assertEqual('completed', result.status)
+        self.assertEqual({'reviewer-1': 1, 'reviewer-2': 1, 'synthesis': 1}, self.counts())
 
 
 class ReuseTest(EngineFixture):
@@ -233,8 +249,23 @@ class ReuseTest(EngineFixture):
         self.review()
         self.assertEqual({'reviewer-1': 1, 'reviewer-2': 1, 'synthesis': 1}, self.counts())
 
+    def test_previous_bubblewrap_evidence_is_invalidated_and_archived(self):
+        self.baseline_review()
+        manifest_path = self.workspace() / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        old = manifest['phases']['reviewer-1']
+        old['inputs']['isolation'] = 'private-snapshot-bwrap-v1'
+        old['fingerprint'] = cache.fingerprint(old['inputs'])
+        manifest_path.write_text(json.dumps(manifest))
+        self.assertEqual({'reviewer-1', 'synthesis'}, self.reran(self.review))
+        current = json.loads(manifest_path.read_text())
+        self.assertEqual('private-snapshot-container-v1',
+                         current['phases']['reviewer-1']['inputs']['isolation'])
+        archive = Path(current['review_history'][-1]['archive'])
+        historical = json.loads((archive / 'phases.json').read_text())
+        self.assertEqual('private-snapshot-bwrap-v1', historical['reviewer-1']['inputs']['isolation'])
+
     def expect(self, stages, change=None):
-        self.needs_bubblewrap()
         self.baseline_review()
         if change:
             change()
@@ -244,7 +275,6 @@ class ReuseTest(EngineFixture):
         self.expect(set())
 
     def test_resume_after_a_failed_slot_reruns_only_incomplete_stages(self):
-        self.needs_bubblewrap()
         with patch.dict(os.environ, {'FAIL_STAGES': 'reviewer-2'}), self.assertRaises(ApiError):
             self.review()
         self.assertEqual({'reviewer-1': 1, 'reviewer-2': 1}, self.counts())
@@ -252,7 +282,6 @@ class ReuseTest(EngineFixture):
         self.assertEqual({'reviewer-1': 1, 'reviewer-2': 2, 'synthesis': 1}, self.counts())
 
     def test_changed_candidate_tree_reruns_everything(self):
-        self.needs_bubblewrap()
         self.baseline_review()
         first = self.workspace()
         self.candidate(content='a different candidate\n')
@@ -263,7 +292,6 @@ class ReuseTest(EngineFixture):
                          {s: sum(c['stage'] == s for c in read_json(first / 'logs/commands.json')) for s in ('reviewer-1', 'reviewer-2', 'synthesis')})
 
     def test_changed_baseline_gives_a_separate_commit_ref_and_evidence(self):
-        self.needs_bubblewrap()
         self.baseline_review()
         tree = self.batch['checkpoint']['tree']
         other = self.base.git('commit-tree', tree, '-p', self.batch['baseline'], '-m', 'another baseline', cwd=self.worktree)
@@ -288,7 +316,6 @@ class ReuseTest(EngineFixture):
             with self.subTest(field=field):
                 self.candidate(content=f'edit {field}\n')
                 self.configure(self.SLOTS, self.SYNTHESIS)
-                self.needs_bubblewrap()
                 self.baseline_review()
                 slots = json.loads(json.dumps(self.SLOTS))
                 slots[1][field] = value
@@ -316,7 +343,6 @@ class ReuseTest(EngineFixture):
         self.expect({'synthesis'}, change)
 
     def test_prompt_schema_validator_and_cli_version_rerun_the_stages_that_use_them(self):
-        self.needs_bubblewrap()
         self.baseline_review()
         original_prompt = acceptance.prompt
         def changed_prompt(name):
@@ -340,7 +366,6 @@ class ReuseTest(EngineFixture):
             self.assertEqual({'reviewer-1', 'reviewer-2', 'synthesis'}, self.reran(self.review))
 
     def test_reused_evidence_is_accepted_only_after_the_live_tree_is_reverified(self):
-        self.needs_bubblewrap()
         self.baseline_review()
         (self.worktree / 'source.txt').write_text('edited after the review\n')
         with patch('pr_review.review_workspace.process') as launched, self.assertRaises(ApiError) as caught:
@@ -355,7 +380,6 @@ class IncompleteSynthesisTest(EngineFixture):
 
     def setUp(self):
         super().setUp()
-        self.needs_bubblewrap()
 
     def test_incomplete_then_passed_on_the_unchanged_candidate(self):
         self.verdict('incomplete', summary='The test environment was broken')
@@ -580,7 +604,6 @@ class CheckoutIntegrityTest(EngineFixture):
 
     def test_stage_and_synthesis_run_in_the_checkout_not_the_live_worktree(self):
         self.configure(self.SLOTS, self.SYNTHESIS)
-        self.needs_bubblewrap()
         self.review()
         marks = self.marks_text()
         self.assertIn(f'cwd={self.workspace() / "stages/synthesis/checkout"}', marks)
@@ -679,7 +702,6 @@ class FailureTest(EngineFixture):
         self.assertEqual(2, self.counts()['synthesis'])         # one correction attempt, on synthesis only
 
     def test_an_invalid_result_gets_exactly_one_correction_attempt_on_synthesis_only(self):
-        self.needs_bubblewrap()
         self.configure(self.SLOTS, self.SYNTHESIS)
         self.result_file.write_text(json.dumps({'assessment': 'maybe'}))
         self.stop('invalid_result')
@@ -717,7 +739,6 @@ class FailureTest(EngineFixture):
             self.assertTrue((self.workspace() / 'stages/synthesis').is_dir())
 
     def test_cancellation_during_a_slot_interrupts_it_and_resume_reruns_only_what_lacks_evidence(self):
-        self.needs_bubblewrap()
         self.configure(self.SLOTS, self.SYNTHESIS)
         error = Cancelled(signal.SIGTERM)
         with self.failing_process('reviewer-2', error), self.assertRaises(ApiError):
@@ -728,7 +749,6 @@ class FailureTest(EngineFixture):
         self.assertEqual({'reviewer-2', 'synthesis'}, self.reran(self.review))
 
     def test_a_runtime_limit_during_a_slot_keeps_its_private_artifacts(self):
-        self.needs_bubblewrap()
         self.configure(self.SLOTS, self.SYNTHESIS)
         with self.failing_process('reviewer-1', ApiError('resource_limit', 'Runtime expired')), self.assertRaises(ApiError):
             self.review()
@@ -736,14 +756,12 @@ class FailureTest(EngineFixture):
         self.assertNoAcceptance()
 
     def test_a_slot_that_edits_its_private_clone_fails_the_isolation_check(self):
-        self.needs_bubblewrap()
         self.configure(self.SLOTS, self.SYNTHESIS)
         self.stop('integrity_failed', EDIT_STAGES='reviewer-1')
 
-    def test_a_slot_that_cannot_start_in_bubblewrap_stops_with_independence_failed(self):
-        self.needs_bubblewrap()
+    def test_a_slot_whose_workspace_cannot_be_prepared_stops_with_independence_failed(self):
         self.configure(self.SLOTS, self.SYNTHESIS)
-        with patch('pr_review.isolation.IndependentSandbox', side_effect=ApiError('independence_failed', 'bubblewrap missing')):
+        with patch('pr_review.isolation.IndependentWorkspace', side_effect=ApiError('independence_failed', 'workspace preparation failed')):
             with self.assertRaises(ApiError) as caught:
                 self.review()
         self.assertEqual('independence_failed', caught.exception.code)

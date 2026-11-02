@@ -254,16 +254,16 @@ class AcceptanceAdapter(review_engine.Adapter):
         except ApiError:
             pass
 
-    def sandbox_inputs(self, run, stage, slot):
+    def workspace_inputs(self, run, stage, slot):
         c = run.candidate
         files = {f'context/{name}.json': json_bytes(value) for name, value in self.reviewer_context().items()}
         protected = [state_root(), run.session.path.resolve(), run.path.resolve(), Path(run.state['worktree']).resolve()]
-        return isolation.SandboxInputs(source=run.repo.common, head_ref=c['ref'], base_ref=c['baseline_ref'],
+        return isolation.WorkspaceInputs(source=run.repo.common, head_ref=c['ref'], base_ref=c['baseline_ref'],
                                        head=c['sha'], base=c['baseline'], scratch=run.scratch, cwd=run.scratch,
                                        output=run.path, protected=protected, context=files)
 
     def reviewer_instructions(self, run, slot):
-        names = [f'/tmp/review-private/context/{name}.json' for name in self.reviewer_context()]
+        names = [f'../context/{name}.json' for name in self.reviewer_context()]
         return (prompt(f'acceptance-reviewer-{self.kind_group}.txt').rstrip('\n') + '\n' + '\n'.join(names) + '\n'
                 + prompt('acceptance-reviewer.txt'))
 

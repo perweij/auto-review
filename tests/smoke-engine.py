@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Opt-in paid CLI smoke: final-verify a disposable local candidate with the shared review engine.
 
-Never contacts GitHub. One slot matching synthesis uses the direct path (no
-bubblewrap); ``--second-provider`` adds an independent sandboxed reviewer, which needs
-bubblewrap and a container where providers can start inside it.
+Never contacts GitHub. One slot matching synthesis uses the direct path;
+``--second-provider`` adds an independent reviewer in a separate private workspace.
+All provider execution relies on the enclosing container.
 """
 import argparse
 import json

@@ -39,17 +39,17 @@ The intended environment is a container sandbox (such as podman) and trusted
 organization repositories. Every Codex model invocation (including probes,
 review, planning, fixes, suggestions, and verification) explicitly uses
 `sandbox_mode=danger-full-access` and `approval_policy=never`. Independent
-reviewers additionally require `bwrap`: each runs in a private writable clone
-with saved reviews hidden. If the required namespace cannot be created, the
-review fails instead of running without isolation. The backend calls plain
-`codex`; no `codex-dangerous` wrapper is required. Project agent settings load
-normally. The CLI requires confirmation when the PR changes agent configuration.
-Independent reviewers use a private home and an empty `/proc`. Their provider
-authentication files and configuration are mounted read-only; host user-session
-keyring sockets are unavailable inside the reviewer. Configure file-based or
-environment-based provider authentication if a CLI otherwise depends on one.
-Claude defaults to `auto`;
-use `PR_REVIEW_CLAUDE_PERMISSION_MODE=dontAsk` when running directly on a host.
+reviewers use disposable clones, separate scratch and output, and fresh provider
+homes. Claude invocations set `sandbox.enabled=false`, separately from permission
+modes and tool denials. No nested bubblewrap, namespace or procfs mount is required.
+The backend calls plain `codex`; no `codex-dangerous` wrapper is required.
+Project agent settings load normally, and configuration changes still require trust.
+Selected authentication/configuration files and provider skills are copied into
+each private home; provider session histories are not copied. Copies are removed
+when the stage ends. The application does not change global user settings.
+Managed provider policy retains precedence; deployments enforcing a conflicting
+sandbox policy are incompatible with this execution mode and must be reported as
+such, not bypassed.
 
 ## Running a review
 
@@ -558,7 +558,7 @@ both the only slot and the synthesis. That effective configuration is computed w
 needed, shown in the Owner view as `effective_settings` (for the session and for each
 batch's frozen settings) and never written back. Fix operations that run providers
 validate fresh model metadata for every role, slot and synthesis choice, check the
-Codex review capability and bubblewrap when isolation is needed, and perform live
+Codex review capability, and perform live
 authentication probes; commit-only recovery needs no provider access. Opening or
 editing settings does not invoke inference.
 
@@ -608,27 +608,27 @@ another baseline gives another commit, ref and evidence. It is an internal revie
 artifact: never an implementation commit, never on the Owner branch, never in the
 index and never pushed. Acceptance still binds to the checkpoint tree.
 
-**Reviewers stay independent.** Each reviewer runs in its own isolated snapshot and
-receives the specification and feedback only as files in its private root. It never
-sees the other report, the implementation session, the implementer's claims, earlier
-findings, the Owner state or the live Owner worktree. If isolation cannot be
-established the review stops with `independence_failed`; it never falls back to an
-unisolated run. Synthesis additionally receives both reports attributed by slot, the
-implementer's checks as untrusted claims and earlier rejected findings.
+**Reviewer independence is input/session separation.** Each slot gets a fresh
+disposable clone, private home, scratch directory and explicitly selected context
+files. Peer reports, implementation sessions and Owner state are not supplied to
+reviewers. Only synthesis receives both attributed reports, implementer checks as
+untrusted claims and earlier rejected findings. These paths remain accessible to
+processes inside the outer container: separate directories are not an access-control
+boundary. Instructions prohibit inspecting peer or workflow artifacts.
 
-| | Sandboxed reviewer slot | Direct stage: single reviewer matching synthesis, and every synthesis |
+| | Independent reviewer slot | Direct stage: single reviewer matching synthesis, and every synthesis |
 | --- | --- | --- |
-| Used when | Two slots, or one slot differing from synthesis | One slot matching synthesis; synthesis in every configuration |
-| Reads the candidate from | Disposable clone of the review commit | Fresh disposable checkout of the review commit |
-| Filesystem | Bubblewrap: read-only host, hidden state root, session and Owner worktree | No mount namespace |
-| Omitted | Nothing | The mount namespace, a private `HOME` and temporary directory, and hiding of the state, session and Owner paths |
-| Kept | The bubblewrap policy and filtered environment | The filtered provider environment, read-only instructions, a scratch `TMPDIR`, and the Owner review tool denials (Claude denied tools plus the Git denials; Codex `--skip-git-repo-check --ignore-rules`) |
-| Live candidate | Not visible and cannot be written | Not the working directory and never named as the source. Restrictions and instructions forbid writes, but nothing at kernel level prevents them; Codex runs with `sandbox_mode=danger-full-access`, relying on the enclosing container |
-| After a violation | A change to the clone fails the sandbox check | A live-tree or Git-admin change records `integrity_failure`, blocks acceptance and retains the work. A tracked-content change in the checkout discards the result (`review_checkout_modified`) |
+| Candidate | Disposable clone of the review commit | Fresh disposable checkout of the review commit |
+| Session | Fresh session and private provider home | Fresh provider session, scratch `TMPDIR` |
+| Security boundary | Enclosing container | Enclosing container |
+| Retained guards | Filtered environment, read-only instructions, tool denials, snapshot verification | Filtered environment, review instructions, tool denials, candidate and Git-state verification |
 
-Direct-stage writes are restricted and detected, not kernel-prevented. A review
-never works by modifying the live Owner worktree, and a violation is always a stop,
-never a pass.
+Checkout mutations discard the result. Live-tree or Git-admin changes block
+acceptance and retain the work for inspection. These are integrity checks, not
+kernel prevention of writes. Failed workspace preparation stops the review rather
+than running in the live candidate directory. New reviewer evidence uses the
+`private-snapshot-container-v1` fingerprint policy; old evidence and its recorded
+policy remain historical and cannot be reused as new-policy evidence.
 
 **Disposable checkout.** Each direct stage gets its own checkout under its attempt
 directory, outside the live Owner worktree and Git directory; its output and

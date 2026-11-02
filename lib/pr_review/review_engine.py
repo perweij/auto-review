@@ -12,7 +12,6 @@ A ``run`` is any object with the attributes the engine reads: ``path``,
 ``model(stage, argv, input_bytes)``. ``Review`` is the PR run; ``CandidateReview``
 (see ``review_workspace``) is the artifact store of Owner and issue stages.
 """
-from contextlib import ExitStack
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -59,8 +58,8 @@ class Adapter:
     def end_stage(self, run, stage, slot, context):
         """Retain generated files after the child stops, even on cancellation."""
 
-    def sandbox_inputs(self, run, stage, slot):
-        """Inputs for ``IndependentSandbox``; ``None`` lets the sandbox describe a PR session."""
+    def workspace_inputs(self, run, stage, slot):
+        """Inputs for ``IndependentWorkspace``; ``None`` describes a PR session."""
         return None
 
     def verify_snapshot(self, run, stage, when, context=None):
@@ -194,6 +193,13 @@ def prepare_slots(run, slots, downstream=PR_DOWNSTREAM):
         raise ApiError('invalid_artifact', 'Invalid slot restart preservation path')
     if any(stage not in ('reviewer-1', 'reviewer-2', *downstream) for stage in journal['stages']):
         raise ApiError('invalid_artifact', 'Invalid slot restart stage')
+    # Keep the evidence's original execution policy alongside archived reports.
+    metadata = archive / 'phases.json'
+    if metadata.is_symlink():
+        raise ApiError('invalid_artifact', 'Invalid archived phase metadata')
+    if not metadata.exists():
+        write_json(metadata, {stage: run.manifest['phases'][stage] for stage in journal['stages']
+                              if stage in run.manifest['phases']})
     for name in journal['files']:
         relative = Path(name)
         if relative.is_absolute() or len(relative.parts) != 2 or relative.parts[0] not in ('reviews', 'prompts', 'logs'):
@@ -405,7 +411,6 @@ def model_failure(run, stage, provider, rc, output, stderr, probe=False):
 
 def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
     """Run one provider stage under its adapter's snapshot and isolation rules."""
-    from .isolation import startup_confirmed
     adapter = adapter_of(run)
     provider = providers.provider_for(run.settings, stage)
     slot = slot_of(run, stage)
@@ -420,7 +425,7 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
         # A new invocation is isolated even when replacing an adopted
         # legacy record; its identity must not inherit that provenance.
         record['inputs'].pop('legacy_source', None)
-        record['inputs']['isolation'] = 'private-snapshot-bwrap-v1'
+        record['inputs']['isolation'] = 'private-snapshot-container-v1'
     record['fingerprint'] = cache.fingerprint(record['inputs'])
     if stage != 'contributions':
         record['testing_policy'] = run.settings['synthesis_tests'] if stage == 'synthesis' else 'focused'
@@ -433,38 +438,26 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
     commands.append(dict(stage=stage, time=now(), cwd=str(cwd), argv=argv))
     write_json(run.path / 'logs/commands.json', commands)
     context = adapter.begin_stage(run, stage, slot, provider, env)
-    sandbox = None
+    workspace = None
     try:
-        with ExitStack() as resources:
-            actual_argv, pass_fds = argv, ()
-            if slot:
-                from . import isolation
-                sandbox = isolation.IndependentSandbox(run, stage, provider, adapter.sandbox_inputs(run, stage, slot))
-                before_names = set(env)
-                actual_argv, env = sandbox.wrap(argv, env)
-                startup = resources.enter_context(tempfile.TemporaryFile())
-                pass_fds = (startup.fileno(),)
-                actual_argv[1:1] = ['--info-fd', str(startup.fileno())]
-                run.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
-                run.save()
-                commands[-1].update(cwd='/tmp/review-private/checkout',
-                                    source_worktree=str(run.worktree),
-                                    isolation='private-snapshot-bwrap-v1', sandbox_argv=actual_argv)
-                write_json(run.path / 'logs/commands.json', commands)
-            result = runner(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
-                            timeout=run.runtime.model_timeout,
-                            stdout_path=output, stderr_path=stderr, model_events=True, stage=stage,
-                            pass_fds=pass_fds)
-            if sandbox:
-                if not startup_confirmed(startup):
-                    record.update(status='failed', failure_reason='independence_failed',
-                                  exit_status=result.returncode, finished_at=now())
-                    run.active = None
-                    run.save()
-                    raise ApiError('independence_failed', f'Cannot start isolated {stage}; inspect {stderr}')
-        if sandbox:
+        actual_argv = argv
+        if slot:
+            from . import isolation
+            workspace = isolation.IndependentWorkspace(run, stage, provider, adapter.workspace_inputs(run, stage, slot))
+            before_names = set(env)
+            actual_argv, env = workspace.wrap(argv, env)
+            cwd = workspace.checkout
+            run.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
+            run.save()
+            commands[-1].update(cwd=str(cwd), source_worktree=str(run.worktree),
+                                isolation='private-snapshot-container-v1', workspace_argv=actual_argv)
+            write_json(run.path / 'logs/commands.json', commands)
+        result = runner(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
+                        timeout=run.runtime.model_timeout,
+                        stdout_path=output, stderr_path=stderr, model_events=True, stage=stage)
+        if workspace:
             try:
-                sandbox.verify()
+                workspace.verify()
             except ApiError as exc:
                 if exc.code == 'independence_failed':
                     record.update(status='failed', failure_reason=exc.code,
@@ -472,7 +465,7 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
                     run.active = None
                     run.save()
                 raise
-            private_result = sandbox.root / 'result.md'
+            private_result = workspace.root / 'result.md'
             if result.returncode == 0 and provider == 'codex' and private_result.is_file() and not private_result.is_symlink():
                 atomic_bytes(run.path / f'reviews/{stage}.md.tmp', private_result.read_bytes())
     except ApiError as exc:
@@ -488,15 +481,15 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
         # Retain both private reviewer artifacts and shared-worktree artifacts
         # after the child stops, including cancellation and resource exhaustion.
         try:
-            if sandbox:
+            if workspace:
                 try:
-                    archive, generated = sandbox.preserve_generated()
+                    archive, generated = workspace.preserve_generated()
                     if generated:
                         record['generated_archive'] = str(archive)
                         run.manifest['generated_files'] = sorted(set(run.manifest.get('generated_files', [])) |
                             {f'{stage}: {name} (saved in {archive})' for name in generated})
                 finally:
-                    sandbox.close()
+                    workspace.close()
         finally:
             try:
                 adapter.end_stage(run, stage, slot, context)
@@ -508,11 +501,6 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
     adapter.verify_snapshot(run, stage, 'after', context)
     run.save()
     if result.returncode:
-        if slot and stderr.read_text(errors='replace').lstrip().startswith('bwrap:'):
-            record.update(status='failed', failure_reason='independence_failed')
-            run.active = None
-            run.save()
-            raise ApiError('independence_failed', f'Cannot start isolated {stage}; inspect {stderr}')
         model_failure(run, stage, provider, result.returncode, output, stderr)
     # A provider can exit successfully after reporting that none of its
     # commands ran. Do not cache that diagnostic as completed analysis.
@@ -527,5 +515,5 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
         run.save()
         raise ApiError('model_failed', f"{stage}: model reported a sandbox launch failure "
                        "(bwrap cannot mount /proc). Review inputs could not be inspected. "
-                       f"Repair the provider execution environment and retry. See {output}")
+                       f"The provider environment is incompatible with outer-container execution; check managed sandbox policy and provider diagnostics before retrying. See {output}")
     return result, output

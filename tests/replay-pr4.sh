@@ -20,7 +20,7 @@ PR4_HEAD=f5e0321ca179d4c4a434ec456cb404b3cedd7486
 for sha in "$PR4_BASE" "$PR4_HEAD"; do
     git -C "$ROOT" cat-file -e "$sha^{commit}" 2>/dev/null || { printf 'The PR4 corpus commit %s is not in this repository.\n' "$sha" >&2; exit 2; }
 done
-command -v claude codex bwrap >/dev/null || { echo 'claude, codex and bwrap are required.' >&2; exit 2; }
+command -v claude codex >/dev/null || { echo 'claude and codex are required.' >&2; exit 2; }
 OUT=${1:-$(mktemp -d "${TMPDIR:-/tmp}/pr4-replay-XXXXXX")}
 mkdir -p "$OUT"
 printf 'PR4 replay artifacts (retained): %s\n' "$OUT"

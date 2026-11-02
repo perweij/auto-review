@@ -9,7 +9,7 @@ from .common import ApiError, ROOT, command, now, read_json
 from .events import emit
 from .models import discover
 from .processes import run
-from .providers import DENIED_TOOLS, Runtime, environment, probe_command
+from .providers import DENIED_TOOLS, Runtime, environment, probe_command, claude_settings, codex_settings
 from .storage import atomic_bytes, write_json
 from . import owner_git
 
@@ -55,7 +55,6 @@ def output_schema(role, keys):
 
 def preflight(session, state):
     """Check every role, reviewer slot and synthesis choice before any model work starts."""
-    import shutil
     from . import review_engine, settings as reviewer_settings
     from .owner_state import effective_settings
     runtime = Runtime.environment()
@@ -74,15 +73,13 @@ def preflight(session, state):
             raise ApiError("unsupported_model", f"Unsupported owner {label} settings: {provider} / {choice['model']} ({choice['effort']}). Choose a supported model and effort in {where}, then resume with r.")
     config = reviewer_settings.final_review_configuration(final)
     independent = review_engine.requires_independent(config, {})
-    if independent and not shutil.which("bwrap"):
-        raise ApiError("missing_dependency", "Final review with independent reviewers requires bubblewrap for filesystem isolation.")
     log = session.path / "preflight"
     log.mkdir(exist_ok=True)
     for provider in catalogs:
         help_text = command([provider, "exec", "--help"] if provider == "codex" else [provider, "--help"]).stdout
         flags = ("--sandbox", "--output-schema", "--ephemeral", "--strict-config", "--cd",
                  "--skip-git-repo-check", "--ignore-rules", "--add-dir") if provider == "codex" else (
-            "--permission-prompts", "--json-schema", "--no-session-persistence", "--disallowed")
+            "--permission-prompts", "--json-schema", "--no-session-persistence", "--disallowed", "--settings")
         if any(flag not in help_text for flag in flags):
             raise ApiError("unsupported_cli", f"Installed {provider} lacks required owner capabilities.")
         if independent and any(slot["provider"] == provider for slot in config["reviewer_slots"]):
@@ -118,12 +115,11 @@ def argv(choice, runtime, role, directory, schema, cwd=None):
     provider = choice["provider"]
     if provider == "codex":
         args = ["codex", "exec", "-m", choice["model"], "--strict-config", "-c",
-                "model_reasoning_effort=" + choice["effort"], "-c",
-                "sandbox_mode=danger-full-access",
+                "model_reasoning_effort=" + choice["effort"], *codex_settings(),
                 "-c", "shell_environment_policy.set.TMPDIR=" + json.dumps(str(directory / "scratch")),
                 "-c", "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
                 "-c", "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
-                "-c", "approval_policy=never", "--ephemeral", "--json", "--output-schema", str(schema),
+                "--ephemeral", "--json", "--output-schema", str(schema),
                 "-o", str(directory / "result.json")]
         if role == "review":
             # Keep verification scratch separate from the owner checkout.
@@ -135,7 +131,7 @@ def argv(choice, runtime, role, directory, schema, cwd=None):
         denied = [t for t in denied if t not in ("Edit", "Write", "NotebookEdit")]
     denied += ["Bash(git add:*)", "Bash(git update-ref:*)", "Bash(git config:*)", "Bash(git merge:*)",
                "Bash(git rebase:*)", "Bash(git cherry-pick:*)", "Bash(git clean:*)"]
-    args = ["claude", "-p", "--model", choice["model"], "--effort", choice["effort"],
+    args = ["claude", *claude_settings(), "-p", "--model", choice["model"], "--effort", choice["effort"],
             "--permission-mode", runtime.permission, "--permission-prompts", "none", "--no-session-persistence",
             "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--json-schema", schema.read_text(), "--disallowed-tools", *denied]
