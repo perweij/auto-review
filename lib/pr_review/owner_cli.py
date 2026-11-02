@@ -99,6 +99,10 @@ def main(argv):
                 if action == "settings":
                     if not args.get("settings_file"):
                         print(json.dumps(view["settings"], indent=2))
+                        if "final_review" not in view["settings"]:
+                            # A legacy value reviews with one slot derived from its task-check choice.
+                            print("No final_review is saved. Effective final review (not saved): "
+                                  + json.dumps(view["effective_settings"]["final_review"]), file=sys.stderr)
                         return 0
                     request.update(operation="settings", settings=json.loads(Path(args["settings_file"]).read_text()))
                 elif action == "reply":

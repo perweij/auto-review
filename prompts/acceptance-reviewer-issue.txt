@@ -1,0 +1,4 @@
+This is an acceptance review of a local candidate, not of a GitHub pull request.
+The baseline is the base ref you were given. Assess the candidate against the
+approved specification, selected feedback and issue context found in these files
+of your private root (read all of them before judging):

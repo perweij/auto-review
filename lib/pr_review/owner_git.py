@@ -154,6 +154,34 @@ def pin_commit(session, sha):
     return ref
 
 
+REVIEW_COMMIT_MESSAGE = "Review candidate\n\nInternal pr-review artifact bridging a checkpoint tree to commit-based review.\nIt is not an implementation commit and is never pushed.\n"
+REVIEW_COMMIT_ENV = {"GIT_AUTHOR_NAME": "pr-review", "GIT_AUTHOR_EMAIL": "pr-review@invalid",
+                     "GIT_AUTHOR_DATE": "1970-01-01T00:00:00Z", "GIT_COMMITTER_NAME": "pr-review",
+                     "GIT_COMMITTER_EMAIL": "pr-review@invalid", "GIT_COMMITTER_DATE": "1970-01-01T00:00:00Z"}
+
+
+def review_commit(session, tree, baseline):
+    """Bridge an existing checkpoint tree to the commit-based review machinery.
+
+    The commit is a deterministic internal review artifact: the same tree and
+    baseline always give the same SHA, whatever the time or the user's Git
+    configuration. It is unreachable from the Owner branch, never touches HEAD or
+    the index and is never pushed. Acceptance still binds to the checkpoint tree.
+    """
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
+    env.update(REVIEW_COMMIT_ENV)
+    result = run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                  "-c", "i18n.commitEncoding=UTF-8", "commit-tree", tree, "-p", baseline,
+                  "-m", REVIEW_COMMIT_MESSAGE], cwd=session.repo.cwd, env=env)
+    sha = result.stdout.strip()
+    if result.returncode or not sha:
+        raise ApiError("review_candidate_failed", result.stderr.strip() or "Cannot create the review candidate commit.")
+    # The SHA covers both tree and baseline, so another baseline gets another ref.
+    ref = f"refs/pr-owner/{digest(str(session.path))[:24]}/review-candidates/{sha}"
+    session.repo.git("update-ref", ref, sha)
+    return {"sha": sha, "ref": ref, "tree": tree, "baseline": baseline}
+
+
 def clean(session, state):
     if session.repo.git("status", "--porcelain=v1", "--untracked-files=all", cwd=state["worktree"]).stdout:
         raise ApiError("dirty_worktree", "Start a new batch from a clean owner worktree; commit or reconcile in Magit.")

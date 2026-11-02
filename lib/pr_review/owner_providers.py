@@ -54,16 +54,28 @@ def output_schema(role, keys):
 
 
 def preflight(session, state):
+    """Check every role, reviewer slot and synthesis choice before any model work starts."""
+    import shutil
+    from . import review_engine, settings as reviewer_settings
+    from .owner_state import effective_settings
     runtime = Runtime.environment()
     catalogs = {}
-    for role in ("fix", "review"):
-        choice = state["settings"][role]
+    final = effective_settings(state["settings"])["final_review"]
+    choices = [(role, role, state["settings"][role]) for role in ("fix", "review")]
+    choices += [(f"final review {slot['id']}", "final_review", slot) for slot in final["reviewer_slots"]]
+    choices.append(("final review synthesis", "final_review", final["synthesis"]))
+    for label, group, choice in choices:
         provider = choice["provider"]
         if provider not in catalogs:
             catalogs[provider] = discover({"provider": provider})
         model = next((m for m in catalogs[provider]["models"] if m["value"] == choice["model"]), None)
         if not model or choice["effort"] not in model["efforts"]:
-            raise ApiError("unsupported_model", f"Unsupported owner {role} settings: {provider} / {choice['model']} ({choice['effort']}). Choose a supported model and effort in R, then resume with r.")
+            where = "R f" if group == "fix" else "R r" if group == "review" else "the Owner settings"
+            raise ApiError("unsupported_model", f"Unsupported owner {label} settings: {provider} / {choice['model']} ({choice['effort']}). Choose a supported model and effort in {where}, then resume with r.")
+    config = reviewer_settings.final_review_configuration(final)
+    independent = review_engine.requires_independent(config, {})
+    if independent and not shutil.which("bwrap"):
+        raise ApiError("missing_dependency", "Final review with independent reviewers requires bubblewrap for filesystem isolation.")
     log = session.path / "preflight"
     log.mkdir(exist_ok=True)
     for provider in catalogs:
@@ -73,6 +85,16 @@ def preflight(session, state):
             "--permission-prompts", "--json-schema", "--no-session-persistence", "--disallowed")
         if any(flag not in help_text for flag in flags):
             raise ApiError("unsupported_cli", f"Installed {provider} lacks required owner capabilities.")
+        if independent and any(slot["provider"] == provider for slot in config["reviewer_slots"]):
+            # Independent slots use the provider's own review command, not the structured path.
+            if provider == "codex":
+                review_help = command(["codex", "exec", "review", "--help"]).stdout
+                needed = ("--base", "--output-last-message", "--json", "--ephemeral", "--model", "--config", "--strict-config")
+            else:
+                review_help, needed = help_text, ("--append-system-prompt", "--output-format", "stream-json", "--verbose",
+                                                  "--disallowed-tools", "--effort", "--permission-mode")
+            if any(flag not in review_help for flag in needed):
+                raise ApiError("unsupported_cli", f"Installed {provider} lacks the review capabilities the final review needs.")
         env, removed = environment(provider)
         with tempfile.TemporaryDirectory(prefix="pr-owner-auth-") as neutral:
             response = Path(neutral) / "response.txt"
@@ -91,7 +113,8 @@ def preflight(session, state):
     session.save(state)
 
 
-def argv(choice, runtime, role, directory, schema):
+def argv(choice, runtime, role, directory, schema, cwd=None):
+    """Provider argv for ``role``. ``cwd`` is where Codex reviews; task checks keep scratch."""
     provider = choice["provider"]
     if provider == "codex":
         args = ["codex", "exec", "-m", choice["model"], "--strict-config", "-c",
@@ -105,7 +128,7 @@ def argv(choice, runtime, role, directory, schema):
         if role == "review":
             # Keep verification scratch separate from the owner checkout.
             # Execution isolation is provided by the enclosing container.
-            args += ["--cd", str(directory / "scratch"), "--skip-git-repo-check", "--ignore-rules"]
+            args += ["--cd", str(cwd or directory / "scratch"), "--skip-git-repo-check", "--ignore-rules"]
         return args + ["-"]
     denied = list(DENIED_TOOLS)
     if role == "fix":

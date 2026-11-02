@@ -1,16 +1,18 @@
 """The issue coordinator must not recreate the harness's coding loop."""
+import contextlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
+import engine_stub
 import test_issue_steps
 from pr_review import issue_harness, owner_git, owner_contracts
 
 
 class ArgumentTest(unittest.TestCase):
-    def test_implementation_resumes_explicit_session_but_review_is_fresh(self):
+    def test_implementation_resumes_its_explicit_session(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             schema = root / 'schema.json'
@@ -18,17 +20,20 @@ class ArgumentTest(unittest.TestCase):
             for provider in ('codex', 'claude'):
                 choice = {'provider': provider, 'model': 'chosen', 'effort': 'high'}
                 session = {'session_id': '00000000-0000-4000-8000-000000000001', 'started': True}
-                args = issue_harness.arguments(choice, 'fix', root, schema, session)
+                args = issue_harness.arguments(choice, root, schema, session)
                 self.assertIn(session['session_id'], args)
                 self.assertNotIn('--last', args)
                 self.assertNotIn('--ephemeral', args)
                 self.assertNotIn('--no-session-persistence', args)
-                review = issue_harness.arguments(choice, 'review', root, schema, {})
-                self.assertNotIn(session['session_id'], review)
-                self.assertIn('--ephemeral' if provider == 'codex' else '--no-session-persistence', review)
+
+    def test_acceptance_review_is_not_a_harness_role(self):
+        self.assertFalse(hasattr(issue_harness, 'report') and 'role' in issue_harness.report.__code__.co_varnames)
+        self.assertEqual(('session', 'state', 'batch', 'specification', 'feedback'),
+                         issue_harness.invoke.__code__.co_varnames[:5])
 
 
 class ExecutionTest(unittest.TestCase):
+    """Implementation turns come from the harness; acceptance review comes from the shared engine."""
     def setUp(self):
         self.f = test_issue_steps.IssueStepsTest()
         self.f.setUp()
@@ -40,48 +45,58 @@ class ExecutionTest(unittest.TestCase):
                 'outcomes': [{'item': self.f.key, 'status': 'fixed', 'evidence': 'Checked candidate'}], 'checks': ['Relevant test passed'],
                 'findings': findings or [], 'questions': []}
 
-    def model(self, session, state, batch, role, specification, feedback):
-        self.calls.append((role, feedback))
-        if role == 'fix':
-            (Path(state['worktree']) / 'implementation.txt').write_text(str(len(self.calls)))
-            batch['checkpoint'] = owner_git.checkpoint(session, state, 'test harness')
+    def fix(self, session, state, batch, specification, feedback):
+        self.calls.append(('fix', feedback))
+        (Path(state['worktree']) / 'implementation.txt').write_text(str(len(self.calls)))
+        batch['checkpoint'] = owner_git.checkpoint(session, state, 'test harness')
         return self.report()
 
-    def test_complete_candidate_has_one_independent_review_and_commit(self):
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
+    def review(self, session, state, batch, specification):
+        self.calls.append(('review', None))
+        return self.report()
+
+    @contextlib.contextmanager
+    def engines(self, fix=None, review=None, no_legacy=False):
+        with patch('pr_review.issue_harness.invoke', side_effect=fix or self.fix), \
+                patch('pr_review.acceptance.review_issue', side_effect=engine_stub.issue_review_from(review or self.review)):
+            if no_legacy:
+                with patch('pr_review.owner_providers.invoke', side_effect=AssertionError('No legacy task pipeline')):
+                    yield
+            else:
+                yield
+
+    def test_complete_candidate_has_one_engine_review_and_commit(self):
+        with self.engines():
             view = self.f.start(issue_harness=True, auto_commit=True)
         batch = view['batches'][-1]
         self.assertEqual(['fix', 'review'], [r for r, _ in self.calls])
         self.assertEqual('ready', batch['status'])
+        self.assertEqual(1, batch['review_engine'])
         self.assertTrue(batch['commit_progress']['complete'])
         self.assertTrue(owner_contracts.current(batch))
         batch['final_tree'] = 'changed'
         self.assertFalse(owner_contracts.current(batch))
 
     def test_partial_work_continues_without_review_or_test_replay(self):
-        def model(*args):
-            result = self.model(*args)
+        def fix(*args):
+            result = self.fix(*args)
             if len(self.calls) == 1:
                 result['status'] = 'working'
             return result
-        with patch('pr_review.issue_harness.invoke', side_effect=model), \
-                patch('pr_review.owner_providers.invoke', side_effect=AssertionError('No legacy task pipeline')):
+        with self.engines(fix=fix, no_legacy=True):
             view = self.f.start(issue_harness=True)
         self.assertEqual(['fix', 'fix', 'review'], [r for r, _ in self.calls])
         self.assertEqual('ready', view['batches'][-1]['status'])
 
     def test_review_findings_return_to_implementation(self):
-        def model(*args):
-            result = self.model(*args)
-            if len(self.calls) == 2:
-                result = self.report('changes_requested', ['Acceptance regression'])
-            return result
-        with patch('pr_review.issue_harness.invoke', side_effect=model):
+        def review(*args):
+            self.calls.append(('review', None))
+            return self.report('changes_requested', ['Acceptance regression']) if len(self.calls) == 2 else self.report()
+        with self.engines(review=review):
             view = self.f.start(issue_harness=True)
         self.assertEqual(['fix', 'review', 'fix', 'review'], [r for r, _ in self.calls])
         self.assertEqual(['Acceptance regression'], self.calls[2][1])
         self.assertEqual('ready', view['batches'][-1]['status'])
-
 
     def test_interactive_owner_batch_cannot_resume_as_issue_harness(self):
         from pr_review.common import ApiError
@@ -107,37 +122,48 @@ class ExecutionTest(unittest.TestCase):
             self.f.start(batch=batch['id'])
         invoke.assert_not_called()
 
+    def test_unfinished_batch_without_the_engine_marker_stops_but_keeps_its_artifacts(self):
+        from pr_review.common import ApiError
+        batch = self.stop_in_review()
+        state = self.f.owner.load()
+        state['batches'][-1].pop('review_engine')
+        state['batches'][-1]['attempts'] = [{'role': 'fix', 'kind': 'issue_harness', 'status': 'complete'}]
+        self.f.owner.save(state)
+        before = self.f.owner.load()['batches'][-1]
+        with patch('pr_review.issue_harness.invoke') as invoke, self.assertRaises(ApiError) as caught:
+            self.f.start(batch=batch['id'])
+        self.assertEqual('unsupported_session', caught.exception.code)
+        invoke.assert_not_called()
+        self.assertEqual(before, self.f.owner.load()['batches'][-1])
+        self.assertTrue(Path(self.f.owner.load()['worktree']).is_dir())
+
+    def test_untouched_unmarked_batch_adopts_the_marker_and_current_settings(self):
+        from pr_review import issue_harness as harness
+        batch = {'status': 'paused', 'attempts': []}
+        harness.require_engine(batch)
+        self.assertEqual(1, batch['review_engine'])
+        harness.require_engine({'status': 'ready', 'attempts': [{}]})  # a ready batch can still commit and publish
+
     def test_invalid_completion_report_is_corrected_without_task_replanning(self):
         from pr_review.common import ApiError
         invoked = 0
-        def model(*args):
+        def fix(*args):
             nonlocal invoked
             invoked += 1
             if invoked == 1:
                 raise ApiError('invalid_result', 'Missing summary')
-            return self.model(*args)
-        with patch('pr_review.issue_harness.invoke', side_effect=model):
+            return self.fix(*args)
+        with self.engines(fix=fix):
             result = self.f.start(issue_harness=True)
-        self.assertEqual(3, invoked)
+        self.assertEqual(2, invoked)
         self.assertIn('Correct the completion report', self.calls[0][1][-1])
         self.assertEqual('ready', result['batches'][-1]['status'])
 
-    def test_review_requires_evidence_for_each_feedback_item(self):
-        from pr_review.common import ApiError
-        result = self.report()
-        issue_harness.validate(result, 'review', [self.f.key])
-        result['outcomes'] = []
-        with self.assertRaisesRegex(ApiError, 'each selected feedback item'):
-            issue_harness.validate(result, 'review', [self.f.key])
-
-
     def stop_in_review(self):
         from pr_review.common import ApiError
-        def model(*args):
-            if args[3] == 'review':
-                raise ApiError('model_failed', 'Review interrupted')
-            return self.model(*args)
-        with patch('pr_review.issue_harness.invoke', side_effect=model), self.assertRaises(ApiError):
+        def review(*args):
+            raise ApiError('model_failed', 'Review interrupted')
+        with self.engines(review=review), self.assertRaises(ApiError):
             self.f.start(issue_harness=True)
         batch = self.f.owner.load()['batches'][-1]
         self.assertEqual('review', batch['harness_phase'])
@@ -147,11 +173,10 @@ class ExecutionTest(unittest.TestCase):
 
     def test_interrupted_review_resumes_review_only_by_saved_engine(self):
         batch = self.stop_in_review()
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
+        with self.engines():
             view = self.f.start(batch=batch['id'])
         self.assertEqual(['review'], [r for r, _ in self.calls])
         self.assertEqual('ready', view['batches'][-1]['status'])
-
 
     def test_adopted_source_invalidates_candidate_and_unadopted_source_blocks(self):
         from pr_review.common import ApiError
@@ -161,32 +186,57 @@ class ExecutionTest(unittest.TestCase):
         with patch('pr_review.issue_harness.invoke') as invoke, self.assertRaisesRegex(ApiError, 'adopt'):
             self.f.start(batch=batch['id'])
         invoke.assert_not_called()
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
+        with self.engines():
             view = self.f.start(batch=batch['id'], adopt=True)
         self.assertEqual(['fix', 'review'], [r for r, _ in self.calls])
         self.assertTrue(owner_contracts.current(view['batches'][-1]))
 
-    def test_partial_continuation_preserves_findings_for_independent_review(self):
-        def model(*args):
-            result = self.model(*args)
-            if len(self.calls) == 2:
-                return self.report('changes_requested', ['Original correctness finding'])
+    def test_source_changed_during_review_blocks_acceptance_until_adopted(self):
+        from pr_review.common import ApiError
+        def review(session, state, batch, specification):
+            (Path(state['worktree']) / 'changed-during-review.txt').write_text('edit')
+            raise ApiError('integrity_failed', 'The review changed the live owner worktree; inspect the retained changes.')
+        with self.engines(review=review), self.assertRaises(ApiError):
+            self.f.start(issue_harness=True)
+        batch = self.f.owner.load()['batches'][-1]
+        self.assertNotEqual('ready', batch['status'])
+        self.assertFalse(owner_contracts.current(batch))
+        self.assertNotIn('final_tree', batch)
+        with patch('pr_review.issue_harness.invoke') as invoke, self.assertRaises(ApiError) as caught:
+            self.f.start(batch=batch['id'])
+        self.assertEqual('worktree_changed', caught.exception.code)
+        invoke.assert_not_called()
+
+    def test_partial_continuation_preserves_findings_for_the_engine_review(self):
+        reviews = 0
+        def fix(*args):
+            result = self.fix(*args)
             if len(self.calls) == 3:
                 result['status'] = 'working'
             return result
-        with patch('pr_review.issue_harness.invoke', side_effect=model):
+        def review(*args):
+            nonlocal reviews
+            reviews += 1
+            self.calls.append(('review', None))
+            return self.report('changes_requested', ['Original correctness finding']) if reviews == 1 else self.report()
+        with self.engines(fix=fix, review=review):
             self.f.start(issue_harness=True)
         self.assertEqual(['fix', 'review', 'fix', 'fix', 'review'], [r for r, _ in self.calls])
-        self.assertEqual(['Original correctness finding'], self.calls[-1][1])
-        self.assertIn('Continue the approved', self.calls[-2][1][-1])
+        self.assertEqual(['Original correctness finding'], self.calls[2][1])
+        self.assertIn('Continue the approved', self.calls[3][1][-1])
 
     def test_ready_candidate_resets_consecutive_no_progress_counter(self):
-        sequence = ['working', 'working', 'ready', 'changes_requested', 'working', 'ready', 'ready']
-        def model(*args):
-            self.calls.append((args[3], args[-1]))
-            status = sequence[len(self.calls)-1]
+        fixes = ['working', 'working', 'ready', 'working', 'ready']
+        reviews = ['changes_requested', 'ready']
+        def fix(*args):
+            status = fixes.pop(0)
+            result = self.fix(*args)
+            return {**result, 'status': status}
+        def review(*args):
+            self.calls.append(('review', None))
+            status = reviews.pop(0)
             return self.report(status, ['Concrete defect'] if status == 'changes_requested' else [])
-        with patch('pr_review.issue_harness.invoke', side_effect=model):
+        with self.engines(fix=fix, review=review):
             view = self.f.start(issue_harness=True)
         self.assertEqual('ready', view['batches'][-1]['status'])
         self.assertEqual(7, len(self.calls))
@@ -194,22 +244,22 @@ class ExecutionTest(unittest.TestCase):
 
     def test_three_identical_rejections_stop(self):
         from pr_review.common import ApiError
-        def model(*args):
-            self.calls.append((args[3], args[-1]))
-            return self.report('changes_requested', ['Concrete defect']) if args[3] == 'review' else self.report()
-        with patch('pr_review.issue_harness.invoke', side_effect=model), self.assertRaisesRegex(ApiError, 'same unchanged'):
+        def review(*args):
+            self.calls.append(('review', None))
+            return self.report('changes_requested', ['Concrete defect'])
+        def fix(session, state, batch, specification, feedback):
+            self.calls.append(('fix', feedback))
+            return self.report()
+        with self.engines(fix=fix, review=review), self.assertRaisesRegex(ApiError, 'same unchanged'):
             self.f.start(issue_harness=True)
         self.assertEqual(['fix', 'review'] * 3, [r for r, _ in self.calls])
 
-
     def test_review_question_answer_resumes_without_replan(self):
         from pr_review import owner_import
-        def question(*args):
-            value = self.model(*args)
-            if args[3] == 'review':
-                value.update(status='needs_input', questions=['Keep archived records searchable?'])
-            return value
-        with patch('pr_review.issue_harness.invoke', side_effect=question):
+        def review(*args):
+            self.calls.append(('review', None))
+            return {**self.report('needs_input'), 'questions': ['Keep archived records searchable?']}
+        with self.engines(review=review):
             view = self.f.start(issue_harness=True)
         batch = view['batches'][-1]
         self.assertEqual('paused', batch['status'])
@@ -219,12 +269,58 @@ class ExecutionTest(unittest.TestCase):
             {'title': item['title'], 'html_url': item['source']['issue']}, 'workflow',
             {'answers': ['Keep them searchable.']})
         self.calls.clear()
-        with patch('pr_review.issue_harness.invoke', side_effect=self.model):
+        with self.engines():
             view = self.f.start(batch=batch['id'])
         self.assertEqual(['fix', 'review'], [r for r, _ in self.calls])
         self.assertNotIn('harness_questions', view['batches'][-1])
         self.assertEqual('ready', view['batches'][-1]['status'])
 
+    def test_incomplete_review_writes_no_proof_and_keeps_the_review_phase(self):
+        from pr_review import review_engine
+        from pr_review.common import ApiError
+        value = {'assessment': 'incomplete', 'summary': 'The test environment is broken', 'findings': []}
+        incomplete = review_engine.Result(value, 'incomplete', Path('/retained/synthesis-incomplete-1.json'))
+        with patch('pr_review.issue_harness.invoke', side_effect=self.fix), \
+                patch('pr_review.acceptance.review_issue', return_value=(incomplete, None)), \
+                self.assertRaises(ApiError) as caught:
+            self.f.start(issue_harness=True)
+        self.assertEqual('review_incomplete', caught.exception.code)
+        batch = self.f.owner.load()['batches'][-1]
+        self.assertEqual('review', batch['harness_phase'])
+        self.assertEqual('paused', batch['status'])
+        self.assertFalse(any(k in batch for k in ('harness_review', 'final_tree', 'verified_items')))
+        self.assertNotIn('harness_repeated_rejection', batch)
+        self.assertFalse(owner_contracts.current(batch))
+
+    def test_findings_return_to_the_same_implementation_session(self):
+        from types import SimpleNamespace
+        identity = '00000000-0000-4000-8000-000000000001'
+        commands = []
+        def run(argv, **kwargs):
+            commands.append(argv)
+            kwargs['on_line']('stdout', json.dumps({'type': 'thread.started', 'thread_id': identity}))
+            (Path(self.f.owner.load()['worktree']) / f'turn-{len(commands)}.txt').write_text('work')
+            value = {'status': 'ready', 'summary': 'Tested complete candidate', 'checks': ['ok'], 'questions': [], 'findings': []}
+            Path(kwargs['stdout_path']).with_name('result.json').write_text(json.dumps(value))
+            return SimpleNamespace(returncode=0, events=[{'type': 'turn.completed'}])
+        reviews = 0
+        def review(*args):
+            nonlocal reviews
+            reviews += 1
+            return self.report('changes_requested', ['Round trip fails']) if reviews == 1 else self.report()
+        state = self.f.owner.load()
+        state['settings']['fix']['provider'] = 'codex'
+        self.f.owner.save(state)
+        with patch('pr_review.issue_harness.invoke', new=REAL_INVOKE), \
+                patch('pr_review.issue_harness.run', side_effect=run), \
+                patch('pr_review.acceptance.review_issue', side_effect=engine_stub.issue_review_from(review)):
+            view = self.f.start(issue_harness=True)
+        self.assertEqual('ready', view['batches'][-1]['status'])
+        self.assertEqual(2, len(commands))
+        self.assertNotIn('resume', commands[0])
+        self.assertEqual(['codex', 'exec', 'resume'], commands[1][:3])
+        self.assertIn(identity, commands[1])
+        self.assertEqual(1, len(self.f.owner.load()['issue_harness_sessions']))
 
 
 # Capture the real adapter before fixtures patch provider boundaries.
@@ -260,8 +356,8 @@ class TransportTest(unittest.TestCase):
         return SimpleNamespace(returncode=0, events=[{'type': 'turn.completed'}] if provider == 'codex' else [
             {'type': 'result', 'subtype': 'success', 'structured_output': value}])
 
-    def invoke(self, role='fix'):
-        return REAL_INVOKE(self.session, self.state, self.batch, role, self.spec, [])
+    def invoke(self):
+        return REAL_INVOKE(self.session, self.state, self.batch, self.spec, [])
 
     def test_exact_codex_session_is_saved_and_reused(self):
         self.batch['settings']['fix']['provider'] = 'codex'
@@ -298,19 +394,6 @@ class TransportTest(unittest.TestCase):
         self.assertEqual(saved['checkpoint'], saved['attempts'][-1]['after'])
         self.assertEqual('failed', saved['attempts'][-1]['status'])
         self.assertTrue(self.session.load()['issue_harness_sessions'])
-
-    def test_readonly_review_edit_invalidates_publication(self):
-        from pr_review.common import ApiError
-        def edited(argv, **kwargs):
-            schema = json.loads(Path(kwargs['stdout_path']).with_name('schema.json').read_text())
-            self.assertEqual(['fixed', 'already_addressed', 'no_change'],
-                             schema['properties']['outcomes']['items']['properties']['status']['enum'])
-            from types import SimpleNamespace
-            (Path(self.state['worktree']) / 'unwanted.txt').write_text('review edit\n')
-            return SimpleNamespace(returncode=0, events=[])
-        with patch('pr_review.issue_harness.run', side_effect=edited), self.assertRaisesRegex(ApiError, 'protected source'):
-            self.invoke('review')
-        self.assertTrue(self.session.load()['batches'][-1]['integrity_failure'])
 
     def test_unrecorded_edit_prevents_provider_launch(self):
         from pr_review.common import ApiError

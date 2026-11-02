@@ -17,6 +17,7 @@ from pr_review.issue_eligibility import evaluate_eligibility, EligibilityPolicy,
 from pr_review.issues import Workflow, approval_comment, dispatch, execution_complete, input_digest
 from pr_review.issue_writes import Writes
 from pr_review import owner_import, owner_state
+import engine_stub
 import test_owner
 
 
@@ -1249,14 +1250,15 @@ class IssueIntegrationTest(unittest.TestCase):
             p = patch(target, side_effect=effect)
             p.start()
             self.addCleanup(p.stop)
-        harness = patch('pr_review.issue_harness.invoke', side_effect=self.harness)
+        harness = patch('pr_review.issue_harness.invoke', side_effect=lambda *args: self.harness(*args))
         harness.start()
         self.addCleanup(harness.stop)
+        engine_stub.route_issue(self, lambda *args: self.review(*args))
         self.reviews = patch('pr_review.reviews.execute', side_effect=AssertionError('fix-issue must not launch the PR-review pipeline'))
         self.reviews.start()
         self.addCleanup(self.reviews.stop)
 
-    def harness(self, session, state, batch, role, specification, feedback):
+    def turn(self, role, session, state, batch, specification):
         from pr_review import owner_providers
         context = {'feedback': session.items(state, batch['items']),
                    'approved_issue_plan': {'plan': specification},
@@ -1270,6 +1272,13 @@ class IssueIntegrationTest(unittest.TestCase):
                 'outcomes': report.get('outcomes', []),
                 'summary': report['summary'], 'checks': report.get('checks', []),
                 'findings': blockers or ([] if ready else [report['summary']]), 'questions': questions}
+
+    def harness(self, session, state, batch, specification, feedback):
+        """The implementation turn; acceptance review is answered by ``review``."""
+        return self.turn('fix', session, state, batch, specification)
+
+    def review(self, session, state, batch, specification):
+        return self.turn('review', session, state, batch, specification)
 
     def collect(self, target, repo):
         sha = self.git('rev-parse', 'remote-feature')
@@ -1298,6 +1307,78 @@ class IssueIntegrationTest(unittest.TestCase):
         value = {'id': len(self.f['comments']) + 1, 'body': payload['body'], 'user': {'login': 'author'}, 'created_at': '2026-10-30T23:59:59+00:00'}
         self.f['comments'].append(value)
         return value
+
+    # ---- reviewer flags configure acceptance review ----------------------------------------------------
+    def owner_settings(self):
+        return owner_state.OwnerSession({'session': self.path}).load()['settings']
+
+    def settings_file(self, **value):
+        path = self.root / 'owner-settings.json'
+        path.write_text(json.dumps(value))
+        return str(path)
+
+    def without_flags(self):
+        return {k: v for k, v in self.req.items() if k != 'reviewers'}
+
+    def final_providers(self, value):
+        return ([slot['provider'] for slot in value['reviewer_slots']], value['synthesis']['provider'])
+
+    def test_reviewer_flags_configure_the_acceptance_review_not_a_post_push_review(self):
+        request = {**self.req, 'reviewers': ['claude'], 'processing_provider': 'claude', 'processing_model': 'sonnet',
+                   'yolo': True}
+        self.assertEqual(0, dispatch(request)['exit_code'])
+        final = self.owner_settings()['final_review']
+        self.assertEqual((['claude'], 'claude'), self.final_providers(final))
+        self.assertEqual('sonnet', final['synthesis']['model'])
+        self.assertEqual({'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, self.owner_settings()['review'])
+
+    def test_a_settings_file_final_review_is_used_when_no_reviewer_flag_is_given(self):
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        final = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'a', 'effort': 'low'},
+                                    {'id': 'reviewer-2', 'provider': 'codex', 'model': 'b', 'effort': 'high'}],
+                 'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'full'}
+        path = self.settings_file(fix=choice, review=choice, final_review=final, verification='focused')
+        self.assertEqual(0, dispatch({**self.without_flags(), 'settings_file': path, 'yolo': True})['exit_code'])
+        self.assertEqual(final, self.owner_settings()['final_review'])
+
+    def test_a_settings_file_without_final_review_is_single_reviewer_derived_from_its_review_choice(self):
+        choice = {'provider': 'codex', 'model': 'file-review', 'effort': 'low'}
+        path = self.settings_file(fix=choice, review=choice, verification='focused')
+        self.assertEqual(0, dispatch({**self.without_flags(), 'settings_file': path, 'yolo': True})['exit_code'])
+        saved = self.owner_settings()
+        self.assertNotIn('final_review', saved)                                  # derived, never written back
+        effective = owner_state.effective_settings(saved)['final_review']
+        self.assertEqual([choice], [{k: v for k, v in slot.items() if k != 'id'} for slot in effective['reviewer_slots']])
+        self.assertEqual(choice, effective['synthesis'])
+
+    def test_explicit_reviewer_flags_beat_the_settings_file(self):
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        final = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'a', 'effort': 'low'}],
+                 'synthesis': dict(choice), 'synthesis_tests': 'focused'}
+        path = self.settings_file(fix=choice, review=choice, final_review=final, verification='focused')
+        request = {**self.req, 'settings_file': path, 'reviewer_1_model': 'flag-model', 'yolo': True}
+        self.assertEqual(0, dispatch(request)['exit_code'])
+        self.assertEqual('flag-model', self.owner_settings()['final_review']['reviewer_slots'][0]['model'])
+
+    def test_a_session_without_flags_or_file_keeps_its_legacy_single_reviewer_settings(self):
+        state = owner_state.OwnerSession({'session': self.path}).load()
+        state['settings'].pop('final_review')
+        owner_state.OwnerSession({'session': self.path}).save(state)
+        self.assertEqual(0, dispatch({**self.without_flags(), 'yolo': True})['exit_code'])
+        self.assertNotIn('final_review', self.owner_settings())
+
+    def test_reviewer_flags_cannot_change_the_settings_of_a_started_batch(self):
+        from pr_review.common import ApiError
+        def fix(*args):
+            raise ApiError('model_failed', 'Provider interrupted')
+        with patch('pr_review.issue_harness.invoke', side_effect=fix):
+            first = dispatch({**self.req, 'yolo': True})
+        self.assertEqual('model_failed', first['error']['code'])
+        owner = owner_state.OwnerSession({'session': self.path})
+        state = owner.load()
+        state['batches'][-1]['attempts'] = [{'role': 'fix', 'kind': 'issue_harness', 'status': 'failed'}]
+        owner.save(state)
+        self.assertEqual('settings_changed', dispatch({**self.req, 'reviewers': ['claude'], 'yolo': True})['error']['code'])
 
     def test_plan_cli_approval_real_owner_commit_push_and_noop(self):
         # Dirty main checkout must survive the entire implementation.
@@ -1818,21 +1899,6 @@ class BootstrapTest(IssueIntegrationTest):
             self.created.append(copy.deepcopy(self.f['pr']))
             return self.f['pr']
         return super().api(endpoint, payload, method)
-
-    def harness(self, session, state, batch, role, specification, feedback):
-        from pr_review import owner_providers
-        context = {'feedback': session.items(state, batch['items']),
-                   'approved_issue_plan': {'plan': specification},
-                   'scope': role == 'review', 'task': {'rationale': 'whole specification'}}
-        report = owner_providers.invoke(session, state, batch, role, context)
-        questions = report.get('product_questions', [])
-        blockers = report.get('blocking', [])
-        ready = report.get('complete', True) and not blockers
-        return {'status': 'needs_input' if questions else 'ready' if ready else
-                'working' if role == 'fix' else 'changes_requested',
-                'outcomes': report.get('outcomes', []),
-                'summary': report['summary'], 'checks': report.get('checks', []),
-                'findings': blockers or ([] if ready else [report['summary']]), 'questions': questions}
 
     def collect(self, target, repo):
         if self.f.get('pr'):

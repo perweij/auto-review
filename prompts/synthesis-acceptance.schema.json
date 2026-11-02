@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assessment", "summary", "checks", "findings", "outcomes", "case_results", "questions"],
+  "properties": {
+    "assessment": {"type": "string", "enum": ["passed", "changes_requested", "incomplete", "needs_input"]},
+    "summary": {"type": "string", "minLength": 1},
+    "checks": {"type": "array", "items": {"type": "string"}},
+    "findings": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "severity", "validity", "source", "evidence", "blocking", "body_md"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "title": {"type": "string", "minLength": 1},
+        "severity": {"type": "string", "enum": ["Critical", "High", "Medium", "Low"]},
+        "validity": {"type": "string", "enum": ["CONFIRMED", "MODIFIED", "NEW", "UNVERIFIED", "REJECTED"]},
+        "source": {"type": "string", "minLength": 1},
+        "evidence": {"type": "string", "minLength": 1},
+        "blocking": {"type": "boolean"},
+        "body_md": {"type": "string", "minLength": 1}
+      }
+    }},
+    "outcomes": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["item", "status", "evidence"],
+      "properties": {
+        "item": {"type": "string"},
+        "status": {"type": "string", "enum": ["fixed", "already_addressed", "clarify", "no_change"]},
+        "evidence": {"type": "string", "minLength": 1}
+      }
+    }},
+    "case_results": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "status", "evidence"],
+      "properties": {
+        "id": {"type": "string"},
+        "status": {"type": "string", "enum": ["tested", "source_traced", "failed", "unavailable"]},
+        "evidence": {"type": "string", "minLength": 1}
+      }
+    }},
+    "questions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

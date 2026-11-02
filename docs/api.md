@@ -388,16 +388,27 @@ Owner mutation operations:
 
 | Operation | Fields |
 | --- | --- |
-| `settings` | `settings: {fix: {provider,model,effort}, review: {provider,model,effort}, verification: "focused"}` |
+| `settings` | `settings: {fix: {provider,model,effort}, review: {provider,model,effort}, final_review?: {reviewer_slots: [{id,provider,model,effort}, ...], synthesis: {provider,model,effort}, synthesis_tests: "focused"\|"full"}, verification: "focused"}` |
 | `acknowledge`, `defer`, `restore`, `handled` | Distinct `items` array |
 | `reply` | Original feedback `item`, nonempty `body` |
 | `edit` | `reply` or `replies`, nonempty `body` |
 | `stage`, `unstage`, `acknowledge-reply` | `reply` or distinct `replies` array |
 
 Only new owner sessions use `defaults`, whose fields match reviewer setup
-defaults; the resolved processing triplet initializes both owner roles. Settings
-are subsequently independent and validated against fresh CLI metadata before
-execution. Metadata selection uses the existing `models` command.
+defaults. The resolved processing triplet initializes both owner roles (`fix`, and
+`review`, which configures focused per-task checks only) and the resolved reviewer
+slots, processing choice and `synthesis_tests` initialize `final_review`, the
+configuration of the shared review engine (one or two slots, the same provider
+allowed). Choices are subsequently independent and validated against fresh CLI
+metadata before execution. Metadata selection uses the existing `models` command.
+
+`final_review` is optional. A saved value or settings file without it stays valid
+and single-reviewer: its `review` choice is both the only slot (`reviewer-1`) and the
+synthesis. The Owner view adds `effective_settings`, the configuration that will
+actually run (the saved value with `final_review` derived when absent), for the session
+and for every batch's frozen `settings`. It is computed for display and never
+persisted, so the `batch.settings != settings` comparison is unchanged. `settings`
+mutations keep `final_review` when supplied and never add it.
 
 If a batch stopped before recording any model attempts, plans, or tasks, resume
 adopts the current owner settings. Once model work exists, resume requires the
@@ -791,10 +802,51 @@ phase resumes review without repeating implementation. A source or context chang
 invalidates that candidate. Unfinished pre-harness issue sessions are rejected with
 `unsupported_session`; their worktrees and artifacts are retained for manual recovery.
 
-The independent harness reviewer is the sole acceptance gate, configured by the
-Owner review settings. After verification the coordinator commits, pushes, and
-marks the PR ready; it does not invoke the separate PR-review/synthesis pipeline.
-Legacy `review_session` references are retained as history and are not resumed.
+The shared review engine is the sole acceptance gate for a completed local candidate.
+It is configured by the Owner `final_review` settings (see `owner-mutate`
+`settings`), which the shared reviewer fields of `issue-run` set under the frozen
+settings rules. After verification the coordinator commits, pushes, and marks the PR
+ready; it does not invoke the PR-review pipeline for a PR. Legacy `review_session`
+references are retained as history and are not resumed.
+
+Review engine results and artifacts. Each review binds to the exact candidate (the
+checkpoint tree on the pinned baseline, represented by a deterministic internal
+review commit at `refs/pr-owner/<session>/review-candidates/<commit>`), the
+specification or feedback and the configuration. Its artifacts live under the Owner
+session at `review-engine/<review commit>/<adapter>/` (`issue-acceptance` or
+`owner-final`): `manifest.json` (stage records and fingerprints), `reviews/`
+(`reviewer-N.md`, `synthesis.json`, `synthesis.md`, and retained
+`synthesis-incomplete-<n>.json` / `synthesis-needs-input-<n>.json`), `context/`,
+`prompts/`, `logs/` and `stages/<stage>/` (scratch, events, a disposable checkout and,
+after a modified checkout, `checkout-modified.txt` and `.diff`). Earlier direct-stage
+attempts are kept under `attempts/`.
+
+`reviews/synthesis.json` is the full result: `assessment` (`passed`,
+`changes_requested`, `incomplete`, `needs_input`), `summary`, `checks`, `findings`
+(`id`, `title`, `severity`, `validity`, `source`, `evidence`, `blocking`, `body_md`),
+`outcomes` (`item`, `status`, `evidence`), `case_results` and `questions`. It is the
+only place where non-blocking observations and rejected claims are stored. Only
+`blocking: true` findings are projected into `harness_review.findings`,
+`harness_feedback` and the Owner `blocking` list; a `passed` result maps to
+`harness_review.status: ready` with empty `findings` and `questions` (and an Owner
+`assessment: passed`, `complete: true`, `blocking: []`). `changes_requested` returns
+only blocking findings to the implementation session. `needs_input` pauses with
+`harness_review.questions` (Owner: an `incomplete` review with `clarify` outcomes).
+`incomplete` writes no proof: `issue-run` stops with `review_incomplete`, keeping
+`harness_phase: review`, and an Owner batch pauses with `assessment: incomplete`.
+Incomplete and unanswered results are retained but never reusable as completed
+evidence, so resume reruns synthesis on the unchanged candidate while valid reviewer
+reports are reused.
+
+`batch.attempts` gains `kind: review_engine` records (`role`: `acceptance` or
+`final_review`, `status`, `path`, `candidate`, `choice`, `result`, `assessment`). New
+batches record `review_engine: 1`; an unfinished batch with attempts and no marker is
+rejected with `unsupported_session`, and a `ready` one can still commit and publish.
+Engine stop codes: `review_incomplete`, `independence_failed` (isolation could not be
+established; no unisolated fallback) and `review_checkout_modified` (a stage changed its
+disposable checkout; its result is discarded, `integrity_failure` is not set and no
+`adopt` is needed). A live-tree or Git-admin change during a review records
+`integrity_failure` and requires `adopt`.
 
 The former issue `replan` control is obsolete and rejected before I/O. Resume with
 an ordinary `issue-run`; `adopt` still explicitly accepts inspected workspace

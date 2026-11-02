@@ -1,4 +1,5 @@
 """Private filesystem and snapshot for independent reviewer processes."""
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -43,6 +44,91 @@ def _git(cwd, *args, check=True):
     return result
 
 
+def prepare_checkout(source, head_ref, base_ref, head, base, destination, cwd):
+    """Create a disposable detached checkout and return its tracked paths.
+
+    The clone is disposable and never shares objects with its source. Refs named
+    by the caller are fetched, ``head`` is checked out detached and ``base_ref``
+    is pinned to ``base``. It serves sandboxed reviewers and direct stages.
+    """
+    _git(cwd, 'clone', '--no-local', '--no-checkout', '--', str(source), str(destination))
+    # PR refs are outside refs/heads and are not included by clone's
+    # default refspec, especially for fork pull requests.
+    _git(destination, 'fetch', '--no-tags', 'origin', head_ref, base_ref)
+    _git(destination, 'checkout', '--detach', head)
+    _git(destination, 'update-ref', base_ref, base)
+    return set(_git(destination, 'ls-files', '-z').stdout.split('\0'))
+
+
+def preserve_generated(checkout, tracked, logs, run_path, stage):
+    """Retain untracked files without placing them in another reviewer's tree."""
+    checkout, archive = Path(checkout), None
+    retained, links_saved = [], {}
+    for directory, folders, files in os.walk(checkout, followlinks=False):
+        here = Path(directory)
+        if here == checkout:
+            folders[:] = [name for name in folders if name != '.git']
+        links = [name for name in folders if (here / name).is_symlink()]
+        folders[:] = [name for name in folders if name not in links]
+        for name in files + links:
+            source = here / name
+            relative = source.relative_to(checkout)
+            if str(relative) in tracked:
+                continue
+            if not (source.is_file() or source.is_symlink()):
+                continue
+            if archive is None:
+                logs, run_path = Path(logs), Path(run_path)
+                base = logs / 'generated'
+                if logs.is_symlink() or logs.resolve() != run_path.resolve() / 'logs' or base.is_symlink():
+                    raise ApiError('invalid_artifact', 'Invalid generated-file preservation directory')
+                base.mkdir(exist_ok=True, mode=0o700)
+                archive = Path(tempfile.mkdtemp(prefix=stage + '-', dir=base))
+            if source.is_symlink():
+                links_saved[str(relative)] = os.readlink(source)
+            else:
+                destination = archive / 'files' / relative
+                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                shutil.copy2(source, destination)
+            retained.append(str(relative))
+    if links_saved:
+        write_json(archive / 'symlinks.json', links_saved)
+    return archive, retained
+
+
+@dataclass
+class SandboxInputs:
+    """Everything a sandboxed reviewer needs from its workflow, without PR attributes."""
+    source: Path            # repository whose objects feed the disposable clone
+    head_ref: str
+    base_ref: str
+    head: str
+    base: str
+    scratch: Path           # parent of the private root
+    cwd: Path               # host-side working directory; never the candidate itself
+    output: Path            # run directory receiving ``reviews/<stage>.md.tmp`` and generated archives
+    protected: list = field(default_factory=list)
+    context: dict = field(default_factory=dict)   # private context files: relative name -> bytes
+
+
+def pr_inputs(run):
+    """Describe a PR review session. Its attributes remain the PR contract."""
+    protected = [state_root(), run.root.resolve(), run.path.resolve(), run.worktree.resolve()]
+    for path in (getattr(run, 'current', None), getattr(run, 'pending', None)):
+        if path is not None:
+            protected.append(Path(path).resolve())
+    history_paths = [str(run.root) + '-history', str(run.path) + '-history',
+                     run.manifest.get('attempt', {}).get('previous'),
+                     run.manifest.get('previous_review', {}).get('archive')]
+    for snapshot in run.manifest.get('snapshot_history', []):
+        history_paths.extend((snapshot.get('archive'), snapshot.get('worktree')))
+    protected.extend(Path(value).resolve() for value in history_paths if value and Path(value).is_dir())
+    snapshot = run.manifest['snapshot']
+    return SandboxInputs(source=run.repo.common, head_ref=run.repo.head_ref, base_ref=run.repo.base_ref,
+                         head=snapshot['head'], base=snapshot['base'], scratch=run.scratch, cwd=run.worktree,
+                         output=run.path, protected=protected)
+
+
 class IndependentSandbox:
     """A disposable clone inside a mount namespace, with private writable files.
 
@@ -51,21 +137,22 @@ class IndependentSandbox:
     invocation from leaving files for another. Provider authentication files are
     exposed read-only; review transcripts and provider session directories are not.
     """
-    def __init__(self, run, stage, provider):
+    def __init__(self, run, stage, provider, inputs=None):
         self.temp = None
         try:
-            self._initialize(run, stage, provider)
+            self._initialize(run, stage, provider, inputs)
         except BaseException:
             if self.temp is not None:
                 self.temp.cleanup()
             raise
 
-    def _initialize(self, run, stage, provider):
+    def _initialize(self, run, stage, provider, inputs):
         self.run, self.stage, self.provider = run, stage, provider
         if not shutil.which('bwrap'):
             raise ApiError('independence_failed', 'Independent reviews require bubblewrap for filesystem isolation')
+        self.inputs = inputs if inputs is not None else pr_inputs(run)
         self.git = _executable('git', os.environ.get('PATH', ''))
-        self.temp = tempfile.TemporaryDirectory(prefix='isolated-review-', dir=run.scratch)
+        self.temp = tempfile.TemporaryDirectory(prefix='isolated-review-', dir=self.inputs.scratch)
         self.root = Path(self.temp.name)
         self.checkout = self.root / 'checkout'
         self.home = self.root / 'home'
@@ -74,24 +161,17 @@ class IndependentSandbox:
         (self.root / 'runtime').mkdir(mode=0o700)
         for name in ('.cache', '.config', '.local/state'):
             (self.home / name).mkdir(mode=0o700, parents=True)
-        _git(run.worktree, 'clone', '--no-local', '--no-checkout', '--', str(run.repo.common), str(self.checkout))
-        # PR refs are outside refs/heads and are not included by clone's
-        # default refspec, especially for fork pull requests.
-        _git(self.checkout, 'fetch', '--no-tags', 'origin', run.repo.head_ref, run.repo.base_ref)
-        _git(self.checkout, 'checkout', '--detach', run.manifest['snapshot']['head'])
-        _git(self.checkout, 'update-ref', run.repo.base_ref, run.manifest['snapshot']['base'])
-        self.tracked = set(_git(self.checkout, 'ls-files', '-z').stdout.split('\0'))
+        inputs = self.inputs
+        self.tracked = prepare_checkout(inputs.source, inputs.head_ref, inputs.base_ref, inputs.head,
+                                        inputs.base, self.checkout, inputs.cwd)
+        # Specification and feedback reach a reviewer only through files in its
+        # private root; no prompt argument exists for ``codex exec review --base``.
+        for name, content in inputs.context.items():
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            target.write_bytes(content)
         self.mounts = []
-        self.protected = [state_root(), run.root.resolve(), run.path.resolve(), run.worktree.resolve()]
-        for path in (getattr(run, 'current', None), getattr(run, 'pending', None)):
-            if path is not None:
-                self.protected.append(Path(path).resolve())
-        history_paths = [str(run.root) + '-history', str(run.path) + '-history',
-                         run.manifest.get('attempt', {}).get('previous'),
-                         run.manifest.get('previous_review', {}).get('archive')]
-        for snapshot in run.manifest.get('snapshot_history', []):
-            history_paths.extend((snapshot.get('archive'), snapshot.get('worktree')))
-        self.protected.extend(Path(value).resolve() for value in history_paths if value and Path(value).is_dir())
+        self.protected = list(inputs.protected)
         home = Path.home()
         source_home = Path(os.environ.get('CODEX_HOME', home / '.codex')) if provider == 'codex' else Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude'))
         files = [(source_home / 'auth.json', '.codex/auth.json'),
@@ -154,12 +234,11 @@ class IndependentSandbox:
                    XDG_CACHE_HOME='/tmp/review-private/home/.cache', XDG_CONFIG_HOME='/tmp/review-private/home/.config',
                    XDG_STATE_HOME='/tmp/review-private/home/.local/state', XDG_RUNTIME_DIR='/tmp/review-private/runtime',
                    GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', PATH=safe_path)
-        output = str(self.run.path / f'reviews/{self.stage}.md.tmp')
+        output = str(self.inputs.output / f'reviews/{self.stage}.md.tmp')
         command = [_executable(argv[0], safe_path), *argv[1:]]
         return sandbox + [('/tmp/review-private/result.md' if arg == output else arg) for arg in command], env
 
     def verify(self):
-        snapshot = self.run.manifest['snapshot']
         gitdir = self.checkout / '.git'
         if gitdir.is_symlink() or not gitdir.is_dir():
             raise ApiError('integrity_failed', 'Independent reviewer changed its isolated Git directory')
@@ -171,53 +250,23 @@ class IndependentSandbox:
             argv, env = self.wrap(prefix + list(args), clean_env)
             with tempfile.TemporaryFile() as startup:
                 argv[1:1] = ['--info-fd', str(startup.fileno())]
-                result = process(argv, cwd=self.run.worktree, env=env, pass_fds=(startup.fileno(),))
+                result = process(argv, cwd=self.inputs.cwd, env=env, pass_fds=(startup.fileno(),))
                 if not startup_confirmed(startup):
                     raise ApiError('independence_failed', 'Cannot start isolated snapshot verification: ' + result.stderr.strip())
             return result
         head = invoke('rev-parse', 'HEAD')
-        base = invoke('rev-parse', self.run.repo.base_ref)
+        base = invoke('rev-parse', self.inputs.base_ref)
         tracked = invoke('diff', '--no-ext-diff', '--quiet', 'HEAD', '--')
         staged = invoke('diff', '--no-ext-diff', '--cached', '--quiet', '--')
-        if (head.returncode or head.stdout.strip() != snapshot['head'] or
-                base.returncode or base.stdout.strip() != snapshot['base'] or
+        if (head.returncode or head.stdout.strip() != self.inputs.head or
+                base.returncode or base.stdout.strip() != self.inputs.base or
                 tracked.returncode or staged.returncode):
             raise ApiError('integrity_failed', 'Independent reviewer changed its isolated snapshot')
 
     def preserve_generated(self):
         """Retain untracked files without placing them in another reviewer's tree."""
-        archive = None
-        retained, links_saved = [], {}
-        for directory, folders, files in os.walk(self.checkout, followlinks=False):
-            here = Path(directory)
-            if here == self.checkout:
-                folders[:] = [name for name in folders if name != '.git']
-            links = [name for name in folders if (here / name).is_symlink()]
-            folders[:] = [name for name in folders if name not in links]
-            for name in files + links:
-                source = here / name
-                relative = source.relative_to(self.checkout)
-                if str(relative) in self.tracked:
-                    continue
-                if not (source.is_file() or source.is_symlink()):
-                    continue
-                if archive is None:
-                    logs = self.run.path / 'logs'
-                    base = logs / 'generated'
-                    if logs.is_symlink() or logs.resolve() != self.run.path.resolve() / 'logs' or base.is_symlink():
-                        raise ApiError('invalid_artifact', 'Invalid generated-file preservation directory')
-                    base.mkdir(exist_ok=True, mode=0o700)
-                    archive = Path(tempfile.mkdtemp(prefix=self.stage + '-', dir=base))
-                if source.is_symlink():
-                    links_saved[str(relative)] = os.readlink(source)
-                else:
-                    destination = archive / 'files' / relative
-                    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    shutil.copy2(source, destination)
-                retained.append(str(relative))
-        if links_saved:
-            write_json(archive / 'symlinks.json', links_saved)
-        return archive, retained
+        return preserve_generated(self.checkout, self.tracked, self.inputs.output / 'logs',
+                                  self.inputs.output, self.stage)
 
     def close(self):
         self.temp.cleanup()

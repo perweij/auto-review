@@ -1,8 +1,9 @@
 """Thin approved-specification execution over persistent provider CLI sessions.
 
 The harness owns implementation, testing, debugging and decomposition. This
-module owns source identity, session attribution, independent review and handoff
-to the existing verified commit/publication transaction.
+module owns source identity, session attribution and handoff to the existing
+verified commit/publication transaction. Acceptance review of a completed local
+candidate belongs to the shared review engine (see ``acceptance``).
 """
 import copy
 import json
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from .common import ApiError, digest, now
 from .events import emit
-from . import owner_git, owner_providers, owner_commit_plan, owner_auto_commit
+from . import acceptance, owner_git, owner_providers, owner_commit_plan, owner_auto_commit
 from .providers import Runtime, environment
 from .processes import run
 from .storage import write_json, atomic_bytes
@@ -26,7 +27,7 @@ SCHEMA = owner_providers.obj({
 })
 
 
-def validate(value, role, keys=()):
+def validate(value):
     if (not isinstance(value, dict) or value.get('status') not in SCHEMA['properties']['status']['enum']
             or not isinstance(value.get('summary'), str) or not value['summary'].strip()
             or any(not isinstance(value.get(k), list) or any(not isinstance(v, str) or not v.strip() for v in value[k])
@@ -36,25 +37,13 @@ def validate(value, role, keys=()):
         raise ApiError('invalid_result', 'A ready candidate cannot contain blocking findings or questions.')
     if value['status'] == 'needs_input' and not value['questions']:
         raise ApiError('invalid_result', 'A product question requires question text.')
-    if role == 'review' and value['status'] == 'working':
-        raise ApiError('invalid_result', 'Independent review must assess the candidate, not implement it.')
     if value['status'] == 'changes_requested' and not value['findings']:
         raise ApiError('invalid_result', 'Changes requested requires actionable findings.')
-    if role == 'review' and value['status'] == 'ready':
-        outcomes = value.get('outcomes', [])
-        if (not isinstance(outcomes, list) or len(outcomes) != len(keys)
-                or any(not isinstance(o, dict) or o.get('item') not in keys
-                       or o.get('status') not in ('fixed', 'already_addressed', 'no_change')
-                       or not isinstance(o.get('evidence'), str) or not o['evidence'].strip() for o in outcomes)
-                or len({o['item'] for o in outcomes}) != len(keys)):
-            raise ApiError('invalid_result', 'Ready review requires an evidenced outcome for each selected feedback item.')
     return value
 
 
-def arguments(choice, role, directory, schema, conversation):
-    args = owner_providers.argv(choice, Runtime.environment(), role, directory, schema)
-    if role != 'fix':
-        return args
+def arguments(choice, directory, schema, conversation):
+    args = owner_providers.argv(choice, Runtime.environment(), 'fix', directory, schema)
     if choice['provider'] == 'codex':
         args.remove('--ephemeral')
         if conversation.get('session_id'):
@@ -69,12 +58,13 @@ def arguments(choice, role, directory, schema, conversation):
     return args
 
 
-def invoke(session, state, batch, role, specification, feedback):
-    choice = batch['settings']['fix' if role == 'fix' else 'review']
+def invoke(session, state, batch, specification, feedback):
+    """One implementation turn of the persistent ``fix`` session."""
+    choice = batch['settings']['fix']
     key = digest([state['issue_workflow'], specification, choice])
     conversations = state.setdefault('issue_harness_sessions', {})
-    conversation = conversations.setdefault(key, {'choice': copy.deepcopy(choice)}) if role == 'fix' else {}
-    if role == 'fix' and choice['provider'] == 'claude':
+    conversation = conversations.setdefault(key, {'choice': copy.deepcopy(choice)})
+    if choice['provider'] == 'claude':
         conversation.setdefault('session_id', str(uuid.uuid4()))
     directory = session.path / 'attempts' / uuid.uuid4().hex
     if any(directory.resolve().is_relative_to(Path(root).resolve())
@@ -83,12 +73,7 @@ def invoke(session, state, batch, role, specification, feedback):
     directory.mkdir(parents=True)
     (directory / 'scratch').mkdir()
     schema = directory / 'schema.json'
-    contract = copy.deepcopy(SCHEMA)
-    if role == 'review':
-        contract['properties']['outcomes'] = copy.deepcopy(owner_providers.OUTCOMES)
-        contract['properties']['outcomes']['items']['properties']['status']['enum'] = ['fixed', 'already_addressed', 'no_change']
-        contract['required'].append('outcomes')
-    write_json(schema, contract)
+    write_json(schema, copy.deepcopy(SCHEMA))
     before = owner_git.checkpoint(session, state, 'harness before')
     if before['tree'] != batch['checkpoint']['tree']:
         raise ApiError('worktree_changed', 'Source changed between harness turns; inspect before continuing.')
@@ -96,7 +81,7 @@ def invoke(session, state, batch, role, specification, feedback):
     admin = owner_git.admin(session, state)
     if batch.get('integrity_failure') or batch.get('git_admin', admin) != admin:
         raise ApiError('integrity_failed', 'Protected Git state changed; inspect before continuing.')
-    prompt = (Path(__file__).resolve().parents[2] / 'prompts' / ('issue-implement.txt' if role == 'fix' else 'issue-review.txt')).read_text()
+    prompt = (Path(__file__).resolve().parents[2] / 'prompts' / 'issue-implement.txt').read_text()
     prompt, _ = owner_providers.context_prompt(prompt + '\n', {'approved_specification': specification,
                                 'feedback': feedback, 'worktree': state['worktree'],
                                 'selected_feedback': session.items(state, batch['items']),
@@ -106,14 +91,14 @@ def invoke(session, state, batch, role, specification, feedback):
                                 'prior_checks': batch.get('harness_candidate', {}).get('checks', []),
                                 'previous_attempts': [a['path'] for a in batch.get('attempts', [])[-4:]]}, directory)
     atomic_bytes(directory / 'prompt.txt', prompt.encode())
-    args = arguments(choice, role, directory, schema, conversation)
-    record = {'role': role, 'kind': 'issue_harness', 'choice': copy.deepcopy(choice),
+    args = arguments(choice, directory, schema, conversation)
+    record = {'role': 'fix', 'kind': 'issue_harness', 'choice': copy.deepcopy(choice),
               'path': str(directory), 'argv': args, 'before': before, 'git_admin_before': admin,
               'status': 'running', 'started_at': now()}
     batch.setdefault('attempts', []).append(record)
     session.save(state)
     def event_line(stream, line):
-        if role != 'fix' or stream != 'stdout':
+        if stream != 'stdout':
             return
         try:
             event = json.loads(line)
@@ -131,22 +116,22 @@ def invoke(session, state, batch, role, specification, feedback):
             session.save(state)
     env, _ = environment(choice['provider'])
     env.update(TMPDIR=str(directory / 'scratch'), PYTHONDONTWRITEBYTECODE='1', GIT_OPTIONAL_LOCKS='0')
-    turn = sum(a.get('kind') == 'issue_harness' and a.get('role') == role for a in batch['attempts'])
-    emit('progress', message=f"Issue {'implementation' if role == 'fix' else 'independent review'} turn {turn}: {choice['provider']} / {choice['model']} ({choice['effort']})")
+    turn = sum(a.get('kind') == 'issue_harness' and a.get('role') == 'fix' for a in batch['attempts'])
+    emit('progress', message=f"Issue implementation turn {turn}: {choice['provider']} / {choice['model']} ({choice['effort']})")
     try:
         result = run(args, cwd=state['worktree'], env=env, input_bytes=prompt.encode(),
                      timeout=Runtime.environment().model_timeout, stdout_path=directory / 'events.jsonl',
                      stderr_path=directory / 'stderr.log', model_events=True, on_line=event_line,
-                     stage='issue-implementation' if role == 'fix' else 'issue-review')
+                     stage='issue-implementation')
         after = owner_git.checkpoint(session, state, 'harness after')
         record['after'] = after
         batch['checkpoint'] = after
-        if owner_git.admin(session, state) != admin or role != 'fix' and after['tree'] != before['tree']:
+        if owner_git.admin(session, state) != admin:
             batch['integrity_failure'] = str(directory)
             raise ApiError('integrity_failed', 'Harness changed protected source or Git state.')
         try:
-            value = validate(response(choice, result, directory), role, batch['items'])
-            if role == 'fix' and not conversation.get('session_id'):
+            value = validate(response(choice, result, directory))
+            if not conversation.get('session_id'):
                 raise ApiError('model_failed', 'Provider did not identify its implementation session; inspect the saved events.')
         except ApiError as exc:
             if exc.code == 'invalid_result' or (exc.code == 'invalid_artifact' and isinstance(exc.__cause__, ValueError)) or (exc.code == 'model_failed' and
@@ -171,7 +156,7 @@ def invoke(session, state, batch, role, specification, feedback):
             try:
                 after = owner_git.checkpoint(session, state, 'interrupted harness')
                 record['after'] = after
-                if owner_git.admin(session, state) == admin and (role == 'fix' or after['tree'] == before['tree']):
+                if owner_git.admin(session, state) == admin:
                     batch['checkpoint'] = after
                 else:
                     batch['integrity_failure'] = str(directory)
@@ -184,15 +169,15 @@ def invoke(session, state, batch, role, specification, feedback):
         session.save(state)
 
 
-def report(session, state, batch, role, specification, feedback):
+def report(session, state, batch, specification, feedback):
     """One format correction; source work stays in the implementation session."""
     try:
-        return invoke(session, state, batch, role, specification, feedback)
+        return invoke(session, state, batch, specification, feedback)
     except ApiError as exc:
         if exc.code != 'invalid_result':
             raise
         emit('progress', message='Correcting harness completion report format')
-        return invoke(session, state, batch, role, specification,
+        return invoke(session, state, batch, specification,
                       list(feedback) + ['Correct the completion report to the supplied schema: ' + str(exc)])
 
 
@@ -203,6 +188,23 @@ def require_supported(batch):
                        'This unfinished issue session uses the retired task pipeline. '
                        'Automatic migration is no longer supported; preserve its worktree '
                        'and artifacts for manual recovery.')
+    require_engine(batch)
+
+
+def require_engine(batch):
+    """Unfinished batches that began before the shared review engine are not migrated.
+
+    New batches record ``review_engine: 1``. An untouched batch adopts the marker;
+    a ready batch can still commit and publish because its guards are unchanged.
+    """
+    if batch.get('review_engine') == 1 or batch.get('status') == 'ready':
+        return
+    if batch.get('attempts'):
+        raise ApiError('unsupported_session',
+                       'This unfinished session started before the shared review engine. '
+                       'Automatic migration is not supported; its worktree and artifacts are kept '
+                       'for manual recovery.')
+    batch['review_engine'] = 1
 
 
 def resume(batch, request, snapshot, identity):
@@ -262,7 +264,7 @@ def execute(session, state, batch, remote):
         session.save(state)
         if batch.get('harness_phase') != 'review':
             before = batch['checkpoint']['tree']
-            candidate = report(session, state, batch, 'fix', approved, implementation_feedback)
+            candidate = report(session, state, batch, approved, implementation_feedback)
             batch['harness_candidate'] = candidate
             batch['harness_candidate_tree'] = batch['checkpoint']['tree']
             if candidate['status'] == 'needs_input':
@@ -283,21 +285,25 @@ def execute(session, state, batch, remote):
             batch['harness_unchanged'] = 0
             batch['harness_phase'] = 'review'
             session.save(state)
-        review = report(session, state, batch, 'review', approved, feedback)
+        result, review = acceptance.review_issue(session, state, batch, approved)
+        if review is None:
+            # An incomplete review writes no proof. The phase stays 'review', so
+            # resume reruns only the stages that lack valid evidence.
+            raise ApiError('review_incomplete', 'Acceptance review could not finish: ' + result.value['summary'],
+                           summary=result.value['summary'], artifact=str(result.artifact), next_action='retry')
         batch['harness_review'] = review
         batch['harness_review_tree'] = batch['checkpoint']['tree']
         if review['status'] == 'needs_input':
             batch.update(status='paused', harness_questions=review['questions'])
             session.save(state)
             return session.view(state)
-        if review['status'] == 'blocked_external':
-            raise ApiError('blocked_external', review['summary'])
         if review['status'] != 'ready':
             repeated = batch.get('harness_rejected_tree') == batch['checkpoint']['tree']
             batch['harness_repeated_rejection'] = batch.get('harness_repeated_rejection', 0) + 1 if repeated else 1
             batch['harness_rejected_tree'] = batch['checkpoint']['tree']
             if batch['harness_repeated_rejection'] >= 3:
                 raise ApiError('automation_failed', 'The same unchanged candidate was repeatedly rejected.', summary='; '.join(review['findings']))
+            # Only blocking findings return to the implementation session.
             feedback = review['findings'] or [review['summary']]
             implementation_feedback = feedback
             batch.update(harness_feedback=feedback, harness_phase='implement')

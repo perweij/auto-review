@@ -28,19 +28,31 @@ def parser():
     result.add_argument('--max-weekly-quota-use', type=float, help='maximum observed weekly percentage-point increase during execution')
     result.add_argument('--max-runtime', help='cumulative active execution allowance, e.g. 30m or 2h')
     result.add_argument('--json', action='store_true')
-    result.add_argument('--settings-file', help='Owner fix/review settings JSON')
+    result.add_argument('--settings-file', help='Owner settings JSON: fix, review (focused task checks only), '
+                        'and optionally final_review {reviewer_slots, synthesis, synthesis_tests} for acceptance review')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     presets = result.add_mutually_exclusive_group()
     presets.add_argument('--economical', action='store_true')
     presets.add_argument('--expensive', action='store_true')
     result.add_argument('--reviewers', type=lambda value: value.split(','), default=argparse.SUPPRESS,
-                        help='Shared configuration compatibility; issue verification uses Owner review settings, not a post-push PR review')
-    for key in ('reviewer-1-provider', 'reviewer-1-model', 'reviewer-1-effort',
-                'reviewer-2-provider', 'reviewer-2-model', 'reviewer-2-effort',
-                'processing-model', 'processing-effort'):
-        result.add_argument('--' + key, default=argparse.SUPPRESS)
-    for key in ('codex-model', 'claude-model', 'processing-provider', 'claude-effort', 'codex-effort', 'synthesis-tests'):
-        result.add_argument('--' + key, default=argparse.SUPPRESS)
+                        help='one or two comma-separated reviewer providers for acceptance review of the local candidate '
+                             '(claude, codex); there is no post-push PR review')
+    for key, text in (('reviewer-1-provider', 'provider of acceptance reviewer slot 1'),
+                      ('reviewer-1-model', 'model of acceptance reviewer slot 1'),
+                      ('reviewer-1-effort', 'effort of acceptance reviewer slot 1'),
+                      ('reviewer-2-provider', 'provider of acceptance reviewer slot 2'),
+                      ('reviewer-2-model', 'model of acceptance reviewer slot 2'),
+                      ('reviewer-2-effort', 'effort of acceptance reviewer slot 2'),
+                      ('processing-model', 'model of the acceptance synthesis'),
+                      ('processing-effort', 'effort of the acceptance synthesis')):
+        result.add_argument('--' + key, default=argparse.SUPPRESS, help=text)
+    for key, text in (('codex-model', 'default Codex model for reviewers and synthesis'),
+                      ('claude-model', 'default Claude model for reviewers and synthesis'),
+                      ('processing-provider', 'provider of the acceptance synthesis'),
+                      ('claude-effort', 'default Claude effort for reviewers and synthesis'),
+                      ('codex-effort', 'default Codex effort for reviewers and synthesis'),
+                      ('synthesis-tests', 'acceptance synthesis verification policy (focused or full)')):
+        result.add_argument('--' + key, default=argparse.SUPPRESS, help=text)
     return result
 
 

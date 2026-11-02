@@ -404,10 +404,9 @@
       (insert (format "Started: %s\nBaseline: %s\n" (alist-get 'created_at batch) (alist-get 'baseline batch)))
       (dolist (rejection (alist-get 'plan_rejections batch))
         (insert (format "Rejected plan (%s): %s\n" (alist-get 'at rejection) (alist-get 'error rejection))))
-      (dolist (role '(fix review))
-        (when-let ((choice (alist-get role (alist-get 'settings batch))))
-          (insert (format "Saved %s settings: %s / %s (%s)\n" role
-                          (alist-get 'provider choice) (alist-get 'model choice) (alist-get 'effort choice)))))
+      (dolist (line (magit-auto-review-owner--settings-lines
+                     (or (alist-get 'effective_settings batch) (alist-get 'settings batch)) t))
+        (insert line "\n"))
       (magit-auto-review-owner--insert-report (alist-get 'review batch))
       (dolist (association (alist-get 'associations batch))
         (insert (format "Commit association: %s → %s (%s)\n" (car association)
@@ -518,10 +517,9 @@
       (magit-auto-review-owner--heading (format "PR Owner · #%s · %s" (or (alist-get 'pr view) "?") (or (alist-get 'repository view) "")))
       (insert "f fix · C-u f fix/commit/replies · g check commits · h finish locally · m commit/status · C-u m inspect · ? actions · M toolkit\n")
       (insert (format "GitHub last checked: %s\n" (or (alist-get 'checked_at view) "never; G fetches feedback")))
-      (dolist (role '(fix review))
-        (when-let ((choice (alist-get role (alist-get 'settings view))))
-          (insert (format "%s: %s / %s / %s\n" (capitalize (symbol-name role))
-                          (alist-get 'provider choice) (alist-get 'model choice) (alist-get 'effort choice)))))
+      (dolist (line (magit-auto-review-owner--settings-lines
+                     (or (alist-get 'effective_settings view) (alist-get 'settings view))))
+        (insert line "\n"))
       (when (alist-get 'worktree view)
         (insert (format "Worktree: %s\nPush target: %s · %s\n" (alist-get 'worktree view)
                         (or (alist-get 'repository (alist-get 'push_target view)) "unavailable")
@@ -1058,9 +1056,53 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
                     (alist-get 'url item) (alist-get 'url (car (alist-get 'comments item)))
                     (alist-get 'url magit-auto-review-owner--view)))))
 
+(defun magit-auto-review-owner--choice-text (choice &optional saved)
+  "Return CHOICE (provider, model, effort) as text.
+SAVED selects the wording of a saved batch."
+  (format (if saved "%s / %s (%s)" "%s / %s / %s")
+          (alist-get 'provider choice) (alist-get 'model choice) (alist-get 'effort choice)))
+
+(defun magit-auto-review-owner--settings-lines (settings &optional saved)
+  "Return display lines for Owner SETTINGS.
+Show the fix and task-check roles, then the final reviewer slots and the
+synthesis of the shared review engine.  SETTINGS should be an effective
+configuration, so a legacy session shows what will actually run.  SAVED selects
+the wording of a saved batch's frozen settings."
+  (let (lines)
+    (dolist (role '(fix review))
+      (when-let ((choice (alist-get role settings)))
+        (let ((choice-text (magit-auto-review-owner--choice-text choice saved)))
+          (push (if saved
+                    (format "Saved %s settings: %s" (if (eq role 'fix) "fix" "task-check") choice-text)
+                  (format "%s: %s" (if (eq role 'fix) "Fix" "Task check") choice-text))
+                lines))))
+    (when-let ((final (alist-get 'final_review settings)))
+      (dolist (slot (alist-get 'reviewer_slots final))
+        (push (format (if saved "Saved final review %s settings: %s" "Final review %s: %s")
+                      (or (alist-get 'id slot) "reviewer") (magit-auto-review-owner--choice-text slot saved))
+              lines))
+      (when-let ((synthesis (alist-get 'synthesis final)))
+        (push (format (if saved "Saved final review synthesis settings: %s (%s checks)" "Final review synthesis: %s (%s checks)")
+                      (magit-auto-review-owner--choice-text synthesis saved) (or (alist-get 'synthesis_tests final) "focused"))
+              lines)))
+    (nreverse lines)))
+
+(defun magit-auto-review-owner--settings-payload (settings)
+  "Return a copy of SETTINGS that `json-serialize' encodes without loss.
+Decoded arrays are lists, which would serialize as objects.  The final-review
+reviewer slots must be a vector so R f and R r keep final_review intact."
+  (let* ((copy (copy-tree settings))
+         (final (alist-get 'final_review copy)))
+    (when final
+      (setf (alist-get 'reviewer_slots final)
+            (vconcat (alist-get 'reviewer_slots final)))
+      (setf (alist-get 'final_review copy) final))
+    copy))
+
 (defun magit-auto-review-owner-configure (role)
   "Choose provider, model, and effort for ROLE using fresh metadata."
-  (let ((provider (completing-read (concat (capitalize role) " provider: ") '("claude" "codex") nil t)))
+  (let ((provider (completing-read (concat (if (equal role "review") "Task-check" (capitalize role)) " provider: ")
+                                   '("claude" "codex") nil t)))
     (magit-auto-review-owner--start
      `((command . "models") (provider . ,provider))
      (lambda (catalog)
@@ -1068,17 +1110,19 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
               (model (completing-read "Model: " (mapcar (lambda (m) (alist-get 'value m)) models) nil t))
               (info (cl-find model models :key (lambda (m) (alist-get 'value m)) :test #'equal))
               (effort (completing-read "Effort: " (alist-get 'efforts info) nil t))
+              ;; Saved settings, not the effective view: a legacy session stays without final_review.
               (settings (copy-tree (alist-get 'settings magit-auto-review-owner--view))))
          (setf (alist-get (intern role) settings) `((provider . ,provider) (model . ,model) (effort . ,effort)))
-         (magit-auto-review-owner--mutate "settings" `(settings . ,settings)))))))
+         (magit-auto-review-owner--mutate
+          "settings" `(settings . ,(magit-auto-review-owner--settings-payload settings))))))))
 (defun magit-auto-review-owner-configure-fix () "Configure fix provider settings." (interactive) (magit-auto-review-owner-configure "fix"))
-(defun magit-auto-review-owner-configure-review () "Configure automatic-review settings." (interactive) (magit-auto-review-owner-configure "review"))
+(defun magit-auto-review-owner-configure-review () "Configure task-check settings." (interactive) (magit-auto-review-owner-configure "review"))
 
 (transient-define-prefix magit-auto-review-owner-setup ()
   "Configure owner providers without invoking inference."
   [["Provider settings"
     ("f" "Fix provider/model/effort" magit-auto-review-owner-configure-fix)
-    ("r" "Review provider/model/effort" magit-auto-review-owner-configure-review)]
+    ("r" "Task-check provider/model/effort" magit-auto-review-owner-configure-review)]
    ["Recovery"
     ("T" "Trust and resume inspected agent configuration" magit-auto-review-owner-confirm-trust)
     ("q" "Close" transient-quit-one)]])

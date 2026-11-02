@@ -18,6 +18,35 @@ def location(value):
             and value['start_line'] <= value['line'])
 
 
+SEVERITIES = ('Critical', 'High', 'Medium', 'Low')
+
+
+def findings(items, *, new, optional=('locations', 'primary_location', 'severity'), publication=True):
+    """Validate the findings envelope shared by PR synthesis and acceptance review.
+
+    ``optional`` names keys a finding may add to the six required ones.
+    ``publication`` also checks the PR inline-publication locations. Returns the
+    finding IDs, or ``None`` when any finding is invalid.
+    """
+    ids = []
+    for finding in items:
+        if not isinstance(finding, dict):
+            return None
+        ids.append(finding.get('id'))
+        valid = (set(finding) - set(optional) == {'id', 'title', 'validity', 'evidence', 'blocking', 'body_md'}
+                 and isinstance(finding['id'], str) and re.fullmatch(r'[A-Za-z0-9_-]+', finding['id'])
+                 and all(text(finding[k]) for k in ('title', 'evidence', 'body_md'))
+                 and finding['validity'] in ('CONFIRMED', 'MODIFIED', 'NEW', 'UNVERIFIED', 'REJECTED')
+                 and isinstance(finding['blocking'], bool) and not (finding['validity'] == 'REJECTED' and finding['blocking'])
+                 and (finding.get('severity') in SEVERITIES if 'severity' in finding else not new))
+        if valid and publication:
+            valid = bool((finding.get('primary_location') is None or location(finding['primary_location']))
+                         and ('locations' not in finding or isinstance(finding['locations'], list) and all(map(location, finding['locations']))))
+        if not valid:
+            return None
+    return ids
+
+
 def synthesis(value, *, new=False):
     valid = isinstance(value, dict) and set(value) == {'recommendation', 'recommendation_rationale', 'blocking_findings', 'report_md', 'review_body_md', 'findings'}
     if valid:
@@ -26,21 +55,8 @@ def synthesis(value, *, new=False):
                  and isinstance(value['findings'], list))
     ids = []
     if valid:
-        for finding in value['findings']:
-            if not isinstance(finding, dict):
-                valid = False
-                break
-            ids.append(finding.get('id'))
-            valid = (set(finding) - {'locations', 'primary_location', 'severity'} == {'id', 'title', 'validity', 'evidence', 'blocking', 'body_md'}
-                     and isinstance(finding['id'], str) and re.fullmatch(r'[A-Za-z0-9_-]+', finding['id'])
-                     and all(text(finding[k]) for k in ('title', 'evidence', 'body_md'))
-                     and finding['validity'] in ('CONFIRMED', 'MODIFIED', 'NEW', 'UNVERIFIED', 'REJECTED')
-                     and isinstance(finding['blocking'], bool) and not (finding['validity'] == 'REJECTED' and finding['blocking'])
-                     and (finding.get('severity') in ('Critical', 'High', 'Medium', 'Low') if 'severity' in finding else not new)
-                     and (finding.get('primary_location') is None or location(finding['primary_location']))
-                     and ('locations' not in finding or isinstance(finding['locations'], list) and all(map(location, finding['locations']))))
-            if not valid:
-                break
+        ids = findings(value['findings'], new=new)
+        valid = ids is not None
     if not valid or len(ids) != len(set(ids)) or value['blocking_findings'] != sum(f['blocking'] for f in value['findings']):
         raise ApiError('invalid_artifact', 'Synthesis violates the JSON schema; resume to retry')
     return value

@@ -96,7 +96,7 @@ Publication receipt markers are hidden from feedback text. A review containing
 only a marker remains in history and is not counted as a fixable comment.
 
 If a fix stops before any model work because its model or effort is unsupported,
-choose valid settings with `R f` and `R r`, then select the paused fix and press
+choose valid settings with `R f` (fix) and `R r` (task checks), then select the paused fix and press
 `r`. The same batch resumes with the corrected settings. Once model work has
 started, resume requires the batch's original settings, shown under
 **Verification and task details**. `T` trusts inspected repository agent
@@ -125,7 +125,7 @@ Owner headings use separate customizable faces:
 | `g` / `G` | Reload and check local fix commits / explicitly fetch GitHub |
 | `f` | Plan, fix, and review the item, group, or selected sibling headings |
 | `V` | Verify selected concerns without a fixer invocation |
-| `R f` / `R r` | Choose fix / automatic-review provider, model, and effort |
+| `R f` / `R r` | Choose fix / task-check provider, model, and effort. Both keep the saved `final_review` intact |
 | `i` / `h` | Acknowledge inspected feedback/context / finish feedback or a verified fix locally |
 | `k` / `U` | Defer / restore feedback locally |
 | `r` / `A` | Resume the selected batch / explicitly adopt manual changes and reverify |
@@ -166,7 +166,8 @@ continues to check existing conversations against pushed code.
 A group fix snapshots the selected items in displayed order. The planner may
 combine overlapping concerns and add prerequisites; independent tasks use display
 order as the tie-breaker. Tasks run sequentially in one owner worktree, with a
-review after each task and a final review of the combined patch. Inspect task
+lightweight focused check after each task and a final verification of the combined
+patch by the shared review engine (independent reviewers, then synthesis). Inspect task
 expectations, per-item outcomes, performed checks, blocking findings, retained
 attempts, and commit associations in **Fixes**. Each fix expands to a next step
 and short result, plus the included feedback for a group fix. **Verification and task details** and **Attempt history** start
@@ -177,6 +178,16 @@ customized processing-provider defaults when a session is first opened. A new
 session created by a review handoff instead uses that review's saved processing
 choice. Existing Owner roles remain independent. Model/effort choices come from fresh
 provider metadata. Owner verification uses focused checks.
+
+The Owner header lists **Fix**, **Task check** (`review`: the focused per-task checks
+that `R r` edits), and the **Final review** reviewer slots and synthesis of the shared
+review engine. The header shows the effective configuration, so a saved session without
+`final_review` displays the single reviewer that will actually run (its task-check
+choice, which is also its synthesis). A fix's **Verification and task details** show that
+batch's frozen settings the same way. Emacs does not yet edit `final_review`; `R f` and
+`R r` send the saved settings back unchanged, so `final_review` round-trips intact, and a
+session without one stays without one. Set it with `pr-review owner PR settings
+--settings-file FILE` or the `fix-issue` reviewer flags.
 
 After a pause, inspect the saved patch with `d`, current partial changes with
 `C-u d`, and the full worktree/index with `m`. `A` accepts inspected edits for

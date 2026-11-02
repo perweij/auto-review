@@ -4,6 +4,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
+import engine_stub
 import test_owner
 from pr_review import owner_fixes, owner_import, owner_git, owner_commit_plan
 from pr_review.common import ApiError
@@ -64,8 +65,9 @@ class IssueStepsTest(unittest.TestCase):
         p = patch('pr_review.issue_harness.invoke', side_effect=self.harness)
         p.start()
         self.addCleanup(p.stop)
+        engine_stub.route_issue(self, self.review)
 
-    def harness(self, session, state, batch, role, specification, feedback):
+    def turn(self, role, session, state, batch, specification):
         from pr_review import owner_providers
         report = owner_providers.invoke(session, state, batch, role, {
             'feedback': session.items(state, batch['items']), 'scope': role == 'review',
@@ -75,6 +77,12 @@ class IssueStepsTest(unittest.TestCase):
                 'outcomes': report.get('outcomes', []),
                 'summary': report['summary'], 'checks': report['checks'],
                 'findings': report['blocking'], 'questions': []}
+
+    def harness(self, session, state, batch, specification, feedback):
+        return self.turn('fix', session, state, batch, specification)
+
+    def review(self, session, state, batch, specification):
+        return self.turn('review', session, state, batch, specification)
 
     def model(self, session, state, batch, role, context):
         self.calls.append((role, copy.deepcopy(context)))

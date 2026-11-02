@@ -83,7 +83,11 @@ def inputs(run, stage, *, followup_input=None, followup_prompt=None):
         artifacts = dict(synthesis=hash_file(path / 'reviews/synthesis.json'), discussion=run.manifest['discussion']['hash'])
     if stage == 'followup':
         artifacts = dict(input=hash_bytes(followup_input) if followup_input is not None else hash_file(path / 'reviews/followup-input.json'))
-    if stage in VALIDATORS:
+    adapter = getattr(run, 'adapter', None)
+    adapted = adapter.artifacts(run, stage) if adapter is not None else None
+    if adapted is not None:
+        artifacts.update(adapted)
+    elif stage in VALIDATORS:
         content = followup_prompt if followup_prompt is not None else (path / f'prompts/{stage}-prompt.txt').read_bytes()
         artifacts.update(prompt=prompt_hash(stage, content, path), validator=VALIDATORS[stage],
                          schema=hash_file(ROOT / f'prompts/{stage}.schema.json'))
@@ -91,6 +95,10 @@ def inputs(run, stage, *, followup_input=None, followup_prompt=None):
                     merge_base=run.manifest['snapshot']['merge_base'],
                     cli_version=run.tools[provider_for(run.settings, stage)],
                     command=cache_command(run.command(stage)), artifacts=artifacts)
+    if adapter is not None:
+        # Non-PR workflows add their candidate and specification identity. The PR
+        # adapter contributes nothing, so saved PR fingerprints stay byte-identical.
+        identity.update(adapter.identity(run, stage))
     if slot is not None:
         identity['slot'] = {key: slot[key] for key in ('id', 'provider', 'model', 'effort')}
         identity['base'] = run.manifest['snapshot'].get('base')
