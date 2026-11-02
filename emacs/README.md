@@ -651,8 +651,13 @@ make check-emacs                # Byte compilation and ERT, including real API u
 make check-all                  # Both
 ```
 
-`EMACS` selects the executable. `AUTO_REVIEW_TEST_LOAD_FILE` can load an explicit
-dependency graph for sandbox tests; otherwise the profile/site load path applies.
+`EMACS` selects the executable. Both compilation and ERT disable site startup to
+prevent installed auto-review code from being preloaded. Environment/profile load
+paths remain available; use `AUTO_REVIEW_TEST_LOAD_FILE` to supply dependency paths
+otherwise registered by site startup. This file must load only third-party
+dependencies, not an installed auto-review package or its autoloads. The runner
+checks that auto-review code comes from the checkout or its temporary bytecode and
+reports `Auto-review test contamination` if foreign code has already been loaded.
 See [contributing](../CONTRIBUTING.md) for dependencies and validation guidance,
 [the protocol](../docs/api.md) for the frontend/backend contract, and
 [the manual](../docs/manual.md) for the underlying review workflow.
