@@ -394,18 +394,21 @@ class Workflow:
                 if not any(not execution_complete(b) for b in data['batches']):
                     owner_git.clean(owner, data)
             data['issue_workflow'] = state['id']
+            desired = data['settings']
             if state.get('owner_settings') and (self.request.get('settings_file') or not link):
-                if any(b.get('status') != 'ready' and b.get('attempts') for b in data['batches']) and data['settings'] != state['owner_settings']:
-                    raise ApiError('settings_changed', 'Active Owner batch settings are frozen.')
-                data['settings'] = state['owner_settings']
+                desired = state['owner_settings']
             if settings.explicit_reviewer_flags(self.request):
                 # Reviewer flags configure acceptance review. Precedence: explicit flags, then the
                 # file's final_review, then one slot derived from its review, then common defaults.
-                desired = settings.final_review_from(state['configuration'])
-                if owner_state.effective_settings(data['settings'])['final_review'] != desired:
-                    if any(b.get('status') != 'ready' and b.get('attempts') for b in data['batches']):
-                        raise ApiError('settings_changed', 'Active Owner batch settings are frozen.')
-                    data['settings'] = {**data['settings'], 'final_review': desired}
+                desired = {**desired, 'final_review': settings.final_review_from(state['configuration'])}
+            desired = owner_state.validate_settings(desired)
+            # Compare only after all overrides have been applied. Retain the saved
+            # representation for equivalent legacy settings: batches also compare
+            # their frozen settings with this object without normalization.
+            if owner_state.effective_settings(data['settings']) != owner_state.effective_settings(desired):
+                if any(b.get('status') != 'ready' and b.get('attempts') for b in data['batches']):
+                    raise ApiError('settings_changed', 'Active Owner batch settings are frozen.')
+                data['settings'] = desired
             owner.save(data)
         state['owner'] = str(owner.path)
         state['issue_item'] = owner_import.from_issue(owner, state['plan'], self.facts['issue'], state['id'],

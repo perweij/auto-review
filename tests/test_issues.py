@@ -128,7 +128,7 @@ class CommentInputTest(unittest.TestCase):
                 flow = Workflow({'pr': 7}, repo, f)
             flow.guard = Mock()
             flow.state.update(plan={**self.state['plan'], 'body': 'Plan'}, remote_branch='feature', configuration={})
-            data = {'feedback': [], 'batches': [], 'settings': {}}
+            data = {'feedback': [], 'batches': [], 'settings': owner_state.default_settings({})}
             owner = SimpleNamespace(path=root / 'owner', execution_lock=root / 'owner.lock',
                                     load=lambda: data, save=lambda value: None)
             with patch('pr_review.issues.owner_state.open_session', return_value={'session': str(owner.path)}), \
@@ -1379,6 +1379,66 @@ class IssueIntegrationTest(unittest.TestCase):
         state['batches'][-1]['attempts'] = [{'role': 'fix', 'kind': 'issue_harness', 'status': 'failed'}]
         owner.save(state)
         self.assertEqual('settings_changed', dispatch({**self.req, 'reviewers': ['claude'], 'yolo': True})['error']['code'])
+
+    def interrupt_recorded_implementation(self, request):
+        def interrupted(session, state, batch, *args):
+            batch['attempts'].append({'role': 'fix', 'kind': 'issue_harness', 'status': 'interrupted',
+                                      'path': str(session.path / 'attempts' / 'interrupted-test')})
+            session.save(state)
+            raise ApiError('model_failed', 'Recorded implementation interruption')
+        with patch('pr_review.issue_harness.invoke', side_effect=interrupted):
+            result = dispatch(request)
+        self.assertEqual('model_failed', result['error']['code'])
+        return owner_state.OwnerSession({'session': self.path}).load()
+
+    def test_identical_file_and_flags_resume_a_recorded_implementation(self):
+        choice = {'provider': 'claude', 'model': 'sonnet', 'effort': 'high'}
+        path = self.settings_file(fix=choice, review=choice, verification='focused')
+        request = {**self.req, 'settings_file': path, 'reviewers': ['claude'],
+                   'processing_provider': 'claude', 'processing_model': 'opus', 'yolo': True}
+        before = self.interrupt_recorded_implementation(request)
+        result = dispatch(request)
+        self.assertEqual(0, result['exit_code'], result)
+        after = owner_state.OwnerSession({'session': self.path}).load()
+        self.assertEqual(before['settings'], after['settings'])
+        self.assertEqual(before['batches'][-1]['id'], after['batches'][-1]['id'])
+        self.assertEqual(before['batches'][-1]['settings'], after['batches'][-1]['settings'])
+
+    def test_resume_without_overrides_preserves_saved_effective_settings(self):
+        choice = {'provider': 'claude', 'model': 'sonnet', 'effort': 'high'}
+        path = self.settings_file(fix=choice, review=choice, verification='focused')
+        request = {**self.req, 'settings_file': path, 'reviewers': ['claude'],
+                   'processing_provider': 'claude', 'processing_model': 'opus', 'yolo': True}
+        before = self.interrupt_recorded_implementation(request)
+        result = dispatch({**self.without_flags(), 'yolo': True})
+        self.assertEqual(0, result['exit_code'], result)
+        self.assertEqual(before['settings'], self.owner_settings())
+
+    def test_equivalent_file_representation_preserves_frozen_legacy_settings(self):
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        path = self.settings_file(fix=choice, review=choice, verification='focused')
+        request = {**self.without_flags(), 'settings_file': path, 'yolo': True}
+        before = self.interrupt_recorded_implementation(request)
+        self.assertNotIn('final_review', before['settings'])
+        Path(path).write_text(json.dumps(owner_state.effective_settings(before['settings'])))
+        result = dispatch(request)
+        self.assertEqual(0, result['exit_code'], result)
+        self.assertEqual(before['settings'], self.owner_settings())
+
+    def test_changed_file_cannot_replace_frozen_effective_settings(self):
+        choice = {'provider': 'claude', 'model': 'sonnet', 'effort': 'high'}
+        path = self.settings_file(fix=choice, review=choice, verification='focused')
+        request = {**self.req, 'settings_file': path, 'reviewers': ['claude'],
+                   'processing_provider': 'claude', 'processing_model': 'opus', 'yolo': True}
+        before = self.interrupt_recorded_implementation(request)
+        changed = json.loads(Path(path).read_text())
+        changed['fix']['effort'] = 'medium'
+        Path(path).write_text(json.dumps(changed))
+        result = dispatch(request)
+        self.assertEqual('settings_changed', result['error']['code'])
+        after = owner_state.OwnerSession({'session': self.path}).load()
+        self.assertEqual(before['settings'], after['settings'])
+        self.assertEqual(before['batches'], after['batches'])
 
     def test_plan_cli_approval_real_owner_commit_push_and_noop(self):
         # Dirty main checkout must survive the entire implementation.
