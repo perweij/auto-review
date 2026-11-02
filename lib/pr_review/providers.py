@@ -59,8 +59,10 @@ def provider_for(settings, stage):
     return stage if stage in ("claude", "codex") else settings["processing_provider"]
 
 
-def review_command(settings, runtime, stage, directory, base_ref):
+def review_command(settings, runtime, stage, directory, base_ref, instructions=""):
+    """``instructions`` extends the independent reviewer's system text for a non-PR workflow."""
     text = lambda name: (ROOT / "prompts" / name).read_text().rstrip("\n")
+    independent_text = lambda: text("independent.txt") + ("\n\n" + instructions.strip() if instructions else "")
     slot = next((s for s in settings.get("reviewer_slots", []) if s["id"] == stage), None)
     provider = slot["provider"] if slot else provider_for(settings, stage)
     independent = slot is not None or stage in ("claude", "codex")
@@ -72,7 +74,7 @@ def review_command(settings, runtime, stage, directory, base_ref):
              "-c", "sandbox_mode=danger-full-access", "-c", "approval_policy=never"]
     if independent and provider == "codex":
         codex.insert(2, "review")
-        return codex + ["-c", "developer_instructions=" + json.dumps((ROOT / "prompts/independent.txt").read_text(), ensure_ascii=False),
+        return codex + ["-c", "developer_instructions=" + json.dumps((ROOT / "prompts/independent.txt").read_text() + (("\n" + instructions.strip() + "\n") if instructions else ""), ensure_ascii=False),
                         "--ephemeral", "--json", "-o", str(directory / f"reviews/{stage if slot else 'codex'}.md.tmp"), "--base", base_ref]
     if not independent and provider == "codex":
         return codex + ["--ephemeral", "--json", "--output-schema", str(ROOT / f"prompts/{stage}.schema.json"),
@@ -82,7 +84,7 @@ def review_command(settings, runtime, stage, directory, base_ref):
     if runtime.budget:
         args += ["--max-budget-usd", runtime.budget]
     if independent:
-        return args + ["--output-format", "stream-json", "--verbose", "--append-system-prompt", text("independent.txt"),
+        return args + ["--output-format", "stream-json", "--verbose", "--append-system-prompt", independent_text(),
                        "--disallowed-tools", *DENIED_TOOLS, "--", f"/code-review {effort} --max-findings default {base_ref}"]
     if stage in ("synthesis", "followup"):
         policy = "focused" if stage == "followup" else settings["synthesis_tests"]

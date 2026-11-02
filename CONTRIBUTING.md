@@ -25,6 +25,10 @@ otherwise the profile/site load path applies.
 - CLI and JSON API adapters call shared application services. Repository/context
   collection, provider execution, saved generations, drafts, and publication live
   in the backend. See the [protocol reference](docs/api.md).
+- PR review, `fix-issue` acceptance and Owner final verification share one review
+  engine (`review_engine.py`: independent slots, then synthesis). Adapters supply
+  their prompts, schema, validator and snapshot integrity checks; the Owner and
+  issue guards stay the authority for acceptance.
 - Reviewer and Owner have separate orchestration and saved sessions. Owner state
   lives under `owners-v1`; it must not appear as reviewer history. Shared services
   handle GitHub access, process supervision, storage, and publication recovery.
@@ -90,7 +94,10 @@ validating provider integration, especially after CLI upgrades:
 tests/smoke.sh
 python3 tests/smoke-owner.py --provider claude --model haiku --effort low
 python3 tests/smoke-owner.py --provider codex --model gpt-6-luna --effort low
+python3 tests/smoke-engine.py --provider claude --model haiku --effort low
+python3 tests/smoke-engine.py --provider codex --model gpt-6-luna --effort low
 tests/evaluate-contributions.sh
+tests/replay-pr4.sh          # one full review of the frozen PR4 corpus through the shared engine
 ```
 
 The reviewer smoke test retains artifacts under `/tmp`. Model availability and

@@ -1043,3 +1043,106 @@
       (should (equal displayed "github.com/parent/repo")))))
 
 ;;; magit-auto-review-owner-tests.el ends here
+
+
+(defun owner-test-final-review ()
+  (copy-tree '((reviewer_slots . (((id . "reviewer-1") (provider . "claude") (model . "opus") (effort . "high"))
+                                  ((id . "reviewer-2") (provider . "codex") (model . "gpt-6.1-sol") (effort . "low"))))
+               (synthesis . ((provider . "codex") (model . "gpt-6.1-sol") (effort . "medium")))
+               (synthesis_tests . "full"))))
+
+(ert-deftest owner/header-shows-fix-task-check-and-final-review-settings ()
+  (owner-test-buffer
+   (let ((view (owner-test-view)))
+     (setf (alist-get 'effective_settings view)
+           (append (alist-get 'settings view) `((final_review . ,(owner-test-final-review)))))
+     (magit-auto-review-owner--accept view)
+     (let ((text (buffer-string)))
+       (should (string-match-p "^Fix: claude / fable / medium$" text))
+       (should (string-match-p "^Task check: codex / chosen / high$" text))
+       (should-not (string-match-p "^Review: " text))
+       (should (string-match-p "^Final review reviewer-1: claude / opus / high$" text))
+       (should (string-match-p "^Final review reviewer-2: codex / gpt-6.1-sol / low$" text))
+       (should (string-match-p "^Final review synthesis: codex / gpt-6.1-sol / medium (full checks)$" text))))))
+
+(ert-deftest owner/header-shows-the-effective-configuration-of-a-legacy-session ()
+  ;; The backend derives one reviewer slot, with the task-check choice as synthesis, and does not persist it.
+  (owner-test-buffer
+   (let ((view (owner-test-view)))
+     (should-not (alist-get 'final_review (alist-get 'settings view)))
+     (setf (alist-get 'effective_settings view)
+           (append (alist-get 'settings view)
+                   '((final_review . ((reviewer_slots . (((id . "reviewer-1") (provider . "codex") (model . "chosen") (effort . "high"))))
+                                      (synthesis . ((provider . "codex") (model . "chosen") (effort . "high")))
+                                      (synthesis_tests . "focused"))))))
+     (magit-auto-review-owner--accept view)
+     (should (string-match-p "^Final review reviewer-1: codex / chosen / high$" (buffer-string)))
+     (should (string-match-p "^Final review synthesis: codex / chosen / high (focused checks)$" (buffer-string)))
+     (should-not (alist-get 'final_review (alist-get 'settings magit-auto-review-owner--view))))))
+
+(ert-deftest owner/header-without-an-effective-view-falls-back-to-saved-settings ()
+  (owner-test-buffer
+   (should (string-match-p "^Fix: claude / fable / medium$" (buffer-string)))
+   (should (string-match-p "^Task check: codex / chosen / high$" (buffer-string)))
+   (should-not (string-match-p "Final review" (buffer-string)))))
+
+(ert-deftest owner/saved-batch-details-show-its-frozen-final-review-settings ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view)) (batch (car (alist-get 'batches view))))
+     (setf (alist-get 'settings batch) (alist-get 'settings view)
+           (alist-get 'effective_settings batch) (append (alist-get 'settings view)
+                                                         `((final_review . ,(owner-test-final-review)))))
+     (setf (car (alist-get 'batches view)) batch)
+     (magit-auto-review-owner--accept view)
+     (let ((text (buffer-string)))
+       (should (string-match-p "Saved fix settings: claude / fable (medium)" text))
+       (should (string-match-p "Saved task-check settings: codex / chosen (high)" text))
+       (should (string-match-p "Saved final review reviewer-2 settings: codex / gpt-6.1-sol (low)" text))
+       (should (string-match-p "Saved final review synthesis settings: codex / gpt-6.1-sol (medium) (full checks)" text))))))
+
+(ert-deftest owner/r-r-is-labelled-as-task-check-settings ()
+  (should (string-match-p "task-check" (documentation 'magit-auto-review-owner-configure-review)))
+  (let ((layout (format "%S" (get 'magit-auto-review-owner-setup 'transient--layout))))
+    (should (string-match-p "Task-check provider/model/effort" layout))
+    (should-not (string-match-p "Review provider/model/effort" layout)))
+  (owner-test-buffer
+   (let (prompt)
+     (cl-letf (((symbol-function 'completing-read) (lambda (p &rest _) (setq prompt p) "codex"))
+               ((symbol-function 'magit-auto-review-owner--start) #'ignore))
+       (magit-auto-review-owner-configure "review"))
+     (should (equal prompt "Task-check provider: ")))))
+
+(ert-deftest owner/settings-requests-keep-final-review-intact-for-both-roles ()
+  ;; json-serialize rejects a decoded list of slot objects; the payload must carry a vector.
+  (owner-test-buffer
+   (setf (alist-get 'settings magit-auto-review-owner--view)
+         (append (alist-get 'settings (owner-test-view)) `((final_review . ,(owner-test-final-review)))))
+   (dolist (role '("fix" "review"))
+     (let (mutated (answers '("codex" "chosen" "medium")))
+       (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (pop answers)))
+                 ((symbol-function 'magit-auto-review-owner--start)
+                  (lambda (_r &optional cb)
+                    (funcall cb '((models . (((value . "chosen") (efforts . ("medium" "high")))))))))
+                 ((symbol-function 'magit-auto-review-owner--mutate)
+                  (lambda (_op &rest fields) (setq mutated (alist-get 'settings fields)))))
+         (magit-auto-review-owner-configure role))
+       (let* ((final (alist-get 'final_review mutated))
+              (decoded (magit-auto-review--json
+                        (json-serialize (cons '(protocol . 1) `((settings . ,mutated)))
+                                        :null-object nil :false-object :false)))
+              (round (alist-get 'final_review (alist-get 'settings decoded))))
+         (should (vectorp (alist-get 'reviewer_slots final)))
+         ;; The wire form decodes to exactly the saved final review, slot order included.
+         (should (equal round (owner-test-final-review)))
+         (should (equal (alist-get 'model (alist-get (intern role) mutated)) "chosen")))))))
+
+(ert-deftest owner/settings-of-a-legacy-session-are-not-given-a-final-review-by-the-editor ()
+  (owner-test-buffer
+   (let (mutated (answers '("codex" "chosen" "medium")))
+     (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (pop answers)))
+               ((symbol-function 'magit-auto-review-owner--start)
+                (lambda (_r &optional cb) (funcall cb '((models . (((value . "chosen") (efforts . ("medium" "high")))))))))
+               ((symbol-function 'magit-auto-review-owner--mutate)
+                (lambda (_op &rest fields) (setq mutated (alist-get 'settings fields)))))
+       (magit-auto-review-owner-configure "fix"))
+     (should-not (assq 'final_review mutated)))))

@@ -1,4 +1,6 @@
 """Review configuration, including read-only migration of legacy manifests."""
+import copy
+
 from .common import ApiError, read_json
 from .state import Session, discover
 
@@ -241,3 +243,45 @@ def resolve(request):
         settings.update(validate(from_manifest(manifest)))
     apply_overrides(settings, request, fresh=not session_path)
     return {"settings": validate(settings), "session": str(session_path) if session_path else None}
+
+
+REVIEWER_FLAGS = ("reviewers", "reviewer_slots", "processing", "processing_provider", "processing_model",
+                  "processing_effort", "claude_model", "codex_model", "claude_effort", "codex_effort",
+                  "synthesis_tests", *(f"reviewer_{i}_{field}" for i in (1, 2) for field in ("provider", "model", "effort")))
+
+
+def explicit_reviewer_flags(request):
+    """Whether a request explicitly chose reviewer, synthesis or preset options."""
+    return (any(request.get(key) is not None for key in REVIEWER_FLAGS)
+            or any(request.get(name) is True for name in PRESETS))
+
+
+def final_review_from(resolved):
+    """The Owner final-review contract of a validated reviewer configuration."""
+    return {"reviewer_slots": copy.deepcopy(resolved["reviewer_slots"]), "synthesis": dict(resolved["processing"]),
+            "synthesis_tests": resolved["synthesis_tests"]}
+
+
+def validate_final_review(value):
+    """Normalize ``{reviewer_slots, synthesis, synthesis_tests}`` with the shared slot rules."""
+    if not isinstance(value, dict) or "reviewer_slots" not in value or "synthesis" not in value:
+        raise ApiError("invalid_request", "final_review needs reviewer_slots and a synthesis choice.")
+    return final_review_from(validate({"reviewer_slots": value["reviewer_slots"], "processing": value["synthesis"],
+                                       "synthesis_tests": value.get("synthesis_tests", "focused")}))
+
+
+def derive_final_review(review):
+    """A file or saved session without ``final_review`` stays single-reviewer.
+
+    Its task-check choice is both the sole reviewer slot and the synthesis choice,
+    so Claude-only and Codex-only users need no second provider. The value is
+    computed when needed and never written back.
+    """
+    return {"reviewer_slots": [{"id": "reviewer-1", **{key: review[key] for key in ("provider", "model", "effort")}}],
+            "synthesis": {key: review[key] for key in ("provider", "model", "effort")}, "synthesis_tests": "focused"}
+
+
+def final_review_configuration(final_review):
+    """A validated reviewer-style configuration for the shared engine."""
+    return validate({"reviewer_slots": final_review["reviewer_slots"], "processing": final_review["synthesis"],
+                     "synthesis_tests": final_review.get("synthesis_tests", "focused")})

@@ -1,0 +1,11 @@
+
+Context: issue acceptance. Assess the complete candidate against the whole approved
+specification and every acceptance criterion in approved_specification, together
+with selected_feedback and issue_context. The implementation harness owns its own
+design, so judge the observable outcome, not the route taken. Check correctness,
+acceptance coverage and regressions. Optional improvements are advisory and never
+blocking. Use case_results [] because no verification cases are supplied. For
+passed, supply an outcome for every selected_feedback key: fixed only for concerns
+addressed by this candidate, already_addressed for behavior satisfied before the
+baseline, and no_change for a justified non-actionable concern. Never omit an
+approved requirement because you consider it optional.

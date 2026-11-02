@@ -330,3 +330,160 @@ class SlotSettingsTest(unittest.TestCase):
         with patch('pr_review.reviews.say'):
             review.configure('review', [])
         review.begin.assert_not_called()
+
+
+class OwnerFinalReviewSettingsTest(unittest.TestCase):
+    """The Owner settings contract: ``review`` is task checks, ``final_review`` the shared engine."""
+    CHOICE = {'provider': 'claude', 'model': 'opus', 'effort': 'high'}
+
+    def legacy(self, **choice):
+        value = {**self.CHOICE, **choice}
+        return {'fix': dict(value), 'review': dict(value), 'verification': 'focused'}
+
+    def test_defaults_use_the_common_resolved_configuration(self):
+        from pr_review import owner_state
+        value = owner_state.default_settings({})
+        final = value['final_review']
+        self.assertEqual(['claude', 'codex'], [slot['provider'] for slot in final['reviewer_slots']])
+        self.assertEqual(['reviewer-1', 'reviewer-2'], [slot['id'] for slot in final['reviewer_slots']])
+        self.assertEqual('codex', final['synthesis']['provider'])
+        self.assertEqual(settings.DEFAULTS['synthesis_tests'], final['synthesis_tests'])
+        self.assertEqual('focused', value['verification'])
+        self.assertEqual(value['fix'], value['review'])
+        self.assertEqual(owner_state.validate_settings(value), value)
+
+    def test_explicit_defaults_configure_reviewer_slots_and_synthesis(self):
+        from pr_review import owner_state
+        defaults = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'a', 'effort': 'low'},
+                                       {'id': 'reviewer-2', 'provider': 'codex', 'model': 'b', 'effort': 'high'}],
+                    'processing': {'provider': 'claude', 'model': 'c', 'effort': 'medium'}, 'synthesis_tests': 'full'}
+        final = owner_state.default_settings({'defaults': defaults})['final_review']
+        self.assertEqual(['codex', 'codex'], [slot['provider'] for slot in final['reviewer_slots']])   # same provider twice
+        self.assertEqual({'provider': 'claude', 'model': 'c', 'effort': 'medium'}, final['synthesis'])
+        self.assertEqual('full', final['synthesis_tests'])
+
+    def test_validate_settings_retains_and_validates_final_review(self):
+        from pr_review import owner_state
+        value = {**self.legacy(), 'final_review': {
+            'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'a', 'effort': 'low'}],
+            'synthesis': {'provider': 'claude', 'model': 'c', 'effort': 'medium'}, 'synthesis_tests': 'focused',
+            'unknown': 'dropped'}}
+        kept = owner_state.validate_settings(value)['final_review']
+        self.assertEqual(['reviewer-1'], [slot['id'] for slot in kept['reviewer_slots']])
+        self.assertEqual({'reviewer_slots', 'synthesis', 'synthesis_tests'}, set(kept))
+        self.assertNotIn('final_review', owner_state.validate_settings(self.legacy()))      # absent stays absent
+        for bad in ({'reviewer_slots': [], 'synthesis': self.CHOICE},
+                    {'reviewer_slots': [{'id': 'reviewer-2', **self.CHOICE}], 'synthesis': self.CHOICE},
+                    {'reviewer_slots': [{'id': f'reviewer-{i}', **self.CHOICE} for i in (1, 2, 3)], 'synthesis': self.CHOICE},
+                    {'reviewer_slots': [{'id': 'reviewer-1', **self.CHOICE}], 'synthesis': {'provider': 'other', 'model': 'm', 'effort': 'e'}},
+                    {'reviewer_slots': [{'id': 'reviewer-1', **self.CHOICE}], 'synthesis': {**self.CHOICE, 'model': '--flag'}},
+                    {'reviewer_slots': [{'id': 'reviewer-1', **self.CHOICE}], 'synthesis': self.CHOICE, 'synthesis_tests': 'all'},
+                    {'reviewer_slots': [{'id': 'reviewer-1', **self.CHOICE}]}, 'text'):
+            with self.subTest(bad=bad), self.assertRaises(ApiError):
+                owner_state.validate_settings({**self.legacy(), 'final_review': bad})
+
+    def test_a_value_without_final_review_is_single_reviewer_and_never_written_back(self):
+        from pr_review import owner_state
+        saved = self.legacy(provider='codex', model='gpt', effort='low')
+        effective = owner_state.effective_settings(saved)['final_review']
+        self.assertEqual([{'id': 'reviewer-1', 'provider': 'codex', 'model': 'gpt', 'effort': 'low'}], effective['reviewer_slots'])
+        self.assertEqual(saved['review'], effective['synthesis'])
+        self.assertNotIn('final_review', saved)                  # so batch['settings'] != state['settings'] keeps working
+        from pr_review import review_engine
+        config = settings.final_review_configuration(effective)
+        self.assertFalse(review_engine.requires_independent(config, {}))   # one slot matching synthesis: no bubblewrap
+
+    def test_claude_only_and_codex_only_users_need_no_second_provider(self):
+        from pr_review import owner_state
+        for provider in ('claude', 'codex'):
+            final = owner_state.effective_settings(self.legacy(provider=provider))['final_review']
+            self.assertEqual({provider}, {slot['provider'] for slot in final['reviewer_slots']} | {final['synthesis']['provider']})
+
+    def test_explicit_flag_detection(self):
+        for flag in ({'reviewers': ['claude']}, {'reviewer_1_model': 'm'}, {'processing_provider': 'codex'},
+                     {'synthesis_tests': 'full'}, {'economical': True}, {'codex_model': 'm'}):
+            self.assertTrue(settings.explicit_reviewer_flags(flag), flag)
+        for quiet in ({}, {'economical': False, 'expensive': False}, {'reviewers': None}, {'issue': 12, 'adopt': True}):
+            self.assertFalse(settings.explicit_reviewer_flags(quiet), quiet)
+
+    def test_final_review_round_trips_through_the_effective_view(self):
+        from pr_review import owner_state
+        value = owner_state.default_settings({})
+        effective = owner_state.effective_settings(value)
+        self.assertEqual(value['final_review'], effective['final_review'])
+        self.assertEqual(value, owner_state.validate_settings(effective))
+
+
+class OwnerPreflightTest(unittest.TestCase):
+    """Preflight names a missing provider, capability or bubblewrap before any model work starts."""
+
+    def run_preflight(self, final_review, *, bwrap=True, help_text=None, models=None):
+        import tempfile
+        from pr_review import owner_providers
+        state = {'settings': {'fix': dict(OwnerFinalReviewSettingsTest.CHOICE), 'review': dict(OwnerFinalReviewSettingsTest.CHOICE),
+                              'verification': 'focused', **({'final_review': final_review} if final_review else {})}}
+        session = SimpleNamespace(path=Path(tempfile.mkdtemp()), save=Mock())
+        self.addCleanup(__import__('shutil').rmtree, session.path, True)
+        catalogs = models or {'claude': ['opus', 'sonnet'], 'codex': ['gpt-6.1-sol']}
+        seen = []
+        def discover(request):
+            provider = request['provider']
+            seen.append(provider)
+            return {'provider': provider, 'models': [{'value': m, 'efforts': ['low', 'high']} for m in catalogs[provider]]}
+        def command(argv, **kwargs):
+            seen.append(' '.join(argv))
+            text = help_text if help_text is not None else (
+                '--sandbox --output-schema --ephemeral --strict-config --cd --skip-git-repo-check --ignore-rules --add-dir '
+                '--permission-prompts --json-schema --no-session-persistence --disallowed --base --output-last-message --json '
+                '--model --config --append-system-prompt --output-format stream-json --verbose --disallowed-tools --effort --permission-mode')
+            return SimpleNamespace(stdout=text)
+        def run(argv, **kwargs):
+            seen.append('probe ' + argv[0])
+            response = argv[argv.index('-o') + 1] if '-o' in argv else None
+            if response:
+                Path(response).write_text('PR_REVIEW_AUTH_OK')
+            events = [{'type': 'turn.completed'}] if argv[0] == 'codex' else [
+                {'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'PR_REVIEW_AUTH_OK'}]
+            return SimpleNamespace(returncode=0, events=events)
+        with patch('pr_review.owner_providers.discover', side_effect=discover), \
+                patch('pr_review.owner_providers.command', side_effect=command), \
+                patch('pr_review.owner_providers.run', side_effect=run), \
+                patch('shutil.which', side_effect=lambda name, *a, **k: '/usr/bin/bwrap' if name == 'bwrap' and bwrap else None):
+            owner_providers.preflight(session, state)
+        return seen
+
+    def test_every_slot_and_the_synthesis_choice_are_checked_before_model_work(self):
+        final = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
+                                    {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}],
+                 'synthesis': {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, 'synthesis_tests': 'focused'}
+        seen = self.run_preflight(final)
+        self.assertEqual({'claude', 'codex'}, {e.split()[1] for e in seen if e.startswith('probe')})
+        self.assertIn('codex exec review --help', seen)       # the review capability of an independent Codex slot
+
+    def test_an_unsupported_slot_model_names_the_slot(self):
+        final = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'missing', 'effort': 'high'}],
+                 'synthesis': {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, 'synthesis_tests': 'focused'}
+        with self.assertRaisesRegex(ApiError, 'final review reviewer-1'):
+            self.run_preflight(final)
+
+    def test_bubblewrap_is_required_only_when_isolation_is_needed(self):
+        two = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
+                                  {'id': 'reviewer-2', 'provider': 'claude', 'model': 'sonnet', 'effort': 'high'}],
+               'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'focused'}
+        with self.assertRaises(ApiError) as caught:
+            self.run_preflight(two, bwrap=False)
+        self.assertEqual('missing_dependency', caught.exception.code)
+        self.run_preflight(two, bwrap=True)
+        single = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}],
+                  'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'focused'}
+        self.run_preflight(single, bwrap=False)             # one slot matching synthesis: no isolation needed
+        self.run_preflight(None, bwrap=False)               # a legacy value derives exactly that
+
+    def test_a_cli_without_the_review_capability_is_named(self):
+        final = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'},
+                                    {'id': 'reviewer-2', 'provider': 'claude', 'model': 'opus', 'effort': 'high'}],
+                 'synthesis': {'provider': 'claude', 'model': 'opus', 'effort': 'high'}, 'synthesis_tests': 'focused'}
+        owner_flags = '--sandbox --output-schema --ephemeral --strict-config --cd --skip-git-repo-check --ignore-rules --add-dir ' \
+                      '--permission-prompts --json-schema --no-session-persistence --disallowed'
+        with self.assertRaisesRegex(ApiError, 'review capabilities'):
+            self.run_preflight(final, help_text=owner_flags)

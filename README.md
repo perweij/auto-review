@@ -168,8 +168,9 @@ worktree. Successful independent harness verification marks the PR ready after a
 ### Autonomous issue execution
 
 After approval, one implementation harness owns planning the code changes, coding,
-testing and debugging until the entire specification is ready. A fresh independent
-review checks the candidate; findings return to the same implementation session.
+testing and debugging until the entire specification is ready. The shared review
+engine (the same independent reviewers and synthesis as `pr-review`) checks the candidate;
+blocking findings return to the same implementation session.
 The coordinator handles safeguards and GitHub communication. There is no second
 post-push PR-review pipeline. It does not launch a new coding agent for each task or replay test suites.
 Real product questions still require an answer. Interactive Owner retains its

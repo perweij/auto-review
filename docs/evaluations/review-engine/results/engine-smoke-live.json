@@ -1,0 +1,12 @@
+{
+  "script": "tests/smoke-engine.py",
+  "date": "2026-11-02",
+  "scope": "Direct path only: one reviewer slot matching synthesis, no bubblewrap, a disposable local candidate with an uncommitted modification and an untracked test file",
+  "runs": [
+    {"provider": "claude", "model": "haiku", "effort": "low", "assessment": "passed", "findings": 0,
+     "candidate_unchanged": true, "git_admin_unchanged": true},
+    {"provider": "codex", "model": "gpt-6-luna", "effort": "low", "assessment": "passed", "findings": 0,
+     "candidate_unchanged": true, "git_admin_unchanged": true}
+  ],
+  "not_covered": "Two independent sandboxed reviewers: neither provider starts inside the independence sandbox in this container (see README)."
+}

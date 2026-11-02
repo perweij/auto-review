@@ -97,7 +97,8 @@ unaffected. Saved review settings take precedence over this defaults
 preset: use explicit flags (or the Emacs setup action) to change an existing review.
 The expanded choices are saved as ordinary settings; there is no persistent mode
 that prevents later edits. These reviewer flags work with interactive analysis,
-`--no-publish`, and `--auto-publish`; they do not configure owner sessions.
+`--no-publish`, and `--auto-publish`; they do not configure interactive Owner sessions. For `fix-issue`,
+the same flags configure acceptance review (see [Issue fixing](#issue-fixing)).
 
 Settings are retained per review, including testing policy and effort. Resume uses
 the pending/current generation's settings unless explicitly overridden. Changing
@@ -536,12 +537,30 @@ triage, reply, and explicit resolve/reopen operations.
 
 ### Provider settings and verification
 
-Settings have `fix` and `review` objects, each with `provider`, `model`, and
-`effort`, plus `verification: "focused"`. Both initially use the default
-processing provider; thereafter they are independent. Fix operations that run
-providers validate fresh model metadata and perform live authentication probes;
-commit-only recovery needs no provider access.
-Opening or editing settings does not invoke inference.
+Settings have a `fix` and a `review` object, each with `provider`, `model` and
+`effort`, an optional `final_review` object, and `verification: "focused"`.
+
+- `fix` is the implementation session.
+- `review` configures focused per-task checks only. Each task check is one
+  lightweight provider call; it never uses the review engine.
+- `final_review` configures the [shared review engine](#shared-review-engine) that
+  verifies the combined fixes (and `fix-issue` acceptance):
+  `{reviewer_slots, synthesis, synthesis_tests}`. `reviewer_slots` holds one or two
+  slots (`reviewer-1`, `reviewer-2`, the same provider allowed) with independent
+  provider, model and effort. `synthesis` is a `{provider, model, effort}` choice and
+  `synthesis_tests` is `focused` or `full`.
+
+New sessions use the common reviewer and synthesis defaults: Claude and Codex
+reviewers with Codex synthesis, while `fix` and `review` start from the default
+processing provider and are thereafter independent. A saved session or settings
+file without `final_review` stays valid and single-reviewer: its `review` choice is
+both the only slot and the synthesis. That effective configuration is computed when
+needed, shown in the Owner view as `effective_settings` (for the session and for each
+batch's frozen settings) and never written back. Fix operations that run providers
+validate fresh model metadata for every role, slot and synthesis choice, check the
+Codex review capability and bubblewrap when isolation is needed, and perform live
+authentication probes; commit-only recovery needs no provider access. Opening or
+editing settings does not invoke inference.
 
 Large Owner prompts store the complete task context in each attempt’s `context/`
 directory and pass an index to the provider. Feedback, accumulated diffs, and
@@ -553,8 +572,9 @@ sequentially in a dedicated `pr-owner/...` branch and linked worktree, preservin
 every original feedback destination. The fixer may edit source; the planner and
 reviewer are instructed not to edit source. For Codex this is a workflow rule,
 not an OS-enforced read-only sandbox; the backend also checks repository
-integrity. Each task and the combined patch get an independent review, with at
-most one automatic repair at each checkpoint. Incomplete checks,
+integrity. Each task gets one lightweight focused check and the combined patch gets
+the engine's final verification, with at most one automatic repair at each
+checkpoint. A repair changes the tree, which is a new candidate. Incomplete checks,
 clarification, or remaining blocking findings pause the batch. Owner checks use
 the focused 60-second-per-check/five-minute cumulative instruction limits.
 
@@ -565,6 +585,111 @@ setup; missing/ambiguous remotes need explicit configuration in Magit. Check the
 displayed PR destination when pushing the differently named owner branch.
 Only the explicit automatic-completion option creates commits. The application
 never pushes or resolves threads as part of fixing.
+
+### Shared review engine
+
+PR review, `fix-issue` acceptance and the final verification of an Owner batch run
+through one engine: independent reviewer slots, then a synthesis that individually
+challenges and consolidates their attributed findings. Workflow behavior stays in
+adapters. PR review assesses a PR snapshot; issue acceptance assesses the local
+candidate against the whole approved specification; Owner verification assesses the
+combined diff against the selected feedback, every verification case and, when
+present, the approved issue plan. The existing Owner and issue guards stay the
+authority for acceptance (`owner_contracts.current`, `owner_commit.prepare`,
+`owner_auto_commit.execute` and `owner_publication.automatic_proof`); the engine
+only supplies the reviewer and synthesis pipeline.
+
+**The candidate.** An Owner or issue candidate is an uncommitted tree that the Owner
+checkpoint identifies. To reuse the commit-based review machinery, a deterministic
+synthetic commit of that tree on the pinned baseline is created and pinned at
+`refs/pr-owner/<session>/review-candidates/<commit>`. The same tree and baseline
+always give the same commit, so a resume never loses evidence to a creation time;
+another baseline gives another commit, ref and evidence. It is an internal review
+artifact: never an implementation commit, never on the Owner branch, never in the
+index and never pushed. Acceptance still binds to the checkpoint tree.
+
+**Reviewers stay independent.** Each reviewer runs in its own isolated snapshot and
+receives the specification and feedback only as files in its private root. It never
+sees the other report, the implementation session, the implementer's claims, earlier
+findings, the Owner state or the live Owner worktree. If isolation cannot be
+established the review stops with `independence_failed`; it never falls back to an
+unisolated run. Synthesis additionally receives both reports attributed by slot, the
+implementer's checks as untrusted claims and earlier rejected findings.
+
+| | Sandboxed reviewer slot | Direct stage: single reviewer matching synthesis, and every synthesis |
+| --- | --- | --- |
+| Used when | Two slots, or one slot differing from synthesis | One slot matching synthesis; synthesis in every configuration |
+| Reads the candidate from | Disposable clone of the review commit | Fresh disposable checkout of the review commit |
+| Filesystem | Bubblewrap: read-only host, hidden state root, session and Owner worktree | No mount namespace |
+| Omitted | Nothing | The mount namespace, a private `HOME` and temporary directory, and hiding of the state, session and Owner paths |
+| Kept | The bubblewrap policy and filtered environment | The filtered provider environment, read-only instructions, a scratch `TMPDIR`, and the Owner review tool denials (Claude denied tools plus the Git denials; Codex `--skip-git-repo-check --ignore-rules`) |
+| Live candidate | Not visible and cannot be written | Not the working directory and never named as the source. Restrictions and instructions forbid writes, but nothing at kernel level prevents them; Codex runs with `sandbox_mode=danger-full-access`, relying on the enclosing container |
+| After a violation | A change to the clone fails the sandbox check | A live-tree or Git-admin change records `integrity_failure`, blocks acceptance and retains the work. A tracked-content change in the checkout discards the result (`review_checkout_modified`) |
+
+Direct-stage writes are restricted and detected, not kernel-prevented. A review
+never works by modifying the live Owner worktree, and a violation is always a stop,
+never a pass.
+
+**Disposable checkout.** Each direct stage gets its own checkout under its attempt
+directory, outside the live Owner worktree and Git directory; its output and
+`TMPDIR` are scratch there. Before and after execution the checkout's tracked content
+must equal the candidate tree and its `HEAD` the review commit. The check uses a
+temporary index filled from the Owner repository's Git directory, so a stage that
+edits the checkout's index, configuration, `assume-unchanged` flags or filters cannot
+hide an edit. Untracked and generated files are allowed and retained. A failed check
+before a stage calls no model. After a stage the result is discarded, the phase is
+`failed` with `failure_reason: candidate_checkout_modified`, the changed paths and
+diff are kept, and the run stops with `review_checkout_modified`. The live candidate
+is unchanged, so no `--adopt` is needed: resume reruns that stage in a fresh
+checkout. The live-Owner integrity callback also runs before and after each stage;
+its violation takes precedence and requires adoption. The checkout lacks ignored
+files, installed dependencies and submodule contents: a stage may set up what it
+needs in scratch, must report a case it cannot run as `unavailable` (or return
+`incomplete` when material verification cannot finish), and never claims `tested`.
+
+**Results.** The acceptance result has an `assessment` (`passed`, `changes_requested`,
+`incomplete` or `needs_input`), `summary`, `checks`, attributed `findings`, one
+evidenced outcome for every selected feedback or specification item, `case_results`
+for every verification case and `questions`. `passed` allows no blocking finding,
+clarifying outcome or question. The full result, including non-blocking observations
+and rejected claims, stays in the engine artifact
+`review-engine/<review commit>/<adapter>/reviews/synthesis.json`. Only findings with
+`blocking: true` become the legacy proof: `harness_review.findings`, `harness_feedback`
+and Owner `blocking`. A `passed` result maps to `status: ready` with empty legacy
+findings and questions, so a candidate with observations passes the unchanged commit
+guard. Observations never return to the implementation session as required work.
+
+**Incomplete and unanswered results are retained, not reusable.** An `incomplete` or
+`needs_input` result is written to its own per-attempt file
+(`reviews/synthesis-incomplete-<n>.json`) with the phase status `incomplete` or
+`needs_input`; it never replaces `synthesis.json` and an earlier attempt is not
+overwritten. Resume reruns synthesis once on the unchanged candidate and keeps valid
+reviewer reports; a result that is still incomplete stops again. Incomplete does not
+count towards the repeated-rejection limit. An invalid synthesis result gets one
+correction attempt on synthesis only.
+
+**Evidence and reuse.** Evidence is bound to the exact candidate tree, baseline,
+specification or feedback, and configuration, and is accepted on resume only after the
+live tree is re-verified:
+
+| Change | Stages rerun |
+| --- | --- |
+| Candidate tree or baseline | All |
+| Specification or selected-feedback identity | All |
+| One slot's provider, model or effort | That slot and synthesis |
+| Synthesis choice, verification cases, implementer report or earlier findings | Synthesis only |
+| An `incomplete` or `needs_input` earlier result, nothing else changed | Synthesis only |
+| A direct stage's checkout check failed, or it was interrupted | That stage and later stages |
+| Prompt, schema, validator or CLI version | The stages that use it |
+
+Cancellation and runtime or quota limits keep every usable artifact, mark the stage
+`interrupted`, set no acceptance and let resume rerun only what lacks valid
+evidence. Engine stages are recorded in `batch['attempts']` with `kind:
+review_engine` and their artifact paths. An orphaned engine stage never forces
+`--adopt` while the tree and Git admin are unchanged; source changes still do.
+Batches begun before the engine carry no `review_engine: 1` marker: an unfinished one
+with attempts stops with `unsupported_session` and keeps its worktree and artifacts,
+and a `ready` one can still commit and publish.
 
 ### Owner recovery and commit association
 
@@ -781,7 +906,8 @@ version-1 runs remain readable but require a new run for discussion-aware public
 
 `bin/fix-issue` automates planning, implementation, pushes, and subsequent review
 fixes. Its invocation authorizes these GitHub writes. It uses the existing Owner
-fix engine and reviewer/synthesis configuration. Emacs Owner commands retain
+fix engine, and the shared review engine for acceptance review of the finished candidate.
+Emacs Owner commands retain
 their explicit publication behavior.
 
 Run from a checkout with a GitHub remote:
@@ -835,9 +961,9 @@ machine or without those local records is not supported.
 
 The entire approved specification is delegated to one persistent implementation
 session. The harness handles its own decomposition, coding, testing and debugging.
-A fresh independent review assesses a completed candidate; actionable findings go
-back to the implementation session. There are no per-task repair credits or
-intermediate user checkpoints. Product questions are published on GitHub; internal
+The shared [review engine](#shared-review-engine) reviews a completed local candidate;
+only blocking findings go back to the implementation session. There are no per-task
+repair credits or intermediate user checkpoints. Product questions are published on GitHub; internal
 design and verification problems remain implementation work.
 
 Recorded partial work and provider session identity survive interruption. Source
@@ -852,14 +978,27 @@ attempts and plans remain readable history. Interactive Owner retains its own
 explicit replanning controls.
 
 Shared reviewer flags and economical/expensive presets use normal precedence:
-defaults, preset, saved settings, then explicit individual flags. Owner settings
-are reused from its session; a new session derives them from the configured
-processing provider. `--settings-file` accepts the existing Owner JSON shape:
+defaults, preset, saved settings, then explicit individual flags. They configure the
+acceptance review: `--reviewers`, `--reviewer-N-provider/model/effort`,
+`--processing-*`, `--claude-*`, `--codex-*` and `--synthesis-tests` set the Owner
+`final_review`, under the same frozen-settings checks. Without them a settings file's
+`final_review` applies, then one slot derived from its `review`, then the common
+defaults; a new session without a file starts from those defaults and a session
+without `final_review` stays single-reviewer. `--settings-file` accepts the Owner JSON
+shape; `review` configures interactive task checks only:
 
 ```json
 {
   "fix": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
   "review": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "final_review": {
+    "reviewer_slots": [
+      {"id": "reviewer-1", "provider": "claude", "model": "opus", "effort": "high"},
+      {"id": "reviewer-2", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high"}
+    ],
+    "synthesis": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+    "synthesis_tests": "focused"
+  },
   "verification": "focused"
 }
 ```
@@ -867,9 +1006,12 @@ processing provider. `--settings-file` accepts the existing Owner JSON shape:
 Started batches retain their settings. Agent configuration changes require the
 normal `--trust-agent-config TOKEN` approval, reported with the blocker details.
 
-After independent harness verification, the coordinator commits, pushes, and marks
-the PR ready. Review findings return to the same implementation session before
-publication; there is no separate post-push review loop. Verified
+After the engine passes the candidate, the coordinator commits, pushes, and marks
+the PR ready. Blocking findings return to the same implementation session before
+publication; there is no separate post-push review loop. An incomplete review stops
+with `review_incomplete`, keeping the review phase so resume reruns only the stages
+without valid evidence; `independence_failed` and `review_checkout_modified` also
+stop with a message (the latter needs no adoption). Verified
 replies are published, while human thread resolution remains manual. The saved
 Owner `verification` setting remains compatible with interactive Owner; its focused
 testing policy does not constrain whole-issue implementation.
@@ -943,12 +1085,14 @@ generate test contracts, or replay reported test commands. It resumes the exact
 implementation session when more work is needed; it never selects a global “last”
 session. Interactive Owner keeps its existing task workflow and focused policy.
 
-When the harness reports a complete candidate, a fresh independent reviewer checks
-the whole approved scope and the source tree. Findings go back to the same
-implementation session. The reviewer inspects existing evidence and runs additional
-checks where needed, rather than automatically repeating the entire test suite.
-The harness reviewer is the sole acceptance gate. Its model and provider come from
-the saved Owner review settings; `--reviewers` does not start additional post-push
+When the harness reports a complete candidate, the shared review engine assesses the
+whole approved scope and the source tree: one or two independent reviewers, then a
+synthesis that challenges and consolidates their findings. Blocking findings go back
+to the same implementation session; non-blocking observations stay in the engine
+artifacts. Reviewers inspect existing evidence and run additional checks where
+needed, rather than automatically repeating the entire test suite. The engine is the
+sole acceptance gate. Its reviewers and synthesis come from the Owner `final_review`
+settings, which the shared reviewer flags configure; they do not start post-push
 reviews. Use `bin/pr-review` separately when an additional PR review is wanted.
 
 The coordinator retains approval and eligibility checks, isolated worktrees,

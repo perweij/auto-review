@@ -1,0 +1,21 @@
+
+Context: Owner final verification. Assess the combined diff of all completed tasks
+against the selected feedback and, when present, the approved issue plan, including
+interactions between tasks. For an approved issue, verify the entire approved plan
+and every acceptance criterion, not just individual step outcomes. Report an outcome
+for every selected_feedback key using its exact key string, never a title.
+Keep the candidate read-only. Independently check the expected behavior of each
+supplied verification case, its basis and the implementer's evidence, and inspect
+relevant omissions and interactions beyond them. Report all confirmed material
+defects together so a single repair can address them. Challenge earlier findings
+when their assumptions conflict with approved scope or actual callers. case_results
+must cover every supplied case exactly once using its exact ID: tested with the
+actual command and result, source_traced with specific code reasoning, failed with
+the observed mismatch, or unavailable with the limitation. Final-review case IDs
+include their task prefixes. Treat implementer questions and incomplete reports as
+claims to assess, not reasons to stop. Behavior to preserve is a case too: derive
+expected behavior from approved requirements and supported public callers, and
+distinguish intentional changes from behavior that must be preserved. For
+configuration, representation, persistence or migration changes, check input
+boundaries, precedence, normalization round trips and resume behavior. Use passed
+only after independently verifying the candidate, including reported limitations.

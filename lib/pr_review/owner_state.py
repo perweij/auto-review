@@ -5,7 +5,8 @@ from pathlib import Path
 
 from .common import ApiError, digest, git, locked, now, read_json, require_text, state_root
 from .repository import Repository, normalize_remote, repository_name
-from .settings import resolve as resolve_reviewer_settings
+from .settings import (derive_final_review, final_review_from, resolve as resolve_reviewer_settings,
+                       validate_final_review)
 from .storage import write_json
 
 
@@ -19,10 +20,17 @@ def default_settings(request):
         raise ApiError("invalid_request", "Owner defaults must be a settings object.")
     resolved = resolve_reviewer_settings({"defaults": defaults})["settings"]
     value = resolved["processing"]
-    return {"fix": dict(value), "review": dict(value), "verification": "focused"}
+    # New work uses the common reviewer and synthesis defaults for final verification.
+    return {"fix": dict(value), "review": dict(value), "final_review": final_review_from(resolved),
+            "verification": "focused"}
 
 
 def validate_settings(value):
+    """``review`` configures focused task checks only; ``final_review`` the shared engine.
+
+    A value without ``final_review`` stays valid; its effective configuration is
+    derived by ``effective_settings`` and is never written back.
+    """
     if not isinstance(value, dict) or value.get("verification") != "focused":
         raise ApiError("invalid_request", "Owner verification must be focused.")
     result = {"verification": "focused"}
@@ -33,6 +41,19 @@ def validate_settings(value):
         result[role] = {key: require_text(choice.get(key), key) for key in ("provider", "model", "effort")}
         if any(v.startswith("-") or any(ord(c) < 32 for c in v) for v in result[role].values()):
             raise ApiError("invalid_request", "Invalid owner provider setting.")
+    if value.get("final_review") is not None:
+        result["final_review"] = validate_final_review(value["final_review"])
+    return result
+
+
+def effective_settings(settings):
+    """Settings with the configuration that will actually run, including for legacy values."""
+    result = copy.deepcopy(settings)
+    if result.get("final_review") is None:
+        try:
+            result["final_review"] = derive_final_review(result["review"])
+        except (KeyError, TypeError):
+            pass  # an incomplete legacy value has no derivable review; display and validation report it
     return result
 
 
@@ -249,6 +270,11 @@ class OwnerSession:
         for item in result["feedback"]:
             for comment in item.get("comments", []):
                 comment["display_body"] = feedback_body(comment["body"])
+        # Display what will actually run, including for legacy sessions and frozen batches.
+        result["effective_settings"] = effective_settings(result["settings"])
+        for batch in result["batches"]:
+            if isinstance(batch.get("settings"), dict) and "review" in batch["settings"]:
+                batch["effective_settings"] = effective_settings(batch["settings"])
         result.update(session=str(self.path), revision=result.pop("sequence"))
         return result
 

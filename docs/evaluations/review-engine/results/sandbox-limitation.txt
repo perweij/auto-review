@@ -1,0 +1,13 @@
+Providers cannot start inside the existing independence sandbox in this container.
+Reproduced on 2026-11-02 with the unchanged IndependentSandbox policy (empty /proc):
+
+  claude -p ...        -> Error: Can't access working directory /tmp/review-private/checkout:
+                          Path "/tmp/review-private/checkout" does not exist
+  codex exec ...       -> WARNING: proceeding, even though we could not create PATH aliases:
+                          no /proc/self/exe available. Is /proc mounted?
+                          Error loading config.toml: no /proc/self/exe available. Is /proc mounted?
+  bwrap --proc /proc   -> bwrap: Can't mount proc on /proc: Operation not permitted
+
+`claude --version` and plain shell commands work in the same sandbox. The scripted reviewers of
+tests/test_review_engine.py run in the real bubblewrap sandbox. The limitation predates this change:
+the sandbox policy is unchanged and its documented tradeoff is an empty /proc.

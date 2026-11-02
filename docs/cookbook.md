@@ -166,9 +166,30 @@ requiring attention; see [automatic reviews](manual.md#automatic-reviews).
 
 ## Issue implementation and Owner settings
 
-`fix-issue` uses processing settings for issue assessment and planning. Approved
-implementation and its independent review use the separate Owner `fix` and
-`review` choices. Reviewer slots do not add a post-push PR review to this workflow.
+`fix-issue` uses processing settings for issue assessment and planning. The
+approved implementation uses the Owner `fix` choice. The finished local candidate
+is then reviewed by the same engine as `pr-review`: one or two independent
+reviewers followed by an adversarial synthesis. Reviewer slots do not add a
+post-push PR review to this workflow.
+
+Owner settings have four parts:
+
+| Setting | Configures |
+| --- | --- |
+| `fix` | The implementation session |
+| `review` | Focused per-task checks in interactive Owner only. One lightweight call, no engine |
+| `final_review` | Acceptance review of a `fix-issue` candidate and final verification of an interactive Owner batch: `reviewer_slots` (one or two, the same provider allowed), a `synthesis` choice and `synthesis_tests` (`focused` or `full`) |
+| `verification` | Always `"focused"` |
+
+Without a settings file, new work uses the common defaults: Claude and Codex
+reviewers with Codex synthesis. A settings file or a saved session without
+`final_review` stays valid and single-reviewer: its `review` choice is both the
+only slot and the synthesis. Claude-only and Codex-only users therefore need no
+second provider. That value is derived when needed and never written back.
+
+Precedence for the final review is: explicit reviewer flags, then `final_review` in
+the settings file, then one slot derived from the file's `review`, then the common
+defaults. Started batches freeze their settings.
 
 For Claude-only issue work, create an Owner settings file:
 
@@ -176,39 +197,65 @@ For Claude-only issue work, create an Owner settings file:
 cat > /tmp/owner-claude.json <<'JSON'
 {
   "fix": {"provider": "claude", "model": "opus", "effort": "high"},
-  "review": {"provider": "claude", "model": "opus", "effort": "high"},
+  "review": {"provider": "claude", "model": "opus", "effort": "medium"},
+  "final_review": {
+    "reviewer_slots": [{"id": "reviewer-1", "provider": "claude", "model": "opus", "effort": "high"}],
+    "synthesis": {"provider": "claude", "model": "opus", "effort": "high"},
+    "synthesis_tests": "focused"
+  },
   "verification": "focused"
 }
 JSON
 
-bin/fix-issue -i 42 \
-  --reviewers claude --processing-provider claude \
-  --processing-model opus --processing-effort high \
-  --settings-file /tmp/owner-claude.json --max-runtime 2h --json
+bin/fix-issue -i 42 --settings-file /tmp/owner-claude.json --max-runtime 2h --json
 ```
 
-For Codex-only work with different implementation and review choices:
+One slot that matches the synthesis choice uses the direct path and needs no
+bubblewrap. For Codex-only work with two independent Codex reviewers of different
+models and a Sol synthesis:
 
 ```sh
 cat > /tmp/owner-codex.json <<'JSON'
 {
   "fix": {"provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
-  "review": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "review": {"provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
+  "final_review": {
+    "reviewer_slots": [
+      {"id": "reviewer-1", "provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
+      {"id": "reviewer-2", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high"}
+    ],
+    "synthesis": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+    "synthesis_tests": "focused"
+  },
   "verification": "focused"
 }
 JSON
 
-bin/fix-issue -i 42 \
-  --reviewers codex --processing-provider codex \
-  --processing-model gpt-6.1-sol --processing-effort high \
-  --settings-file /tmp/owner-codex.json --max-runtime 2h --json
+bin/fix-issue -i 42 --settings-file /tmp/owner-codex.json --max-runtime 2h --json
 ```
 
+Two or more independent reviewers require bubblewrap and each provider's review
+capability; preflight names anything missing before any model work starts.
+
+The shared reviewer flags now configure acceptance review. `--reviewers`,
+`--reviewer-N-provider/model/effort`, `--processing-*`, `--claude-*`, `--codex-*`,
+`--synthesis-tests` and the presets override the settings file for the final review:
+
+```sh
+bin/fix-issue -i 42 --reviewers claude,codex \
+  --reviewer-1-model opus --reviewer-2-model gpt-6.1-sol \
+  --processing-provider codex --processing-model gpt-6.1-sol --processing-effort high \
+  --max-runtime 2h --json
+```
+
+They never change `fix` or `review`, and never start a post-push PR review. A
+started batch keeps its settings; changing them stops with `settings_changed`.
+
 The two Owner roles can also use different providers. Without a settings file,
-new Owner sessions derive both roles from processing; existing sessions retain
-their saved Owner choices. Started batches freeze their settings. These examples
-retain plan approval; `--yolo` skips approval for that invocation, but unanswered
-product questions still block. Runtime is cumulative across invocations.
+new Owner sessions derive them from processing; existing sessions retain their
+saved Owner choices. These examples retain plan approval; `--yolo` skips approval
+for that invocation, but unanswered product questions still block. Runtime is
+cumulative across invocations.
 
 The Owner JSON requires `verification: "focused"` for compatibility with
 interactive Owner. This does not constrain the issue harness's whole-specification
@@ -221,6 +268,10 @@ pr-review owner 123 settings --settings-file /tmp/owner-claude.json
 pr-review owner 123 settings
 ```
 
-The second command displays saved settings. Reviewer CLI flags do not configure
-interactive Owner. See the [Owner workflow](manual.md#pr-owner-workflow) and
+The second command displays saved settings, including the effective final-review
+configuration of a session that has none saved. Reviewer CLI flags configure
+`fix-issue` acceptance review only; interactive Owner takes its settings from the
+file, the saved session and, in Emacs, `R f` (fix) and `R r` (task checks). See the
+[Owner workflow](manual.md#pr-owner-workflow), the
+[shared review engine](manual.md#shared-review-engine) and the
 [issue workflow](manual.md#issue-fixing) for execution details.

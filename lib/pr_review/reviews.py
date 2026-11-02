@@ -8,8 +8,9 @@ import subprocess
 import tempfile
 
 from .common import ApiError, command, locked, now, read_json
-from . import cache, providers, settings
+from . import cache, providers, review_engine, settings, validation
 from .processes import Cancelled, cancellation_scope, run as process
+from .review_engine import requires_independent
 from .repository import Repository
 from .sessions import Store, locate, say
 from .storage import atomic_bytes, hash_file, write_json
@@ -46,131 +47,44 @@ class Review(Store):
         self.save()
         say(f'Artifacts: {self.path}')
 
+    @property
+    def adapter(self):
+        return PR_ADAPTER
+
     def model(self, stage, argv, input_bytes=b'', probe=False):
-        provider = stage.split('_')[0] if probe else providers.provider_for(self.settings, stage)
-        slot = next((s for s in self.settings.get('reviewer_slots', []) if s['id'] == stage), None)
-        choice = slot or (self.settings.get('processing') if stage not in ('claude', 'codex') else None)
-        model = (('haiku' if provider == 'claude' else self.runtime.probe_model) if probe else
-                 choice['model'] if choice else self.settings[provider + '_model'])
-        output = self.path / ('reviews/claude-independent.jsonl' if stage == 'claude' else
-                              'logs/codex.events.jsonl' if stage == 'codex' else
-                              f'logs/{stage}.jsonl' if probe else f'logs/{stage}.raw.json')
-        stderr = self.path / ('logs/claude-independent.stderr.log' if stage == 'claude' else f'logs/{stage}.stderr.log')
+        if not probe:
+            return review_engine.execute_stage(self, stage, argv, input_bytes, runner=process)
+        provider = stage.split('_')[0]
+        model = 'haiku' if provider == 'claude' else self.runtime.probe_model
+        output = self.path / f'logs/{stage}.jsonl'
+        stderr = self.path / f'logs/{stage}.stderr.log'
         env, removed = providers.environment(provider)
         self.manifest.setdefault('removed_environment', {})[provider] = removed
         record = dict(status='running', fingerprint='', started_at=now(), stdout_log=str(output), stderr_log=str(stderr), model=model)
-        if not probe:
-            record['inputs'] = cache.inputs(self, stage)
-            if slot:
-                # A new invocation is isolated even when replacing an adopted
-                # legacy record; its identity must not inherit that provenance.
-                record['inputs'].pop('legacy_source', None)
-                record['inputs']['isolation'] = 'private-snapshot-bwrap-v1'
-            record['fingerprint'] = cache.fingerprint(record['inputs'])
-            if stage != 'contributions':
-                record['testing_policy'] = self.settings['synthesis_tests'] if stage == 'synthesis' else 'focused'
-                say('Verification: ' + ('one full-suite attempt permitted (30m); focused checks limited to 5m total.' if record['testing_policy'] == 'full' else 'focused checks (60s each, 5m total); no full-suite runs.'))
         self.manifest['phases'][stage] = record
         self.active = stage
         self.save()
-        cwd = self.scratch / 'auth-probe' if probe else self.worktree
-        cwd.mkdir(exist_ok=True) if probe else None
+        cwd = self.scratch / 'auth-probe'
+        cwd.mkdir(exist_ok=True)
         commands = read_json(self.path / 'logs/commands.json', [])
         commands.append(dict(stage=stage, time=now(), cwd=str(cwd), argv=argv))
         write_json(self.path / 'logs/commands.json', commands)
-        before = set()
-        if not probe:
-            self.repo.verify(self.manifest, self.path)
-            before = set(self.repo.git('status', '--porcelain=v1', '--untracked-files=all', '--ignored', cwd=self.worktree).stdout.splitlines())
-            atomic_bytes(self.path / f'logs/{stage}.files-before.txt', ('\n'.join(sorted(before)) + ('\n' if before else '')).encode())
-            identity = process(['git', '-c', 'core.hooksPath=/dev/null', '-C', self.worktree, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', 'HEAD'], env=env)
-            atomic_bytes(self.path / f'logs/{stage}.git-preflight.log', identity.stdout.encode())
-            atomic_bytes(self.path / f'logs/{stage}.git-preflight.log.stderr', identity.stderr.encode())
-            if identity.returncode or identity.stdout.splitlines() != [str(self.worktree), str(self.repo.common), self.manifest['snapshot']['head']]:
-                raise ApiError('integrity_failed', f"Git cannot read the worktree with {provider}'s filtered environment. See {self.path}/logs/{stage}.git-preflight.log")
-        sandbox = None
         try:
-            with ExitStack() as resources:
-                actual_argv, pass_fds = argv, ()
-                if slot:
-                    from .isolation import IndependentSandbox, startup_confirmed
-                    sandbox = IndependentSandbox(self, stage, provider)
-                    before_names = set(env)
-                    actual_argv, env = sandbox.wrap(argv, env)
-                    startup = resources.enter_context(tempfile.TemporaryFile())
-                    pass_fds = (startup.fileno(),)
-                    actual_argv[1:1] = ['--info-fd', str(startup.fileno())]
-                    self.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
-                    self.save()
-                    commands[-1].update(cwd='/tmp/review-private/checkout',
-                                        source_worktree=str(self.worktree),
-                                        isolation='private-snapshot-bwrap-v1', sandbox_argv=actual_argv)
-                    write_json(self.path / 'logs/commands.json', commands)
-                result = process(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
-                                 timeout=self.runtime.auth_timeout if probe else self.runtime.model_timeout,
-                                 stdout_path=output, stderr_path=stderr, model_events=True, stage=stage,
-                                 pass_fds=pass_fds)
-                if sandbox:
-                    if not startup_confirmed(startup):
-                        record.update(status='failed', failure_reason='independence_failed',
-                                      exit_status=result.returncode, finished_at=now())
-                        self.active = None
-                        self.save()
-                        raise ApiError('independence_failed', f'Cannot start isolated {stage}; inspect {stderr}')
-            if sandbox:
-                try:
-                    sandbox.verify()
-                except ApiError as exc:
-                    if exc.code == 'independence_failed':
-                        record.update(status='failed', failure_reason=exc.code,
-                                      exit_status=result.returncode, finished_at=now())
-                        self.active = None
-                        self.save()
-                    raise
-                private_result = sandbox.root / 'result.md'
-                if result.returncode == 0 and provider == 'codex' and private_result.is_file() and not private_result.is_symlink():
-                    atomic_bytes(self.path / f'reviews/{stage}.md.tmp', private_result.read_bytes())
+            result = process(argv, cwd=cwd, env=env, input_bytes=input_bytes, timeout=self.runtime.auth_timeout,
+                             stdout_path=output, stderr_path=stderr, model_events=True, stage=stage, pass_fds=())
         except ApiError as exc:
             record.update(status='interrupted' if isinstance(exc, Cancelled) or exc.code == 'resource_limit' else 'failed',
                           exit_status=exc.details.get('exit_code', record.get('exit_status', 1)), finished_at=now())
-            if exc.code == 'independence_failed':
-                record['failure_reason'] = exc.code
             self.active = None
             raise
         finally:
-            # Retain both private reviewer artifacts and shared-worktree artifacts
-            # after the child stops, including cancellation and resource exhaustion.
-            try:
-                if sandbox:
-                    try:
-                        archive, generated = sandbox.preserve_generated()
-                        if generated:
-                            record['generated_archive'] = str(archive)
-                            self.manifest['generated_files'] = sorted(set(self.manifest.get('generated_files', [])) |
-                                {f'{stage}: {name} (saved in {archive})' for name in generated})
-                    finally:
-                        sandbox.close()
-            finally:
-                try:
-                    if not probe:
-                        self.record_generated_files(stage, before)
-                finally:
-                    self.save()
+            self.save()
         record.update(exit_status=result.returncode, finished_at=now())
         if result.reason:
             record.update(failure_reason=result.reason, process_exit_status=result.process_exit_status)
-        if not probe:
-            self.repo.verify(self.manifest, self.path)
         self.save()
         if result.returncode:
-            if slot and stderr.read_text(errors='replace').lstrip().startswith('bwrap:'):
-                record.update(status='failed', failure_reason='independence_failed')
-                self.active = None
-                self.save()
-                raise ApiError('independence_failed', f'Cannot start isolated {stage}; inspect {stderr}')
-            self.model_failure(stage, provider, result.returncode, output, stderr, probe)
-        # A provider can exit successfully after reporting that none of its
-        # commands ran. Do not cache that diagnostic as completed analysis.
+            self.model_failure(stage, provider, result.returncode, output, stderr, True)
         responses = [e.get('item', {}).get('text', '') for e in result.events
                      if e.get('type') == 'item.completed' and isinstance(e.get('item'), dict)
                      and e['item'].get('type') == 'agent_message']
@@ -199,57 +113,10 @@ class Review(Store):
             say('Warning: Model created untracked or ignored files (retained): ' + '\n'.join(sorted(generated)))
 
     def model_failure(self, stage, provider, rc, output, stderr, probe=False):
-        text = output.read_text(errors='replace') + stderr.read_text(errors='replace')
-        record = self.manifest['phases'][stage]
-        record.update(status='failed')
-        say(f'Warning: {stage} failed with exit {rc} ({provider}, model: {record["model"]}).')
-        events = []
-        for line in output.read_text(errors='replace').splitlines():
-            try:
-                event = json.loads(line)
-                if isinstance(event, dict) and event.get('type') == 'result':
-                    events.append(event)
-            except ValueError:
-                pass
-        subtype = events[-1].get('subtype') if events else None
-        if isinstance(subtype, str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', subtype):
-            say('Warning: CLI result subtype: ' + subtype)
-        if probe:
-            reason = 'timeout' if rc in (124, 137) else 'unverified'
-            for name, pattern in [('authentication', r'oauth session expired|unauthorized|authentication|failed to authenticate|invalid.{0,20}(api.?key|token)|token.{0,20}expired|401'),
-                                  ('quota', r'quota|rate.limit|usage.limit|insufficient.credit|429'),
-                                  ('model_access', r'model.{0,80}(not found|not available|unavailable|not supported|does not exist|access)|unsupported.model'),
-                                  ('network', r'connection|network|dns|timed out|unable to connect')]:
-                if reason != 'timeout' and re.search(pattern, text, re.I):
-                    reason = name
-                    break
-            record['failure_reason'] = reason
-            messages = dict(authentication=f"Live authentication failed. Run '{'claude auth login' if provider == 'claude' else 'codex login'}' and retry.",
-                quota='Live probe blocked by a usage or rate limit; authentication could not be confirmed.',
-                model_access='Probe model unavailable or not permitted; set PR_REVIEW_CODEX_PROBE_MODEL to an available inexpensive model.',
-                network='Live probe could not reach the service; authentication could not be confirmed.',
-                timeout='Live probe timed out; adjust PR_REVIEW_AUTH_TIMEOUT if needed.',
-                unverified='Live probe did not return a successful diagnostic response; authentication could not be confirmed.')
-            say('Warning: ' + messages[reason])
-        if provider == 'claude' and re.search('OAuth session expired', text, re.I):
-            record['failure_reason'] = 'oauth_session_expired'
-            say("Warning: Claude's OAuth session expired. Run 'claude auth login', then resume this run.")
-        if '"is_error": true' in text or '"is_error":true' in text:
-            say('Warning: CLI result reports an error (is_error=true), regardless of its subtype.')
-        if record.get('failure_reason') == 'git_repository_unavailable':
-            say(f'Warning: Codex rejected the working directory as a Git repository: {self.worktree}')
-        say(f'Captured stdout (including structured errors): {output}')
-        say(('Captured stderr: ' if stderr.stat().st_size else 'Captured stderr is empty: ') + str(stderr))
-        self.active = None
-        self.save()
-        raise ApiError('model_failed', 'Live authentication preflight failed; review setup stopped' if probe else f'{stage} failed; inspect captured logs and resume to retry')
+        review_engine.model_failure(self, stage, provider, rc, output, stderr, probe)
 
     def complete(self, stage, output):
-        if not output.is_file() or not output.stat().st_size:
-            raise ApiError('model_failed', f'{stage} produced an empty report')
-        self.manifest['phases'][stage].update(status='completed', output_hash=hash_file(output), exit_status=0)
-        self.active = None
-        self.save()
+        review_engine.complete(self, stage, output)
 
     def authenticate_live(self, enabled):
         for provider in ('claude', 'codex'):
@@ -406,13 +273,6 @@ def required_providers(configuration, kind):
     return list(dict.fromkeys(providers_needed))
 
 
-def requires_independent(configuration, manifest):
-    slots = configuration['reviewer_slots']
-    reviewer = {key: slots[0][key] for key in ('provider', 'model', 'effort')}
-    return (len(slots) == 2 or reviewer != configuration['processing'] or
-            any(slot['id'] in manifest.get('phases', {}) for slot in slots))
-
-
 def execute(request, *, confirm_trust=None):
     """Return the selected generation after releasing all backend locks."""
     from . import pipeline
@@ -496,17 +356,8 @@ def execute(request, *, confirm_trust=None):
                     from .automation import manual_completion
                     manual_completion(run)
                 run.save()
-        except Cancelled as exc:
-            if run.active:
-                run.manifest['phases'][run.active].update(status='interrupted', exit_status=exc.details['exit_code'], finished_at=now())
-                run.active = None
-            run.manifest['status'] = 'failed'
-            run.save()
-            raise
-        except BaseException:
-            if run.active:
-                record = run.manifest['phases'][run.active]
-                record.update(status='failed', exit_status=record.get('exit_status', 1), finished_at=now())
+        except BaseException as exc:
+            review_engine.record_interruption(run, exc)
             run.manifest['status'] = 'failed'
             run.save()
             raise
@@ -516,3 +367,70 @@ def execute(request, *, confirm_trust=None):
             if run.pending:
                 say(f'Previous review: {run.current} (replacement not installed)\nResume session: {run.root}')
     return run.session()
+
+
+class PrAdapter(review_engine.Adapter):
+    """PR review: existing prompts, schema, argv, fingerprints and snapshot verification."""
+    name = 'pr'
+
+    def log_paths(self, run, stage):
+        output = run.path / ('reviews/claude-independent.jsonl' if stage == 'claude' else
+                             'logs/codex.events.jsonl' if stage == 'codex' else f'logs/{stage}.raw.json')
+        stderr = run.path / ('logs/claude-independent.stderr.log' if stage == 'claude' else f'logs/{stage}.stderr.log')
+        return output, stderr
+
+    def stage_cwd(self, run, stage, slot):
+        return run.worktree
+
+    def verify_snapshot(self, run, stage, when, context=None):
+        # Saved PR sessions are verified when their snapshot is established.
+        if when in ('before', 'after'):
+            run.repo.verify(run.manifest, run.path)
+
+    def begin_stage(self, run, stage, slot, provider, env):
+        self.verify_snapshot(run, stage, 'before')
+        before = set(run.repo.git('status', '--porcelain=v1', '--untracked-files=all', '--ignored', cwd=run.worktree).stdout.splitlines())
+        atomic_bytes(run.path / f'logs/{stage}.files-before.txt', ('\n'.join(sorted(before)) + ('\n' if before else '')).encode())
+        identity = process(['git', '-c', 'core.hooksPath=/dev/null', '-C', run.worktree, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', 'HEAD'], env=env)
+        atomic_bytes(run.path / f'logs/{stage}.git-preflight.log', identity.stdout.encode())
+        atomic_bytes(run.path / f'logs/{stage}.git-preflight.log.stderr', identity.stderr.encode())
+        if identity.returncode or identity.stdout.splitlines() != [str(run.worktree), str(run.repo.common), run.manifest['snapshot']['head']]:
+            raise ApiError('integrity_failed', f"Git cannot read the worktree with {provider}'s filtered environment. See {run.path}/logs/{stage}.git-preflight.log")
+        return before
+
+    def end_stage(self, run, stage, slot, context):
+        run.record_generated_files(stage, context)
+
+    def render_synthesis(self, run, correction=None):
+        from . import pipeline
+        pipeline.render_synthesis(run)
+
+    def structured(self, run, stage):
+        from . import pipeline
+        return pipeline.structured(run, stage)
+
+    def validate(self, run, value, *, new):
+        return validation.synthesis(value, new=new)
+
+    def prepare_rerun(self, run):
+        from . import pipeline
+        pipeline.protect(run, 'synthesis')
+        run.reset_publication()
+
+    def accept_new(self, run, value):
+        # A newly produced analysis gets a fresh discussion match, even when a
+        # provider happened to return byte-identical findings to its predecessor.
+        run.manifest['phases'].pop('contributions', None)
+
+    def finalize(self, run, value):
+        from . import pipeline
+        pipeline.write_report(run, value)
+
+    def reuse_message(self, run):
+        return 'Reusing completed synthesis' if run.dual else 'Reusing completed structured review'
+
+    def running_message(self, run):
+        return f'[synthesis] Running {"adversarial synthesis" if run.dual else "structured review (one reviewer)"} ({run.settings["processing_provider"]})'
+
+
+PR_ADAPTER = PrAdapter()

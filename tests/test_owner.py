@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import engine_stub
 from pr_review.api import dispatch
 from pr_review.common import ApiError, atomic_json, digest, locked, read_json
 from pr_review.repository import Repository
@@ -61,6 +62,7 @@ class OwnerTest(unittest.TestCase):
             ("pr_review.discussion.fetch", lambda repo: ({"items": copy.deepcopy(self.feedback)}, {"inline": []})),
             ("pr_review.owner_providers.preflight", lambda session, state: None),
             ("pr_review.owner_providers.invoke", self.model),
+            ("pr_review.acceptance.review_owner", engine_stub.owner_review),
             ("pr_review.owner_publication.gh", self.publish),
         ):
             p = patch(target, side_effect=side_effect)

@@ -6,7 +6,7 @@ import uuid
 from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
-from . import owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts
+from . import acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts
 from .owner_state import refresh, superseded_batches, active_feedback_keys
 
 
@@ -212,7 +212,10 @@ def final_review(session, state, batch):
         data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks. For approved issues, verify the entire approved plan and every acceptance criterion, not just individual step outcomes."
         if batch.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = batch["review"]
-        review = validate_result(models.invoke(session, state, batch, "review", data), keys)
+        # Final verification runs the shared review engine; per-task checks above
+        # stay a single lightweight call. A repair changes the tree, which is a new candidate.
+        _, review = acceptance.review_owner(session, state, batch, keys, data)
+        review = validate_result(review, keys)
         owner_contracts.bind(review, data["verification_cases"], batch["checkpoint"]["tree"])
         batch["review"] = review
         batch['review_tree'] = batch['checkpoint']['tree']
@@ -323,13 +326,15 @@ def execute(session, state, request):
                 if not batch:
                     raise ApiError("invalid_request", "Choose an existing owner batch.")
                 is_harness = is_harness or batch.get("execution_kind") == "issue_harness"
-                if is_harness:
-                    from . import issue_harness
-                    try:
+                from . import issue_harness
+                try:
+                    if is_harness:
                         issue_harness.require_supported(batch)
-                    except ApiError:
-                        batch = None  # Reject without rewriting the retired record.
-                        raise
+                    else:
+                        issue_harness.require_engine(batch)
+                except ApiError:
+                    batch = None  # Reject without rewriting the retired record.
+                    raise
                 replacements = superseded_batches(state).get(batch["id"])
                 if replacements:
                     batch = None  # Preserve the original stop reason and artifacts.
@@ -378,7 +383,10 @@ def execute(session, state, request):
                     if (last.get('role') == 'fix' and last.get('status') in ('failed', 'interrupted') and not last.get('adopted_at')
                             and batch['tasks'] and all(t['status'] in ('complete', 'skipped') for t in batch['tasks'])):
                         batch['combined_repair_pending'] = True
-                    if orphaned or batch.get('combined_repair_pending') or batch.get("status") == "running" or interrupted:
+                    # An orphaned engine stage never forces adoption: the tree and Git
+                    # admin checks above and below still require it after source changes.
+                    if ([a for a in orphaned if a.get('kind') != 'review_engine'] or batch.get('combined_repair_pending')
+                            or batch.get("status") == "running" or interrupted):
                         batch["status"] = "interrupted"
                         if not request.get('adopt') and (batch.get('combined_repair_pending') or not interrupted or not interrupted <= set(skip)):
                             raise ApiError('interrupted_task', 'Inspect retained changes, then adopt and reverify; task skips must cover every interrupted task. A failed combined repair requires adoption.')
@@ -425,7 +433,7 @@ def execute(session, state, request):
                          "baseline_ref": workspace.pin_commit(session, baseline),
                          "items": [i["key"] for i in items], "fingerprints": {i["key"]: i["fingerprint"] for i in items},
                          "settings": copy.deepcopy(state["settings"]), "checkpoint": snapshot, "tasks": [],
-                         "git_admin": workspace.admin(session, state),
+                         "git_admin": workspace.admin(session, state), "review_engine": 1,
                          "verify_only": bool(request.get("verify_only")),
                          "auto_commit": request.get("auto_commit", False),
                          "plans": [], "attempts": [], "repairs": 0, "status": "planning"}

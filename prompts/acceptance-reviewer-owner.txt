@@ -1,0 +1,4 @@
+This is a final verification of a local candidate, not of a GitHub pull request.
+The baseline is the base ref you were given. Assess the combined changes against
+the selected feedback and, when present, the approved issue plan found in these
+files of your private root (read all of them before judging):

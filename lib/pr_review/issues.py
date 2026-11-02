@@ -394,10 +394,21 @@ class Workflow:
                 if not any(not execution_complete(b) for b in data['batches']):
                     owner_git.clean(owner, data)
             data['issue_workflow'] = state['id']
+            desired = data['settings']
             if state.get('owner_settings') and (self.request.get('settings_file') or not link):
-                if any(b.get('status') != 'ready' and b.get('attempts') for b in data['batches']) and data['settings'] != state['owner_settings']:
+                desired = state['owner_settings']
+            if settings.explicit_reviewer_flags(self.request):
+                # Reviewer flags configure acceptance review. Precedence: explicit flags, then the
+                # file's final_review, then one slot derived from its review, then common defaults.
+                desired = {**desired, 'final_review': settings.final_review_from(state['configuration'])}
+            desired = owner_state.validate_settings(desired)
+            # Compare only after all overrides have been applied. Retain the saved
+            # representation for equivalent legacy settings: batches also compare
+            # their frozen settings with this object without normalization.
+            if owner_state.effective_settings(data['settings']) != owner_state.effective_settings(desired):
+                if any(b.get('status') != 'ready' and b.get('attempts') for b in data['batches']):
                     raise ApiError('settings_changed', 'Active Owner batch settings are frozen.')
-                data['settings'] = state['owner_settings']
+                data['settings'] = desired
             owner.save(data)
         state['owner'] = str(owner.path)
         state['issue_item'] = owner_import.from_issue(owner, state['plan'], self.facts['issue'], state['id'],
@@ -560,6 +571,10 @@ class Workflow:
         actual_settings = owner.load()['settings']
         resource = state.get('resources', {})
         additional = {actual_settings[r]['provider'] for r in ('fix', 'review')}
+        # A legacy value without final_review reviews with its task-check provider, already counted.
+        final = actual_settings.get('final_review')
+        if final:
+            additional |= {slot['provider'] for slot in final['reviewer_slots']} | {final['synthesis']['provider']}
         if additional - set(resource.get('providers', [])):
             resource['providers'] = sorted(set(resource.get('providers', [])) | additional)
             resource.pop('quota_polled', None)
@@ -668,6 +683,9 @@ def dispatch(request):
                 'provider_failed': 'The coding provider could not complete its turn. Saved work and session identity are retained.',
                 'invalid_result': 'The provider could not supply a usable completion report after correction. No implementation was published.',
                 'integrity_failed': 'Protected worktree or Git state changed. Inspect the retained changes before continuing.',
+                'review_incomplete': 'Acceptance review could not finish. Its partial result is retained; resume to rerun only the stages without valid evidence.',
+                'independence_failed': 'Independent reviewer isolation could not be established. Fix the isolation problem and resume; the review never runs without it.',
+                'review_checkout_modified': 'A reviewer changed its disposable candidate checkout, so its result was discarded. The live worktree is unchanged and no adoption is needed; resume to rerun in a fresh checkout.',
                 'worktree_changed': 'The worktree differs from the saved execution checkpoint. Inspect and adopt the retained changes before continuing.',
                 'interrupted_task': 'An older interrupted run left unverified changes. Inspect and adopt the retained changes before continuing.',
             }
