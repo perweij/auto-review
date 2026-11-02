@@ -1,0 +1,109 @@
+{
+  "date": "2026-11-02",
+  "issue": 30,
+  "base": "f7f0f2e2df548186b3b85d5f420ad0424af25655",
+  "head": "f5e0321ca179d4c4a434ec456cb404b3cedd7486",
+  "configuration": {
+    "reviewers": [
+      {
+        "provider": "claude",
+        "model": "opus",
+        "effort": "high"
+      },
+      {
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      }
+    ],
+    "synthesis": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "synthesis_tests": "focused"
+  },
+  "discussion": "withheld",
+  "raw_artifacts": "/workspaces/work/issue30-pr4",
+  "model_execution": "The working-tree replay used the new outer-container policy and final model prompts/argv. Subsequent implementation edits hardened Git verification and adjusted diagnostics/tests without changing these model inputs.",
+  "reference": "docs/evaluations/pr4/coverage-matrix.json, case C-feature-synthesised; historical adjudication in evidence.json",
+  "matched_behavioral": 6,
+  "reference_behavioral": 8,
+  "matched_observations": 0,
+  "reference_observations": 2,
+  "conclusion": "Execution succeeds beyond the former sandbox startup failures. Reference recall regressed in this run: R8 and R13 are unexplained omissions; R10 and R12 observations are also absent. This single run neither identifies the cause nor establishes overall recall against an exhaustive oracle.",
+  "adjudication": [
+    {
+      "reference": "R2",
+      "kind": "behavioral",
+      "finding": "F11",
+      "status": "matched",
+      "assessment": "The final finding preserves uncertain submission wording and original commit provenance through reassociation and receipt recovery."
+    },
+    {
+      "reference": "R5",
+      "kind": "behavioral",
+      "finding": "F14",
+      "status": "matched",
+      "assessment": "Synthesis independently reproduced the next attempted send after metadata closes the PR. It remains NEW and nonblocking; no live GitHub write is claimed."
+    },
+    {
+      "reference": "R6",
+      "kind": "behavioral",
+      "finding": "F6",
+      "status": "matched",
+      "assessment": "The narrow, supported case is an unrelated preflight failure on an unchanged ready batch, followed by lost commit-association eligibility."
+    },
+    {
+      "reference": "R7",
+      "kind": "behavioral",
+      "finding": "F5",
+      "status": "matched",
+      "assessment": "The own-publication receipt changes thread freshness and aborts the remaining same-thread reply. Expected own writes must be distinguished from external changes."
+    },
+    {
+      "reference": "R8",
+      "kind": "behavioral",
+      "finding": null,
+      "status": "missed",
+      "assessment": "No finding covers skipping an unrelated task to bypass interrupted-task adoption. F2 instead concerns skipping the failed task after a nonzero fixer and is not counted as this scenario. The historical real-Git reproduction remains supporting evidence; the frozen owner_fixes.py:197-200 gate still exempts any nonempty skip request. No evidence invalidates the reference. This is an unexplained reference-recall regression."
+    },
+    {
+      "reference": "R9",
+      "kind": "behavioral",
+      "finding": "F3",
+      "status": "matched_narrowed",
+      "assessment": "The result correctly retains bypass of untouched queued tasks initial fixer/repair allowance, while acknowledging that task and combined reviews still gate readiness. This matches the narrowed reference, not a claim of arbitrary incorrect-code acceptance."
+    },
+    {
+      "reference": "R10",
+      "kind": "observation",
+      "finding": null,
+      "status": "missed",
+      "assessment": "No final finding discusses unrelated shared Git configuration changes triggering conservative integrity recovery. Historical real-Git evidence still supports this design-tradeoff observation; it is not counted as a behavioral correctness defect."
+    },
+    {
+      "reference": "R11",
+      "kind": "behavioral",
+      "finding": "F10",
+      "status": "matched",
+      "assessment": "The result reproduces different preference keys for explicit versus omitted repository identity with multiple remotes and traces the frontend routing. It does not claim an executed full Forge interaction."
+    },
+    {
+      "reference": "R12",
+      "kind": "observation",
+      "finding": null,
+      "status": "missed",
+      "assessment": "No final finding covers duplicated accumulated diff in final-review context. The frozen final_review still calls context with the batch baseline; the historical captured context supports this efficiency observation. No measured cost or context-limit failure is claimed."
+    },
+    {
+      "reference": "R13",
+      "kind": "behavioral",
+      "finding": null,
+      "status": "missed",
+      "assessment": "No finding covers the missing operation ID for network Owner operations. The frozen owner dispatch still runs refresh/publication without the fix operation envelope, while Emacs cancellation requires an operation_id. Historical evidence is backend reproduction plus frontend tracing, not executed Emacs cancellation. No evidence invalidates the reference. This is an unexplained reference-recall regression."
+    }
+  ],
+  "exit_status": 0,
+  "status": "complete"
+}

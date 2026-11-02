@@ -67,3 +67,10 @@ on a host where providers start inside bubblewrap, compare its `synthesis.json` 
 `docs/evaluations/pr4/coverage-matrix.json`, and adjudicate each missed reference
 finding. Model variance alone is not a regression, and that corpus is not an exhaustive
 oracle; an unexplained loss of supported findings is.
+
+
+## Follow-up: outer-container execution (#30)
+
+The original results above remain the historical #28 record. See
+[outer-container validation](outer-container.md) for the subsequent removal of nested
+bubblewrap, fresh/resumed provider checks, and the PR4 replay under the new policy.

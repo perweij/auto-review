@@ -1,0 +1,210 @@
+{
+  "date": "2026-11-02",
+  "issue": 30,
+  "versions": {
+    "claude": "2.1.316",
+    "codex": "0.166.0"
+  },
+  "execution_policy": {
+    "claude": {
+      "sandbox": {
+        "enabled": false
+      }
+    },
+    "codex": {
+      "sandbox_mode": "danger-full-access",
+      "approval_policy": "never"
+    }
+  },
+  "implementation_session_checks": [
+    {
+      "provider": "claude",
+      "model": "haiku",
+      "fresh": true,
+      "resumed": true,
+      "bwrap_invoked": false,
+      "artifact_directory": "/tmp/provider-policy-smoke-oz24p4n8",
+      "commands": [
+        {
+          "turn": "fresh",
+          "argv": [
+            "claude",
+            "--settings",
+            "{\"sandbox\":{\"enabled\":false}}",
+            "-p",
+            "--model",
+            "haiku",
+            "--effort",
+            "low",
+            "--permission-mode",
+            "auto",
+            "--permission-prompts",
+            "none",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--json-schema",
+            "{\"type\": \"object\", \"properties\": {\"proof\": {\"type\": \"string\"}}, \"required\": [\"proof\"], \"additionalProperties\": false}",
+            "--disallowed-tools",
+            "Bash(git push:*)",
+            "Bash(git commit:*)",
+            "Bash(git checkout:*)",
+            "Bash(git switch:*)",
+            "Bash(git reset:*)",
+            "Bash(git restore:*)",
+            "Bash(git stash:*)",
+            "Bash(gh:*)",
+            "Bash(git add:*)",
+            "Bash(git update-ref:*)",
+            "Bash(git config:*)",
+            "Bash(git merge:*)",
+            "Bash(git rebase:*)",
+            "Bash(git cherry-pick:*)",
+            "Bash(git clean:*)",
+            "--session-id",
+            "6116a0f8-6dd5-4839-ae87-de299a0244cf"
+          ],
+          "exit_status": 0
+        },
+        {
+          "turn": "resumed",
+          "argv": [
+            "claude",
+            "--settings",
+            "{\"sandbox\":{\"enabled\":false}}",
+            "-p",
+            "--model",
+            "haiku",
+            "--effort",
+            "low",
+            "--permission-mode",
+            "auto",
+            "--permission-prompts",
+            "none",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--json-schema",
+            "{\"type\": \"object\", \"properties\": {\"proof\": {\"type\": \"string\"}}, \"required\": [\"proof\"], \"additionalProperties\": false}",
+            "--disallowed-tools",
+            "Bash(git push:*)",
+            "Bash(git commit:*)",
+            "Bash(git checkout:*)",
+            "Bash(git switch:*)",
+            "Bash(git reset:*)",
+            "Bash(git restore:*)",
+            "Bash(git stash:*)",
+            "Bash(gh:*)",
+            "Bash(git add:*)",
+            "Bash(git update-ref:*)",
+            "Bash(git config:*)",
+            "Bash(git merge:*)",
+            "Bash(git rebase:*)",
+            "Bash(git cherry-pick:*)",
+            "Bash(git clean:*)",
+            "--resume",
+            "6116a0f8-6dd5-4839-ae87-de299a0244cf"
+          ],
+          "exit_status": 0
+        }
+      ]
+    },
+    {
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "fresh": true,
+      "resumed": true,
+      "bwrap_invoked": false,
+      "artifact_directory": "/tmp/provider-policy-smoke-ac0k0uk4",
+      "commands": [
+        {
+          "turn": "fresh",
+          "argv": [
+            "codex",
+            "exec",
+            "-m",
+            "gpt-6-luna",
+            "--strict-config",
+            "-c",
+            "model_reasoning_effort=low",
+            "-c",
+            "sandbox_mode=danger-full-access",
+            "-c",
+            "approval_policy=never",
+            "-c",
+            "shell_environment_policy.set.TMPDIR=\"/tmp/provider-policy-smoke-ac0k0uk4/fresh/scratch\"",
+            "-c",
+            "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+            "-c",
+            "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+            "--json",
+            "--output-schema",
+            "/tmp/provider-policy-smoke-ac0k0uk4/schema.json",
+            "-o",
+            "/tmp/provider-policy-smoke-ac0k0uk4/fresh/result.json",
+            "-"
+          ],
+          "exit_status": 0
+        },
+        {
+          "turn": "resumed",
+          "argv": [
+            "codex",
+            "exec",
+            "resume",
+            "-m",
+            "gpt-6-luna",
+            "--strict-config",
+            "-c",
+            "model_reasoning_effort=low",
+            "-c",
+            "sandbox_mode=danger-full-access",
+            "-c",
+            "approval_policy=never",
+            "-c",
+            "shell_environment_policy.set.TMPDIR=\"/tmp/provider-policy-smoke-ac0k0uk4/resumed/scratch\"",
+            "-c",
+            "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+            "-c",
+            "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+            "--json",
+            "--output-schema",
+            "/tmp/provider-policy-smoke-ac0k0uk4/schema.json",
+            "-o",
+            "/tmp/provider-policy-smoke-ac0k0uk4/resumed/result.json",
+            "01a19d9c-eb29-71e0-8f4d-97a49f7cc706",
+            "-"
+          ],
+          "exit_status": 0
+        }
+      ]
+    }
+  ],
+  "engine_checks": [
+    {
+      "provider": "claude",
+      "model": "haiku",
+      "effort": "low",
+      "slots": 2,
+      "synthesis": "haiku",
+      "status": "passed",
+      "artifact_directory": "/tmp/pr-engine-live-smoke-3_fjg7e8"
+    },
+    {
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "slots": 2,
+      "synthesis": "gpt-6-luna",
+      "status": "passed",
+      "artifact_directory": "/tmp/pr-engine-live-smoke-dlwccmfr"
+    }
+  ],
+  "contribution_matching": {
+    "passed": 6,
+    "failed": 0
+  },
+  "observability": "The smoke script verifies file contents and a shell-created marker on each fresh/resumed turn. A failing PATH bubblewrap sentinel was not invoked. Commands record requested settings; managed provider policy retains precedence."
+}

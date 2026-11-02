@@ -1,0 +1,451 @@
+{
+  "recommendation": "REQUEST_CHANGES",
+  "recommendation_rationale": "Focused reproductions establish nine blocking defects affecting configuration trust, checkpoint acceptance, workflow recovery, publication history, submodule integrity, and frontend selection. Three original claims require qualification; one additional publication-state issue is nonblocking.",
+  "blocking_findings": 9,
+  "report_md": "## 1. Executive summary\n\nThis PR adds an owner toolkit spanning saved feedback, dependency-aware fixes, dedicated worktrees, verification, commit association, reply publication, recovery, CLI commands, and Emacs controls.\n\nReviewed head: `f5e0321ca179d4c4a434ec456cb404b3cedd7486`; merge base: `f7f0f2e2df548186b3b85d5f420ad0424af25655`. The supplied diff exactly matches those commits.\n\nAll 13 original findings were individually reassessed: 10 CONFIRMED and 3 MODIFIED. One additional Low-severity finding is NEW. Nine retained findings block approval. No original finding was rejected or left unverified. The narrower classifications matter: adoption still invokes independent reviews; combined adoption/replanning can recover an unchanged provider failure; and push setup does configure a usable upstream.\n\nThe supplied discussion, reviews, and inline-comment artifacts are empty. No supplied discussion addresses these issues. Actions runs and legacy statuses are also empty: no runs or statuses were found, which does not establish a CI pass. Third-party GitHub App check runs are unavailable.\n\n## 2. Validated findings, ordered by severity\n\n### F1 — High — Configuration trust can survive unreviewed content changes\n\nSource: reviewer-1, finding 1. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_git.py:152–154`.\n\nA session opened from a repository subdirectory retains that directory as its Git cwd. Changed filenames are root-relative, but the subsequent `ls-tree` lookup and path-limited diff interpret them relative to that cwd. The reproduction produced an empty configuration diff, approved its token, changed the configuration contents, and successfully entered the real provider adapter with the old token. Run these operations from the repository root with unambiguous root-relative paths, binding authorization to actual blob identities.\n\n### F2 — Medium — Failed edits become the accepted checkpoint\n\nSource: reviewer-1, finding 2. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_providers.py:145–151`.\n\nThe adapter advances the batch checkpoint before checking provider failure or validating its result. A failed fixer wrote `abandoned.txt`; resuming with that task skipped ran an independent task and produced a ready batch whose final tree retained the failed edit, without adoption. Subsequent reviews still run, but the explicit partial-change acceptance boundary has been bypassed. Retain failed-attempt snapshots separately and advance the accepted checkpoint only after successful result validation.\n\n### F3 — Medium — Adoption bypasses the normal fixer for queued tasks\n\nSource: reviewer-1, finding 3. MODIFIED; nonblocking; confidence: High in the transition. Location: `lib/pr_review/owner_fixes.py:207–211`.\n\nAfter the first of three tasks was interrupted, adoption moved both untouched queued tasks directly to reviewing. The reproduction reached ready with review-only `no_change` outcomes. This proves the scheduled fixer is bypassed and its normal initial attempt is lost; it does not prove incorrect code is accepted, because task and combined reviews remain mandatory and legitimate `no_change` outcomes are supported. Preserve queued execution unless those tasks are explicitly included in the manual adoption scope.\n\n### F4 — Medium — Deleted feedback prevents in-place batch recovery\n\nSource: reviewer-1, finding 4. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_fixes.py:261–263`; related rejection at `owner_state.py:156–161`.\n\nDeleting a selected comment from a paused batch produced `stale_discussion` on resume, `invalid_target` on replan, and `dirty_worktree` when starting replacement work. Missing feedback remains in the selected keys and is invalidated again on every refresh. Preserve its historical record while allowing an explicit removal or skip transition that excludes it from active planning and freshness requirements.\n\n### F5 — Medium — Own replies invalidate the workflow that publishes them\n\nSource: reviewer-1, finding 5. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_state.py:203–207`.\n\nWorkflow freshness uses the full transcript fingerprint, including the viewer's replies. With two staged replies to one thread, reflecting the first successful send into refreshed discussion caused the second send to fail with `stale_discussion`; the first remained published and the second became unstaged. The same changed set stales batches, and association rejects a verified fingerprint after a self-reply. Separate incoming-feedback freshness from full context, or explicitly account for expected own publications while retaining checks for external changes.\n\n### F6 — Medium — An unrelated resume failure destroys ready status\n\nSource: reviewer-1, finding 6. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_fixes.py:286–289`.\n\nA ready batch was resumed before committing. A simulated authentication-preflight failure demoted it to paused. After committing and advancing the PR head, automatic association produced no replies and explicit association rejected the batch. The existing HEAD-change exception does preserve ready batches, as its named regression test confirms, but the catch-all does not preserve them for other post-selection failures. Keep the last verified result eligible for association unless a specific transition invalidates it.\n\n### F7 — Medium — An unchanged provider failure cannot use ordinary retry\n\nSource: reviewer-1, finding 7. MODIFIED; nonblocking; confidence: High. Location: `lib/pr_review/owner_fixes.py:197–200`.\n\nA real-adapter failure before any edit left the task fixing. Both plain resume and replan returned `interrupted_task`. However, combined `adopt=true,replan=true` recovered and reran the fixer, so the original implication of no recovery route is too strong. Allow an explicit retry when source and protected Git state are unchanged; expose that recovery in Emacs without requiring unrelated adoption controls.\n\n### F8 — Medium — The initial Emacs heading selects deferred feedback too\n\nSource: reviewer-1, finding 8. CONFIRMED; blocking; confidence: High. Location: `emacs/magit-auto-review-owner.el:88–95`.\n\nA focused ERT reproduction opened the normal fixture at point-min and invoked fix. The emitted request selected both Attention items and an item in Deferred / History. The root section's full range is treated as a selectable group, despite no explicit feedback-group selection. Triage actions use the same selector. Require an explicit feedback item/group or sibling region, or separately confirm a deliberate whole-buffer action.\n\n### F9 — Medium — PushRemote does not map the owner branch to the PR branch\n\nSource: reviewer-1, finding 9. MODIFIED; nonblocking; confidence: High. Location: `lib/pr_review/owner_git.py:70–74`.\n\nSetup correctly configures the upstream merge branch, so Magit's `P u` can target the PR branch. It also configures pushRemote, whose `P p` action explicitly constructs a same-name destination. An intercepted installed-Magit invocation produced `refs/heads/pr-owner/7-test:refs/heads/pr-owner/7-test`, rather than `feature`. No actual push was attempted. Clarify and guide the upstream push operation, or avoid presenting pushRemote as a branch mapping. A Git push refspec alone would not change Magit's explicit `P p` refspec.\n\n### F11 — Medium — Reassociation mutates a reply awaiting receipt recovery\n\nSource: reviewer-2, first finding. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_publication.py:74–78`.\n\nA generated timeline reply was posted with a lost response. After an amended exact commit and reassociation, the local uncertain reply acquired the new SHA and body. Recovery then marked it published using a receipt containing the original SHA. The reproduction included the posted timeline comment in refreshed feedback. Freeze replies with submitting/ambiguous actions, as local draft mutation already does; recover first and preserve the actual submitted wording and commit provenance.\n\n### F12 — Medium — Dirty submodule contents escape checkpoints and integrity checks\n\nSource: reviewer-2, second finding. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_git.py:105–107`.\n\nA Git tree records the submodule commit, not its dirty tracked files. A real-adapter reviewer edit inside an initialized submodule left the checkpoint tree unchanged and recorded no integrity failure. Plain dispatcher resume subsequently reached ready while nested source remained dirty. The ordinary-file integrity regression test passed, confirming the gap is specific to contents outside the recorded gitlink. Reject dirty submodules or capture and validate their nested state explicitly.\n\n### F13 — Medium — Replanning leaves retained tasks with removed prerequisites\n\nSource: reviewer-2, third finding. CONFIRMED; blocking; confidence: High. Location: `lib/pr_review/owner_fixes.py:249–261`.\n\nCompleted B depended on A. Changing only A's feedback caused replan to retain B with its old prerequisite ID while replacing A with a newly prefixed ID. Following a manual edit, adoption moved B back to reviewing; dependency lookup raised `KeyError`, preventing recovery. Rebuild a valid, topologically ordered graph and invalidate transitive dependents, or consistently remap retained prerequisites and schedule their reverification.\n\n### F10 — Low — Multiple remotes split the remembered toolkit preference\n\nSource: reviewer-1, finding 10. CONFIRMED; nonblocking; confidence: High. Location: `lib/pr_review/owner_state.py:99–101`.\n\nWith two distinct repository remotes, saving Owner under an explicit repository and reading without one returned Reviewer. Inspection confirms the PR list supplies repository identity, while direct Forge/prefix dispatch omits it. Resolve the same repository identity before reading the preference, prompting for repository selection where necessary.\n\nF14 is a validated Low-severity NEW finding described in section 4.\n\n## 3. Rejected or modified findings and original-finding accounting\n\nNo original finding was rejected. IDs map to reviewer slots, not providers: F1–F10 correspond in order to reviewer-1's ten findings; F11–F13 correspond in order to reviewer-2's three findings.\n\n| Original | Result | Qualification or falsification attempt |\n| --- | --- | --- |\n| reviewer-1 #1 / F1 | CONFIRMED | Root-level trust test passes; subdirectory content binding fails independently. |\n| reviewer-1 #2 / F2 | CONFIRMED | Interruption guard exists, but explicit skip plus the advanced checkpoint still retains failed edits without adoption. |\n| reviewer-1 #3 / F3 | MODIFIED | Queued fixers are bypassed, but independent review remains; incorrect readiness is not established merely by a mocked `no_change` verdict. |\n| reviewer-1 #4 / F4 | CONFIRMED | Resume, replan, and replacement-batch paths were exercised; historical keys remain incompatible with active item validation. |\n| reviewer-1 #5 / F5 | CONFIRMED | Reproduced with the first own reply reflected into discussion; distinct-thread partial-publication regression still passes. |\n| reviewer-1 #6 / F6 | CONFIRMED | HEAD-change recovery works; authentication failure before committing demonstrably loses association eligibility. |\n| reviewer-1 #7 / F7 | MODIFIED | Ordinary retry fails, but combined adoption/replanning successfully recovers. |\n| reviewer-1 #8 / F8 | CONFIRMED | Actual Emacs selector emitted deferred feedback from the initial root heading. |\n| reviewer-1 #9 / F9 | MODIFIED | Upstream mapping is usable; the defect concerns pushRemote behavior and guidance, not absence of every valid push route. |\n| reviewer-1 #10 / F10 | CONFIRMED | Backend key mismatch reproduced; frontend omission traced. |\n| reviewer-2 #1 / F11 | CONFIRMED | Timeline response-loss, amendment, reassociation, and receipt recovery reproduced together. |\n| reviewer-2 #2 / F12 | CONFIRMED | Real adapter and subsequent dispatcher resume accepted dirty nested source; ordinary-file protection still passes. |\n| reviewer-2 #3 / F13 | CONFIRMED | Replan, manual edit, and adoption reproduced the dangling-ID failure; ordinary skip dependencies still pass. |\n\nReviewer-1 supplied an ordering without explicit severity labels; this synthesis assigns impact ratings. Reviewer-2's P2 findings retain Medium severity. No findings were eliminated as duplicates: related checkpoint, retry, graph, and publication issues have distinct triggers and corrections. The supplied reviewer reproduction claims were not treated as independent proof; focused checks were run against this snapshot.\n\n## 4. New findings\n\n### F14 — Low — Publication continues after fresh metadata reports a closed PR\n\nSource: New. NEW; nonblocking; confidence: High in the attempted-send behavior. Location: `lib/pr_review/owner_publication.py:181–186`.\n\nPreparation rejects closed PRs, but the per-send loop refreshes metadata and checks only HEAD changes. In a two-reply reproduction, the first send changed mocked metadata to CLOSED; the second send was still attempted and accepted by the mock, with the saved view already showing CLOSED. This is a narrow inconsistency in publication eligibility, not evidence of an unconfirmed body or a live GitHub write. Recheck open state before each new send, preserving earlier receipts and stopping the remainder.\n\n## 5. Review coverage and uncertainty\n\nRead both reviewer reports and all eight supplied context artifacts: `pr.json`, `pr-discussion.json`, `pr-reviews.json`, `pr-inline-comments.json`, `ci-actions-runs.json`, `ci-statuses.json`, `pr.diff`, and `diffstat.txt`. Inspected the changed implementation, documentation, tests, and surrounding repository, process, cancellation, storage, receipt, API, and frontend code. No applicable AGENTS.md was found by the repository and ancestor searches.\n\nTraced failure/save/resume, cancellation handling, explicit adoption, unchanged retry, deleted feedback, changed-discussion replanning, transitive dependencies, ready-result preservation, manual edits, verification invalidation, partial selection, reply staging, confirmation tokens, partial publication, lost responses, amendments, force-push provenance, historical receipts, submodules, toolkit routing, and Magit handoff. Verification included safety failures and successful recovery controls.\n\nExecutable checks used standard-library Python and Git fixtures already provided by `tests/test_owner.py`, plus installed Emacs 30.1 and Magit/Transient dependencies. External GitHub, provider, and authentication behavior was mocked; selected checks entered the actual provider adapter and application dispatcher. Temporary repositories and state were created under `/tmp` and cleaned by the fixtures. Scratch check scripts remain at `/tmp/pr7-synthesis-checks.py`, `/tmp/pr7-ui-checks.el`, and `/tmp/pr7-anchor-check.py`. No reviewed source, HEAD, index, or refs were changed; the final checkout check was clean at the supplied head.\n\nResults: 12 focused Python reproduction cases, two focused ERT cases, and five named existing regression tests passed. These reproduction passes assert the described defects or qualifications; they do not mean the PR is correct. The stored-diff and 14-primary-anchor checks passed. No check timed out. Executable verification, including fixture setup, remained below 30 seconds cumulatively; every executable check used a timeout of at most 60 seconds.\n\nExact executable verification commands:\n\n```text\ntimeout --signal=TERM --kill-after=5s 60s env PYTHONDONTWRITEBYTECODE=1 python3 /tmp/pr7-synthesis-checks.py F1 F2 F3 F4 F7\ntimeout --signal=TERM --kill-after=5s 60s env PYTHONDONTWRITEBYTECODE=1 python3 /tmp/pr7-synthesis-checks.py F5 F6 F10 F11 F12 F13\ntimeout --signal=TERM --kill-after=5s 15s emacs --batch --eval '(progn (princ emacs-version) (terpri) (princ (locate-library \"magit\")) (terpri) (princ (locate-library \"magit-push\")) (terpri))'\ntimeout --signal=TERM --kill-after=5s 30s emacs --batch -Q -l /tmp/pr7-ui-checks.el\ntimeout --signal=TERM --kill-after=5s 30s env PYTHONDONTWRITEBYTECODE=1 python3 /tmp/pr7-synthesis-checks.py F14\ntimeout --signal=TERM --kill-after=5s 60s env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests python3 -m unittest -v test_owner.OwnerTest.test_agent_configuration_trust_tracks_content_and_shows_exact_diff test_owner.OwnerTest.test_actual_provider_adapter_captures_edits_and_blocks_review_writes test_owner.OwnerTest.test_resuming_after_commit_preserves_verified_tree_for_association test_owner.OwnerTest.test_partial_publication_retains_confirmed_reply_and_recovers_remaining test_owner.OwnerTest.test_task_dependencies_and_skip_do_not_run_dependents\ntimeout --signal=TERM --kill-after=5s 15s env PYTHONDONTWRITEBYTECODE=1 python3 /tmp/pr7-anchor-check.py\n```\n\nThe named controls establish that root-level configuration trust detects content changes, ordinary reviewer writes require adoption, a post-commit resume preserves ready association, ordinary partial publication recovers, and skipping a prerequisite blocks its dependents. None covers the counterexample that its related finding identifies.\n\nAdditional exact Git inspection/check commands included:\n\n```text\ngit status --short && git rev-parse HEAD && ls -la\ngit diff f7f0f2e2df548186b3b85d5f420ad0424af25655 f5e0321ca179d4c4a434ec456cb404b3cedd7486 -- lib/pr_review/discussion.py lib/pr_review/publication.py lib/pr_review/application.py lib/pr_review/pulls.py lib/pr_review/cli.py emacs/magit-auto-review.el emacs/magit-auto-review-pulls.el emacs/magit-auto-review-setup.el emacs/magit-auto-review-actions.el\ngit diff --numstat f7f0f2e2df548186b3b85d5f420ad0424af25655 f5e0321ca179d4c4a434ec456cb404b3cedd7486\ngit diff f7f0f2e2df548186b3b85d5f420ad0424af25655 f5e0321ca179d4c4a434ec456cb404b3cedd7486 -- emacs/tests/magit-auto-review-tests.el emacs/tests/run.sh\ngit diff --check f7f0f2e2df548186b3b85d5f420ad0424af25655 f5e0321ca179d4c4a434ec456cb404b3cedd7486 -- lib/pr_review/owner_git.py lib/pr_review/owner_fixes.py lib/pr_review/owner_publication.py\n```\n\nRead-only inspection also used `cat`, `nl -ba`, `sed`, `rg`, `tail`, `ls`, and `command -v emacs` on the supplied artifacts, repository files, and installed Lisp dependencies. The initial AGENTS.md search returned exit 1 because it found no matches; this was not a test failure. The narrow diff-whitespace check returned no diagnostics.\n\nRemaining gaps: no live GitHub pagination, permission, receipt, network-failure, or provider-authentication execution; no semantic model-quality assessment; no actual remote push; and no OS-signal cancellation reproduction in this synthesis. Cancellation and process-group handling were inspected, while interruption transitions were exercised with injected errors. F9's executable evidence intercepts Magit's constructed arguments. F14 proves the attempted second send locally, not a live GitHub receipt. Real provider sandbox enforcement, alternate Magit versions, Python 3.9, Guix packaging, and broader reviewer regressions remain untested. No generated source changes were identified; no generated bytecode or compiled Lisp was produced in the checkout. Repository-wide suites, builds, lint sweeps, paid smoke tests, and publication were not run. Documentation's historical test claims were read but not treated as CI evidence for this head.\n\n## 6. Suggested GitHub review and rationale\n\nREQUEST_CHANGES. The nine blockers are demonstrated defects in central safety and recovery paths. Fix configuration-content binding, failed checkpoint acceptance, deleted-feedback and graph recovery, ready-result preservation, self-publication freshness, uncertain-reply immutability, dirty-submodule detection, and initial frontend scope selection before approval. The five nonblocking findings remain useful follow-up work. The recommendation is advisory; nothing was published.",
+  "review_body_md": "Please address these safety and recovery issues before merging:\n\n- **F1 — High:** `lib/pr_review/owner_git.py:152–154`: sessions opened from a subdirectory can approve an empty configuration diff and reuse that token after configuration contents change. Resolve trust paths from the repository root and bind the token to the actual blobs.\n- **F2 — Medium:** `lib/pr_review/owner_providers.py:145–151`: failed fixer edits become the accepted checkpoint. Skipping that task can carry its partial edits into a ready batch without adoption. Keep failed snapshots separate from accepted checkpoints.\n- **F4/F13 — Medium:** `lib/pr_review/owner_fixes.py:261–263`: deleted selected feedback prevents replanning, and replacing a prerequisite leaves retained completed tasks referencing removed IDs. Support explicit removal of missing feedback and rebuild a valid dependency graph.\n- **F5 — Medium:** `lib/pr_review/owner_state.py:203–207`: the first own reply changes workflow freshness and aborts a second staged reply to the same thread. Account for expected own writes without masking incoming changes.\n- **F6 — Medium:** `lib/pr_review/owner_fixes.py:286–289`: an authentication failure while resuming a ready batch demotes it, preventing later commit association. Preserve the previously verified result unless it is specifically invalidated.\n- **F8 — Medium:** `emacs/magit-auto-review-owner.el:88–95`: pressing `f` on the initial root heading includes Deferred / History feedback. Require an explicit feedback selection or whole-buffer confirmation.\n- **F11 — Medium:** `lib/pr_review/owner_publication.py:74–78`: reassociation rewrites replies awaiting publication recovery; recovery can then mark the new SHA published using a receipt containing the old SHA. Freeze uncertain replies until recovery completes.\n- **F12 — Medium:** `lib/pr_review/owner_git.py:105–107`: dirty submodule files do not change the recorded tree, so reviewer edits and subsequent resume evade integrity checks. Reject or explicitly snapshot dirty nested state.\n\nFocused reproductions exercised these paths with real temporary Git repositories and mocked external services. Five named regression controls and two focused Emacs checks also passed. No Actions runs or legacy statuses were supplied; third-party App checks were unavailable.",
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Bind configuration trust to root-relative blob contents",
+      "severity": "High",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #1. owner_state.py preserves the opening cwd; owner_git.py:148 obtains root-relative names, but :152–154 resolves them through Git in that cwd. A focused reproduction from a subdirectory received an empty trust diff, approved its token, changed CLAUDE.md, and entered REAL_INVOKE with the old token. The root-level trust regression passed. Confidence: High.",
+      "blocking": true,
+      "body_md": "When an owner session is opened from a subdirectory, these root-relative paths are interpreted relative to that directory. The trust prompt can contain an empty diff, and its token can remain unchanged after configuration contents change. A reproduction successfully entered the provider adapter after such an unreviewed change. Run trust lookups and diffs from the repository root with literal root-relative paths, and bind authorization to actual blob identities. Source: reviewer-1 #1. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_git.py",
+        "side": "RIGHT",
+        "line": 154,
+        "start_line": 152
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_git.py",
+          "side": "RIGHT",
+          "line": 154,
+          "start_line": 152
+        },
+        {
+          "path": "lib/pr_review/owner_state.py",
+          "side": "RIGHT",
+          "line": 70,
+          "start_line": 67
+        }
+      ]
+    },
+    {
+      "id": "F2",
+      "title": "Keep failed-attempt snapshots outside the accepted checkpoint",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #2. owner_providers.py:145–151 advances checkpoint before checking returncode; result validation also occurs later. Through the dispatcher and real adapter, a failed fixer wrote abandoned.txt. Resume with its task skipped reached ready with abandoned.txt in final_tree and no adoption. Independent reviews still ran. Confidence: High.",
+      "blocking": true,
+      "body_md": "A failed fixer advances the accepted checkpoint before its failure is checked. Skipping that task then passes the worktree-change guard and can retain its abandoned edits in a ready batch without explicit adoption. This was reproduced with a failed partial edit and a subsequent independent task. Preserve the failed snapshot in attempt history, but advance the accepted checkpoint only after successful result validation. Source: reviewer-1 #2. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_providers.py",
+        "side": "RIGHT",
+        "line": 151,
+        "start_line": 145
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_providers.py",
+          "side": "RIGHT",
+          "line": 151,
+          "start_line": 145
+        },
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 202,
+          "start_line": 197
+        }
+      ]
+    },
+    {
+      "id": "F3",
+      "title": "Preserve queued fixer execution when adopting partial work",
+      "severity": "Medium",
+      "validity": "MODIFIED",
+      "evidence": "Source: reviewer-1 #3. owner_fixes.py:207–211 changes every non-skipped/non-blocked task to reviewing; run_task at :91 consequently omits its fixer. After interrupting task one of three, adoption caused all three to undergo review only. Mocked complete/no_change reviews reached ready. This demonstrates bypassed fix attempts, not acceptance of objectively incorrect code: task and combined reviews remain mandatory. Confidence: High in the transition.",
+      "blocking": false,
+      "body_md": "Adopting the first task's partial changes also moves untouched queued tasks directly to reviewing, bypassing their normal fixer attempt and leaving only a blocking-review repair opportunity. Preserve queued execution unless those tasks are explicitly part of the manual adoption scope. The original safety claim is narrowed: independent reviews still gate readiness, and a legitimate no_change outcome is permitted. Source: reviewer-1 #3. Confidence: High in the observed transition.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_fixes.py",
+        "side": "RIGHT",
+        "line": 211,
+        "start_line": 207
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 211,
+          "start_line": 207
+        },
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 100,
+          "start_line": 91
+        }
+      ]
+    },
+    {
+      "id": "F4",
+      "title": "Allow recovery when selected feedback has been deleted",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #4. owner_state.py:222–225 marks missing items changed every refresh; items at :156–161 rejects missing keys; owner_fixes.py:253–263 requires those keys during replan. Dispatcher reproduction: paused batch with accumulated edits, delete selected comment, resume -> stale_discussion, replan -> invalid_target, replacement fix -> dirty_worktree. Confidence: High.",
+      "blocking": true,
+      "body_md": "Deleting selected feedback leaves a paused batch unable to resume or replan: refresh repeatedly marks the historical item changed, while planning rejects its missing key. Accumulated edits also prevent starting a replacement batch without manual Git reconciliation. Preserve the historical item but provide an explicit removal/skip transition that excludes it from active planning and freshness checks. Source: reviewer-1 #4. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_fixes.py",
+        "side": "RIGHT",
+        "line": 263,
+        "start_line": 261
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 263,
+          "start_line": 261
+        },
+        {
+          "path": "lib/pr_review/owner_state.py",
+          "side": "RIGHT",
+          "line": 225,
+          "start_line": 222
+        },
+        {
+          "path": "lib/pr_review/owner_state.py",
+          "side": "RIGHT",
+          "line": 161,
+          "start_line": 156
+        }
+      ]
+    },
+    {
+      "id": "F5",
+      "title": "Prevent expected own replies from invalidating publication",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #5. owner_state.py:203–207 computes notification without the viewer but freshness from the full transcript; :226–231 invalidates drafts and batches. In a two-reply same-thread dispatcher reproduction, the first own reply was reflected into discussion; the second failed stale_discussion, leaving published/unstaged statuses. owner_publication.py:68 also rejects association after such a fingerprint change. Confidence: High.",
+      "blocking": true,
+      "body_md": "The viewer's own replies change the fingerprint used for workflow freshness. Publishing one reply can therefore abort another staged reply to the same thread, stale a selected batch, or suppress later fixed-in draft generation. The same-thread partial-publication failure was reproduced with refreshed discussion containing the first send. Separate incoming-feedback freshness from transcript context, or account for expected own writes while preserving external-change detection. Source: reviewer-1 #5. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_state.py",
+        "side": "RIGHT",
+        "line": 207,
+        "start_line": 203
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_state.py",
+          "side": "RIGHT",
+          "line": 207,
+          "start_line": 203
+        },
+        {
+          "path": "lib/pr_review/owner_state.py",
+          "side": "RIGHT",
+          "line": 231,
+          "start_line": 226
+        },
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 186,
+          "start_line": 181
+        },
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 69,
+          "start_line": 67
+        }
+      ]
+    },
+    {
+      "id": "F6",
+      "title": "Preserve verified readiness after unrelated resume errors",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #6. owner_fixes.py:286–289 demotes any selected batch on error; owner_publication.py:27–32 accepts only ready batches. A ready batch resumed before committing encountered an injected authentication-preflight error and became paused. After commit/push simulation, automatic association returned no drafts and explicit association returned invalid_target. The separate post-commit HEAD-change preservation regression passed. Confidence: High.",
+      "blocking": true,
+      "body_md": "An authentication or other post-selection resume failure overwrites an already verified ready batch with paused. After the human commits and pushes, that batch is no longer eligible for automatic or explicit fixed-in association, despite retaining its verified tree. Preserve the last verified result unless a specific transition invalidates it; record the failed resume separately. Source: reviewer-1 #6. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_fixes.py",
+        "side": "RIGHT",
+        "line": 289,
+        "start_line": 286
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 289,
+          "start_line": 286
+        },
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 32,
+          "start_line": 27
+        }
+      ]
+    },
+    {
+      "id": "F7",
+      "title": "Provide an ordinary retry for failures that changed no source",
+      "severity": "Medium",
+      "validity": "MODIFIED",
+      "evidence": "Source: reviewer-1 #7. A real-adapter nonzero exit before editing left a task fixing; owner_fixes.py:197–200 rejected plain resume and replan with interrupted_task. A follow-up dispatcher request combining adopt=true and replan=true successfully reran the fixer. Emacs exposes those controls separately. Confidence: High.",
+      "blocking": false,
+      "body_md": "A provider failure before any edit leaves the task fixing, so ordinary resume and replan both demand adoption or skipping despite unchanged source. Add a retry transition when source and protected Git state are unchanged, and expose it in Emacs. The original recovery claim is narrowed: combined adoption and replanning does successfully rerun the fixer through the API/CLI. Source: reviewer-1 #7. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_fixes.py",
+        "side": "RIGHT",
+        "line": 200,
+        "start_line": 197
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 200,
+          "start_line": 197
+        }
+      ]
+    },
+    {
+      "id": "F8",
+      "title": "Require an explicit scope before acting from the root heading",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #8. owner--selected at emacs/magit-auto-review-owner.el:88–95 collects all matching descendant sections within the current section. Rendering at :235 places a fresh buffer at point-min. Focused ERT against the reviewed source invoked fix there and captured items [thread:T1, thread:T2, comment:3], including Deferred / History. Confidence: High.",
+      "blocking": true,
+      "body_md": "A fresh owner buffer starts on the root heading, whose range contains every feedback section. Pressing f there sends actionable Deferred / History items along with Attention items to owner-fix; triage commands share the selector. This can launch source-editing model work outside the apparent feedback scope. Require an explicit feedback item/group or sibling selection, or confirm a distinct whole-buffer action. Source: reviewer-1 #8. Confidence: High.",
+      "primary_location": {
+        "path": "emacs/magit-auto-review-owner.el",
+        "side": "RIGHT",
+        "line": 95,
+        "start_line": 88
+      },
+      "locations": [
+        {
+          "path": "emacs/magit-auto-review-owner.el",
+          "side": "RIGHT",
+          "line": 95,
+          "start_line": 88
+        },
+        {
+          "path": "emacs/magit-auto-review-owner.el",
+          "side": "RIGHT",
+          "line": 235,
+          "start_line": 231
+        },
+        {
+          "path": "emacs/magit-auto-review-owner.el",
+          "side": "RIGHT",
+          "line": 310,
+          "start_line": 306
+        }
+      ]
+    },
+    {
+      "id": "F9",
+      "title": "Distinguish the PR upstream from Magit's same-name pushRemote target",
+      "severity": "Medium",
+      "validity": "MODIFIED",
+      "evidence": "Source: reviewer-1 #9. owner_git.py:71–73 configures upstream feature plus pushRemote. Installed Magit's magit-push-current-to-pushremote constructs an explicit same-name refspec; focused ERT intercepted refs/heads/pr-owner/7-test:refs/heads/pr-owner/7-test. Its upstream command separately uses branch.merge. No actual push was run. Confidence: High.",
+      "blocking": false,
+      "body_md": "pushRemote selects a remote, not the differently named PR branch: Magit's P p explicitly pushes pr-owner/... to that same remote branch name. Setup does configure a usable upstream, so P u remains a valid route and the original claim of no mapping is too broad. Guide users explicitly to the upstream push or avoid a misleading pushRemote configuration; adding a Git push refspec alone will not override Magit's explicit P p refspec. Source: reviewer-1 #9. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_git.py",
+        "side": "RIGHT",
+        "line": 74,
+        "start_line": 70
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_git.py",
+          "side": "RIGHT",
+          "line": 74,
+          "start_line": 70
+        }
+      ]
+    },
+    {
+      "id": "F10",
+      "title": "Resolve repository identity consistently for toolkit preferences",
+      "severity": "Low",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-1 #10. owner_state.py:93–101 leaves identity null when multiple distinct remote repositories exist and no repository is supplied. A two-remote reproduction saved Owner with explicit github.com/org/repo and read Reviewer when repository was omitted. magit-auto-review.el:490 omits repository on direct dispatch, unlike the scoped PR-list path. Confidence: High.",
+      "blocking": false,
+      "body_md": "In a checkout with multiple repository remotes, an explicit repository saves its toolkit under a different key from an omitted repository. Direct Forge/prefix opens can therefore return Reviewer after the PR list remembered Owner. Resolve repository identity consistently before preference lookup, asking which repository to use when needed. Source: reviewer-1 #10. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_state.py",
+        "side": "RIGHT",
+        "line": 101,
+        "start_line": 99
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_state.py",
+          "side": "RIGHT",
+          "line": 101,
+          "start_line": 99
+        },
+        {
+          "path": "emacs/magit-auto-review.el",
+          "side": "RIGHT",
+          "line": 491,
+          "start_line": 490
+        },
+        {
+          "path": "emacs/magit-auto-review.el",
+          "side": "RIGHT",
+          "line": 512,
+          "start_line": 507
+        }
+      ]
+    },
+    {
+      "id": "F11",
+      "title": "Freeze uncertain replies until receipt recovery completes",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-2, first finding. owner_publication.py:74–78 rewrites any unpublished reply on changed association without checking submitting/ambiguous actions; finish at :165–168 marks the current reply published. Dispatcher reproduction posted a timeline reply with lost response, amended the exact commit, reassociated, then recovered. Local published body/commits contained the new SHA while the receipt contained only the original SHA. Confidence: High.",
+      "blocking": true,
+      "body_md": "Reassociation can rewrite a reply whose submission is still ambiguous. After an amended commit, recovery then attaches the original receipt and marks the rewritten body and new commit association Published, although the receipt contains the old SHA. Exclude replies with submitting/ambiguous actions from reassociation until recovery completes, preserving the exact submitted wording and provenance. Source: reviewer-2, first finding. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_publication.py",
+        "side": "RIGHT",
+        "line": 78,
+        "start_line": 74
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 78,
+          "start_line": 74
+        },
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 168,
+          "start_line": 165
+        },
+        {
+          "path": "lib/pr_review/owner.py",
+          "side": "RIGHT",
+          "line": 94,
+          "start_line": 90
+        }
+      ]
+    },
+    {
+      "id": "F12",
+      "title": "Detect dirty submodule contents before accepting checkpoints",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-2, second finding. owner_git.py:105–107 records the unchanged gitlink for tracked edits inside an initialized submodule. A real provider-adapter reviewer changed nested/nested.txt; before/after tree IDs matched, no integrity failure was recorded, and subsequent dispatcher resume reached ready with dirty nested source. The ordinary-file write-protection regression passed. Confidence: High.",
+      "blocking": true,
+      "body_md": "Tracked edits inside an initialized submodule do not change its recorded gitlink, so this checkpoint can remain identical despite changed source. A reviewer edit inside a submodule passed the real adapter's read-only integrity check, and plain resume reached ready without adoption while that edit remained dirty. Reject dirty nested state or snapshot and compare it explicitly before trusting checkpoints or verification. Source: reviewer-2, second finding. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_git.py",
+        "side": "RIGHT",
+        "line": 107,
+        "start_line": 105
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_git.py",
+          "side": "RIGHT",
+          "line": 107,
+          "start_line": 105
+        },
+        {
+          "path": "lib/pr_review/owner_providers.py",
+          "side": "RIGHT",
+          "line": 149,
+          "start_line": 145
+        },
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 202,
+          "start_line": 201
+        }
+      ]
+    },
+    {
+      "id": "F13",
+      "title": "Rebuild retained dependencies when replacing replanned tasks",
+      "severity": "Medium",
+      "validity": "CONFIRMED",
+      "evidence": "Source: reviewer-2, third finding. owner_fixes.py:249–261 retains completed tasks but replaces other IDs with a new plan prefix. Reproduction completed B depending on A, changed only A feedback, and replanned: retained B still referenced p1-t0, which no longer existed. After a manual edit, adoption reactivated B and dependency lookup at :271 raised KeyError. Confidence: High.",
+      "blocking": true,
+      "body_md": "Replanning a changed prerequisite retains completed dependents with references to the removed task ID. A later adoption reactivates such a dependent and raises KeyError during dependency lookup, blocking valid manual changes from resuming. Invalidate transitive dependents or consistently remap prerequisites, then rebuild a valid topologically ordered graph for execution and reverification. Source: reviewer-2, third finding. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_fixes.py",
+        "side": "RIGHT",
+        "line": 261,
+        "start_line": 249
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 261,
+          "start_line": 249
+        },
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 274,
+          "start_line": 267
+        },
+        {
+          "path": "lib/pr_review/owner_fixes.py",
+          "side": "RIGHT",
+          "line": 211,
+          "start_line": 207
+        }
+      ]
+    },
+    {
+      "id": "F14",
+      "title": "Recheck open PR state before each publication send",
+      "severity": "Low",
+      "validity": "NEW",
+      "evidence": "Source: New. owner_publication.py:124–125 rejects closed PRs during preparation, but :181–186 refreshes before each send and checks only HEAD changes. A two-reply dispatcher reproduction changed metadata to CLOSED after the first send; the second was still attempted, and the returned view showed CLOSED with both mock receipts published. No live GitHub publication occurred. Confidence: High in the attempted-send behavior.",
+      "blocking": false,
+      "body_md": "The per-send refresh can report that the PR closed after the first reply, yet the next send still proceeds because only HEAD changes are checked. This conflicts with preparation's open-PR requirement. Recheck state before each new send, preserving completed receipts and stopping the remainder when eligibility changes. The reproduced impact is a locally demonstrated attempted send of already confirmed text, not a live GitHub write. Source: New. Confidence: High.",
+      "primary_location": {
+        "path": "lib/pr_review/owner_publication.py",
+        "side": "RIGHT",
+        "line": 186,
+        "start_line": 181
+      },
+      "locations": [
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 186,
+          "start_line": 181
+        },
+        {
+          "path": "lib/pr_review/owner_publication.py",
+          "side": "RIGHT",
+          "line": 125,
+          "start_line": 124
+        }
+      ]
+    }
+  ]
+}
