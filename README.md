@@ -130,6 +130,7 @@ Incoming feedback and fixes use `pr-review owner`; see the
 | Guide | Contents |
 | --- | --- |
 | [User manual](docs/manual.md) | Configuration, CLI workflows, saved state, recovery, and safeguards |
+| [CLI cookbook](docs/cookbook.md) | Reviewer combinations, model/effort settings, single-provider operation, and Owner examples |
 | [Emacs reference](emacs/README.md) | Magit/Forge setup, keys, review and owner buffers |
 | [GitHub workflow](docs/github-review-process-overview.md) | Findings, conversations, verdicts, and merge requirements |
 | [Guix packaging](docs/packaging.md) | Installation, reusable recipes, and package validation |
