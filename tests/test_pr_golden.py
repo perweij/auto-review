@@ -1,7 +1,9 @@
 """PR review prompts, argv and cache identities must not change when the engine is shared.
 
 The expected values in ``fixtures/pr-golden.json`` were captured from the
-pre-extraction implementation. Regenerate them only for a deliberate PR-review
+pre-extraction implementation. Comparison fingerprints hash the captured inputs
+after installation/run paths are normalized; production cache identity is not
+changed. Regenerate them only for a deliberate PR-review
 change: ``UPDATE_PR_GOLDEN=1 python3 tests/test_pr_golden.py``.
 """
 import json
@@ -95,7 +97,13 @@ def capture(name, configuration):
         inputs = cache.inputs(run, 'synthesis')
         result['synthesis'] = dict(argv=run.command('synthesis'), inputs=inputs, fingerprint=cache.fingerprint(inputs))
         result['contributions-argv'] = run.command('contributions')
-        return normalize(result, run.path)
+        result = normalize(result, run.path)
+        # Codex's schema argument contains the installation root. Normalize it
+        # before hashing for comparison across checkouts, not after: replacing
+        # paths in the displayed inputs cannot normalize an existing hash.
+        for stage in [*result['slots'].values(), result['synthesis']]:
+            stage['fingerprint'] = cache.fingerprint(stage['inputs'])
+        return result
 
 
 class PrGoldenTest(unittest.TestCase):
