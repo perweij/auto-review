@@ -367,8 +367,12 @@ class IssueAdapter(AcceptanceAdapter):
         return list(self.batch['items'])
 
     def reviewer_context(self):
-        return {'approved_specification': self.specification,
-                'selected_feedback': self.session.items(self.state, self.batch['items']),
+        from . import specification
+        # The reviewer judges the same bytes the implementation harness was handed.
+        document = specification.handoff(self.session, self.state)
+        return {'approved_specification': {'format': 'markdown', 'revision': document['plan']['revision'],
+                                           'sha256': document['locator']['sha256'], 'document': document['text']},
+                'selected_feedback': [specification.provenance(i) for i in self.session.items(self.state, self.batch['items'])],
                 'issue_context': next((i['source'].get('context', {}) for i in self.state['feedback']
                                        if i['kind'] == 'issue_plan' and not i.get('missing')), {})}
 

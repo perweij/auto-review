@@ -1,0 +1,27 @@
+{
+  "checks": {
+    "acceptance": {
+      "A1_combined_lowercase_totals": true,
+      "A2_storage_keeps_original_case": true,
+      "A3_list_shows_original_case": true,
+      "A4_library_totals_sorted_lowercase": true,
+      "A5_monthly_unchanged": true
+    },
+    "regression": {
+      "R1_legacy_file_reports": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 5,
+    "acceptance_total": 5,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  }
+}

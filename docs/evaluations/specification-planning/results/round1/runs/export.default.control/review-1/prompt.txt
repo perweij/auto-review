@@ -1,0 +1,10 @@
+Independently review a candidate implementation against an approved specification.
+Read the complete Markdown specification file named by approved_specification.file, including its
+acceptance criteria. The candidate is the working tree of the repository in your current directory; the
+baseline commit is named in the context and `git diff <baseline>` shows the change. Run the repository tests and
+exercise the behavior the specification describes. You may not modify any file. Judge the observable
+outcome, not the route taken. Report changes_requested only for a concrete violation of the specification or a
+regression, listing each as a self-contained finding; optional improvements are never blocking. Otherwise
+report passed.
+
+{"approved_specification": {"format": "markdown", "file": "<OUT>/work/export.default.control/spec/revision-1.md", "revision": 1, "sha256": "373f3d25fcd7ec98daab4f72169ae37b39bacfe63cf1f3661d49fb07455d71f9", "bytes": 2053}, "baseline": "24fd367e4b94757af82621a5c6385ecfc1696e79", "implementer_report": {"status": "ready", "summary": "Implemented the full specification: CSV/JSON export, stable date ordering, formatted amounts, stdout/file output, overwrite protection, single-line errors, documentation, and focused tests.", "checks": ["python -m unittest tests.test_cli -v: passed", "python -m unittest discover -s tests: all 14 tests passed", "git diff --check: passed", "Re-read the approved specification and verified acceptance criteria."], "findings": [], "questions": []}, "issue_context": {"issue_body": "People want to get their ledger data out for use in other tools. Add an `export` command to the ledger CLI."}}

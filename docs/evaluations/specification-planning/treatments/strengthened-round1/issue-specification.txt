@@ -1,0 +1,67 @@
+SPECIFICATION STANDARD (one standard for every implementation provider)
+
+The plan field is a self-contained Markdown specification that will be approved by a
+person and then handed, unchanged, to an autonomous coding harness. The acceptance
+array holds the concise acceptance criteria; the caller appends them to the document
+under "Acceptance criteria:", so do not repeat that heading.
+
+Before returning a plan:
+1. Inspect the existing behavior, patterns and tests the change touches, and list what
+   you inspected in "inspected" (existing repository paths, with what each showed).
+2. Identify the consequential decisions and list them in "decisions". Classify each as
+   a product choice (externally observable behavior, defaults, precedence, error
+   behavior, compatibility, scope) or a technical choice (internal design, structure,
+   tests, repairs).
+   - Settle a product choice from the issue, the discussion or the repository ("resolved").
+   - If a product choice is still open and repository inspection cannot settle it,
+     mark it "unresolved" and return decision "questions" instead of a plan. Each
+     question must lay out the realistic alternatives and what each would change for
+     users. Never guess a product choice and never bury it in an assumption.
+   - Technical choices are the harness's: mark them "delegated". Resolve one in the
+     specification only where it is a real integration boundary or constraint that
+     the harness could not discover (state why).
+3. Scale detail to the task's size and risk. A small change gets a short specification.
+   A change across several components resolves the decisions needed for a reliable
+   handoff. Do not pad, do not add sections that do not apply, and do not use
+   placeholder text such as "N/A" or "TBD".
+
+Write the plan as Markdown with these level-two sections. Required:
+  ## Outcome                 observable behavior, with examples where they clarify
+  ## Scope                   what is included and what is explicitly excluded
+  ## Approach                existing components, patterns and constraints in this
+                             repository the work builds on, and integration boundaries
+  ## Acceptance scenarios    concrete scenarios, including regression cases that must
+                             keep working
+  ## Verification            the tests and commands that demonstrate the result
+Include these only when they apply (an empty section is invalid):
+  ## Interfaces and defaults        interfaces, defaults, precedence
+  ## Errors and compatibility      error behavior, existing data or callers to keep working
+  ## Design decisions              technical decisions you resolve and why
+  ## Assumptions and resolved choices   assumptions made and product choices already settled
+Requirements that follow from the decisions must appear in the document: every
+resolved product choice belongs in "Assumptions and resolved choices"; every technical
+decision you resolve belongs in "Design decisions".
+
+State outcomes and constraints. Do not write a checklist or ledger of tasks, do not
+dictate individual file edits, line numbers or diffs, and do not classify the work by
+the model that will do it. The harness decomposes, implements, tests and debugs.
+
+The examples are illustrative of proportion and form only; never copy their facts.
+
+Example, small change (a complete plan response, abbreviated JSON):
+  plan: "## Outcome\nfix-issue --version prints the package version and exits 0 without contacting GitHub.\n\n## Scope\nOnly the fix-issue command line. Other commands and the version value are unchanged.\n\n## Approach\nThe parser in lib/pr_review/issue_cli.py already builds all options; reuse the version string that bin/pr-review reports.\n\n## Acceptance scenarios\n- `fix-issue --version` prints one line and exits 0.\n- `fix-issue -i 12` behaves as before.\n\n## Verification\nAdd a case to the issue CLI tests and run `make check-backend`."
+  acceptance: ["--version prints the version and exits 0", "Existing options behave unchanged"]
+
+Example, change across components (headings and the kind of content only):
+  ## Outcome        a saved review can be exported; the export file's fields, ordering and an example
+  ## Scope          exports one session at a time; excludes importing and multi-session bundles
+  ## Approach       the saved-session reader, the JSON API dispatcher and the Emacs transient each
+                    gain a thin entry point over one shared service; names the existing patterns
+  ## Interfaces and defaults    the request/response fields, the default path, precedence of an
+                    explicit path over the default
+  ## Errors and compatibility   behavior for a missing or partial session; older sessions without
+                    the new field export without error
+  ## Design decisions          the export schema is versioned because external tools will parse it
+  ## Assumptions and resolved choices   the user's answer that export excludes private drafts
+  ## Acceptance scenarios      success, missing session, older session, explicit path overriding default
+  ## Verification              named test modules plus `make check-backend`

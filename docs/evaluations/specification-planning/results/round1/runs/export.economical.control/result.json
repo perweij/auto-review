@@ -1,0 +1,367 @@
+{
+  "id": "export.economical.control",
+  "pair": "export/economical",
+  "task": "export",
+  "config": "economical",
+  "arm": "control",
+  "position": 0,
+  "status": "completed",
+  "planning": {
+    "treatment": "control",
+    "task": "export",
+    "status": "planned",
+    "clarification_turns": 1,
+    "questions": [
+      [
+        "1. Which export formats are required (CSV, JSON, or another tool’s format), and which should be the default?",
+        "2. Should exports include date, category, note, and amount? Should amounts use decimal currency (12.50) or integer cents (1250)?",
+        "3. Should export write to standard output for shell redirection, support a destination-file option, or both?"
+      ]
+    ],
+    "document_sha256": "373f3d25fcd7ec98daab4f72169ae37b39bacfe63cf1f3661d49fb07455d71f9",
+    "answers_supplied": true,
+    "elapsed_seconds": 49.057,
+    "usage": {
+      "status": "reported",
+      "calls": 2,
+      "calls_unavailable": 0,
+      "input_tokens": 114255,
+      "cached_input_tokens": 77568,
+      "output_tokens": 1475,
+      "reasoning_output_tokens": 350,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "turns": 2,
+    "repair_rounds": 1,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 2,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-terra",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=low",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/export.economical.control/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/export.economical.control/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/export.economical.control/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/export.economical.control/turn-1",
+        "elapsed_seconds": 30.193,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 150766,
+          "cached_input_tokens": 130176,
+          "output_tokens": 2844,
+          "reasoning_output_tokens": 110,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented ledger export in CSV and JSON, including sorted entries, file overwrite protection, single-line errors, documentation, and subprocess tests.",
+          "checks": [
+            "python -m unittest discover -s tests: 13 tests passed",
+            "git diff --check: passed"
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e7b-da25-7991-87ae-1fb79fefdda8",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/export.economical.control/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/export.economical.control/review-1/schema.json",
+          "-o",
+          "<OUT>/work/export.economical.control/review-1/result.json",
+          "--cd",
+          "<OUT>/work/export.economical.control/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/export.economical.control/review-1",
+        "elapsed_seconds": 46.43,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 110610,
+          "cached_input_tokens": 65280,
+          "output_tokens": 2107,
+          "reasoning_output_tokens": 597,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "changes_requested",
+          "summary": "All 13 repository tests pass, but independent CLI checks found one violation of the destination-error requirements.",
+          "findings": [
+            "ledger/cli.py:83–84: Default stdout exports leave write and flush failures unhandled. Running `python -m ledger --data /nonexistent/review-ledger.json export --format csv > /dev/full` exits with status 120 and two stderr lines; JSON behaves the same way. Specification item 4 and the acceptance criteria require unwritable destinations to return status 2 with exactly one stderr line. Handle stdout write failures, including buffered flush failures, within the export error handling."
+          ]
+        },
+        "status": "ok",
+        "session_id": "01a19e7c-5019-77c3-805f-ba5f94285caf",
+        "kind": "review",
+        "report_status": "changes_requested"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "resume",
+          "-m",
+          "gpt-6.1-terra",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=low",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/export.economical.control/turn-2/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/export.economical.control/turn-2/schema.json",
+          "-o",
+          "<OUT>/work/export.economical.control/turn-2/result.json",
+          "01a19e7b-da25-7991-87ae-1fb79fefdda8",
+          "-"
+        ],
+        "directory": "<OUT>/work/export.economical.control/turn-2",
+        "elapsed_seconds": 15.567,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 253935,
+          "cached_input_tokens": 228608,
+          "output_tokens": 3990,
+          "reasoning_output_tokens": 185,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented the approved export specification and fixed stdout write and buffered flush failures to return status 2 with one stderr line.",
+          "checks": [
+            "python -m unittest discover -s tests: 15 tests passed, including stdout failure checks for both formats",
+            "git diff --check: passed"
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e7b-da25-7991-87ae-1fb79fefdda8",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/export.economical.control/review-2/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/export.economical.control/review-2/schema.json",
+          "-o",
+          "<OUT>/work/export.economical.control/review-2/result.json",
+          "--cd",
+          "<OUT>/work/export.economical.control/review-copy-2",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/export.economical.control/review-2",
+        "elapsed_seconds": 32.394,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 78978,
+          "cached_input_tokens": 55680,
+          "output_tokens": 1932,
+          "reasoning_output_tokens": 304,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "The implementation meets the approved specification. All 15 repository tests and 22 independent subprocess checks passed, covering serialization, ordering, Unicode, overwrite protection, validation, and destination failures. No files were modified.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e7d-424f-7611-92f9-0bd9231aff37",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 124.596,
+    "usage": {
+      "status": "reported",
+      "calls": 2,
+      "calls_unavailable": 0,
+      "input_tokens": 404701,
+      "cached_input_tokens": 358784,
+      "output_tokens": 6834,
+      "reasoning_output_tokens": 295,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 2,
+      "calls_unavailable": 0,
+      "input_tokens": 189588,
+      "cached_input_tokens": 120960,
+      "output_tokens": 4039,
+      "reasoning_output_tokens": 901,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 45.76,
+    "review_elapsed_seconds": 78.824,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "README.md",
+      "ledger/cli.py",
+      "tests/test_cli.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/export.economical.control/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_csv_stdout_header_sorted_decimals": true,
+      "A2_json_object_with_version_and_entries": true,
+      "A3_output_file_replaces_stdout": true,
+      "A4_existing_file_refused_unless_force": true,
+      "A5_unknown_format_usage_error": true,
+      "A6_unwritable_path_usage_error": true,
+      "A7_format_is_required": true,
+      "A8_csv_quoting": true
+    },
+    "regression": {
+      "R1_report_still_works": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 8,
+    "acceptance_total": 8,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "export",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 173.653,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 708544,
+      "cached_input_tokens": 557312,
+      "output_tokens": 12348,
+      "reasoning_output_tokens": 1546,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

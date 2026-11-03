@@ -1,0 +1,82 @@
+{
+  "decision": "questions",
+  "summary": "The recurrence requirements are clear except for --until supplied without --repeat.",
+  "plan": "",
+  "acceptance": [],
+  "questions": [
+    "1. How should `ledger add ... --until YYYY-MM-DD` behave without `--repeat`: reject it with exit 2 and leave the file untouched, create an ordinary entry ignoring the cutoff, or infer monthly recurrence through that date?"
+  ],
+  "inspected": [
+    {
+      "path": "ledger/cli.py",
+      "finding": "Add currently creates ordinary entries; neither recurrence option exists. List sorts by date, and report supports category and month."
+    },
+    {
+      "path": "ledger/models.py",
+      "finding": "Entry stores date, amount in cents, category, and an optional note."
+    },
+    {
+      "path": "ledger/store.py",
+      "finding": "Storage reads and atomically replaces a JSON array of entries; missing files load as empty."
+    },
+    {
+      "path": "ledger/report.py",
+      "finding": "Both reports aggregate supplied entries and sort their output keys."
+    },
+    {
+      "path": "tests/test_cli.py",
+      "finding": "Tests establish ordinary add/list/report output and invalid-input exit status 2."
+    },
+    {
+      "path": "tests/test_store.py",
+      "finding": "Tests cover missing files and ordinary-entry round trips, including refunds."
+    },
+    {
+      "path": "tests/test_report.py",
+      "finding": "Tests establish amount formatting and category/month aggregation."
+    },
+    {
+      "path": "README.md",
+      "finding": "Documents data-path selection, ordinary CLI usage, and the unittest discovery command."
+    }
+  ],
+  "decisions": [
+    {
+      "topic": "Monthly occurrence dates",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "The issue requires occurrences from the start through the inclusive cutoff, using the original day each month and clamping to shorter months' last day."
+    },
+    {
+      "topic": "Listing and reporting",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "List and both reports include generated occurrences with the original amount, category, and note."
+    },
+    {
+      "topic": "Persistence and compatibility",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "Persist the series rather than individual occurrences; legacy data must continue loading and accepting additions."
+    },
+    {
+      "topic": "Invalid recurrence arguments",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "Unsupported repeat values, missing or invalid recurrence cutoffs, and cutoffs before the start produce stderr diagnostics and exit 2 without changing the data file."
+    },
+    {
+      "topic": "Cutoff without recurrence",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "Neither the issue nor existing CLI behavior determines what --until means when --repeat is absent."
+    },
+    {
+      "topic": "Implementation and verification design",
+      "kind": "technical",
+      "status": "delegated",
+      "detail": "The harness chooses the series representation, expansion integration, validation structure, and test organization."
+    }
+  ],
+  "agent_configuration": {}
+}

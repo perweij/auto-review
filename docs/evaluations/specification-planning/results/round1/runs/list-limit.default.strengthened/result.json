@@ -1,0 +1,109 @@
+{
+  "id": "list-limit.default.strengthened",
+  "pair": "list-limit/default",
+  "task": "list-limit",
+  "config": "default",
+  "arm": "strengthened",
+  "position": 0,
+  "status": "failed",
+  "planning": {
+    "treatment": "strengthened",
+    "task": "list-limit",
+    "status": "unanswered_questions",
+    "clarification_turns": 0,
+    "questions": [
+      [
+        "1. When `--limit N` cuts through entries sharing the same date, should it retain entries appearing earlier or later in the saved ledger order? Both choices respect N, but select different entries on that date."
+      ]
+    ],
+    "answers_supplied": false,
+    "elapsed_seconds": 43.68,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 69171,
+      "cached_input_tokens": 64640,
+      "output_tokens": 1313,
+      "reasoning_output_tokens": 516,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "not_started",
+    "stop": "unanswered_questions",
+    "turns": 0,
+    "repair_rounds": 0,
+    "clarification_turns": 0,
+    "elapsed_seconds": 0.0,
+    "usage": {
+      "status": "unavailable",
+      "calls": 0
+    }
+  },
+  "checks": null,
+  "score": {
+    "acceptance_passed": 0,
+    "acceptance_total": 4,
+    "acceptance_coverage": 0.0,
+    "regression_passed": 0,
+    "regression_total": 3,
+    "failed_acceptance": [
+      "A1_latest_n_oldest_first",
+      "A2_limit_above_count_shows_all",
+      "A3_non_positive_or_invalid_is_usage_error",
+      "A4_limit_one"
+    ],
+    "failed_regression": [
+      "R1_no_limit_unchanged",
+      "original_tests_pass",
+      "repository_tests_pass"
+    ],
+    "checks_ran": false,
+    "correct": false
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "list-limit",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 43.68,
+    "usage": {
+      "status": "partial",
+      "calls": 3,
+      "calls_unavailable": 2,
+      "input_tokens": 69171,
+      "cached_input_tokens": 64640,
+      "output_tokens": 1313,
+      "reasoning_output_tokens": 516,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

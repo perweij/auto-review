@@ -1,0 +1,192 @@
+diff --git a/README.md b/README.md
+index b677f4e..81c83d3 100644
+--- a/README.md
++++ b/README.md
+@@ -5,5 +5,11 @@ A small expense ledger. Entries live in a JSON file (`--data` or `$LEDGER_DATA`)
+     python -m ledger add 2026-01-05 12.50 food "lunch"
+     python -m ledger list
+     python -m ledger report --by month
++    python -m ledger export --format csv
++    python -m ledger export --format json --output entries.json
++
++Export writes entries in date order to standard output unless `--output` is
++specified. Existing output files are protected; add `--force` to replace one.
++The data file is selected by `--data`, then `LEDGER_DATA`, then `ledger.json`.
+ 
+ Tests: `python -m unittest discover -s tests`.
+diff --git a/ledger/cli.py b/ledger/cli.py
+index c74e0ac..abd3c14 100644
+--- a/ledger/cli.py
++++ b/ledger/cli.py
+@@ -1,6 +1,8 @@
+-"""Command line: ``python -m ledger add|list|report``."""
++"""Command line: ``python -m ledger add|list|report|export``."""
+ import argparse
++import csv
+ import datetime
++import json
+ import os
+ import sys
+ 
+@@ -8,6 +10,15 @@ from . import report, store
+ from .models import Entry
+ 
+ 
++class ArgumentError(Exception):
++    pass
++
++
++class ArgumentParser(argparse.ArgumentParser):
++    def error(self, message):
++        raise ArgumentError(message)
++
++
+ def parse_amount(text):
+     """Decimal text such as 12.5 -> 1250 cents."""
+     whole, _, fraction = text.partition(".")
+@@ -15,7 +26,7 @@ def parse_amount(text):
+ 
+ 
+ def build_parser():
+-    parser = argparse.ArgumentParser(prog="ledger")
++    parser = ArgumentParser(prog="ledger")
+     parser.add_argument("--data", default=os.environ.get("LEDGER_DATA", "ledger.json"))
+     commands = parser.add_subparsers(dest="command", required=True)
+     add = commands.add_parser("add")
+@@ -26,16 +37,51 @@ def build_parser():
+     commands.add_parser("list")
+     summary = commands.add_parser("report")
+     summary.add_argument("--by", choices=["category", "month"], default="category")
++    export = commands.add_parser("export")
++    export.add_argument("--format", required=True, choices=["csv", "json"])
++    export.add_argument("--output")
++    export.add_argument("--force", action="store_true")
+     return parser
+ 
+ 
++def write_export(entries, format_, stream):
++    rows = [
++        {"date": entry.date, "amount": report.format_cents(entry.amount_cents),
++         "category": entry.category, "note": entry.note}
++        for entry in sorted(entries, key=lambda entry: entry.date)
++    ]
++    if format_ == "csv":
++        writer = csv.DictWriter(stream, fieldnames=["date", "amount", "category", "note"],
++                                lineterminator="\n")
++        writer.writeheader()
++        writer.writerows(rows)
++    else:
++        json.dump({"version": 1, "entries": rows}, stream, ensure_ascii=False)
++        stream.write("\n")
++
++
+ def main(argv=None, out=None, err=None):
+-    out, err = out or sys.stdout, err or sys.stderr
++    out = sys.stdout if out is None else out
++    err = sys.stderr if err is None else err
+     try:
+         args = build_parser().parse_args(argv)
++    except ArgumentError as error:
++        print(f"error: {error}", file=err)
++        return 2
+     except SystemExit as exit_:
+         return exit_.code
+     entries = store.load(args.data)
++    if args.command == "export":
++        try:
++            if args.output is None:
++                write_export(entries, args.format, out)
++            else:
++                with open(args.output, "w" if args.force else "x", encoding="utf-8", newline="") as stream:
++                    write_export(entries, args.format, stream)
++        except (OSError, UnicodeError) as error:
++            print(f"error: cannot write export: {str(error).splitlines()[0]}", file=err)
++            return 2
++        return 0
+     if args.command == "add":
+         try:
+             datetime.date.fromisoformat(args.date)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..3354d2e 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,7 +1,12 @@
+ import io
++import csv
++import json
+ import os
++import subprocess
++import sys
+ import tempfile
+ import unittest
++from unittest import mock
+ 
+ from ledger import cli
+ 
+@@ -30,3 +35,66 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_export_formats_and_order(self):
++        records = [
++            {"date": "2026-02-01", "amount_cents": 0, "category": "café, \"x\"", "note": "line 1\nline 2"},
++            {"date": "2026-01-01", "amount_cents": -300, "category": "food", "note": "refund"},
++            {"date": "2026-01-01", "amount_cents": 1250, "category": "rent"},
++        ]
++        with open(self.data, "w", encoding="utf-8") as stream:
++            json.dump(records, stream)
++        expected = [
++            {"date": "2026-01-01", "amount": "-3.00", "category": "food", "note": "refund"},
++            {"date": "2026-01-01", "amount": "12.50", "category": "rent", "note": ""},
++            {"date": "2026-02-01", "amount": "0.00", "category": "café, \"x\"", "note": "line 1\nline 2"},
++        ]
++        for format_ in ("csv", "json"):
++            with self.subTest(format=format_):
++                code, output, error = self.run_cli("export", "--format", format_)
++                self.assertEqual((code, error), (0, ""))
++                if format_ == "csv":
++                    reader = csv.DictReader(io.StringIO(output, newline=""))
++                    self.assertEqual(reader.fieldnames, ["date", "amount", "category", "note"])
++                    self.assertEqual(list(reader), expected)
++                else:
++                    self.assertEqual(json.loads(output), {"version": 1, "entries": expected})
++
++    def test_empty_export_and_files(self):
++        destination = os.path.join(self.directory.name, "export")
++        for format_ in ("csv", "json"):
++            code, output, error = self.run_cli("export", "--format", format_)
++            self.assertEqual((code, error), (0, ""))
++            self.assertEqual(output if format_ == "csv" else json.loads(output),
++                             "date,amount,category,note\n" if format_ == "csv" else {"version": 1, "entries": []})
++            code, out, err = self.run_cli("export", "--format", format_, "--output", destination, "--force")
++            self.assertEqual((code, out, err), (0, "", ""))
++            with open(destination, encoding="utf-8") as stream:
++                self.assertEqual(stream.read(), output)
++        code, out, err = self.run_cli("export", "--format", "csv", "--output", destination)
++        self.assertEqual((code, out), (2, ""))
++        self.assertEqual(len(err.splitlines()), 1)
++        with open(destination, encoding="utf-8") as stream:
++            self.assertEqual(json.load(stream), {"version": 1, "entries": []})
++
++    def test_errors_and_process_exit_codes(self):
++        cases = [("export",), ("export", "--format", "xml"),
++                 ("export", "--format", "csv", "--output", os.path.join(self.directory.name, "missing", "out"))]
++        for args in cases:
++            with self.subTest(args=args):
++                code, out, err = self.run_cli(*args)
++                self.assertEqual((code, out, len(err.splitlines())), (2, "", 1))
++                process = subprocess.run([sys.executable, "-B", "-m", "ledger", "--data", self.data, *args],
++                                         text=True, capture_output=True)
++                self.assertEqual((process.returncode, process.stdout, len(process.stderr.splitlines())), (2, "", 1))
++                self.assertNotIn("Traceback", process.stderr)
++
++    def test_export_data_precedence(self):
++        other = os.path.join(self.directory.name, "other.json")
++        with open(other, "w", encoding="utf-8") as stream:
++            json.dump([{"date": "2026-01-01", "amount_cents": 100, "category": "env"}], stream)
++        with mock.patch.dict(os.environ, {"LEDGER_DATA": other}):
++            out = io.StringIO()
++            self.assertEqual(cli.main(["export", "--format", "json"], out, io.StringIO()), 0)
++            self.assertEqual(json.loads(out.getvalue())["entries"][0]["category"], "env")
++            self.assertEqual(json.loads(self.run_cli("export", "--format", "json")[1])["entries"], [])

@@ -1,0 +1,251 @@
+{
+  "id": "list-limit.default.control",
+  "pair": "list-limit/default",
+  "task": "list-limit",
+  "config": "default",
+  "arm": "control",
+  "position": 1,
+  "status": "completed",
+  "planning": {
+    "treatment": "control",
+    "task": "list-limit",
+    "status": "planned",
+    "clarification_turns": 0,
+    "questions": [],
+    "document_sha256": "fb73827684bc5caf095d443619e7c5d161d35a9ab590440549a8b9d84aa3af13",
+    "answers_supplied": false,
+    "elapsed_seconds": 28.275,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 64476,
+      "cached_input_tokens": 46208,
+      "output_tokens": 708,
+      "reasoning_output_tokens": 176,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "turns": 1,
+    "repair_rounds": 0,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 1,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/list-limit.default.control/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/list-limit.default.control/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/list-limit.default.control/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/list-limit.default.control/turn-1",
+        "elapsed_seconds": 43.737,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 92429,
+          "cached_input_tokens": 71424,
+          "output_tokens": 2252,
+          "reasoning_output_tokens": 396,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented and documented ledger list --limit N, preserving stable date ordering, formatting, and unlimited behavior. Added validation and regression tests covering all specified cases.",
+          "checks": [
+            "python -m unittest discover -s tests: all 10 tests passed.",
+            "Subprocess tests verified invalid limits exit 2 with stderr diagnostics and no stdout.",
+            "git diff --check: passed.",
+            "Re-read the approved specification and verified acceptance criteria."
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e8a-54ab-7363-969c-56e841ee97fb",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/list-limit.default.control/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/list-limit.default.control/review-1/schema.json",
+          "-o",
+          "<OUT>/work/list-limit.default.control/review-1/result.json",
+          "--cd",
+          "<OUT>/work/list-limit.default.control/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/list-limit.default.control/review-1",
+        "elapsed_seconds": 26.295,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 74427,
+          "cached_input_tokens": 52864,
+          "output_tokens": 1181,
+          "reasoning_output_tokens": 91,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "The implementation meets the complete approved specification. All 10 repository tests and 27 independent CLI checks passed, covering stable date ordering, formatting, limit boundaries, empty ledgers, unchanged unlimited output, and invalid arguments. No files were modified during review.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e8a-ff80-7712-80e5-a84f9b08ecc9",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 70.035,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 92429,
+      "cached_input_tokens": 71424,
+      "output_tokens": 2252,
+      "reasoning_output_tokens": 396,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 74427,
+      "cached_input_tokens": 52864,
+      "output_tokens": 1181,
+      "reasoning_output_tokens": 91,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 43.737,
+    "review_elapsed_seconds": 26.295,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "README.md",
+      "ledger/cli.py",
+      "tests/test_cli.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/list-limit.default.control/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_latest_n_oldest_first": true,
+      "A2_limit_above_count_shows_all": true,
+      "A3_non_positive_or_invalid_is_usage_error": true,
+      "A4_limit_one": true
+    },
+    "regression": {
+      "R1_no_limit_unchanged": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 4,
+    "acceptance_total": 4,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "list-limit",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 98.31,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 231332,
+      "cached_input_tokens": 170496,
+      "output_tokens": 4141,
+      "reasoning_output_tokens": 663,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "treatment": "strengthened",
+  "task": "recurring",
+  "status": "unanswered_questions",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 103,
+          "title": "Support monthly recurring entries",
+          "body": "Add recurring entries. `ledger add` gets `--repeat monthly --until YYYY-MM-DD`: the entry becomes a recurring series that produces one entry per month on the same day of the month, from its date through the `--until` date inclusive. When a month is shorter than the day of the month, use that month's last day (so a series starting on the 31st yields Feb 28 or 29). `ledger list` and both reports include the generated entries, and each generated entry has the amount, category and note of the original. The data file must record the series itself rather than one stored row per generated entry, and data files written before this change must keep loading and extending unchanged. A `--repeat` value other than `monthly`, a missing or invalid `--until`, or an `--until` before the start date is a usage error (exit status 2, message on stderr) that leaves the data file untouched.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/103"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 40.427,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 79171,
+        "cached_input_tokens": 54912,
+        "output_tokens": 1412,
+        "reasoning_output_tokens": 378,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "questions",
+      "response": {
+        "decision": "questions",
+        "summary": "The recurrence requirements are clear except for --until supplied without --repeat.",
+        "plan": "",
+        "acceptance": [],
+        "questions": [
+          "1. How should `ledger add ... --until YYYY-MM-DD` behave without `--repeat`: reject it with exit 2 and leave the file untouched, create an ordinary entry ignoring the cutoff, or infer monthly recurrence through that date?"
+        ],
+        "inspected": [
+          {
+            "path": "ledger/cli.py",
+            "finding": "Add currently creates ordinary entries; neither recurrence option exists. List sorts by date, and report supports category and month."
+          },
+          {
+            "path": "ledger/models.py",
+            "finding": "Entry stores date, amount in cents, category, and an optional note."
+          },
+          {
+            "path": "ledger/store.py",
+            "finding": "Storage reads and atomically replaces a JSON array of entries; missing files load as empty."
+          },
+          {
+            "path": "ledger/report.py",
+            "finding": "Both reports aggregate supplied entries and sort their output keys."
+          },
+          {
+            "path": "tests/test_cli.py",
+            "finding": "Tests establish ordinary add/list/report output and invalid-input exit status 2."
+          },
+          {
+            "path": "tests/test_store.py",
+            "finding": "Tests cover missing files and ordinary-entry round trips, including refunds."
+          },
+          {
+            "path": "tests/test_report.py",
+            "finding": "Tests establish amount formatting and category/month aggregation."
+          },
+          {
+            "path": "README.md",
+            "finding": "Documents data-path selection, ordinary CLI usage, and the unittest discovery command."
+          }
+        ],
+        "decisions": [
+          {
+            "topic": "Monthly occurrence dates",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue requires occurrences from the start through the inclusive cutoff, using the original day each month and clamping to shorter months' last day."
+          },
+          {
+            "topic": "Listing and reporting",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "List and both reports include generated occurrences with the original amount, category, and note."
+          },
+          {
+            "topic": "Persistence and compatibility",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "Persist the series rather than individual occurrences; legacy data must continue loading and accepting additions."
+          },
+          {
+            "topic": "Invalid recurrence arguments",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "Unsupported repeat values, missing or invalid recurrence cutoffs, and cutoffs before the start produce stderr diagnostics and exit 2 without changing the data file."
+          },
+          {
+            "topic": "Cutoff without recurrence",
+            "kind": "product",
+            "status": "unresolved",
+            "detail": "Neither the issue nor existing CLI behavior determines what --until means when --repeat is absent."
+          },
+          {
+            "topic": "Implementation and verification design",
+            "kind": "technical",
+            "status": "delegated",
+            "detail": "The harness chooses the series representation, expansion integration, validation structure, and test organization."
+          }
+        ]
+      }
+    }
+  ],
+  "clarification_turns": 0,
+  "document": null,
+  "questions": [
+    [
+      "1. How should `ledger add ... --until YYYY-MM-DD` behave without `--repeat`: reject it with exit 2 and leave the file untouched, create an ordinary entry ignoring the cutoff, or infer monthly recurrence through that date?"
+    ]
+  ],
+  "answers_supplied": false,
+  "elapsed_seconds": 40.428,
+  "usage": {
+    "status": "reported",
+    "calls": 1,
+    "calls_unavailable": 0,
+    "input_tokens": 79171,
+    "cached_input_tokens": 54912,
+    "output_tokens": 1412,
+    "reasoning_output_tokens": 378,
+    "provider_cost_usd": "unavailable"
+  },
+  "comments": []
+}

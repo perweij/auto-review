@@ -1,0 +1,16 @@
+{
+  "decision": "plan",
+  "summary": "Add monthly recurring series with backward-compatible storage and generated entries in listings and reports.",
+  "plan": "1. Extend the entry model with optional recurrence metadata. Preserve the existing JSON list format and ordinary entry serialization; load older records without recurrence fields as one-time entries.\n2. Add --repeat monthly and --until YYYY-MM-DD to ledger add. Validate recurrence arguments before saving. Unsupported frequencies, missing or invalid end dates, and end dates before the start return status 2 with a stderr message and leave storage untouched.\n3. Implement shared occurrence expansion anchored to the original day of the month. Clamp each occurrence to its month's last day independently, include dates through the end date, and retain the original amount, category, and note.\n4. Expand series for ledger list and both category and monthly reports. Preserve chronological listing and existing report formatting. Keep stored series unexpanded when adding further entries.\n5. Document usage and storage behavior in README.md. Add focused model, storage, CLI, and report tests, then run python -m unittest discover -s tests.",
+  "acceptance": [
+    "A monthly series includes its start and every subsequent monthly occurrence on or before --until, including an occurrence exactly on that date.",
+    "Month-end clamping handles leap and non-leap February and restores the original day in longer months; year transitions work.",
+    "Generated entries retain the original amount, category, and note and appear correctly alongside one-time entries in list and both reports.",
+    "The data file stores one series record rather than generated rows; reading and reporting do not rewrite it, and later additions do not materialize occurrences.",
+    "Legacy files continue loading and accepting additions without changing the meaning or representation of existing ordinary entries.",
+    "Every specified invalid recurrence input returns status 2, emits a stderr message, preserves existing file bytes, and does not create a missing data file.",
+    "Existing tests and the new recurrence tests pass."
+  ],
+  "questions": [],
+  "agent_configuration": {}
+}

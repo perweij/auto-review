@@ -1,0 +1,125 @@
+{
+  "treatment": "strengthened",
+  "task": "category-case",
+  "status": "unanswered_questions",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 102,
+          "title": "Report categories case-insensitively",
+          "body": "Categories are case-sensitive, so `Food` and `food` are reported separately by `ledger report`. Treat categories case-insensitively in the category report: combine them into one total shown in lower case. Stored entries must keep the category exactly as entered, `ledger list` keeps showing it as entered, and existing data files must keep working.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/102"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 31.986,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 52741,
+        "cached_input_tokens": 33152,
+        "output_tokens": 1653,
+        "reasoning_output_tokens": 772,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "questions",
+      "response": {
+        "decision": "questions",
+        "summary": "The reporting and preservation requirements are clear, but Unicode category matching is unspecified.",
+        "plan": "",
+        "acceptance": [],
+        "questions": [
+          "1. Should categories match by lowercase spelling (`Food`/`food` merge, but `Straße`/`STRASSE` remain separate), or by full Unicode case folding (both pairs merge, with the latter reported as `strasse`)?"
+        ],
+        "inspected": [
+          {
+            "path": "ledger/report.py",
+            "finding": "Category totals currently group by exact category strings and sort the resulting keys; monthly totals are independent."
+          },
+          {
+            "path": "ledger/cli.py",
+            "finding": "Categories accept unrestricted strings. Category reporting is the default; add and list preserve entered spelling."
+          },
+          {
+            "path": "ledger/models.py",
+            "finding": "Entry serialization and deserialization preserve category strings."
+          },
+          {
+            "path": "ledger/store.py",
+            "finding": "Existing JSON files load without category normalization or migration."
+          },
+          {
+            "path": "tests/test_report.py",
+            "finding": "Covers lowercase category aggregation, monthly totals, and amount formatting; no mixed-case or Unicode cases."
+          },
+          {
+            "path": "tests/test_cli.py",
+            "finding": "Covers add, list, default category reporting, and monthly reporting."
+          },
+          {
+            "path": "tests/test_store.py",
+            "finding": "Covers storage round trips and missing files."
+          },
+          {
+            "path": "README.md",
+            "finding": "Documents JSON storage and the unittest command; provides no category matching policy."
+          }
+        ],
+        "decisions": [
+          {
+            "topic": "Reporting scope",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "Combine category case variants into lowercase report labels for default and explicit category reports; monthly reporting remains unchanged."
+          },
+          {
+            "topic": "Preservation and compatibility",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "Stored entries and list output retain original category spelling, and existing JSON files continue working."
+          },
+          {
+            "topic": "Unicode matching",
+            "kind": "product",
+            "status": "unresolved",
+            "detail": "Unrestricted category strings permit Unicode values, but neither the issue nor repository specifies lowercase equivalence versus full Unicode case folding."
+          },
+          {
+            "topic": "Implementation and regression coverage",
+            "kind": "technical",
+            "status": "delegated",
+            "detail": "The harness chooses the internal aggregation implementation and test structure after matching behavior is clarified."
+          }
+        ]
+      }
+    }
+  ],
+  "clarification_turns": 0,
+  "document": null,
+  "questions": [
+    [
+      "1. Should categories match by lowercase spelling (`Food`/`food` merge, but `Straße`/`STRASSE` remain separate), or by full Unicode case folding (both pairs merge, with the latter reported as `strasse`)?"
+    ]
+  ],
+  "answers_supplied": false,
+  "elapsed_seconds": 31.986,
+  "usage": {
+    "status": "reported",
+    "calls": 1,
+    "calls_unavailable": 0,
+    "input_tokens": 52741,
+    "cached_input_tokens": 33152,
+    "output_tokens": 1653,
+    "reasoning_output_tokens": 772,
+    "provider_cost_usd": "unavailable"
+  },
+  "comments": []
+}

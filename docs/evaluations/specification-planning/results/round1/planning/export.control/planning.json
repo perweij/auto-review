@@ -1,0 +1,129 @@
+{
+  "treatment": "control",
+  "task": "export",
+  "status": "planned",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 104,
+          "title": "Add `ledger export` for other tools",
+          "body": "People want to get their ledger data out for use in other tools. Add an `export` command to the ledger CLI.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/104"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 20.153,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 48627,
+        "cached_input_tokens": 30720,
+        "output_tokens": 578,
+        "reasoning_output_tokens": 211,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "questions",
+      "response": {
+        "decision": "questions",
+        "summary": "The repository defines entry fields and JSON storage but no export format or output contract.",
+        "plan": "",
+        "acceptance": [],
+        "questions": [
+          "1. Which export formats are required (CSV, JSON, or another tool’s format), and which should be the default?",
+          "2. Should exports include date, category, note, and amount? Should amounts use decimal currency (12.50) or integer cents (1250)?",
+          "3. Should export write to standard output for shell redirection, support a destination-file option, or both?"
+        ]
+      }
+    },
+    {
+      "turn": 2,
+      "context": {
+        "issue": {
+          "number": 104,
+          "title": "Add `ledger export` for other tools",
+          "body": "People want to get their ledger data out for use in other tools. Add an `export` command to the ledger CLI.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/104"
+        },
+        "comments": [
+          {
+            "id": 9001,
+            "user": {
+              "login": "maintainer"
+            },
+            "body": "Maintainer answers: (1) Formats: CSV and JSON, chosen with a required `--format csv|json`; no default. (2) Content: the entries themselves, not totals, sorted by date, with fields date, amount, category and note. The amount is the same two-decimal text `ledger list` shows (refunds negative, e.g. `-3.00`). (3) Destination: standard output by default; `--output FILE` writes the file instead and prints nothing to standard output; if FILE already exists the command fails with exit status 2 unless `--force` is given. (4) Errors: an unknown format, a missing `--format`, or a path that cannot be written is exit status 2 with a one-line message on stderr, never a traceback. (5) Shapes: CSV has the header row `date,amount,category,note` and quotes fields as needed; JSON is an object `{\"version\": 1, \"entries\": [...]}` whose entries use the same four field names."
+          }
+        ],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 28.903,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 65628,
+        "cached_input_tokens": 46848,
+        "output_tokens": 897,
+        "reasoning_output_tokens": 139,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "plan",
+      "response": {
+        "decision": "plan",
+        "summary": "Add ledger export with CSV/JSON output, date-sorted entries, optional file destination, and concise errors. Requirements are clear.",
+        "plan": "1. Extend ledger/cli.py with export, required --format csv|json, optional --output FILE, and --force. Handle missing or unknown formats with exit status 2 and exactly one stderr line; argparse currently emits multiline errors, so adapt export validation accordingly.\n2. Load entries through store.load, sort ascending by date using the same stable ordering as list, and serialize date, amount, category, and note. Reuse report.format_cents for amount strings, including negative refunds.\n3. Use the standard CSV writer with header date,amount,category,note and proper quoting. Produce JSON as {\"version\": 1, \"entries\": [...]}, with amounts represented as strings. Empty ledgers produce a CSV header or an empty JSON entries array.\n4. Write to stdout by default. For --output, write UTF-8 to the file with no stdout output. Use exclusive creation unless --force permits replacement. Catch destination open/write failures and return 2 with a single stderr line and no traceback.\n5. Add focused export tests alongside tests/test_cli.py, including subprocess checks for actual stdout, stderr, and exit status. Document invocation examples, formats, and overwrite behavior in README.md.\n6. Run python -m unittest discover -s tests after implementation, retaining coverage for existing add, list, report, and storage behavior.",
+        "acceptance": [
+          "Both formats export individual entries in ascending date order with exactly the four specified fields and two-decimal amount strings.",
+          "CSV quotes commas, quotes, and newlines correctly; JSON has version 1 and an entries array. Unicode, empty notes, refunds, and empty ledgers round-trip through their respective parsers.",
+          "Default output goes to stdout; --output writes the file and leaves stdout empty.",
+          "An existing destination remains unchanged and returns status 2 without --force; --force replaces its contents successfully.",
+          "Missing --format, unknown formats, and unwritable destinations return status 2 with one stderr line and no traceback.",
+          "The full existing test suite and new export tests pass."
+        ],
+        "questions": []
+      }
+    }
+  ],
+  "clarification_turns": 1,
+  "document": "1. Extend ledger/cli.py with export, required --format csv|json, optional --output FILE, and --force. Handle missing or unknown formats with exit status 2 and exactly one stderr line; argparse currently emits multiline errors, so adapt export validation accordingly.\n2. Load entries through store.load, sort ascending by date using the same stable ordering as list, and serialize date, amount, category, and note. Reuse report.format_cents for amount strings, including negative refunds.\n3. Use the standard CSV writer with header date,amount,category,note and proper quoting. Produce JSON as {\"version\": 1, \"entries\": [...]}, with amounts represented as strings. Empty ledgers produce a CSV header or an empty JSON entries array.\n4. Write to stdout by default. For --output, write UTF-8 to the file with no stdout output. Use exclusive creation unless --force permits replacement. Catch destination open/write failures and return 2 with a single stderr line and no traceback.\n5. Add focused export tests alongside tests/test_cli.py, including subprocess checks for actual stdout, stderr, and exit status. Document invocation examples, formats, and overwrite behavior in README.md.\n6. Run python -m unittest discover -s tests after implementation, retaining coverage for existing add, list, report, and storage behavior.\n\nAcceptance criteria:\n- Both formats export individual entries in ascending date order with exactly the four specified fields and two-decimal amount strings.\n- CSV quotes commas, quotes, and newlines correctly; JSON has version 1 and an entries array. Unicode, empty notes, refunds, and empty ledgers round-trip through their respective parsers.\n- Default output goes to stdout; --output writes the file and leaves stdout empty.\n- An existing destination remains unchanged and returns status 2 without --force; --force replaces its contents successfully.\n- Missing --format, unknown formats, and unwritable destinations return status 2 with one stderr line and no traceback.\n- The full existing test suite and new export tests pass.",
+  "questions": [
+    [
+      "1. Which export formats are required (CSV, JSON, or another tool’s format), and which should be the default?",
+      "2. Should exports include date, category, note, and amount? Should amounts use decimal currency (12.50) or integer cents (1250)?",
+      "3. Should export write to standard output for shell redirection, support a destination-file option, or both?"
+    ]
+  ],
+  "document_sha256": "373f3d25fcd7ec98daab4f72169ae37b39bacfe63cf1f3661d49fb07455d71f9",
+  "answers_supplied": true,
+  "elapsed_seconds": 49.057,
+  "usage": {
+    "status": "reported",
+    "calls": 2,
+    "calls_unavailable": 0,
+    "input_tokens": 114255,
+    "cached_input_tokens": 77568,
+    "output_tokens": 1475,
+    "reasoning_output_tokens": 350,
+    "provider_cost_usd": "unavailable"
+  },
+  "comments": [
+    {
+      "id": 9001,
+      "user": {
+        "login": "maintainer"
+      },
+      "body": "Maintainer answers: (1) Formats: CSV and JSON, chosen with a required `--format csv|json`; no default. (2) Content: the entries themselves, not totals, sorted by date, with fields date, amount, category and note. The amount is the same two-decimal text `ledger list` shows (refunds negative, e.g. `-3.00`). (3) Destination: standard output by default; `--output FILE` writes the file instead and prints nothing to standard output; if FILE already exists the command fails with exit status 2 unless `--force` is given. (4) Errors: an unknown format, a missing `--format`, or a path that cannot be written is exit status 2 with a one-line message on stderr, never a traceback. (5) Shapes: CSV has the header row `date,amount,category,note` and quotes fields as needed; JSON is an object `{\"version\": 1, \"entries\": [...]}` whose entries use the same four field names."
+    }
+  ]
+}

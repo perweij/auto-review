@@ -1,0 +1,72 @@
+{
+  "decision": "questions",
+  "summary": "The repository defines ledger entries and CLI conventions, but does not establish the export format, selection, ordering, or destination.",
+  "plan": "",
+  "acceptance": [],
+  "questions": [
+    "1. Which export format should be supported: CSV with date, amount, category, and note columns (decimal amounts for spreadsheets), JSON using the existing date/amount_cents/category/note schema (integer cents for programs), or both? If both, which should be the default?",
+    "2. Should export include all entries or support filters? Should entries appear chronologically, matching `list`, or in stored order, preserving their current sequence? If filters are needed, specify which.",
+    "3. Should export write only to stdout, allowing shell redirection, or also offer an output-file option? If a file option is required, should an existing destination be replaced or cause an error?"
+  ],
+  "inspected": [
+    {
+      "path": "README.md",
+      "finding": "Documents add, list, report, data-file selection, and the unittest command; specifies no export behavior."
+    },
+    {
+      "path": "ledger/cli.py",
+      "finding": "Implements add/list/report; data selection uses --data, then LEDGER_DATA, then ledger.json. List sorts by date, and read commands write to stdout."
+    },
+    {
+      "path": "ledger/models.py",
+      "finding": "Entries contain date, integer amount_cents, category, and an optional note defaulting to an empty string."
+    },
+    {
+      "path": "ledger/store.py",
+      "finding": "Stores a JSON array in entry order; missing files load as an empty ledger."
+    },
+    {
+      "path": "ledger/report.py",
+      "finding": "Provides exact two-decimal formatting for integer cents, including negative refunds."
+    },
+    {
+      "path": "tests/test_cli.py",
+      "finding": "Tests chronological list output, reports, and invalid add input; contains no export contract."
+    },
+    {
+      "path": "tests/test_store.py",
+      "finding": "Tests missing-file behavior and storage round trips, including negative amounts."
+    },
+    {
+      "path": "tests/test_report.py",
+      "finding": "Tests monetary formatting and category/month aggregation."
+    }
+  ],
+  "decisions": [
+    {
+      "topic": "Export format and schema",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "The issue does not specify formats, monetary representation, or the default when multiple formats are supported."
+    },
+    {
+      "topic": "Entry selection and ordering",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "Stored order and list order differ; export filtering requirements are unspecified."
+    },
+    {
+      "topic": "Output destination and replacement behavior",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "Existing read commands use stdout, but the requested export interface does not establish whether direct file output or replacement is required."
+    },
+    {
+      "topic": "Implementation structure and testing",
+      "kind": "technical",
+      "status": "delegated",
+      "detail": "The harness should choose internal organization and tests once the export contract is settled."
+    }
+  ],
+  "agent_configuration": {}
+}

@@ -1,0 +1,71 @@
+{
+  "codex": {
+    "choice": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "status": "ok",
+    "error": null,
+    "elapsed_seconds": 8.84,
+    "usage": {
+      "status": "reported",
+      "turns_reported": 1,
+      "input_tokens": 47800,
+      "cached_input_tokens": 46208,
+      "output_tokens": 361,
+      "reasoning_output_tokens": 11,
+      "provider_cost_usd": "unavailable"
+    },
+    "file_created": true,
+    "content_matches": true,
+    "spec_unchanged": true,
+    "report": {
+      "status": "ready",
+      "summary": "Created HANDOFF.txt in the repository root with the specified nonce and newline.",
+      "checks": [
+        "Read the file back and verified its exact bytes.",
+        "Confirmed HANDOFF.txt is the only worktree change."
+      ],
+      "findings": [],
+      "questions": []
+    }
+  },
+  "claude": {
+    "choice": {
+      "provider": "claude",
+      "model": "haiku",
+      "effort": "low"
+    },
+    "status": "ok",
+    "error": null,
+    "elapsed_seconds": 9.588,
+    "usage": {
+      "status": "reported",
+      "turns_reported": 1,
+      "input_tokens": 92874,
+      "cached_input_tokens": 69073,
+      "output_tokens": 1269,
+      "reasoning_output_tokens": 0,
+      "provider_cost_usd": 0.006084429999999999
+    },
+    "file_created": true,
+    "content_matches": true,
+    "spec_unchanged": true,
+    "report": {
+      "status": "ready",
+      "summary": "Created HANDOFF.txt in the repository root containing exactly NONCE-c857d09db23e followed by a newline, per revision-1 of the specification. No other files were touched; nothing was staged, committed, or pushed.",
+      "checks": [
+        "Read HANDOFF.txt back: content is NONCE-c857d09db23e plus a single trailing newline (17 bytes, verified with od -c).",
+        "git status shows only '?? HANDOFF.txt', confirming no source changes.",
+        "No test or build run: the specification defines no test or build requirements, and the repository tests do not cover this file."
+      ],
+      "findings": [
+        "Interpretation: the spec's 'Ünïcode check: ✓ 日本語' sentence was treated as a note about the spec text, not as file content, because the spec says the file should contain exactly the nonce and a newline. If the Unicode text was meant to be in the file, this needs a one-line change."
+      ],
+      "questions": [
+        "Should the Unicode line 'Ünïcode check: ✓ 日本語' also be included in HANDOFF.txt, or was it only a note about the spec?"
+      ]
+    }
+  }
+}

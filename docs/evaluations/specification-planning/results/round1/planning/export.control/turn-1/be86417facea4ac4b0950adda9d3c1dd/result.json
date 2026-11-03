@@ -1,0 +1,12 @@
+{
+  "decision": "questions",
+  "summary": "The repository defines entry fields and JSON storage but no export format or output contract.",
+  "plan": "",
+  "acceptance": [],
+  "questions": [
+    "1. Which export formats are required (CSV, JSON, or another tool’s format), and which should be the default?",
+    "2. Should exports include date, category, note, and amount? Should amounts use decimal currency (12.50) or integer cents (1250)?",
+    "3. Should export write to standard output for shell redirection, support a destination-file option, or both?"
+  ],
+  "agent_configuration": {}
+}

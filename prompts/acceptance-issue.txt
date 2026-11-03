@@ -1,8 +1,9 @@
 
 Context: issue acceptance. Assess the complete candidate against the whole approved
-specification and every acceptance criterion in approved_specification, together
-with selected_feedback and issue_context. The implementation harness owns its own
-design, so judge the observable outcome, not the route taken. Check correctness,
+specification and every acceptance criterion in approved_specification.document
+(the complete approved Markdown file), together with selected_feedback (provenance
+only) and issue_context (discussion that does not amend the specification). The
+implementation harness owns its own design, so judge the observable outcome, not the route taken. Check correctness,
 acceptance coverage and regressions. Optional improvements are advisory and never
 blocking. Use case_results [] because no verification cases are supplied. For
 passed, supply an outcome for every selected_feedback key: fixed only for concerns

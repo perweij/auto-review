@@ -795,6 +795,29 @@ history. A now-accepted write is receipted instead. Ambiguous/changed results an
 read failures cannot authorize a resend. Recovery never runs models, pushes, or
 publishes; a separate `issue-run` resumes execution.
 
+Specification documents. Each plan revision has one canonical UTF-8 Markdown
+document (the specification followed by `Acceptance criteria:` and its bullets). The
+issue session records `specifications.<revision>` = `{revision, path, digest, sha256,
+bytes, origin}` (`origin`: `planner`, or `saved-plan` when materialized from a plan
+saved earlier) next to the unchanged `plan` object, whose `body` is the document and
+whose `digest` is the approval digest. The approval comment is
+`## Plan revision <n>`, the document, then the approval instructions; the hidden
+workflow marker follows. Comments over 65,536 characters fail with
+`specification_too_large` before anything is stored or published. The Owner
+`issue_plan` item gains `source.specification` (the same fields, pointing at the
+byte-exact Owner copy); that locator is excluded from the item `fingerprint`, so a
+changed path or origin never marks execution stale, while changed content does. The
+harness prompt carries `approved_specification` = `{format: "markdown", file,
+revision, sha256, bytes}` and only the provenance of the `issue_plan` item; the issue
+acceptance reviewer receives `approved_specification.document` with the identical
+text. `specification_missing` and `specification_modified` (no file, unreadable or
+non-UTF-8 file, digest or byte mismatch) stop execution before a provider is started,
+after a provider turn that changed the file, and before review. The planner's JSON
+response additionally requires `inspected` (`path`, `finding`) and `decisions`
+(`topic`, `kind` product|technical, `status` resolved|delegated|unresolved, `detail`);
+responses that combine a plan with questions or leave a product decision unresolved in
+a plan are rejected as `invalid_result`.
+
 `issue-run` delegates the approved scope to a persistent implementation harness.
 The linked Owner batch stores source identity, completed commit boundaries and
 publication evidence; unfinished tasks do not control execution. A saved review

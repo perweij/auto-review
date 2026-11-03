@@ -1,0 +1,10 @@
+Independently review a candidate implementation against an approved specification.
+Read the complete Markdown specification file named by approved_specification.file, including its
+acceptance criteria. The candidate is the working tree of the repository in your current directory; the
+baseline commit is named in the context and `git diff <baseline>` shows the change. Run the repository tests and
+exercise the behavior the specification describes. You may not modify any file. Judge the observable
+outcome, not the route taken. Report changes_requested only for a concrete violation of the specification or a
+regression, listing each as a self-contained finding; optional improvements are never blocking. Otherwise
+report passed.
+
+{"approved_specification": {"format": "markdown", "file": "<OUT>/work/category-case.economical.control/spec/revision-1.md", "revision": 1, "sha256": "9daa6cdeea18b692c473aa2f39761685c00d00c889b677e7f43a261eab8d6464", "bytes": 1133}, "baseline": "11d945b2cee0986f8f6dfa5d29de2bb15bd27cc1", "implementer_report": {"status": "ready", "summary": "Category reports now combine mixed-case categories under sorted lowercase labels while preserving stored and listed category spelling. Added coverage for refunds, existing files, unchanged file contents, and monthly reports.", "checks": ["python -B -m unittest discover -s tests: 11 tests passed", "git diff --check: passed"], "findings": [], "questions": []}, "issue_context": {"issue_body": "Categories are case-sensitive, so `Food` and `food` are reported separately by `ledger report`. Treat categories case-insensitively in the category report: combine them into one total shown in lower case. Stored entries must keep the category exactly as entered, `ledger list` keeps showing it as entered, and existing data files must keep working."}}

@@ -1,0 +1,10 @@
+Independently review a candidate implementation against an approved specification.
+Read the complete Markdown specification file named by approved_specification.file, including its
+acceptance criteria. The candidate is the working tree of the repository in your current directory; the
+baseline commit is named in the context and `git diff <baseline>` shows the change. Run the repository tests and
+exercise the behavior the specification describes. You may not modify any file. Judge the observable
+outcome, not the route taken. Report changes_requested only for a concrete violation of the specification or a
+regression, listing each as a self-contained finding; optional improvements are never blocking. Otherwise
+report passed.
+
+{"approved_specification": {"format": "markdown", "file": "<OUT>/work/list-limit.default.control/spec/revision-1.md", "revision": 1, "sha256": "fb73827684bc5caf095d443619e7c5d161d35a9ab590440549a8b9d84aa3af13", "bytes": 1112}, "baseline": "69999c6193aee3fd304fd3b96c4aa7a024b9567c", "implementer_report": {"status": "ready", "summary": "Implemented and documented ledger list --limit N, preserving stable date ordering, formatting, and unlimited behavior. Added validation and regression tests covering all specified cases.", "checks": ["python -m unittest discover -s tests: all 10 tests passed.", "Subprocess tests verified invalid limits exit 2 with stderr diagnostics and no stdout.", "git diff --check: passed.", "Re-read the approved specification and verified acceptance criteria."], "findings": [], "questions": []}, "issue_context": {"issue_body": "`ledger list` prints every entry. Add `--limit N` so only the N most recent entries (by date) are shown, still printed oldest first. N must be a positive integer; anything else is a usage error (exit status 2, message on stderr, nothing on stdout). Without `--limit` nothing changes."}}

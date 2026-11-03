@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "title": "Current versus strengthened issue planning: paired exploratory evaluation",
+  "frozen_on": "2026-11-02",
+  "control": {
+    "file": "control/issue_planning_control.py",
+    "sha256": "2af5b46bec4ac2f4cdb9b188c0af9af54a70830a0c29f44c5d866bdf27265014",
+    "git_blob": "450b35a341d1942b49a796ed0beb2ab2ec78c5ca",
+    "source_commit": "2db933347b2cfe32b1f29fc0b8d9b998f93ee6fb",
+    "note": "Verbatim lib/pr_review/issue_planning.py (prompt, schema and validation) before the specification work."
+  },
+  "treatments": {
+    "control": "frozen current planner",
+    "strengthened": "lib/pr_review/issue_planning.py with the specification standard"
+  },
+  "planning": {
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "high",
+    "max_clarification_turns": 2
+  },
+  "implementation_configs": {
+    "economical": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "default": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    }
+  },
+  "review": {
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "high"
+  },
+  "limits": {
+    "call_timeout_seconds": 1200,
+    "max_implementation_turns": 5,
+    "max_repair_rounds": 2,
+    "max_run_seconds": 3600
+  },
+  "fixture": {
+    "path": "fixture/ledger",
+    "tree_sha256": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423"
+  },
+  "tasks": [
+    "list-limit",
+    "category-case",
+    "recurring",
+    "export"
+  ],
+  "prompts": {
+    "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+    "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+    "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+  },
+  "strengthened": {
+    "round1": {
+      "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+      "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+      "prompts/issue-specification.txt": "04ad86641de4cf493b6fb1ac144b8f1b32bd199c73f7eb405532f85f110dfea1"
+    },
+    "round1_archive": {
+      "prompts/issue-specification.txt": {
+        "file": "treatments/strengthened-round1/issue-specification.txt",
+        "sha256": "04ad86641de4cf493b6fb1ac144b8f1b32bd199c73f7eb405532f85f110dfea1"
+      }
+    },
+    "current": {
+      "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+      "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+      "prompts/issue-specification.txt": "9509f799fdf1dadb6002760b0a0aef6ecce1e2ba98d0155e0a9d404881f0f985"
+    },
+    "note": "Round 1 used the round-1 prompt (archived). Round 2 uses the current prompt, tuned after round 1 to ask only about consequential product choices; planner code and validation are unchanged."
+  },
+  "order": "pair index alternates which arm runs first (even: control first)"
+}

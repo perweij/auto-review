@@ -1,0 +1,107 @@
+diff --git a/README.md b/README.md
+index b677f4e..df0b037 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@ A small expense ledger. Entries live in a JSON file (`--data` or `$LEDGER_DATA`)
+ 
+     python -m ledger add 2026-01-05 12.50 food "lunch"
+     python -m ledger list
++    python -m ledger list --limit 10
+     python -m ledger report --by month
+ 
++Use `list --limit N` to show the N most recent entries in chronological order.
++N must be a positive integer; omit the option to show all entries.
++
+ Tests: `python -m unittest discover -s tests`.
+diff --git a/ledger/cli.py b/ledger/cli.py
+index c74e0ac..1d0b9b2 100644
+--- a/ledger/cli.py
++++ b/ledger/cli.py
+@@ -14,6 +14,16 @@ def parse_amount(text):
+     return int(whole) * 100 + int((fraction + "00")[:2]) * (-1 if whole.startswith("-") else 1)
+ 
+ 
++def positive_int(text):
++    try:
++        value = int(text)
++        if value > 0:
++            return value
++    except ValueError:
++        pass
++    raise argparse.ArgumentTypeError("limit must be a positive integer")
++
++
+ def build_parser():
+     parser = argparse.ArgumentParser(prog="ledger")
+     parser.add_argument("--data", default=os.environ.get("LEDGER_DATA", "ledger.json"))
+@@ -23,7 +33,8 @@ def build_parser():
+     add.add_argument("amount")
+     add.add_argument("category")
+     add.add_argument("note", nargs="?", default="")
+-    commands.add_parser("list")
++    listing = commands.add_parser("list")
++    listing.add_argument("--limit", type=positive_int, metavar="N", help="show the N most recent entries")
+     summary = commands.add_parser("report")
+     summary.add_argument("--by", choices=["category", "month"], default="category")
+     return parser
+@@ -46,7 +57,10 @@ def main(argv=None, out=None, err=None):
+         store.save(args.data, entries + [Entry(args.date, cents, args.category, args.note)])
+         return 0
+     if args.command == "list":
+-        for entry in sorted(entries, key=lambda e: e.date):
++        ordered = sorted(entries, key=lambda e: e.date)
++        if args.limit is not None:
++            ordered = ordered[-args.limit:]
++        for entry in ordered:
+             print(f"{entry.date} {report.format_cents(entry.amount_cents):>10} {entry.category} {entry.note}".rstrip(), file=out)
+         return 0
+     totals = report.totals_by_category(entries) if args.by == "category" else report.monthly_totals(entries)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..95adec8 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -2,6 +2,8 @@ import io
+ import os
+ import tempfile
+ import unittest
++from contextlib import redirect_stderr
++from unittest.mock import patch
+ 
+ from ledger import cli
+ 
+@@ -30,3 +32,35 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_list_limit_order_boundaries_and_ties(self):
++        for date, category in [("2026-01-08", "first"), ("2026-01-03", "early"),
++                               ("2026-01-08", "second"), ("2026-01-05", "middle"),
++                               ("2026-01-08", "third")]:
++            self.assertEqual(0, self.run_cli("add", date, "1", category)[0])
++        all_lines = ["2026-01-03       1.00 early", "2026-01-05       1.00 middle",
++                     "2026-01-08       1.00 first", "2026-01-08       1.00 second",
++                     "2026-01-08       1.00 third"]
++        self.assertEqual(all_lines, self.run_cli("list")[1].splitlines())
++        for limit in (1, 2, 4, 5, 10):
++            with self.subTest(limit=limit):
++                code, out, err = self.run_cli("list", "--limit", str(limit))
++                self.assertEqual((0, ""), (code, err))
++                self.assertEqual(all_lines[-limit:], out.splitlines())
++
++    def test_list_limit_empty_and_missing(self):
++        self.assertEqual((0, "", ""), self.run_cli("list", "--limit", "2"))
++        with open(self.data, "w") as data:
++            data.write("[]")
++        self.assertEqual((0, "", ""), self.run_cli("list", "--limit", "2"))
++
++    def test_invalid_list_limits_fail_before_loading(self):
++        for arguments in [("0",), ("-1",), ("abc",), ("1.5",), ()]:
++            with self.subTest(arguments=arguments), patch("ledger.cli.store.load") as load:
++                stderr = io.StringIO()
++                with redirect_stderr(stderr):
++                    code, out, _ = self.run_cli("list", "--limit", *arguments)
++                self.assertEqual(2, code)
++                self.assertEqual("", out)
++                self.assertTrue(stderr.getvalue())
++                load.assert_not_called()

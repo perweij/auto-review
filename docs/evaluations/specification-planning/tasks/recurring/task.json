@@ -1,0 +1,25 @@
+{
+  "id": "recurring",
+  "size": "complex",
+  "number": 103,
+  "title": "Support monthly recurring entries",
+  "body": "Add recurring entries. `ledger add` gets `--repeat monthly --until YYYY-MM-DD`: the entry becomes a recurring series that produces one entry per month on the same day of the month, from its date through the `--until` date inclusive. When a month is shorter than the day of the month, use that month's last day (so a series starting on the 31st yields Feb 28 or 29). `ledger list` and both reports include the generated entries, and each generated entry has the amount, category and note of the original. The data file must record the series itself rather than one stored row per generated entry, and data files written before this change must keep loading and extending unchanged. A `--repeat` value other than `monthly`, a missing or invalid `--until`, or an `--until` before the start date is a usage error (exit status 2, message on stderr) that leaves the data file untouched.",
+  "answers": null,
+  "acceptance": [
+    "A1_month_end_clamped_inclusive_until",
+    "A2_leap_day",
+    "A3_monthly_report_includes_generated",
+    "A4_until_before_start_is_usage_error_without_write",
+    "A5_invalid_repeat_or_until_is_usage_error",
+    "A6_series_stored_compactly",
+    "A7_legacy_file_loads_and_extends",
+    "A8_category_report_includes_generated",
+    "A9_until_equal_to_start_is_one_entry",
+    "A10_note_applies_to_every_generated_entry"
+  ],
+  "regression": [
+    "R1_plain_add_unchanged",
+    "original_tests_pass",
+    "repository_tests_pass"
+  ]
+}

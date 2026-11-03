@@ -1,0 +1,14 @@
+{
+  "decision": "plan",
+  "summary": "Add an optional positive-integer --limit to ledger list, selecting the most recent entries by date and displaying them oldest first.",
+  "plan": "1. In ledger/cli.py, add --limit N to the list subparser with validation that rejects nonintegers and values below 1 through argparse usage errors.\n2. Retain the existing stable ascending date sort, then take its final N entries when a limit is provided. Preserve output formatting and unlimited behavior.\n3. Extend tests/test_cli.py to cover unordered input dates, limits of 1 and fewer/equal/more than the entry count, empty ledgers, unchanged unlimited output, and invalid values including zero, negatives, decimals, text, and a missing argument. Check exit status and capture stdout/stderr for errors.\n4. Document --limit in README.md and run python -m unittest discover -s tests.",
+  "acceptance": [
+    "ledger list --limit N prints at most N entries with the most recent dates, in ascending date order.",
+    "Limits equal to or larger than the ledger size show every entry; an empty ledger produces no output.",
+    "Invalid or missing limit values produce exit status 2, a diagnostic on stderr, and no stdout.",
+    "Without --limit, existing list output and behavior remain unchanged.",
+    "The full unittest suite passes."
+  ],
+  "questions": [],
+  "agent_configuration": {}
+}

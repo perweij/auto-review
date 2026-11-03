@@ -1,0 +1,19 @@
+{
+  "id": "list-limit",
+  "size": "small",
+  "number": 101,
+  "title": "Add --limit to `ledger list`",
+  "body": "`ledger list` prints every entry. Add `--limit N` so only the N most recent entries (by date) are shown, still printed oldest first. N must be a positive integer; anything else is a usage error (exit status 2, message on stderr, nothing on stdout). Without `--limit` nothing changes.",
+  "answers": null,
+  "acceptance": [
+    "A1_latest_n_oldest_first",
+    "A2_limit_above_count_shows_all",
+    "A3_non_positive_or_invalid_is_usage_error",
+    "A4_limit_one"
+  ],
+  "regression": [
+    "R1_no_limit_unchanged",
+    "original_tests_pass",
+    "repository_tests_pass"
+  ]
+}

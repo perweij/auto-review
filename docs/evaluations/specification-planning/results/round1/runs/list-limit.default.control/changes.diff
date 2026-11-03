@@ -1,0 +1,137 @@
+diff --git a/README.md b/README.md
+index b677f4e..cf67464 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@ A small expense ledger. Entries live in a JSON file (`--data` or `$LEDGER_DATA`)
+ 
+     python -m ledger add 2026-01-05 12.50 food "lunch"
+     python -m ledger list
++    python -m ledger list --limit 10
+     python -m ledger report --by month
+ 
++`list --limit N` shows at most the N most recent entries by date, oldest first.
++N must be a positive integer. Without `--limit`, all entries are shown.
++
+ Tests: `python -m unittest discover -s tests`.
+diff --git a/ledger/cli.py b/ledger/cli.py
+index c74e0ac..3575d31 100644
+--- a/ledger/cli.py
++++ b/ledger/cli.py
+@@ -1,5 +1,6 @@
+ """Command line: ``python -m ledger add|list|report``."""
+ import argparse
++import contextlib
+ import datetime
+ import os
+ import sys
+@@ -14,6 +15,16 @@ def parse_amount(text):
+     return int(whole) * 100 + int((fraction + "00")[:2]) * (-1 if whole.startswith("-") else 1)
+ 
+ 
++def positive_integer(text):
++    try:
++        value = int(text)
++    except ValueError:
++        raise argparse.ArgumentTypeError("limit must be a positive integer") from None
++    if value < 1:
++        raise argparse.ArgumentTypeError("limit must be a positive integer")
++    return value
++
++
+ def build_parser():
+     parser = argparse.ArgumentParser(prog="ledger")
+     parser.add_argument("--data", default=os.environ.get("LEDGER_DATA", "ledger.json"))
+@@ -23,7 +34,9 @@ def build_parser():
+     add.add_argument("amount")
+     add.add_argument("category")
+     add.add_argument("note", nargs="?", default="")
+-    commands.add_parser("list")
++    listing = commands.add_parser("list")
++    listing.add_argument("--limit", type=positive_integer, metavar="N",
++                         help="show only the N most recent entries, oldest first")
+     summary = commands.add_parser("report")
+     summary.add_argument("--by", choices=["category", "month"], default="category")
+     return parser
+@@ -32,7 +45,8 @@ def build_parser():
+ def main(argv=None, out=None, err=None):
+     out, err = out or sys.stdout, err or sys.stderr
+     try:
+-        args = build_parser().parse_args(argv)
++        with contextlib.redirect_stderr(err):
++            args = build_parser().parse_args(argv)
+     except SystemExit as exit_:
+         return exit_.code
+     entries = store.load(args.data)
+@@ -46,7 +60,10 @@ def main(argv=None, out=None, err=None):
+         store.save(args.data, entries + [Entry(args.date, cents, args.category, args.note)])
+         return 0
+     if args.command == "list":
+-        for entry in sorted(entries, key=lambda e: e.date):
++        entries = sorted(entries, key=lambda e: e.date)
++        if args.limit is not None:
++            entries = entries[-args.limit:]
++        for entry in entries:
+             print(f"{entry.date} {report.format_cents(entry.amount_cents):>10} {entry.category} {entry.note}".rstrip(), file=out)
+         return 0
+     totals = report.totals_by_category(entries) if args.by == "category" else report.monthly_totals(entries)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..8a2edf6 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,5 +1,7 @@
+ import io
+ import os
++import subprocess
++import sys
+ import tempfile
+ import unittest
+ 
+@@ -30,3 +32,48 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_list_limits_preserve_date_order_and_formatting(self):
++        for date, amount, category, note in [
++            ("2026-01-05", "12.50", "food", "lunch"),
++            ("2026-01-03", "30", "rent", ""),
++            ("2026-01-05", "2", "food", "snack"),
++            ("2026-01-01", "-5", "refund", ""),
++        ]:
++            self.assertEqual(0, self.run_cli("add", date, amount, category, note)[0])
++        lines = [
++            "2026-01-01      -5.00 refund\n",
++            "2026-01-03      30.00 rent\n",
++            "2026-01-05      12.50 food lunch\n",
++            "2026-01-05       2.00 food snack\n",
++        ]
++        self.assertEqual((0, "".join(lines), ""), self.run_cli("list"))
++        for limit in (1, 2, 3, 4, 5):
++            with self.subTest(limit=limit):
++                self.assertEqual(
++                    (0, "".join(lines[-limit:]), ""),
++                    self.run_cli("list", "--limit", str(limit)),
++                )
++
++    def test_list_empty_ledger(self):
++        for args in ((), ("--limit", "1"), ("--limit", "5")):
++            with self.subTest(args=args):
++                self.assertEqual((0, "", ""), self.run_cli("list", *args))
++
++    def test_list_invalid_limits(self):
++        for args in (("0",), ("-1",), ("1.5",), ("text",), ()):
++            with self.subTest(args=args):
++                code, out, err = self.run_cli("list", "--limit", *args)
++                self.assertEqual(2, code)
++                self.assertEqual("", out)
++                self.assertIn("usage:", err)
++                self.assertIn("--limit", err)
++                result = subprocess.run(
++                    [sys.executable, "-m", "ledger", "--data", self.data,
++                     "list", "--limit", *args],
++                    capture_output=True, text=True,
++                )
++                self.assertEqual(2, result.returncode)
++                self.assertEqual("", result.stdout)
++                self.assertIn("usage:", result.stderr)
++                self.assertIn("--limit", result.stderr)

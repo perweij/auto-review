@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "questions",
+        "unsuitable",
+        "no_change",
+        "continue"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "plan": {
+      "type": "string"
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "decision",
+    "summary",
+    "plan",
+    "acceptance",
+    "questions"
+  ],
+  "additionalProperties": false
+}

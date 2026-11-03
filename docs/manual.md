@@ -942,6 +942,70 @@ come from the GitHub user who started the workflow. Changed scope requires a new
 plan revision. `--yolo` bypasses approval for this invocation, but never blocking
 questions, assignment checks, or workspace/branch integrity checks.
 
+### The specification
+
+The approved plan is one canonical UTF-8 Markdown document per plan revision: the
+complete specification followed by its acceptance criteria. The planner follows one
+standard for every implementation provider, scaling detail with the size and risk of
+the change rather than with the model that will implement it. A specification states:
+
+- **Outcome** (required): observable behavior, with examples where they clarify.
+- **Scope** (required): what is included and what is excluded.
+- **Approach** (required): the existing components, patterns and constraints in this
+  repository that the work builds on, and the integration boundaries.
+- **Acceptance scenarios** (required): concrete scenarios, including regression cases.
+- **Verification** (required): the tests and commands that demonstrate the result.
+- Only when they apply: **Interfaces and defaults** (including precedence), **Errors
+  and compatibility**, **Design decisions**, and **Assumptions and resolved choices**.
+
+Small changes get a few lines under the required headings; a change across several
+components resolves the decisions a reliable handoff needs. The standard forbids
+padding, empty or placeholder sections, task checklists, and per-edit prescriptions
+(line numbers, diffs). Technical design, decomposition, tests and repairs belong to
+the implementation harness. Before returning a plan the planner must inspect the
+existing behavior it relies on and list the consequential decisions. An unresolved
+**product** choice (externally observable behavior, defaults, precedence, errors,
+compatibility, scope) is never guessed: the planner asks numbered questions that
+explain the alternatives and what each would change, and no plan is published until
+they are answered. Never both a plan and questions.
+
+The checks applied to a planner response are mechanical: well-formed fields, the
+required sections present and non-empty, inspected paths that exist in the
+repository, a plan that leaves no product choice unresolved, resolved decisions
+recorded in the document, and no task ledger or diff. They cannot show that the
+decisions are *sound*; that is what your approval and the independent acceptance
+review are for. Read the published plan before approving it.
+
+**Artifact lifecycle.** For each revision the coordinator writes the document once to
+`issues-v1/<repo>/issue-N/specifications/revision-R.md` (read-only, UTF-8, outside
+every worktree and Git directory) and records its digest and SHA-256 in the session.
+The plan comment on the issue shows that exact document between the `## Plan
+revision R` heading and the approval instructions; the revision label and the
+`/fix-issue approve R` command are not part of the approved content. The approval
+digest is derived from the document. A specification over GitHub's comment limit is
+refused with `specification_too_large`; it is never truncated or summarized.
+Unchanged discussion keeps the current revision and file; any content change is a new
+revision that needs its own approval and keeps earlier revisions on disk.
+On approval the file is copied, byte for byte, beside the Owner session
+(`owners-v1/.../specifications/`). Before every implementation turn, on resumption,
+and for acceptance review, the copy is verified against the approved digest; the
+implementation provider (Codex or Claude Code) is handed the path of that Markdown
+file, and the acceptance reviewer receives the identical text. Issue discussion and
+the plan's provenance are passed separately and never amend the document. A missing
+or altered file stops execution with `specification_missing` or
+`specification_modified`, naming the file; restore the approved bytes from the plan
+comment or approve a new revision. Plans saved before this lifecycle existed are
+materialized from their exact approved `body` and acceptance criteria, unchanged. The
+location of a file, or other metadata about it, never restarts an implementation
+session; only a change of approved content does.
+
+The standard, its mechanical validation and the artifact lifecycle are evaluated, with
+their limits, in [the paired planning evaluation](evaluations/specification-planning/README.md)
+(exploratory: it found no quality gain on its four tasks, a higher planning cost, and an
+over-asking weakness in the first prompt that the current prompt addresses). Reproduce it with
+`python3 docs/evaluations/specification-planning/evaluate.py prepare|verify-checks|run|summarize`;
+`run` consumes provider quota and is never part of `make check-backend`.
+
 After approval, an empty commit and draft PR are created if needed. The PR body
 links to the published plan comment and includes the intended issue-closing
 reference; plan prose is not embedded, so it cannot add closing references. Bootstrap

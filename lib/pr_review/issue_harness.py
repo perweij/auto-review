@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .common import ApiError, digest, now
 from .events import emit
-from . import acceptance, owner_git, owner_providers, owner_commit_plan, owner_auto_commit
+from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit
 from .providers import Runtime, environment
 from .processes import run
 from .storage import write_json, atomic_bytes
@@ -58,6 +58,15 @@ def arguments(choice, directory, schema, conversation):
     return args
 
 
+def handoff(session, state, batch=None):
+    """The verified approved document, kept outside the worktree and Git directory."""
+    document = canonical.handoff(session, state)
+    roots = [Path(state['worktree']).resolve(), Path(session.repo.common).resolve()]
+    if any(Path(document['path']).resolve().is_relative_to(root) for root in roots):
+        raise ApiError('invalid_session', 'The approved specification must be outside the worktree and Git directory.')
+    return document
+
+
 def invoke(session, state, batch, specification, feedback):
     """One implementation turn of the persistent ``fix`` session."""
     choice = batch['settings']['fix']
@@ -82,14 +91,18 @@ def invoke(session, state, batch, specification, feedback):
     if batch.get('integrity_failure') or batch.get('git_admin', admin) != admin:
         raise ApiError('integrity_failed', 'Protected Git state changed; inspect before continuing.')
     prompt = (Path(__file__).resolve().parents[2] / 'prompts' / 'issue-implement.txt').read_text()
-    prompt, _ = owner_providers.context_prompt(prompt + '\n', {'approved_specification': specification,
-                                'feedback': feedback, 'worktree': state['worktree'],
-                                'selected_feedback': session.items(state, batch['items']),
-                                'issue_context': next((i['source'].get('context', {}) for i in state['feedback']
-                                                       if i['kind'] == 'issue_plan' and not i.get('missing')), {}),
-                                'scratch': str(directory / 'scratch'), 'baseline': batch['baseline'],
-                                'prior_checks': batch.get('harness_candidate', {}).get('checks', []),
-                                'previous_attempts': [a['path'] for a in batch.get('attempts', [])[-4:]]}, directory)
+    # Re-verify the approved document immediately before each turn (including resumption).
+    document = handoff(session, state, batch)
+    prompt, _ = owner_providers.context_prompt(prompt + '\n', {
+        'approved_specification': {'format': 'markdown', 'file': document['path'], 'revision': document['plan']['revision'],
+                                   'sha256': document['locator']['sha256'], 'bytes': document['locator']['bytes']},
+        'feedback': feedback, 'worktree': state['worktree'],
+        'selected_feedback': [canonical.provenance(i) for i in session.items(state, batch['items'])],
+        'issue_context': next((i['source'].get('context', {}) for i in state['feedback']
+                               if i['kind'] == 'issue_plan' and not i.get('missing')), {}),
+        'scratch': str(directory / 'scratch'), 'baseline': batch['baseline'],
+        'prior_checks': batch.get('harness_candidate', {}).get('checks', []),
+        'previous_attempts': [a['path'] for a in batch.get('attempts', [])[-4:]]}, directory)
     atomic_bytes(directory / 'prompt.txt', prompt.encode())
     args = arguments(choice, directory, schema, conversation)
     record = {'role': 'fix', 'kind': 'issue_harness', 'choice': copy.deepcopy(choice),
@@ -129,6 +142,8 @@ def invoke(session, state, batch, specification, feedback):
         if owner_git.admin(session, state) != admin:
             batch['integrity_failure'] = str(directory)
             raise ApiError('integrity_failed', 'Harness changed protected source or Git state.')
+        # The provider could write anywhere; the approved document must be what it was handed.
+        handoff(session, state, batch)
         try:
             value = validate(response(choice, result, directory))
             if not conversation.get('session_id'):
@@ -245,6 +260,8 @@ def execute(session, state, batch, remote):
     if not approved:
         raise ApiError('invalid_state', 'Issue execution requires its approved specification.')
     require_supported(batch)
+    # Fresh start or resumption: the exact approved document must still be intact.
+    handoff(session, state)
     if batch.pop('harness_questions', None):
         batch['harness_phase'] = 'implement'
     batch.pop('error', None)

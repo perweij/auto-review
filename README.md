@@ -162,6 +162,11 @@ bin/fix-issue -i 123 --approve 1
 bin/fix-issue -p 456
 ```
 
+The approved plan is one Markdown specification document (outcome, scope, repository-grounded
+approach, acceptance scenarios and verification, plus interfaces, defaults, errors and decisions where
+they apply). The comment you approve shows that exact document, and the same file is handed to the
+implementation provider. See [The specification](docs/manual.md#the-specification).
+
 Repeat the command after answering questions or receiving review feedback.
 Questions and revisioned plans remain on the issue. A draft PR is bootstrapped
 with an empty commit after approval; implementation runs in an isolated Owner

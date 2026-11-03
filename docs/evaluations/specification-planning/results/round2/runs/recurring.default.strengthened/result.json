@@ -1,0 +1,268 @@
+{
+  "id": "recurring.default.strengthened",
+  "pair": "recurring/default",
+  "task": "recurring",
+  "config": "default",
+  "arm": "strengthened",
+  "position": 0,
+  "status": "completed",
+  "planning": {
+    "treatment": "strengthened",
+    "task": "recurring",
+    "status": "planned",
+    "clarification_turns": 0,
+    "questions": [],
+    "document_sha256": "a33250e5dc43dca70e17bbcdbb91156f102b5ff7918b477a6af0ae713ea15b5d",
+    "planner_hashes": {
+      "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+      "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+      "prompts/issue-specification.txt": "9509f799fdf1dadb6002760b0a0aef6ecce1e2ba98d0155e0a9d404881f0f985"
+    },
+    "answers_supplied": false,
+    "elapsed_seconds": 62.923,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 89982,
+      "cached_input_tokens": 69888,
+      "output_tokens": 2658,
+      "reasoning_output_tokens": 459,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "turns": 1,
+    "repair_rounds": 0,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 1,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/recurring.default.strengthened/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/recurring.default.strengthened/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/recurring.default.strengthened/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/recurring.default.strengthened/turn-1",
+        "elapsed_seconds": 120.406,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 182494,
+          "cached_input_tokens": 128384,
+          "output_tokens": 7621,
+          "reasoning_output_tokens": 1450,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented monthly recurrence, compact persistence, listing and report expansion, validation, legacy compatibility, documentation, and acceptance tests.",
+          "checks": [
+            "python -B -m unittest discover -s tests — all 18 tests passed",
+            "CLI subprocess tests verified status 2, stderr diagnostics, and unchanged or absent data files for invalid recurrence inputs.",
+            "git diff --check — passed",
+            "Rechecked the complete approved specification and acceptance criteria."
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e93-83d4-76f0-ae0f-057bd8587807",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/recurring.default.strengthened/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/recurring.default.strengthened/review-1/schema.json",
+          "-o",
+          "<OUT>/work/recurring.default.strengthened/review-1/result.json",
+          "--cd",
+          "<OUT>/work/recurring.default.strengthened/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/recurring.default.strengthened/review-1",
+        "elapsed_seconds": 44.907,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 117943,
+          "cached_input_tokens": 101760,
+          "output_tokens": 2282,
+          "reasoning_output_tokens": 172,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "The implementation satisfies the approved specification. All 18 repository tests passed, along with independent checks of 1,360 recurrence cases and CLI checks covering reports, compact persistence, legacy compatibility, and invalid-input file preservation. No specification violations or regressions found.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e95-5a59-7110-87f7-741a7876cc35",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 165.316,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 182494,
+      "cached_input_tokens": 128384,
+      "output_tokens": 7621,
+      "reasoning_output_tokens": 1450,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 117943,
+      "cached_input_tokens": 101760,
+      "output_tokens": 2282,
+      "reasoning_output_tokens": 172,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 120.406,
+    "review_elapsed_seconds": 44.907,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "README.md",
+      "ledger/cli.py",
+      "ledger/models.py",
+      "ledger/report.py",
+      "ledger/store.py",
+      "tests/test_cli.py",
+      "tests/test_models.py",
+      "tests/test_report.py",
+      "tests/test_store.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/recurring.default.strengthened/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_month_end_clamped_inclusive_until": true,
+      "A2_leap_day": true,
+      "A3_monthly_report_includes_generated": true,
+      "A4_until_before_start_is_usage_error_without_write": true,
+      "A5_invalid_repeat_or_until_is_usage_error": true,
+      "A6_series_stored_compactly": true,
+      "A7_legacy_file_loads_and_extends": true,
+      "A8_category_report_includes_generated": true,
+      "A9_until_equal_to_start_is_one_entry": true,
+      "A10_note_applies_to_every_generated_entry": true
+    },
+    "regression": {
+      "R1_plain_add_unchanged": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 10,
+    "acceptance_total": 10,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "recurring",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 228.239,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 390419,
+      "cached_input_tokens": 300032,
+      "output_tokens": 12561,
+      "reasoning_output_tokens": 2081,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}
