@@ -97,6 +97,27 @@ class EmacsRunnerTest(unittest.TestCase):
         self.assertFalse(Path(phases[0]).exists(), 'Temporary bytecode must be cleaned up')
         self.assertFalse(list(self.source.glob('*.elc')), 'Compilation must not write into the checkout')
 
+    def test_dependency_discovery_without_temporary_loader(self):
+        self.env.pop('AUTO_REVIEW_TEST_LOAD_FILE')
+        dependency_root = self.root / 'dependency checkouts'
+        self.env['AUTO_REVIEW_EMACS_DEPENDENCY_ROOT'] = str(dependency_root)
+        for package, subdir in (('compat', ''), ('magit', 'lisp')):
+            directory = dependency_root / package / subdir
+            directory.mkdir(parents=True)
+            (directory / f'{package}.el').write_text(f"(provide '{package})\n")
+        source = self.source / 'magit-auto-review.el'
+        source.write_text(source.read_text().replace("(defun", "(require 'compat)\n(require 'magit)\n(defun", 1))
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('2 results as expected', result.stderr)
+        self.assertFalse(self.site_marker.exists())
+
+    def test_missing_explicit_loader_explains_automatic_discovery(self):
+        self.dependency_file.unlink()
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Unset AUTO_REVIEW_TEST_LOAD_FILE', result.stderr)
+
     def check_preload_rejected(self, only_ert):
         with self.dependency_file.open('a') as stream:
             load = f'(load {json.dumps(str(self.foreign))} nil t)'

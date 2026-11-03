@@ -5,7 +5,22 @@ bytecode_dir=$(mktemp -d "${TMPDIR:-/tmp}/auto-review-elc.XXXXXX")
 trap 'rm -rf -- "$bytecode_dir"' EXIT
 export AUTO_REVIEW_TEST_BYTECODE_DIR="$bytecode_dir"
 args=(--batch --no-site-file -L emacs -L "$bytecode_dir" --eval '(setq load-prefer-newer t)')
-if [[ -n ${AUTO_REVIEW_TEST_LOAD_FILE:-} ]]; then args+=(-l "$AUTO_REVIEW_TEST_LOAD_FILE"); fi
+if [[ -n ${AUTO_REVIEW_TEST_LOAD_FILE:-} ]]; then
+    if [[ ! -f $AUTO_REVIEW_TEST_LOAD_FILE ]]; then
+        printf 'Dependency setup file not found: %s. Unset AUTO_REVIEW_TEST_LOAD_FILE to use automatic discovery.\n' "$AUTO_REVIEW_TEST_LOAD_FILE" >&2
+        exit 1
+    fi
+    args+=(-l "$AUTO_REVIEW_TEST_LOAD_FILE")
+else
+    # Container dependencies are source checkouts, with Lisp either at the root
+    # or in lisp/. Add only known dependencies; never load package startup files.
+    dependency_root=${AUTO_REVIEW_EMACS_DEPENDENCY_ROOT:-/opt/emacs-lisp}
+    for package in compat cond-let llama seq with-editor transient magit closql emacsql ghub treepy markdown-mode yaml forge; do
+        directory="$dependency_root/$package"
+        if [[ -d $directory/lisp ]]; then directory+=/lisp; fi
+        if [[ -d $directory ]]; then args+=(-L "$directory"); fi
+    done
+fi
 args+=(-l emacs/tests/bootstrap.el)
 "${EMACS:-emacs}" "${args[@]}" --eval '(progn
   (unless (version<= "29.1" emacs-version) (error "Tests require Emacs 29.1 or newer"))

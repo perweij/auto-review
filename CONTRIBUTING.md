@@ -14,11 +14,17 @@ Backend checks additionally require Git, Bash, Bats 1.5+, ShellCheck, and jq.
 The deterministic suite mocks GitHub and model CLIs; credentials are not required.
 
 Frontend checks require Emacs 29.1+, Magit 4.6+, Transient 0.13+, and Forge on the
-Emacs load path. `EMACS` selects the executable. `AUTO_REVIEW_TEST_LOAD_FILE` may
+Emacs load path. `EMACS` selects the executable. The runner automatically discovers
+known dependency checkouts under `/opt/emacs-lisp`, including their `lisp/`
+subdirectories. Set `AUTO_REVIEW_EMACS_DEPENDENCY_ROOT` for a different checkout
+root. Existing environment/profile load paths also remain available. In the dev
+container, `make check-emacs` needs no temporary setup file.
+
+For other layouts, `AUTO_REVIEW_TEST_LOAD_FILE` may
 name an Emacs Lisp file that configures those dependencies for a test run.
 Both compilation and ERT disable site startup with `--no-site-file`; dependencies
-registered only by a site-start file must be supplied explicitly. Environment/profile
-load paths remain available. For example, a dependency setup file can add the
+registered only by a site-start file outside the discovered directories must be
+supplied explicitly. For example, a dependency setup file can add the
 directories for Magit, Forge, Transient and their dependencies:
 
 ```elisp
@@ -28,7 +34,9 @@ directories for Magit, Forge, Transient and their dependencies:
                           ) load-path))
 ```
 
-Run it with `AUTO_REVIEW_TEST_LOAD_FILE=/absolute/path/to/dependencies.el make check-emacs`.
+For this custom layout, run `AUTO_REVIEW_TEST_LOAD_FILE=/absolute/path/to/dependencies.el make check-emacs`.
+An explicit setup file overrides automatic discovery; unset the variable to return
+to discovery. Missing explicit files report an error rather than being silently ignored.
 The setup file must load only third-party dependencies, not an installed auto-review
 package or its autoloads. The runner restores checkout load-path precedence and
 checks module and function origins in both processes. A preloaded foreign copy

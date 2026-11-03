@@ -653,8 +653,10 @@ make check-all                  # Both
 
 `EMACS` selects the executable. Both compilation and ERT disable site startup to
 prevent installed auto-review code from being preloaded. Environment/profile load
-paths remain available; use `AUTO_REVIEW_TEST_LOAD_FILE` to supply dependency paths
-otherwise registered by site startup. This file must load only third-party
+paths remain available. Known dependency checkouts in `/opt/emacs-lisp` are
+added automatically, including `lisp/` subdirectories. Use
+`AUTO_REVIEW_EMACS_DEPENDENCY_ROOT` for a different checkout root, or
+`AUTO_REVIEW_TEST_LOAD_FILE` to override discovery with a custom setup file. This file must load only third-party
 dependencies, not an installed auto-review package or its autoloads. The runner
 checks that auto-review code comes from the checkout or its temporary bytecode and
 reports `Auto-review test contamination` if foreign code has already been loaded.
