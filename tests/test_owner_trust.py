@@ -3,6 +3,7 @@ import copy
 from contextlib import nullcontext
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -215,6 +216,60 @@ class ConfigurationTrustTest(unittest.TestCase):
             self.assertEqual(self.state["trusted_snapshot"], request["trusted_snapshot"])
             self.assertIn("CLAUDE.local.md", self.state["trusted_configuration"])
             preflight.assert_called_once()
+
+
+class InitialConfigurationTrustTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Test')
+        self.git('config', 'user.email', 'test@example.invalid')
+        (self.root / 'AGENTS.md').write_text('Existing repository instructions\n')
+        self.git('add', 'AGENTS.md')
+        self.git('commit', '-qm', 'Base configuration')
+        base = self.git('rev-parse', 'HEAD').stdout.strip()
+        self.state = {'worktree': str(self.root), 'metadata': {'baseRefOid': base, 'headRefOid': base}}
+        self.session = SimpleNamespace(repo=SimpleNamespace(git=self.git), save=Mock())
+
+    def git(self, *args, check=True):
+        return subprocess.run(['git', *args], cwd=self.root, text=True, capture_output=True, check=check)
+
+    def test_initial_base_configuration_is_accepted_and_later_edits_are_checked(self):
+        owner_git.trust(self.session, self.state, 'HEAD')
+        self.assertIn('AGENTS.md', self.state['trusted_configuration'])
+        token = self.state['trusted_snapshot']
+        owner_git.trust(self.session, self.state, 'HEAD')
+        self.assertEqual(token, self.state['trusted_snapshot'])
+        (self.root / 'AGENTS.md').write_text('Changed instructions\n')
+        with self.assertRaises(ApiError) as caught:
+            owner_git.trust(self.session, self.state, 'HEAD')
+        self.assertEqual('trust_required', caught.exception.code)
+        self.assertIn('-Existing repository instructions', caught.exception.details['diff'])
+
+    def test_initial_local_edit_is_not_inherited_from_base(self):
+        (self.root / 'AGENTS.md').write_text('Local replacement\n')
+        with self.assertRaises(ApiError) as caught:
+            owner_git.trust(self.session, self.state, 'HEAD')
+        self.assertEqual('trust_required', caught.exception.code)
+        self.assertNotIn('trusted_snapshot', self.state)
+
+    def test_initial_pr_configuration_change_requires_confirmation(self):
+        (self.root / 'AGENTS.md').write_text('PR replacement\n')
+        self.git('commit', '-qam', 'Change instructions')
+        self.state['metadata']['headRefOid'] = self.git('rev-parse', 'HEAD').stdout.strip()
+        with self.assertRaises(ApiError) as caught:
+            owner_git.trust(self.session, self.state, 'HEAD')
+        self.assertEqual('trust_required', caught.exception.code)
+        self.assertIn('AGENTS.md', caught.exception.details['paths'])
+
+    def test_initial_ignored_file_still_requires_confirmation(self):
+        (self.root / '.git/info/exclude').write_text('CLAUDE.local.md\n')
+        (self.root / 'CLAUDE.local.md').write_text('Local instructions\n')
+        with self.assertRaises(ApiError) as caught:
+            owner_git.trust(self.session, self.state, 'HEAD')
+        self.assertEqual(['CLAUDE.local.md'], caught.exception.details['paths'])
 
 
 if __name__ == "__main__":

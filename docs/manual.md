@@ -706,8 +706,10 @@ new fix fast-forwards a clean owner worktree when it is behind the fetched PR
 head, with progress messages showing both commits. Unfinished batches at that
 HEAD, Git operations in progress, local changes, and genuinely diverged branches
 require inspection in Magit. Ignored files are never overwritten by this update.
-Agent-configuration changes return
-the exact diff and a token for explicit `--trust-agent-config TOKEN`.
+A new session automatically accepts tracked agent configuration unchanged from
+the PR merge base. PR-introduced configuration, local or ignored additions, and
+changes after that initial baseline return the exact diff and a token for explicit
+`--trust-agent-config TOKEN`.
 
 Skipping an unrelated task cannot authorize replay of an interrupted fixer.
 Adopting partial work preserves the initial fix step for tasks that have not yet

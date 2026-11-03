@@ -1,6 +1,7 @@
 """Writable owner worktrees and immutable trees without touching the real index."""
 import base64
 import difflib
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -321,6 +322,21 @@ def trust(session, state, tree, approval=None):
     paths = sorted(p for p in changed if p and agent_configuration(p))
     configuration = configuration_snapshot(state["worktree"])
     previous = state.get("trusted_configuration")
+    if previous is None and not state.get("trusted_snapshot") and not approval:
+        # A new session inherits unchanged, tracked base configuration. Local,
+        # ignored, linked, or PR-modified instructions still need confirmation.
+        previous = {}
+        for path, value in configuration.items():
+            entry = session.repo.git("ls-tree", base.stdout.strip(), "--", path).stdout
+            fields = entry.split("\t", 1)[0].split()
+            if len(fields) != 3 or fields[0] not in ("100644", "100755") or fields[1] != "blob" or value["link"] is not None:
+                continue
+            mode, _, oid = fields
+            content = base64.b64decode(value["content"])
+            blob = b"blob " + str(len(content)).encode("ascii") + b"\0" + content
+            actual = hashlib.new("sha256" if len(oid) == 64 else "sha1", blob).hexdigest()
+            if actual == oid and bool(value["mode"] & 0o111) == (mode == "100755"):
+                previous[path] = value
     # Source edits do not revoke trust in unchanged configuration content.
     token = digest({"version": 2, "configuration": configuration,
                     "tree_entries": [(p, session.repo.git("ls-tree", tree, "--", p).stdout) for p in paths]})
