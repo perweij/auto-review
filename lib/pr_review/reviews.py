@@ -147,9 +147,21 @@ class Review(Store):
             pr = self.repo.metadata()
             head = self.repo.git('rev-parse', self.repo.head_ref).stdout.strip()
             base = self.repo.git('rev-parse', self.repo.base_ref).stdout.strip()
-            if head == pr['headRefOid'] and base == pr['baseRefOid'] and branch == pr['baseRefName']:
+            # PR metadata can retain an older baseRefOid after the base branch
+            # advances.  Open reviews use the live branch, so validate it via
+            # Git too; closed reviews deliberately use the recorded commit.
+            expected_base = pr['baseRefOid']
+            if pr['state'] == 'OPEN':
+                ref = 'refs/heads/' + pr['baseRefName']
+                refs = self.repo.git('ls-remote', '--refs', self.repo.remote, ref).stdout.splitlines()
+                expected_base = next((line.split()[0] for line in refs
+                                      if len(line.split()) == 2 and line.split()[1] == ref), None)
+            if head == pr['headRefOid'] and base == expected_base and branch == pr['baseRefName']:
                 break
-            say(f'Warning: PR refs changed during setup (attempt {attempt+1}); refreshing snapshot')
+            say(f'Warning: PR refs changed during setup (attempt {attempt+1}); refreshing snapshot; '
+                f'fetched head={head}, base={base}, base_branch={branch}; '
+                f'metadata head={pr["headRefOid"]}, base={pr["baseRefOid"]}, '
+                f'base_branch={pr["baseRefName"]}, state={pr["state"]}; expected_base={expected_base}')
         else:
             raise ApiError('snapshot_changed', 'Could not establish a consistent snapshot after retry')
         snapshot = dict(head=head, base=base, merge_base=self.repo.git('merge-base', head, base).stdout.strip(), base_branch=branch)

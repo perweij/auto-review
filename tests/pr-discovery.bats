@@ -17,12 +17,13 @@ load helpers/fixture
     done
 }
 
-@test "open PRs still reject metadata that does not match the fetched branch" {
+@test "open PRs use the live base branch when PR metadata retains an older base" {
     export MOCK_PR_BASE_SHA=$BASE
-    git commit --allow-empty -qm 'Base moved during setup'
+    git commit --allow-empty -qm 'Main advanced after PR creation'
     git push -q "$FIXTURE/remote.git" HEAD:refs/heads/main
-    run_review; assert_failure
-    [[ $output == *'Could not establish a consistent snapshot after retry'* ]]
-    [ ! -f "$FIXTURE/stages" ]
-    [ ! -d "$FIXTURE/repo-review-pr-7" ]
+    run_review; assert_success
+    [[ $output != *'PR refs changed during setup'* ]]
+    [ "$(git rev-parse refs/pr-review/7/base)" = "$(git rev-parse HEAD)" ]
+    [ "$(jq -r .snapshot.base "$(run_directory)/manifest.json")" = "$(git rev-parse HEAD)" ]
+    [ ! -f "$FIXTURE/post-count" ]
 }
