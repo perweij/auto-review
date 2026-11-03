@@ -1,0 +1,54 @@
+{
+  "decision": "questions",
+  "summary": "The requirements are clear except for which entries to select when equal dates cross the limit.",
+  "plan": "",
+  "acceptance": [],
+  "questions": [
+    "1. When `--limit N` cuts through entries sharing the same date, should it retain entries appearing earlier or later in the saved ledger order? Both choices respect N, but select different entries on that date."
+  ],
+  "inspected": [
+    {
+      "path": "ledger/cli.py",
+      "finding": "The list command sorts all entries by date ascending, preserving saved order for equal dates. There is no limit option or selection tie-break rule."
+    },
+    {
+      "path": "ledger/store.py",
+      "finding": "Storage preserves entry order; a missing file loads as an empty ledger."
+    },
+    {
+      "path": "tests/test_cli.py",
+      "finding": "Tests cover ascending list output, formatting, add/report behavior, and invalid add input. No equal-date or limit cases exist."
+    },
+    {
+      "path": "README.md",
+      "finding": "Documents CLI usage and the unittest command; provides no additional selection semantics."
+    }
+  ],
+  "decisions": [
+    {
+      "topic": "Limit and output behavior",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "Select up to N most recent entries by date, print oldest first, and preserve existing behavior when --limit is absent."
+    },
+    {
+      "topic": "Invalid limit",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "A non-positive or non-integer limit is a usage error: exit status 2, a message on stderr, and no stdout."
+    },
+    {
+      "topic": "Equal-date selection at the cutoff",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "Existing stable display order does not determine which equal-date entries survive a limit."
+    },
+    {
+      "topic": "Implementation and verification",
+      "kind": "technical",
+      "status": "delegated",
+      "detail": "Parser validation, selection implementation, error-stream handling, and regression test design belong to the implementation harness."
+    }
+  ],
+  "agent_configuration": {}
+}

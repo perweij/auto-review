@@ -1,0 +1,131 @@
+{
+  "treatment": "strengthened",
+  "task": "category-case",
+  "status": "planned",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 102,
+          "title": "Report categories case-insensitively",
+          "body": "Categories are case-sensitive, so `Food` and `food` are reported separately by `ledger report`. Treat categories case-insensitively in the category report: combine them into one total shown in lower case. Stored entries must keep the category exactly as entered, `ledger list` keeps showing it as entered, and existing data files must keep working.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/102"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 42.902,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 91520,
+        "cached_input_tokens": 71168,
+        "output_tokens": 1792,
+        "reasoning_output_tokens": 110,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "plan",
+      "response": {
+        "decision": "plan",
+        "summary": "Combine category totals under lowercase labels while preserving original categories in storage and list output.",
+        "plan": "## Outcome\nCategory reports combine categories using their lowercase labels. Entries for `Food` (12.50), `food` (5.00), and `FOOD` (-2.50) produce one line: `food: 15.00`.\n\n## Scope\nApply this behavior to `ledger report` and `ledger report --by category`, including the shared category aggregation function. Preserve stored categories, list output, monthly reports, and the existing JSON format. No data migration or new command-line options are required.\n\n## Approach\nBuild on `ledger/report.py` and its existing sorted category aggregation. `ledger/cli.py` already routes both default and explicit category reports through that function. Keep normalization confined to report grouping and labels; retain the existing entry model and storage behavior. Internal implementation and test structure are delegated to the coding harness.\n\n## Assumptions and resolved choices\n- Lowercase category labels define the groups: categories with the same lowercase value share one total, displayed using that value.\n- Preserve the existing alphabetical ordering, integer-cent arithmetic, and amount formatting.\n- Categories remain exactly as entered in saved entries and `ledger list`; reporting must not mutate entries or rewrite data files.\n- Existing JSON files work directly, including files containing mixed-case categories. Monthly report behavior remains unchanged.\n\n## Acceptance scenarios\n- The mixed-case entries in the outcome example produce exactly `food: 15.00` in both default and explicit category reports.\n- A category entered only as `Rent` appears as `rent`; distinct lowercase labels remain separate and sorted.\n- Adding mixed-case categories preserves their exact spelling in JSON and subsequent list output. Reporting leaves the file contents unchanged.\n- A preexisting JSON file containing case variants reports a combined lowercase total without migration and still lists the original spellings.\n- Existing lowercase-only totals, empty reports, refunds, monthly totals, and list ordering continue to behave as before.\n\n## Verification\nExtend the existing unittest coverage in `tests/test_report.py`, `tests/test_cli.py`, and, where useful, `tests/test_store.py` to demonstrate grouping, lowercase display, preservation, and compatibility. Run `python -m unittest discover -s tests`. During planning, a read-only in-memory reproduction confirmed that the current implementation reports `FOOD`, `Food`, and `food` separately; the test suite was inspected but not executed.",
+        "acceptance": [
+          "Default and explicit category reports combine case variants into one lowercase category total.",
+          "Category report ordering, cent arithmetic, and amount formatting remain unchanged.",
+          "Stored entries and list output preserve categories exactly as entered; reporting does not modify the data file.",
+          "Existing JSON files work without migration, and monthly reports retain existing behavior.",
+          "Regression coverage passes with `python -m unittest discover -s tests`."
+        ],
+        "questions": [],
+        "inspected": [
+          {
+            "path": "ledger/report.py",
+            "finding": "Category aggregation currently uses exact category strings and sorts the resulting keys. An in-memory reproduction returned three separate totals for FOOD, Food, and food."
+          },
+          {
+            "path": "ledger/cli.py",
+            "finding": "Category is the default report mode; explicit category reports use the same function. Add stores the supplied spelling, and list prints it unchanged in date order."
+          },
+          {
+            "path": "ledger/models.py",
+            "finding": "Frozen Entry objects retain category strings verbatim through serialization and deserialization."
+          },
+          {
+            "path": "ledger/store.py",
+            "finding": "Storage reads and writes a JSON list of entries without normalizing categories; a missing file loads as an empty ledger."
+          },
+          {
+            "path": "tests/test_report.py",
+            "finding": "Tests cover lowercase category totals, monthly totals, and amount formatting, but do not cover mixed-case grouping."
+          },
+          {
+            "path": "tests/test_cli.py",
+            "finding": "Tests cover add/list/report behavior, date ordering, monthly reports, and invalid input."
+          },
+          {
+            "path": "tests/test_store.py",
+            "finding": "Tests cover storage round trips and missing files."
+          },
+          {
+            "path": "README.md",
+            "finding": "Documents JSON storage and the verification command `python -m unittest discover -s tests`."
+          }
+        ],
+        "decisions": [
+          {
+            "topic": "Category grouping and display",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue requires grouping by lowercase category labels and displaying one lowercase total for each group."
+          },
+          {
+            "topic": "Storage and existing data compatibility",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue explicitly requires preserving entered spelling in storage and list output and supporting existing files without migration or report-time rewrites."
+          },
+          {
+            "topic": "Existing report conventions",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "Retain sorted category labels, integer-cent arithmetic, amount formatting, and monthly report behavior established by the code and tests."
+          },
+          {
+            "topic": "Implementation and regression test design",
+            "kind": "technical",
+            "status": "delegated",
+            "detail": "The harness chooses the internal implementation and test structure within the existing shared aggregation, CLI, and unittest patterns."
+          }
+        ]
+      }
+    }
+  ],
+  "clarification_turns": 0,
+  "document": "## Outcome\nCategory reports combine categories using their lowercase labels. Entries for `Food` (12.50), `food` (5.00), and `FOOD` (-2.50) produce one line: `food: 15.00`.\n\n## Scope\nApply this behavior to `ledger report` and `ledger report --by category`, including the shared category aggregation function. Preserve stored categories, list output, monthly reports, and the existing JSON format. No data migration or new command-line options are required.\n\n## Approach\nBuild on `ledger/report.py` and its existing sorted category aggregation. `ledger/cli.py` already routes both default and explicit category reports through that function. Keep normalization confined to report grouping and labels; retain the existing entry model and storage behavior. Internal implementation and test structure are delegated to the coding harness.\n\n## Assumptions and resolved choices\n- Lowercase category labels define the groups: categories with the same lowercase value share one total, displayed using that value.\n- Preserve the existing alphabetical ordering, integer-cent arithmetic, and amount formatting.\n- Categories remain exactly as entered in saved entries and `ledger list`; reporting must not mutate entries or rewrite data files.\n- Existing JSON files work directly, including files containing mixed-case categories. Monthly report behavior remains unchanged.\n\n## Acceptance scenarios\n- The mixed-case entries in the outcome example produce exactly `food: 15.00` in both default and explicit category reports.\n- A category entered only as `Rent` appears as `rent`; distinct lowercase labels remain separate and sorted.\n- Adding mixed-case categories preserves their exact spelling in JSON and subsequent list output. Reporting leaves the file contents unchanged.\n- A preexisting JSON file containing case variants reports a combined lowercase total without migration and still lists the original spellings.\n- Existing lowercase-only totals, empty reports, refunds, monthly totals, and list ordering continue to behave as before.\n\n## Verification\nExtend the existing unittest coverage in `tests/test_report.py`, `tests/test_cli.py`, and, where useful, `tests/test_store.py` to demonstrate grouping, lowercase display, preservation, and compatibility. Run `python -m unittest discover -s tests`. During planning, a read-only in-memory reproduction confirmed that the current implementation reports `FOOD`, `Food`, and `food` separately; the test suite was inspected but not executed.\n\nAcceptance criteria:\n- Default and explicit category reports combine case variants into one lowercase category total.\n- Category report ordering, cent arithmetic, and amount formatting remain unchanged.\n- Stored entries and list output preserve categories exactly as entered; reporting does not modify the data file.\n- Existing JSON files work without migration, and monthly reports retain existing behavior.\n- Regression coverage passes with `python -m unittest discover -s tests`.",
+  "questions": [],
+  "document_sha256": "2cbac764f99932ccb33d3a63fee27cdf03fd0882f0be41b18025be6b3fb5869d",
+  "planner_hashes": {
+    "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+    "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+    "prompts/issue-specification.txt": "9509f799fdf1dadb6002760b0a0aef6ecce1e2ba98d0155e0a9d404881f0f985"
+  },
+  "answers_supplied": false,
+  "elapsed_seconds": 42.902,
+  "usage": {
+    "status": "reported",
+    "calls": 1,
+    "calls_unavailable": 0,
+    "input_tokens": 91520,
+    "cached_input_tokens": 71168,
+    "output_tokens": 1792,
+    "reasoning_output_tokens": 110,
+    "provider_cost_usd": "unavailable"
+  },
+  "comments": []
+}

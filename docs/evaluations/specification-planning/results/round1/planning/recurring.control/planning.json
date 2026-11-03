@@ -1,0 +1,41 @@
+{
+  "treatment": "control",
+  "task": "recurring",
+  "status": "planning_failed",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 103,
+          "title": "Support monthly recurring entries",
+          "body": "Add recurring entries. `ledger add` gets `--repeat monthly --until YYYY-MM-DD`: the entry becomes a recurring series that produces one entry per month on the same day of the month, from its date through the `--until` date inclusive. When a month is shorter than the day of the month, use that month's last day (so a series starting on the 31st yields Feb 28 or 29). `ledger list` and both reports include the generated entries, and each generated entry has the amount, category and note of the original. The data file must record the series itself rather than one stored row per generated entry, and data files written before this change must keep loading and extending unchanged. A `--repeat` value other than `monthly`, a missing or invalid `--until`, or an `--until` before the start date is a usage error (exit status 2, message on stderr) that leaves the data file untouched.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/103"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "status": "failed",
+      "error": "model_failed: Provider failed; inspect <OUT>/planning/recurring.control/turn-1/fa43dc67c7c145b0b5cc835494ab45d1.",
+      "elapsed_seconds": 1130.089,
+      "usage": {
+        "status": "unavailable"
+      }
+    }
+  ],
+  "clarification_turns": 0,
+  "document": null,
+  "questions": [],
+  "answers_supplied": false,
+  "elapsed_seconds": 1130.094,
+  "usage": {
+    "status": "unavailable",
+    "calls": 1,
+    "calls_unavailable": 1
+  },
+  "comments": []
+}

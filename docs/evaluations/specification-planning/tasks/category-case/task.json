@@ -1,0 +1,20 @@
+{
+  "id": "category-case",
+  "size": "small",
+  "number": 102,
+  "title": "Report categories case-insensitively",
+  "body": "Categories are case-sensitive, so `Food` and `food` are reported separately by `ledger report`. Treat categories case-insensitively in the category report: combine them into one total shown in lower case. Stored entries must keep the category exactly as entered, `ledger list` keeps showing it as entered, and existing data files must keep working.",
+  "answers": null,
+  "acceptance": [
+    "A1_combined_lowercase_totals",
+    "A2_storage_keeps_original_case",
+    "A3_list_shows_original_case",
+    "A4_library_totals_sorted_lowercase",
+    "A5_monthly_unchanged"
+  ],
+  "regression": [
+    "R1_legacy_file_reports",
+    "original_tests_pass",
+    "repository_tests_pass"
+  ]
+}

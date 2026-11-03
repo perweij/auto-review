@@ -1,0 +1,115 @@
+{
+  "id": "recurring.default.strengthened",
+  "pair": "recurring/default",
+  "task": "recurring",
+  "config": "default",
+  "arm": "strengthened",
+  "position": 0,
+  "status": "failed",
+  "planning": {
+    "treatment": "strengthened",
+    "task": "recurring",
+    "status": "unanswered_questions",
+    "clarification_turns": 0,
+    "questions": [
+      [
+        "1. How should `ledger add ... --until YYYY-MM-DD` behave without `--repeat`: reject it with exit 2 and leave the file untouched, create an ordinary entry ignoring the cutoff, or infer monthly recurrence through that date?"
+      ]
+    ],
+    "answers_supplied": false,
+    "elapsed_seconds": 40.428,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 79171,
+      "cached_input_tokens": 54912,
+      "output_tokens": 1412,
+      "reasoning_output_tokens": 378,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "not_started",
+    "stop": "unanswered_questions",
+    "turns": 0,
+    "repair_rounds": 0,
+    "clarification_turns": 0,
+    "elapsed_seconds": 0.0,
+    "usage": {
+      "status": "unavailable",
+      "calls": 0
+    }
+  },
+  "checks": null,
+  "score": {
+    "acceptance_passed": 0,
+    "acceptance_total": 10,
+    "acceptance_coverage": 0.0,
+    "regression_passed": 0,
+    "regression_total": 3,
+    "failed_acceptance": [
+      "A1_month_end_clamped_inclusive_until",
+      "A2_leap_day",
+      "A3_monthly_report_includes_generated",
+      "A4_until_before_start_is_usage_error_without_write",
+      "A5_invalid_repeat_or_until_is_usage_error",
+      "A6_series_stored_compactly",
+      "A7_legacy_file_loads_and_extends",
+      "A8_category_report_includes_generated",
+      "A9_until_equal_to_start_is_one_entry",
+      "A10_note_applies_to_every_generated_entry"
+    ],
+    "failed_regression": [
+      "R1_plain_add_unchanged",
+      "original_tests_pass",
+      "repository_tests_pass"
+    ],
+    "checks_ran": false,
+    "correct": false
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "recurring",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 40.428,
+    "usage": {
+      "status": "partial",
+      "calls": 3,
+      "calls_unavailable": 2,
+      "input_tokens": 79171,
+      "cached_input_tokens": 54912,
+      "output_tokens": 1412,
+      "reasoning_output_tokens": 378,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

@@ -1,0 +1,255 @@
+{
+  "id": "list-limit.economical.strengthened",
+  "pair": "list-limit/economical",
+  "task": "list-limit",
+  "config": "economical",
+  "arm": "strengthened",
+  "position": 1,
+  "status": "completed",
+  "planning": {
+    "treatment": "strengthened",
+    "task": "list-limit",
+    "status": "planned",
+    "clarification_turns": 0,
+    "questions": [],
+    "document_sha256": "5694e1b48a642d6ddeca7eadb9f6d94c2295c3ca16576d6dc66b7f4f19c3384a",
+    "planner_hashes": {
+      "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+      "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+      "prompts/issue-specification.txt": "9509f799fdf1dadb6002760b0a0aef6ecce1e2ba98d0155e0a9d404881f0f985"
+    },
+    "answers_supplied": false,
+    "elapsed_seconds": 50.65,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 69865,
+      "cached_input_tokens": 50432,
+      "output_tokens": 2153,
+      "reasoning_output_tokens": 629,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "turns": 1,
+    "repair_rounds": 0,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 1,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-terra",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=low",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/list-limit.economical.strengthened/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/list-limit.economical.strengthened/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/list-limit.economical.strengthened/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/list-limit.economical.strengthened/turn-1",
+        "elapsed_seconds": 25.865,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 128926,
+          "cached_input_tokens": 108160,
+          "output_tokens": 1827,
+          "reasoning_output_tokens": 28,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented `ledger list --limit N` with positive-integer validation, stable chronological selection, help text, and documentation. Added regression coverage for ordering, ties, boundary cases, empty ledgers, and usage errors.",
+          "checks": [
+            "`python -m unittest discover -s tests` passed (10 tests).",
+            "Checked list help and the documented invocation.",
+            "`git diff --check` passed."
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e8f-9cb4-7d71-9e5f-222b752a7d6c",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/list-limit.economical.strengthened/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/list-limit.economical.strengthened/review-1/schema.json",
+          "-o",
+          "<OUT>/work/list-limit.economical.strengthened/review-1/result.json",
+          "--cd",
+          "<OUT>/work/list-limit.economical.strengthened/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/list-limit.economical.strengthened/review-1",
+        "elapsed_seconds": 38.436,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 89826,
+          "cached_input_tokens": 69120,
+          "output_tokens": 1808,
+          "reasoning_output_tokens": 219,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "The implementation satisfies the approved specification. All 10 repository tests and 22 direct CLI checks passed, covering ordering, tie cutoffs, limits, usage errors, data selection, formatting, and report behavior. No specification violations or regressions found.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e90-01d4-7c01-a859-5583478f80fc",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 64.31,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 128926,
+      "cached_input_tokens": 108160,
+      "output_tokens": 1827,
+      "reasoning_output_tokens": 28,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 89826,
+      "cached_input_tokens": 69120,
+      "output_tokens": 1808,
+      "reasoning_output_tokens": 219,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 25.865,
+    "review_elapsed_seconds": 38.436,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "README.md",
+      "ledger/cli.py",
+      "tests/test_cli.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/list-limit.economical.strengthened/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_latest_n_oldest_first": true,
+      "A2_limit_above_count_shows_all": true,
+      "A3_non_positive_or_invalid_is_usage_error": true,
+      "A4_limit_one": true
+    },
+    "regression": {
+      "R1_no_limit_unchanged": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 4,
+    "acceptance_total": 4,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "list-limit",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 114.96,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 288617,
+      "cached_input_tokens": 227712,
+      "output_tokens": 5788,
+      "reasoning_output_tokens": 876,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "treatment": "strengthened",
+  "task": "recurring",
+  "status": "planned",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 103,
+          "title": "Support monthly recurring entries",
+          "body": "Add recurring entries. `ledger add` gets `--repeat monthly --until YYYY-MM-DD`: the entry becomes a recurring series that produces one entry per month on the same day of the month, from its date through the `--until` date inclusive. When a month is shorter than the day of the month, use that month's last day (so a series starting on the 31st yields Feb 28 or 29). `ledger list` and both reports include the generated entries, and each generated entry has the amount, category and note of the original. The data file must record the series itself rather than one stored row per generated entry, and data files written before this change must keep loading and extending unchanged. A `--repeat` value other than `monthly`, a missing or invalid `--until`, or an `--until` before the start date is a usage error (exit status 2, message on stderr) that leaves the data file untouched.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/103"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 62.922,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 89982,
+        "cached_input_tokens": 69888,
+        "output_tokens": 2658,
+        "reasoning_output_tokens": 459,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "plan",
+      "response": {
+        "decision": "plan",
+        "summary": "Add monthly recurring series with inclusive end dates, compact persistence, and generated entries in listing and reports. All 7 existing tests pass.",
+        "plan": "## Outcome\n`ledger add DATE AMOUNT CATEGORY [NOTE] --repeat monthly --until YYYY-MM-DD` creates a recurring series. Listing and both reports include every occurrence from the start date through the end date inclusive, with the original amount, category, and note.\n\nOccurrences retain the original day of the month, clamped to each month's last day. For example, a series starting on 2026-01-31 and ending on 2026-03-31 produces January 31, February 28, and March 31.\n\n## Scope\nInclude recurring additions, persistence, listing, category reports, monthly reports, documentation, and relevant tests. Support only monthly recurrence. Editing, deleting, and other recurrence frequencies are excluded.\n\n## Approach\nBuild on the existing argparse CLI, `Entry` model, JSON storage, and report functions. Preserve the existing command syntax and output conventions for ordinary entries. Persist series definitions and make their occurrences available consistently to listing and reports. The internal representation, storage extension, and expansion boundary are implementation choices, subject to the compatibility requirements below.\n\n## Interfaces and defaults\nRecurrence is opt-in through `--repeat monthly`, which requires `--until` containing a valid calendar date in YYYY-MM-DD form. Ordinary additions without recurrence options continue creating one entry. The existing `--data`, `LEDGER_DATA`, and default data-path behavior remains unchanged.\n\n## Errors and compatibility\nAn unsupported repeat value, missing or invalid end date for a recurring addition, or end date before the start date returns status 2 and a diagnostic on stderr. These failures leave an existing data file byte-for-byte unchanged and do not create a missing data file.\n\nExisting JSON-list data files remain readable and extendable. Preserve their ordinary entries, including negative amounts and omitted notes. Saving after loading a recurring series, including when appending an ordinary entry, must preserve the series definition without materializing its occurrences into stored rows.\n\n## Assumptions and resolved choices\n- Each series includes its start date exactly once. An end date equal to the start date yields one occurrence.\n- Every month derives its occurrence from the original start day; February clamping does not shift subsequent months to the 28th or 29th.\n- The end date is an inclusive cutoff on occurrence dates. A month contributes no occurrence if its calculated date falls after that cutoff.\n- Listing and reports include the complete bounded series, including future occurrences, without a current-date cutoff.\n- Generated entries use the existing listing format and chronological ordering. Both reports preserve their existing grouping, sorted keys, and amount formatting.\n- Recurrence is optional, and older data remains usable for ordinary and recurring additions.\n- The specified recurrence validation failures are usage errors and must not modify persistence.\n\n## Acceptance scenarios\n- A January 31 series through March 31 produces January 31, February 28, and March 31 in a non-leap year; the corresponding leap-year case produces February 29.\n- A January 31 series ending March 30 includes January and February only. An end date equal to the start includes exactly one entry.\n- A series crosses December into January correctly, and future occurrences appear in listing and reports.\n- Mixed ordinary entries and multiple series appear once per occurrence in chronological listing; category and monthly reports total those same occurrences. Amounts, categories, notes, and refunds are preserved.\n- Persisted data records each series compactly. Reloading, listing, reporting, and later additions neither duplicate occurrences nor replace the series with generated rows.\n- A legacy JSON list, including an entry without a note, loads and accepts further ordinary and recurring additions without losing its entries.\n- Unsupported repeat values, missing or malformed end dates, impossible calendar dates, and end dates before the start all produce status 2 and stderr diagnostics while preserving existing file bytes or leaving an absent file absent.\n- Existing ordinary add, list, report, storage round-trip, and missing-file behavior continues to pass.\n\n## Verification\nExtend the CLI, storage, and report tests with the acceptance scenarios, checking actual persisted JSON for compact series storage and file contents before and after rejected additions. Exercise usage errors through the command-line entry point as appropriate to verify exit status and stderr. Run `python -B -m unittest discover -s tests`. The inspected baseline passes all 7 tests.",
+        "acceptance": [
+          "Monthly occurrences use the original day with month-end clamping and an inclusive end-date cutoff.",
+          "Listing and both reports include every generated occurrence with the original amount, category, and note.",
+          "Series persist compactly and survive reloads and subsequent additions without duplication or flattening.",
+          "Legacy data files remain readable and extendable, and ordinary entry behavior remains compatible.",
+          "Specified invalid recurrence inputs return status 2 with stderr diagnostics and leave the data file untouched.",
+          "The existing test suite and added recurrence, persistence, compatibility, and error scenarios pass."
+        ],
+        "questions": [],
+        "inspected": [
+          {
+            "path": "README.md",
+            "finding": "Documents ordinary additions, listing, reports, data-path selection, and the unittest command."
+          },
+          {
+            "path": "ledger/cli.py",
+            "finding": "Defines add/list/report commands, validates ordinary additions, sorts listing by date, and selects category or monthly totals. Recurrence options are absent."
+          },
+          {
+            "path": "ledger/models.py",
+            "finding": "Immutable Entry stores date, integer cents, category, and optional note; missing persisted notes default to an empty string."
+          },
+          {
+            "path": "ledger/store.py",
+            "finding": "Loads JSON lists into entries, treats missing files as empty, and saves through a temporary file and replacement. No series representation exists."
+          },
+          {
+            "path": "ledger/report.py",
+            "finding": "Aggregates entries by category or calendar month with sorted keys and shared signed-cents formatting."
+          },
+          {
+            "path": "ledger/__main__.py",
+            "finding": "Exits with the return status from cli.main, providing the process-level validation boundary."
+          },
+          {
+            "path": "tests/test_cli.py",
+            "finding": "Covers ordinary additions, chronological listing, both reports, and invalid input."
+          },
+          {
+            "path": "tests/test_store.py",
+            "finding": "Covers missing-file loading and ordinary entry round trips, including refunds."
+          },
+          {
+            "path": "tests/test_report.py",
+            "finding": "Covers signed formatting and category/monthly totals. The full existing suite passed: 7 tests using python -B -m unittest discover -s tests."
+          }
+        ],
+        "decisions": [
+          {
+            "topic": "Monthly occurrence dates and bounds",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue specifies monthly dates anchored to the original day, month-end clamping, and inclusive bounds. Equal bounds yield one occurrence; a cutoff before a later occurrence excludes it."
+          },
+          {
+            "topic": "Generated entry visibility and output",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue requires all generated occurrences in listing and both reports with copied entry fields. Existing formatting, ordering, and grouping conventions apply, including to future occurrences within the bounds."
+          },
+          {
+            "topic": "Persistence and legacy compatibility",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue requires series definitions rather than stored occurrence rows and continued loading and extension of legacy files. Ordinary additions remain the default, and subsequent saves must preserve series."
+          },
+          {
+            "topic": "Recurrence validation",
+            "kind": "product",
+            "status": "resolved",
+            "detail": "The issue specifies status 2, stderr diagnostics, and untouched persistence for unsupported repeat values, missing or invalid end dates, and end dates before the start."
+          },
+          {
+            "topic": "Series model, storage schema, and expansion boundary",
+            "kind": "technical",
+            "status": "delegated",
+            "detail": "The harness chooses internal representation and integration structure while preserving compact persistence, legacy compatibility, and consistent consumer behavior."
+          },
+          {
+            "topic": "Validation integration and test structure",
+            "kind": "technical",
+            "status": "delegated",
+            "detail": "The harness chooses parser integration, diagnostic wording, technical repairs, and test organization to demonstrate the specified observable behavior."
+          }
+        ]
+      }
+    }
+  ],
+  "clarification_turns": 0,
+  "document": "## Outcome\n`ledger add DATE AMOUNT CATEGORY [NOTE] --repeat monthly --until YYYY-MM-DD` creates a recurring series. Listing and both reports include every occurrence from the start date through the end date inclusive, with the original amount, category, and note.\n\nOccurrences retain the original day of the month, clamped to each month's last day. For example, a series starting on 2026-01-31 and ending on 2026-03-31 produces January 31, February 28, and March 31.\n\n## Scope\nInclude recurring additions, persistence, listing, category reports, monthly reports, documentation, and relevant tests. Support only monthly recurrence. Editing, deleting, and other recurrence frequencies are excluded.\n\n## Approach\nBuild on the existing argparse CLI, `Entry` model, JSON storage, and report functions. Preserve the existing command syntax and output conventions for ordinary entries. Persist series definitions and make their occurrences available consistently to listing and reports. The internal representation, storage extension, and expansion boundary are implementation choices, subject to the compatibility requirements below.\n\n## Interfaces and defaults\nRecurrence is opt-in through `--repeat monthly`, which requires `--until` containing a valid calendar date in YYYY-MM-DD form. Ordinary additions without recurrence options continue creating one entry. The existing `--data`, `LEDGER_DATA`, and default data-path behavior remains unchanged.\n\n## Errors and compatibility\nAn unsupported repeat value, missing or invalid end date for a recurring addition, or end date before the start date returns status 2 and a diagnostic on stderr. These failures leave an existing data file byte-for-byte unchanged and do not create a missing data file.\n\nExisting JSON-list data files remain readable and extendable. Preserve their ordinary entries, including negative amounts and omitted notes. Saving after loading a recurring series, including when appending an ordinary entry, must preserve the series definition without materializing its occurrences into stored rows.\n\n## Assumptions and resolved choices\n- Each series includes its start date exactly once. An end date equal to the start date yields one occurrence.\n- Every month derives its occurrence from the original start day; February clamping does not shift subsequent months to the 28th or 29th.\n- The end date is an inclusive cutoff on occurrence dates. A month contributes no occurrence if its calculated date falls after that cutoff.\n- Listing and reports include the complete bounded series, including future occurrences, without a current-date cutoff.\n- Generated entries use the existing listing format and chronological ordering. Both reports preserve their existing grouping, sorted keys, and amount formatting.\n- Recurrence is optional, and older data remains usable for ordinary and recurring additions.\n- The specified recurrence validation failures are usage errors and must not modify persistence.\n\n## Acceptance scenarios\n- A January 31 series through March 31 produces January 31, February 28, and March 31 in a non-leap year; the corresponding leap-year case produces February 29.\n- A January 31 series ending March 30 includes January and February only. An end date equal to the start includes exactly one entry.\n- A series crosses December into January correctly, and future occurrences appear in listing and reports.\n- Mixed ordinary entries and multiple series appear once per occurrence in chronological listing; category and monthly reports total those same occurrences. Amounts, categories, notes, and refunds are preserved.\n- Persisted data records each series compactly. Reloading, listing, reporting, and later additions neither duplicate occurrences nor replace the series with generated rows.\n- A legacy JSON list, including an entry without a note, loads and accepts further ordinary and recurring additions without losing its entries.\n- Unsupported repeat values, missing or malformed end dates, impossible calendar dates, and end dates before the start all produce status 2 and stderr diagnostics while preserving existing file bytes or leaving an absent file absent.\n- Existing ordinary add, list, report, storage round-trip, and missing-file behavior continues to pass.\n\n## Verification\nExtend the CLI, storage, and report tests with the acceptance scenarios, checking actual persisted JSON for compact series storage and file contents before and after rejected additions. Exercise usage errors through the command-line entry point as appropriate to verify exit status and stderr. Run `python -B -m unittest discover -s tests`. The inspected baseline passes all 7 tests.\n\nAcceptance criteria:\n- Monthly occurrences use the original day with month-end clamping and an inclusive end-date cutoff.\n- Listing and both reports include every generated occurrence with the original amount, category, and note.\n- Series persist compactly and survive reloads and subsequent additions without duplication or flattening.\n- Legacy data files remain readable and extendable, and ordinary entry behavior remains compatible.\n- Specified invalid recurrence inputs return status 2 with stderr diagnostics and leave the data file untouched.\n- The existing test suite and added recurrence, persistence, compatibility, and error scenarios pass.",
+  "questions": [],
+  "document_sha256": "a33250e5dc43dca70e17bbcdbb91156f102b5ff7918b477a6af0ae713ea15b5d",
+  "planner_hashes": {
+    "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+    "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+    "prompts/issue-specification.txt": "9509f799fdf1dadb6002760b0a0aef6ecce1e2ba98d0155e0a9d404881f0f985"
+  },
+  "answers_supplied": false,
+  "elapsed_seconds": 62.923,
+  "usage": {
+    "status": "reported",
+    "calls": 1,
+    "calls_unavailable": 0,
+    "input_tokens": 89982,
+    "cached_input_tokens": 69888,
+    "output_tokens": 2658,
+    "reasoning_output_tokens": 459,
+    "provider_cost_usd": "unavailable"
+  },
+  "comments": []
+}

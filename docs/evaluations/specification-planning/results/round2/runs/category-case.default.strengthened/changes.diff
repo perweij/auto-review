@@ -1,0 +1,115 @@
+diff --git a/ledger/report.py b/ledger/report.py
+index e54c38e..8c2394e 100644
+--- a/ledger/report.py
++++ b/ledger/report.py
+@@ -9,7 +9,8 @@ def format_cents(cents):
+ def totals_by_category(entries):
+     totals = {}
+     for entry in entries:
+-        totals[entry.category] = totals.get(entry.category, 0) + entry.amount_cents
++        category = entry.category.lower()
++        totals[category] = totals.get(category, 0) + entry.amount_cents
+     return dict(sorted(totals.items()))
+ 
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..68efcff 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,5 @@
+ import io
++import json
+ import os
+ import tempfile
+ import unittest
+@@ -30,3 +31,53 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_mixed_case_add_report_and_list_preserve_categories(self):
++        for date, amount, category in [
++            ("2026-01-05", "12.50", "Food"),
++            ("2026-01-03", "5.00", "food"),
++            ("2026-02-01", "-2.50", "FOOD"),
++        ]:
++            self.assertEqual((0, "", ""), self.run_cli("add", date, amount, category))
++
++        with open(self.data, "rb") as stream:
++            original = stream.read()
++        self.assertEqual(["Food", "food", "FOOD"], [item["category"] for item in json.loads(original)])
++        for arguments in [("report",), ("report", "--by", "category")]:
++            with self.subTest(arguments=arguments):
++                self.assertEqual((0, "food: 15.00\n", ""), self.run_cli(*arguments))
++                with open(self.data, "rb") as stream:
++                    self.assertEqual(original, stream.read())
++        self.assertEqual(
++            (0, "2026-01-03       5.00 food\n2026-01-05      12.50 Food\n2026-02-01      -2.50 FOOD\n", ""),
++            self.run_cli("list"),
++        )
++        self.assertEqual((0, "2026-01: 17.50\n2026-02: -2.50\n", ""), self.run_cli("report", "--by", "month"))
++
++    def test_preexisting_mixed_case_json_needs_no_migration(self):
++        original = b'''[
++  {"date":"2026-02-01","amount_cents":3000,"category":"Rent"},
++  {"date":"2026-01-05","amount_cents":1250,"category":"Food","note":"lunch"},
++  {"date":"2026-01-20","amount_cents":500,"category":"food"},
++  {"date":"2026-01-21","amount_cents":-250,"category":"FOOD"},
++  {"date":"2026-01-22","amount_cents":-5,"category":"Books"}
++]'''
++        with open(self.data, "wb") as stream:
++            stream.write(original)
++
++        for arguments in [("report",), ("report", "--by", "category")]:
++            with self.subTest(arguments=arguments):
++                self.assertEqual((0, "books: -0.05\nfood: 15.00\nrent: 30.00\n", ""), self.run_cli(*arguments))
++        self.assertEqual(
++            (0, "2026-01-05      12.50 Food lunch\n2026-01-20       5.00 food\n2026-01-21      -2.50 FOOD\n2026-01-22      -0.05 Books\n2026-02-01      30.00 Rent\n", ""),
++            self.run_cli("list"),
++        )
++        self.assertEqual((0, "2026-01: 14.95\n2026-02: 30.00\n", ""), self.run_cli("report", "--by", "month"))
++        with open(self.data, "rb") as stream:
++            self.assertEqual(original, stream.read())
++
++    def test_empty_reports(self):
++        for arguments in [("report",), ("report", "--by", "category"), ("report", "--by", "month")]:
++            with self.subTest(arguments=arguments):
++                self.assertEqual((0, "", ""), self.run_cli(*arguments))
++        self.assertFalse(os.path.exists(self.data))
+diff --git a/tests/test_report.py b/tests/test_report.py
+index 92be1d7..17cb573 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -13,5 +13,32 @@ class ReportTest(unittest.TestCase):
+     def test_totals_by_category(self):
+         self.assertEqual({"food": 1750, "rent": 3000}, report.totals_by_category(ENTRIES))
+ 
++    def test_category_totals_lowercase_combine_and_sort_without_mutating_entries(self):
++        entries = [
++            Entry("2026-02-01", 3000, "Rent"),
++            Entry("2026-01-05", 1250, "Food"),
++            Entry("2026-01-20", 500, "food"),
++            Entry("2026-01-21", -250, "FOOD"),
++            Entry("2026-01-22", -5, "Books"),
++        ]
++        original_categories = [entry.category for entry in entries]
++
++        self.assertEqual(
++            [("books", -5), ("food", 1500), ("rent", 3000)],
++            list(report.totals_by_category(entries).items()),
++        )
++        self.assertEqual(original_categories, [entry.category for entry in entries])
++        self.assertEqual(
++            {"2026-01": 1495, "2026-02": 3000}, report.monthly_totals(entries)
++        )
++
++    def test_category_groups_use_lowercase_labels(self):
++        entries = [Entry("2026-01-01", 100, "Straße"), Entry("2026-01-01", 200, "STRASSE")]
++        self.assertEqual({"strasse": 200, "straße": 100}, report.totals_by_category(entries))
++
++    def test_empty_reports(self):
++        self.assertEqual({}, report.totals_by_category([]))
++        self.assertEqual({}, report.monthly_totals([]))
++
+     def test_monthly_totals(self):
+         self.assertEqual({"2026-01": 1750, "2026-02": 3000}, report.monthly_totals(ENTRIES))

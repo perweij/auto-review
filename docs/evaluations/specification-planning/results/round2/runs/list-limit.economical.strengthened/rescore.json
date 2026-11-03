@@ -1,0 +1,26 @@
+{
+  "checks": {
+    "acceptance": {
+      "A1_latest_n_oldest_first": true,
+      "A2_limit_above_count_shows_all": true,
+      "A3_non_positive_or_invalid_is_usage_error": true,
+      "A4_limit_one": true
+    },
+    "regression": {
+      "R1_no_limit_unchanged": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 4,
+    "acceptance_total": 4,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  }
+}

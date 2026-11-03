@@ -10,8 +10,8 @@ from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
 from .issue_planning import assess_issue
-from . import issue_resources
-from .issue_writes import Writes
+from . import issue_resources, specification
+from .issue_writes import Writes, comment_marker
 
 
 def resolve(request):
@@ -235,6 +235,39 @@ class Workflow:
         self.clean(path, state.get('planning_head', state.get('bootstrap_sha', state['planning_base'])))
         return path
 
+    def specification_path(self, revision):
+        return self.path / 'specifications' / f'revision-{revision}.md'
+
+    def plan_comment(self, revision, document, published=False):
+        """Approval comment. With ``published`` return only the text added around the document."""
+        body = (f'## Plan revision {revision}\n\n{document}\n\nApprove with `/fix-issue approve {revision}` '
+                f'or `fix-issue -i {self.state["issue"]} --approve {revision}`.')
+        if published:
+            return body + '\n\n' + comment_marker(self.state['id'], 'plan:' + str(revision))
+        return body
+
+    def document(self, plan=None):
+        """The verified canonical document and locator of a plan revision.
+
+        Plans saved before canonical documents existed are materialized from their
+        exact approved ``body``; nothing is strengthened or rewritten.
+        """
+        plan = plan or self.state['plan']
+        key = str(plan['revision'])
+        records = self.state.setdefault('specifications', {})
+        current = specification.description(plan['body'])
+        if current['digest'] != plan.get('digest', current['digest']):
+            raise ApiError('specification_modified', 'The saved plan no longer matches its approved digest; approve a new revision.')
+        record = records.get(key)
+        if record is None:
+            path = self.specification_path(plan['revision'])
+            specification.write(path, plan['body'])
+            record = records[key] = specification.locator(plan['revision'], path, current, origin='saved-plan')
+            self.save()
+        elif record['digest'] != current['digest']:
+            raise ApiError('specification_modified', 'The saved plan differs from its canonical document; approve a new revision.')
+        return specification.read(record['path'], record), record
+
     def plan(self):
         self.writes.reconcile()
         state, facts = self.state, self.facts
@@ -285,9 +318,14 @@ class Workflow:
                 state.pop('approval', None)
             elif decision == 'plan':
                 revision = state.get('plan', {}).get('revision', 0) + 1
-                body = assessment['plan'] + '\n\nAcceptance criteria:\n' + '\n'.join('- ' + a for a in assessment['acceptance'])
+                body = specification.render(assessment['plan'], assessment['acceptance'])
+                # Never truncate: refuse before any state or document is written.
+                specification.check_size(body, wrapper=self.plan_comment(revision, '', published=True))
+                stored = specification.write(self.specification_path(revision), body)
+                state.setdefault('specifications', {})[str(revision)] = specification.locator(
+                    revision, self.specification_path(revision), stored, origin='planner')
                 state['plan'] = {'revision': revision, 'body': body, 'text': assessment['plan'], 'acceptance': assessment['acceptance'],
-                                 'digest': digest(body), 'published_at': now()}
+                                 'digest': stored['digest'], 'published_at': now()}
                 state.update(phase='waiting', waiting='approval')
                 state.pop('approval', None)
                 self.save()
@@ -309,7 +347,9 @@ class Workflow:
             return False
         if state.get('plan'):
             plan = state['plan']
-            receipt = self.writes.comment(f'## Plan revision {plan["revision"]}\n\n{plan["body"]}\n\nApprove with `/fix-issue approve {plan["revision"]}` or `fix-issue -i {state["issue"]} --approve {plan["revision"]}`.', 'plan:' + str(plan['revision']))
+            # The approval comment shows the verified canonical document, never a second copy.
+            document, _ = self.document()
+            receipt = self.writes.comment(self.plan_comment(plan['revision'], document), 'plan:' + str(plan['revision']))
             plan['published_at'] = receipt['created_at']
             self.save()
         if state['phase'] in ('complete', 'blocked'):
@@ -325,6 +365,7 @@ class Workflow:
         if not approved and not self.request.get('yolo'):
             state.update(phase='waiting', waiting='approval')
             return False
+        self.document()
         state['approval'] = {'revision': state['plan']['revision'], 'digest': state['plan']['digest'],
                              'receipt': approved, 'yolo': bool(not approved), 'at': now()}
         state['approved_input'] = input_digest(facts, state)
@@ -411,8 +452,10 @@ class Workflow:
                 data['settings'] = desired
             owner.save(data)
         state['owner'] = str(owner.path)
+        _, canonical = self.document()
         state['issue_item'] = owner_import.from_issue(owner, state['plan'], self.facts['issue'], state['id'],
-            {'issue_body': self.facts['issue']['body'], 'answers': semantic_comments(self.facts['comments'], state)})
+            {'issue_body': self.facts['issue']['body'], 'answers': semantic_comments(self.facts['comments'], state)},
+            canonical)
         self.save()
         return owner
 
@@ -687,6 +730,8 @@ def dispatch(request):
                 'independence_failed': 'The independent reviewer workspace could not be prepared. Fix the workspace problem and resume; the review never runs without its workspace.',
                 'review_checkout_modified': 'A reviewer changed its disposable candidate checkout, so its result was discarded. The live worktree is unchanged and no adoption is needed; resume to rerun in a fresh checkout.',
                 'worktree_changed': 'The worktree differs from the saved execution checkpoint. Inspect and adopt the retained changes before continuing.',
+                'specification_missing': 'The approved specification file is missing. Restore it before execution can continue.',
+                'specification_modified': 'The approved specification no longer matches its approved digest. Restore it or approve a new revision.',
                 'interrupted_task': 'An older interrupted run left unverified changes. Inspect and adopt the retained changes before continuing.',
             }
             if (exc.code in ('automation_failed', 'resource_limit', 'blocked_external') or

@@ -1,0 +1,249 @@
+{
+  "id": "list-limit.economical.control",
+  "pair": "list-limit/economical",
+  "task": "list-limit",
+  "config": "economical",
+  "arm": "control",
+  "position": 0,
+  "status": "completed",
+  "planning": {
+    "treatment": "control",
+    "task": "list-limit",
+    "status": "planned",
+    "clarification_turns": 0,
+    "questions": [],
+    "document_sha256": "fb73827684bc5caf095d443619e7c5d161d35a9ab590440549a8b9d84aa3af13",
+    "answers_supplied": false,
+    "elapsed_seconds": 28.275,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 64476,
+      "cached_input_tokens": 46208,
+      "output_tokens": 708,
+      "reasoning_output_tokens": 176,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "turns": 1,
+    "repair_rounds": 0,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 1,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-terra",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=low",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/list-limit.economical.control/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/list-limit.economical.control/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/list-limit.economical.control/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/list-limit.economical.control/turn-1",
+        "elapsed_seconds": 23.171,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 104843,
+          "cached_input_tokens": 99840,
+          "output_tokens": 1772,
+          "reasoning_output_tokens": 48,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented and documented `ledger list --limit N`, preserving stable ascending date order and unlimited behavior.",
+          "checks": [
+            "`python -m unittest discover -s tests` passed: 10 tests.",
+            "`git diff --check` passed."
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e89-8998-7bb2-b517-b8a339ae0d5c",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/list-limit.economical.control/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/list-limit.economical.control/review-1/schema.json",
+          "-o",
+          "<OUT>/work/list-limit.economical.control/review-1/result.json",
+          "--cd",
+          "<OUT>/work/list-limit.economical.control/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/list-limit.economical.control/review-1",
+        "elapsed_seconds": 27.46,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 74149,
+          "cached_input_tokens": 53632,
+          "output_tokens": 1203,
+          "reasoning_output_tokens": 195,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "The implementation meets the approved specification. All 10 repository tests and 32 independent CLI checks passed, covering stable date ordering, limit boundaries, empty ledgers, unchanged unlimited output, and usage errors. No files were modified.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e89-e41e-7c83-b4f5-6cf8202283f4",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 50.635,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 104843,
+      "cached_input_tokens": 99840,
+      "output_tokens": 1772,
+      "reasoning_output_tokens": 48,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 74149,
+      "cached_input_tokens": 53632,
+      "output_tokens": 1203,
+      "reasoning_output_tokens": 195,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 23.171,
+    "review_elapsed_seconds": 27.46,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "README.md",
+      "ledger/cli.py",
+      "tests/test_cli.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/list-limit.economical.control/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_latest_n_oldest_first": true,
+      "A2_limit_above_count_shows_all": true,
+      "A3_non_positive_or_invalid_is_usage_error": true,
+      "A4_limit_one": true
+    },
+    "regression": {
+      "R1_no_limit_unchanged": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 4,
+    "acceptance_total": 4,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "effort": "low"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "list-limit",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 78.91,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 243468,
+      "cached_input_tokens": 199680,
+      "output_tokens": 3683,
+      "reasoning_output_tokens": 419,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

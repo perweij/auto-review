@@ -3,6 +3,7 @@ import copy
 
 from .common import ApiError, digest, locked, now, read_json, require_text
 from .repository import Repository
+from . import specification as canonical
 from .state import Session
 from .owner_state import OwnerSession, open_session
 from .owner_completion import manual_triage
@@ -101,8 +102,13 @@ def from_review(request):
         return {"owner": owner.view(state), "items": [key for key in selected if key not in completed]}
 
 
-def from_issue(owner, plan, issue, workflow, context=None):
-    """Import a real approved issue task, retaining immutable source provenance."""
+def from_issue(owner, plan, issue, workflow, context=None, document=None):
+    """Import a real approved issue task, retaining immutable source provenance.
+
+    ``document`` locates the workflow's canonical specification. Its exact bytes are
+    copied beside the Owner session and the copy's location is recorded outside the
+    item fingerprint: moving or re-verifying a document never restarts execution.
+    """
     with locked(owner.execution_lock):
         state = owner.load()
         key = "issue:" + digest(workflow)[:32]
@@ -112,8 +118,21 @@ def from_issue(owner, plan, issue, workflow, context=None):
                 "comments": [{"id": key, "author": "Approved issue plan", "body": plan["body"]}],
                 "actionable": True, "unread": False, "queued": True, "triage": "attention", "attention": True}
         item["fingerprint"] = digest(item)
+        located = None
+        if document is not None:
+            if document["digest"] != canonical.fingerprint(plan["body"]):
+                raise ApiError("specification_modified", "The canonical document does not match the approved plan; approve a new revision.")
+            copied = canonical.transport(document["path"], owner.path / "specifications" / f"{workflow}-r{plan['revision']}.md",
+                                         document, what="Owner specification copy")
+            located = canonical.locator(plan["revision"], copied, {k: document[k] for k in ("digest", "sha256", "bytes")},
+                                        origin=document.get("origin", "planner"))
         if old and old['fingerprint'] == item['fingerprint']:
+            if located and old['source'].get('specification') != located:
+                old['source']['specification'] = located
+                owner.save(state)
             return key
+        if located:
+            item["source"]["specification"] = located
         if old:
             item['versions'] = old.get('versions', []) + [copy.deepcopy({k: v for k, v in old.items() if k != 'versions'})]
             state['feedback'] = [i for i in state['feedback'] if i['key'] != key]

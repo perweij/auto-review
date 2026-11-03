@@ -1,0 +1,23 @@
+{
+  "id": "export",
+  "size": "complex",
+  "number": 104,
+  "title": "Add `ledger export` for other tools",
+  "body": "People want to get their ledger data out for use in other tools. Add an `export` command to the ledger CLI.",
+  "answers": "Maintainer answers: (1) Formats: CSV and JSON, chosen with a required `--format csv|json`; no default. (2) Content: the entries themselves, not totals, sorted by date, with fields date, amount, category and note. The amount is the same two-decimal text `ledger list` shows (refunds negative, e.g. `-3.00`). (3) Destination: standard output by default; `--output FILE` writes the file instead and prints nothing to standard output; if FILE already exists the command fails with exit status 2 unless `--force` is given. (4) Errors: an unknown format, a missing `--format`, or a path that cannot be written is exit status 2 with a one-line message on stderr, never a traceback. (5) Shapes: CSV has the header row `date,amount,category,note` and quotes fields as needed; JSON is an object `{\"version\": 1, \"entries\": [...]}` whose entries use the same four field names.",
+  "acceptance": [
+    "A1_csv_stdout_header_sorted_decimals",
+    "A2_json_object_with_version_and_entries",
+    "A3_output_file_replaces_stdout",
+    "A4_existing_file_refused_unless_force",
+    "A5_unknown_format_usage_error",
+    "A6_unwritable_path_usage_error",
+    "A7_format_is_required",
+    "A8_csv_quoting"
+  ],
+  "regression": [
+    "R1_report_still_works",
+    "original_tests_pass",
+    "repository_tests_pass"
+  ]
+}

@@ -1,0 +1,300 @@
+diff --git a/README.md b/README.md
+index b677f4e..3a86682 100644
+--- a/README.md
++++ b/README.md
+@@ -7,3 +7,12 @@ A small expense ledger. Entries live in a JSON file (`--data` or `$LEDGER_DATA`)
+     python -m ledger report --by month
+ 
+ Tests: `python -m unittest discover -s tests`.
++
++To add a monthly series, supply its start date and inclusive end date:
++
++    python -m ledger add 2026-01-31 12.50 food "monthly lunch" --repeat monthly --until 2026-04-30
++
++Each month uses the start day, or the last day of a shorter month. Listing and
++both reports include each occurrence. The JSON file stores one record for the
++series with `repeat` and `until` fields, rather than storing generated entries;
++existing one-time records retain their ordinary format.
+diff --git a/ledger/cli.py b/ledger/cli.py
+index c74e0ac..6c4f904 100644
+--- a/ledger/cli.py
++++ b/ledger/cli.py
+@@ -1,11 +1,13 @@
+ """Command line: ``python -m ledger add|list|report``."""
+ import argparse
+ import datetime
++import contextlib
++import re
+ import os
+ import sys
+ 
+ from . import report, store
+-from .models import Entry
++from .models import Entry, expand_entries
+ 
+ 
+ def parse_amount(text):
+@@ -23,6 +25,8 @@ def build_parser():
+     add.add_argument("amount")
+     add.add_argument("category")
+     add.add_argument("note", nargs="?", default="")
++    add.add_argument("--repeat")
++    add.add_argument("--until")
+     commands.add_parser("list")
+     summary = commands.add_parser("report")
+     summary.add_argument("--by", choices=["category", "month"], default="category")
+@@ -32,21 +36,34 @@ def build_parser():
+ def main(argv=None, out=None, err=None):
+     out, err = out or sys.stdout, err or sys.stderr
+     try:
+-        args = build_parser().parse_args(argv)
++        with contextlib.redirect_stderr(err):
++            args = build_parser().parse_args(argv)
+     except SystemExit as exit_:
+         return exit_.code
+     entries = store.load(args.data)
+     if args.command == "add":
+         try:
+-            datetime.date.fromisoformat(args.date)
++            start = datetime.date.fromisoformat(args.date)
+             cents = parse_amount(args.amount)
+         except ValueError:
+             print("error: invalid date or amount", file=err)
+             return 2
+-        store.save(args.data, entries + [Entry(args.date, cents, args.category, args.note)])
++        if args.repeat is not None or args.until is not None:
++            try:
++                if args.repeat != "monthly" or args.until is None:
++                    raise ValueError
++                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.until):
++                    raise ValueError
++                end = datetime.date.fromisoformat(args.until)
++                if end < start:
++                    raise ValueError
++            except ValueError:
++                print("error: invalid recurrence or end date", file=err)
++                return 2
++        store.save(args.data, entries + [Entry(args.date, cents, args.category, args.note, args.repeat, args.until)])
+         return 0
+     if args.command == "list":
+-        for entry in sorted(entries, key=lambda e: e.date):
++        for entry in sorted(expand_entries(entries), key=lambda e: e.date):
+             print(f"{entry.date} {report.format_cents(entry.amount_cents):>10} {entry.category} {entry.note}".rstrip(), file=out)
+         return 0
+     totals = report.totals_by_category(entries) if args.by == "category" else report.monthly_totals(entries)
+diff --git a/ledger/models.py b/ledger/models.py
+index e382fba..e37775e 100644
+--- a/ledger/models.py
++++ b/ledger/models.py
+@@ -1,4 +1,6 @@
+-"""Ledger entries."""
++"""Ledger entries and recurrence expansion."""
++import calendar
++import datetime
+ from dataclasses import dataclass, asdict
+ 
+ 
+@@ -8,10 +10,42 @@ class Entry:
+     amount_cents: int  # positive spending, negative refund
+     category: str
+     note: str = ""
++    repeat: str = None
++    until: str = None
+ 
+     def to_dict(self):
+-        return asdict(self)
++        value = asdict(self)
++        if self.repeat is None:
++            del value["repeat"]
++            del value["until"]
++        return value
+ 
+     @classmethod
+     def from_dict(cls, value):
+-        return cls(value["date"], int(value["amount_cents"]), value["category"], value.get("note", ""))
++        return cls(value["date"], int(value["amount_cents"]), value["category"],
++                   value.get("note", ""), value.get("repeat"), value.get("until"))
++
++
++def expand_entries(entries):
++    """Yield one-time entries for each occurrence, anchored to the start day."""
++    for entry in entries:
++        if entry.repeat is None:
++            yield entry
++            continue
++        if entry.repeat != "monthly":
++            raise ValueError("unsupported recurrence frequency")
++        start = datetime.date.fromisoformat(entry.date)
++        end = datetime.date.fromisoformat(entry.until)
++        year, month = start.year, start.month
++        while True:
++            day = min(start.day, calendar.monthrange(year, month)[1])
++            occurrence = datetime.date(year, month, day)
++            if occurrence > end:
++                break
++            yield Entry(occurrence.isoformat(), entry.amount_cents, entry.category, entry.note)
++            if year == 9999 and month == 12:
++                break
++            if month == 12:
++                year, month = year + 1, 1
++            else:
++                month += 1
+diff --git a/ledger/report.py b/ledger/report.py
+index e54c38e..a1f6786 100644
+--- a/ledger/report.py
++++ b/ledger/report.py
+@@ -1,5 +1,7 @@
+ """Totals over ledger entries."""
+ 
++from .models import expand_entries
++
+ 
+ def format_cents(cents):
+     sign = "-" if cents < 0 else ""
+@@ -8,14 +10,14 @@ def format_cents(cents):
+ 
+ def totals_by_category(entries):
+     totals = {}
+-    for entry in entries:
++    for entry in expand_entries(entries):
+         totals[entry.category] = totals.get(entry.category, 0) + entry.amount_cents
+     return dict(sorted(totals.items()))
+ 
+ 
+ def monthly_totals(entries):
+     totals = {}
+-    for entry in entries:
++    for entry in expand_entries(entries):
+         month = entry.date[:7]
+         totals[month] = totals.get(month, 0) + entry.amount_cents
+     return dict(sorted(totals.items()))
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..4e13688 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,5 @@
+ import io
++import json
+ import os
+ import tempfile
+ import unittest
+@@ -30,3 +31,47 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_recurring_entries_list_report_and_storage(self):
++        self.assertEqual(0, self.run_cli("add", "2024-01-31", "12.50", "food", "lunch",
++                                         "--repeat", "monthly", "--until", "2024-03-31")[0])
++        with open(self.data, "rb") as stream:
++            before = stream.read()
++        self.assertEqual(0, self.run_cli("list")[0])
++        self.assertEqual(0, self.run_cli("report")[0])
++        self.assertEqual(0, self.run_cli("report", "--by", "month")[0])
++        with open(self.data, "rb") as stream:
++            self.assertEqual(before, stream.read())
++        self.assertEqual(0, self.run_cli("add", "2024-02-01", "3", "rent")[0])
++        self.assertEqual(["2024-01-31      12.50 food lunch", "2024-02-01       3.00 rent",
++                          "2024-02-29      12.50 food lunch", "2024-03-31      12.50 food lunch"],
++                         self.run_cli("list")[1].splitlines())
++        self.assertEqual("food: 37.50\nrent: 3.00\n", self.run_cli("report")[1])
++        self.assertEqual("2024-01: 12.50\n2024-02: 15.50\n2024-03: 12.50\n",
++                         self.run_cli("report", "--by", "month")[1])
++        with open(self.data) as stream:
++            records = json.load(stream)
++        self.assertEqual(2, len(records))
++        self.assertEqual("monthly", records[0]["repeat"])
++        self.assertNotIn("repeat", records[1])
++
++    def test_invalid_recurrence_preserves_existing_or_missing_file(self):
++        invalid = [("--repeat", "weekly", "--until", "2026-02-01"),
++                   ("--repeat", "monthly"), ("--repeat", "monthly", "--until", "bad"),
++                   ("--repeat", "monthly", "--until", "20260201"),
++                   ("--repeat", "monthly", "--until", "2025-12-31"),
++                   ("--until", "2026-02-01"), ("--repeat",)]
++        for existing in (False, True):
++            if existing:
++                with open(self.data, "wb") as stream:
++                    stream.write(b'[]\n')
++            for flags in invalid:
++                with self.subTest(existing=existing, flags=flags):
++                    code, _, err = self.run_cli("add", "2026-01-01", "5", "food", *flags)
++                    self.assertEqual(2, code)
++                    self.assertTrue(err)
++                    if existing:
++                        with open(self.data, "rb") as stream:
++                            self.assertEqual(b'[]\n', stream.read())
++                    else:
++                        self.assertFalse(os.path.exists(self.data))
+diff --git a/tests/test_models.py b/tests/test_models.py
+new file mode 100644
+index 0000000..1386d7f
+--- /dev/null
++++ b/tests/test_models.py
+@@ -0,0 +1,22 @@
++import unittest
++
++from ledger.models import Entry, expand_entries
++
++
++class RecurrenceTest(unittest.TestCase):
++    def test_month_end_leap_year_and_original_day(self):
++        entry = Entry("2024-01-31", 1250, "food", "lunch", "monthly", "2024-04-30")
++        occurrences = list(expand_entries([entry]))
++        self.assertEqual(["2024-01-31", "2024-02-29", "2024-03-31", "2024-04-30"],
++                         [item.date for item in occurrences])
++        self.assertTrue(all((item.amount_cents, item.category, item.note) == (1250, "food", "lunch")
++                            for item in occurrences))
++
++    def test_year_transition_non_leap_and_exclusive_next_occurrence(self):
++        entry = Entry("2025-12-31", 1, "x", repeat="monthly", until="2026-03-30")
++        self.assertEqual(["2025-12-31", "2026-01-31", "2026-02-28"],
++                         [item.date for item in expand_entries([entry])])
++
++    def test_maximum_date(self):
++        entry = Entry("9999-12-31", 1, "x", repeat="monthly", until="9999-12-31")
++        self.assertEqual(["9999-12-31"], [item.date for item in expand_entries([entry])])
+diff --git a/tests/test_report.py b/tests/test_report.py
+index 92be1d7..7cd5825 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -15,3 +15,10 @@ class ReportTest(unittest.TestCase):
+ 
+     def test_monthly_totals(self):
+         self.assertEqual({"2026-01": 1750, "2026-02": 3000}, report.monthly_totals(ENTRIES))
++
++    def test_reports_expand_series(self):
++        entries = [Entry("2024-01-31", 100, "food", "", "monthly", "2024-03-31"),
++                   Entry("2024-02-01", -50, "food")]
++        self.assertEqual({"food": 250}, report.totals_by_category(entries))
++        self.assertEqual({"2024-01": 100, "2024-02": 50, "2024-03": 100},
++                         report.monthly_totals(entries))
+diff --git a/tests/test_store.py b/tests/test_store.py
+index d0b0077..e4eadf9 100644
+--- a/tests/test_store.py
++++ b/tests/test_store.py
+@@ -1,4 +1,5 @@
+ import os
++import json
+ import tempfile
+ import unittest
+ 
+@@ -16,3 +17,18 @@ class StoreTest(unittest.TestCase):
+             entries = [Entry("2026-01-05", 1250, "food", "lunch"), Entry("2026-01-06", -300, "food")]
+             store.save(path, entries)
+             self.assertEqual(entries, store.load(path))
++
++    def test_legacy_and_series_round_trip(self):
++        with tempfile.TemporaryDirectory() as directory:
++            path = os.path.join(directory, "l.json")
++            legacy = {"date": "2026-01-01", "amount_cents": 123, "category": "food", "note": "old"}
++            with open(path, "w") as stream:
++                json.dump([legacy], stream)
++            entries = store.load(path)
++            entries.append(Entry("2026-01-31", 500, "rent", "", "monthly", "2026-03-31"))
++            store.save(path, entries)
++            with open(path) as stream:
++                records = json.load(stream)
++            self.assertEqual(legacy, records[0])
++            self.assertEqual(2, len(records))
++            self.assertEqual(entries, store.load(path))

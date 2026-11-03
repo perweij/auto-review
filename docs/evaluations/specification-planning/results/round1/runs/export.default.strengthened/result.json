@@ -1,0 +1,262 @@
+{
+  "id": "export.default.strengthened",
+  "pair": "export/default",
+  "task": "export",
+  "config": "default",
+  "arm": "strengthened",
+  "position": 0,
+  "status": "completed",
+  "planning": {
+    "treatment": "strengthened",
+    "task": "export",
+    "status": "planned",
+    "clarification_turns": 1,
+    "questions": [
+      [
+        "1. Which export format should be supported: CSV with date, amount, category, and note columns (decimal amounts for spreadsheets), JSON using the existing date/amount_cents/category/note schema (integer cents for programs), or both? If both, which should be the default?",
+        "2. Should export include all entries or support filters? Should entries appear chronologically, matching `list`, or in stored order, preserving their current sequence? If filters are needed, specify which.",
+        "3. Should export write only to stdout, allowing shell redirection, or also offer an output-file option? If a file option is required, should an existing destination be replaced or cause an error?"
+      ]
+    ],
+    "document_sha256": "6518eea95e503f5fcafc17afe0e2d504fb3d1c621ec4c112045bc8aa434a5cd7",
+    "answers_supplied": true,
+    "elapsed_seconds": 100.468,
+    "usage": {
+      "status": "reported",
+      "calls": 2,
+      "calls_unavailable": 0,
+      "input_tokens": 143558,
+      "cached_input_tokens": 84480,
+      "output_tokens": 4207,
+      "reasoning_output_tokens": 992,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "turns": 1,
+    "repair_rounds": 0,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 1,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/export.default.strengthened/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/export.default.strengthened/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/export.default.strengthened/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/export.default.strengthened/turn-1",
+        "elapsed_seconds": 127.032,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 152535,
+          "cached_input_tokens": 128768,
+          "output_tokens": 6793,
+          "reasoning_output_tokens": 1254,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented the complete export specification: CSV/JSON serialization, protected file output, one-line errors, documentation, and regression tests. Ready for independent review.",
+          "checks": [
+            "Re-read the full specification and acceptance criteria.",
+            "python -B -m unittest discover -s tests: all 19 tests passed.",
+            "Verified subprocess exit codes and stderr for format and destination errors.",
+            "git diff --check passed."
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e7f-2c95-7533-92f0-f677a3aa8ef3",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/export.default.strengthened/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/export.default.strengthened/review-1/schema.json",
+          "-o",
+          "<OUT>/work/export.default.strengthened/review-1/result.json",
+          "--cd",
+          "<OUT>/work/export.default.strengthened/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/export.default.strengthened/review-1",
+        "elapsed_seconds": 45.207,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 96867,
+          "cached_input_tokens": 85248,
+          "output_tokens": 1875,
+          "reasoning_output_tokens": 380,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "Reviewed the complete specification and candidate changes. All 19 repository tests and independent behavioral checks passed, covering serialization, ordering, text preservation, supplied streams, overwrite protection, and process-level errors. No specification violations or regressions found. No files modified.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e81-1cbf-72a1-a04c-9d512d543428",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 172.242,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 152535,
+      "cached_input_tokens": 128768,
+      "output_tokens": 6793,
+      "reasoning_output_tokens": 1254,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 96867,
+      "cached_input_tokens": 85248,
+      "output_tokens": 1875,
+      "reasoning_output_tokens": 380,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 127.032,
+    "review_elapsed_seconds": 45.207,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "README.md",
+      "ledger/cli.py",
+      "ledger/export.py",
+      "tests/test_export.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/export.default.strengthened/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_csv_stdout_header_sorted_decimals": true,
+      "A2_json_object_with_version_and_entries": true,
+      "A3_output_file_replaces_stdout": true,
+      "A4_existing_file_refused_unless_force": true,
+      "A5_unknown_format_usage_error": true,
+      "A6_unwritable_path_usage_error": true,
+      "A7_format_is_required": true,
+      "A8_csv_quoting": true
+    },
+    "regression": {
+      "R1_report_still_works": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 8,
+    "acceptance_total": 8,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "export",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 272.71,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 392960,
+      "cached_input_tokens": 298496,
+      "output_tokens": 12875,
+      "reasoning_output_tokens": 2626,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

@@ -1,0 +1,84 @@
+diff --git a/ledger/report.py b/ledger/report.py
+index e54c38e..8c2394e 100644
+--- a/ledger/report.py
++++ b/ledger/report.py
+@@ -9,7 +9,8 @@ def format_cents(cents):
+ def totals_by_category(entries):
+     totals = {}
+     for entry in entries:
+-        totals[entry.category] = totals.get(entry.category, 0) + entry.amount_cents
++        category = entry.category.lower()
++        totals[category] = totals.get(category, 0) + entry.amount_cents
+     return dict(sorted(totals.items()))
+ 
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..4e17d2c 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,5 @@
+ import io
++import json
+ import os
+ import tempfile
+ import unittest
+@@ -30,3 +31,35 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_mixed_case_categories_preserved_and_reported(self):
++        for date, amount, category in [("2026-02-01", "12.50", "Food"),
++                                       ("2026-01-02", "5.00", "food"),
++                                       ("2026-01-03", "-2.50", "FOOD"),
++                                       ("2026-01-04", "30", "Rent")]:
++            self.assertEqual(0, self.run_cli("add", date, amount, category)[0])
++        with open(self.data, "rb") as stream:
++            original = stream.read()
++        self.assertEqual(["Food", "food", "FOOD", "Rent"],
++                         [entry["category"] for entry in json.loads(original)])
++        expected = "food: 15.00\nrent: 30.00\n"
++        self.assertEqual(expected, self.run_cli("report")[1])
++        self.assertEqual(expected, self.run_cli("report", "--by", "category")[1])
++        self.assertEqual("2026-01: 32.50\n2026-02: 12.50\n",
++                         self.run_cli("report", "--by", "month")[1])
++        self.assertEqual(["2026-01-02       5.00 food", "2026-01-03      -2.50 FOOD",
++                          "2026-01-04      30.00 Rent", "2026-02-01      12.50 Food"],
++                         self.run_cli("list")[1].splitlines())
++        with open(self.data, "rb") as stream:
++            self.assertEqual(original, stream.read())
++
++    def test_existing_mixed_case_json_needs_no_migration(self):
++        original = b'[{"date":"2026-01-01","amount_cents":1250,"category":"Food"},\n'
++        original += b' {"date":"2026-01-02","amount_cents":500,"category":"FOOD"}]\n'
++        with open(self.data, "wb") as stream:
++            stream.write(original)
++        self.assertEqual("food: 17.50\n", self.run_cli("report")[1])
++        self.assertEqual(["2026-01-01      12.50 Food", "2026-01-02       5.00 FOOD"],
++                         self.run_cli("list")[1].splitlines())
++        with open(self.data, "rb") as stream:
++            self.assertEqual(original, stream.read())
+diff --git a/tests/test_report.py b/tests/test_report.py
+index 92be1d7..ea5dc90 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -13,5 +13,19 @@ class ReportTest(unittest.TestCase):
+     def test_totals_by_category(self):
+         self.assertEqual({"food": 1750, "rent": 3000}, report.totals_by_category(ENTRIES))
+ 
++    def test_categories_are_lowercased_combined_and_sorted(self):
++        entries = [Entry("2026-01-01", 3000, "Rent"),
++                   Entry("2026-01-02", 1250, "Food"),
++                   Entry("2026-01-03", 500, "food"),
++                   Entry("2026-01-04", -250, "FOOD")]
++        self.assertEqual([("food", 1500), ("rent", 3000)],
++                         list(report.totals_by_category(entries).items()))
++        self.assertEqual(["Rent", "Food", "food", "FOOD"],
++                         [entry.category for entry in entries])
++
++    def test_empty_reports(self):
++        self.assertEqual({}, report.totals_by_category([]))
++        self.assertEqual({}, report.monthly_totals([]))
++
+     def test_monthly_totals(self):
+         self.assertEqual({"2026-01": 1750, "2026-02": 3000}, report.monthly_totals(ENTRIES))

@@ -1,0 +1,67 @@
+{
+  "decision": "questions",
+  "summary": "The repository establishes entry fields and stdout output conventions, but leaves the export format and amount representation unspecified.",
+  "plan": "",
+  "acceptance": [],
+  "questions": [
+    "1. Should export produce CSV for spreadsheets, JSON for programmatic use, or support both? If both, which should be the default?",
+    "2. Should exported amounts use integer cents (`amount_cents: 1250`), decimal currency (`amount: 12.50`), or both? Cents preserve the existing storage contract; decimals simplify spreadsheet use."
+  ],
+  "inspected": [
+    {
+      "path": "README.md",
+      "finding": "Documents add, list, report, data-path selection, and the unittest command; contains no export requirements."
+    },
+    {
+      "path": "ledger/cli.py",
+      "finding": "Existing read commands print to stdout. List sorts entries by date; no export command or machine-readable output option exists."
+    },
+    {
+      "path": "ledger/models.py",
+      "finding": "Entries contain date, integer amount_cents, category, and note; missing notes default to an empty string."
+    },
+    {
+      "path": "ledger/store.py",
+      "finding": "Storage is a JSON array of entry objects. Missing files load as an empty ledger."
+    },
+    {
+      "path": "ledger/report.py",
+      "finding": "Existing currency formatting produces two decimal places and supports negative amounts."
+    },
+    {
+      "path": "tests/test_cli.py",
+      "finding": "Covers add/list/report behavior, chronological listing, and invalid input."
+    },
+    {
+      "path": "tests/test_store.py",
+      "finding": "Covers missing-file behavior and storage round trips including refunds."
+    }
+  ],
+  "decisions": [
+    {
+      "topic": "Export format and default",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "CSV, JSON, and supporting both provide materially different interfaces; the issue and repository do not select one."
+    },
+    {
+      "topic": "Exported amount representation",
+      "kind": "product",
+      "status": "unresolved",
+      "detail": "Storage uses integer cents while display uses decimal currency; neither establishes the external export contract."
+    },
+    {
+      "topic": "Output destination",
+      "kind": "product",
+      "status": "resolved",
+      "detail": "Follow existing read-command conventions by writing to stdout, allowing shell redirection."
+    },
+    {
+      "topic": "Implementation structure and testing",
+      "kind": "technical",
+      "status": "delegated",
+      "detail": "The implementation harness selects internal structure and tests once the export contract is settled."
+    }
+  ],
+  "agent_configuration": {}
+}

@@ -7,6 +7,10 @@ from .issue_eligibility import pages
 from .repository import normalize_remote
 
 
+def comment_marker(workflow, key):
+    return f'<!-- fix-issue workflow={workflow} action={digest(key)[:24]} -->'
+
+
 class Writes:
     def __init__(self, repo, state, save, guard):
         self.repo, self.state, self.save, self.guard = repo, state, save, guard
@@ -16,7 +20,7 @@ class Writes:
                                  cwd=self.repo.cwd, input_text=json.dumps(payload)).stdout)
 
     def comment_text(self, body, key):
-        return body + '\n\n' + f'<!-- fix-issue workflow={self.state["id"]} action={digest(key)[:24]} -->'
+        return body + '\n\n' + comment_marker(self.state["id"], key)
 
     def readback(self, key, action):
         """Inspect one saved intent without sending or changing its journal."""

@@ -1,0 +1,256 @@
+{
+  "id": "category-case.default.strengthened",
+  "pair": "category-case/default",
+  "task": "category-case",
+  "config": "default",
+  "arm": "strengthened",
+  "position": 0,
+  "status": "completed",
+  "planning": {
+    "treatment": "strengthened",
+    "task": "category-case",
+    "status": "planned",
+    "clarification_turns": 0,
+    "questions": [],
+    "document_sha256": "2cbac764f99932ccb33d3a63fee27cdf03fd0882f0be41b18025be6b3fb5869d",
+    "planner_hashes": {
+      "lib/pr_review/issue_planning.py": "41a1c2749c17ea60f269006a91f3f581e78b832923cee5c17aebc9bde4647b96",
+      "lib/pr_review/specification.py": "fbf40ce76afbc72ec7e73f0f6e39011cc9bae0fed7bbf444082671a567003139",
+      "prompts/issue-specification.txt": "9509f799fdf1dadb6002760b0a0aef6ecce1e2ba98d0155e0a9d404881f0f985"
+    },
+    "answers_supplied": false,
+    "elapsed_seconds": 42.902,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 91520,
+      "cached_input_tokens": 71168,
+      "output_tokens": 1792,
+      "reasoning_output_tokens": 110,
+      "provider_cost_usd": "unavailable"
+    }
+  },
+  "implementation": {
+    "status": "completed",
+    "config": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "turns": 1,
+    "repair_rounds": 0,
+    "format_corrections": 0,
+    "continuations": 0,
+    "clarification_turns": 0,
+    "review_rounds": 1,
+    "calls": [
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/category-case.default.strengthened/turn-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/category-case.default.strengthened/turn-1/schema.json",
+          "-o",
+          "<OUT>/work/category-case.default.strengthened/turn-1/result.json",
+          "-"
+        ],
+        "directory": "<OUT>/work/category-case.default.strengthened/turn-1",
+        "elapsed_seconds": 33.717,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 92301,
+          "cached_input_tokens": 70912,
+          "output_tokens": 2518,
+          "reasoning_output_tokens": 204,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "status": "ready",
+          "summary": "Implemented the full specification: category reports combine case variants under sorted lowercase labels while preserving stored categories, list output, and monthly behavior.",
+          "checks": [
+            "python -m unittest discover -s tests — all 13 tests passed.",
+            "git diff --check — passed.",
+            "Reviewed the final diff against the complete specification and acceptance criteria."
+          ],
+          "findings": [],
+          "questions": []
+        },
+        "status": "ok",
+        "session_id": "01a19e90-a894-7061-9c16-e78c94a437a3",
+        "kind": "implementation",
+        "report_status": "ready"
+      },
+      {
+        "argv": [
+          "codex",
+          "exec",
+          "-m",
+          "gpt-6.1-sol",
+          "--strict-config",
+          "-c",
+          "model_reasoning_effort=high",
+          "-c",
+          "sandbox_mode=danger-full-access",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "shell_environment_policy.set.TMPDIR=\"<OUT>/work/category-case.default.strengthened/review-1/scratch\"",
+          "-c",
+          "shell_environment_policy.set.PYTHONDONTWRITEBYTECODE=\"1\"",
+          "-c",
+          "shell_environment_policy.set.GIT_OPTIONAL_LOCKS=\"0\"",
+          "--ephemeral",
+          "--json",
+          "--output-schema",
+          "<OUT>/work/category-case.default.strengthened/review-1/schema.json",
+          "-o",
+          "<OUT>/work/category-case.default.strengthened/review-1/result.json",
+          "--cd",
+          "<OUT>/work/category-case.default.strengthened/review-copy-1",
+          "--skip-git-repo-check",
+          "--ignore-rules",
+          "-"
+        ],
+        "directory": "<OUT>/work/category-case.default.strengthened/review-1",
+        "elapsed_seconds": 29.173,
+        "usage": {
+          "status": "reported",
+          "turns_reported": 1,
+          "input_tokens": 79133,
+          "cached_input_tokens": 56832,
+          "output_tokens": 1448,
+          "reasoning_output_tokens": 120,
+          "provider_cost_usd": "unavailable"
+        },
+        "value": {
+          "assessment": "passed",
+          "summary": "The implementation satisfies the approved specification. All 13 repository tests and independent CLI checks passed, confirming lowercase grouping, preserved category spelling, sorting, cent arithmetic, existing JSON compatibility, and unchanged monthly behavior. No files were modified during review.",
+          "findings": []
+        },
+        "status": "ok",
+        "session_id": "01a19e91-2c68-7b12-9eba-f75e0db0acde",
+        "kind": "review",
+        "report_status": "passed"
+      }
+    ],
+    "stop": "passed_review",
+    "elapsed_seconds": 62.894,
+    "usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 92301,
+      "cached_input_tokens": 70912,
+      "output_tokens": 2518,
+      "reasoning_output_tokens": 204,
+      "provider_cost_usd": "unavailable"
+    },
+    "review_usage": {
+      "status": "reported",
+      "calls": 1,
+      "calls_unavailable": 0,
+      "input_tokens": 79133,
+      "cached_input_tokens": 56832,
+      "output_tokens": 1448,
+      "reasoning_output_tokens": 120,
+      "provider_cost_usd": "unavailable"
+    },
+    "implementation_elapsed_seconds": 33.717,
+    "review_elapsed_seconds": 29.173,
+    "hidden_reference_hits": 0,
+    "files_changed": [
+      "ledger/report.py",
+      "tests/test_cli.py",
+      "tests/test_report.py"
+    ],
+    "commits_added": 0,
+    "checkout": "<OUT>/work/category-case.default.strengthened/repo"
+  },
+  "checks": {
+    "acceptance": {
+      "A1_combined_lowercase_totals": true,
+      "A2_storage_keeps_original_case": true,
+      "A3_list_shows_original_case": true,
+      "A4_library_totals_sorted_lowercase": true,
+      "A5_monthly_unchanged": true
+    },
+    "regression": {
+      "R1_legacy_file_reports": true,
+      "original_tests_pass": true,
+      "repository_tests_pass": true
+    }
+  },
+  "score": {
+    "acceptance_passed": 5,
+    "acceptance_total": 5,
+    "acceptance_coverage": 1.0,
+    "regression_passed": 3,
+    "regression_total": 3,
+    "failed_acceptance": [],
+    "failed_regression": [],
+    "checks_ran": true,
+    "correct": true
+  },
+  "settings": {
+    "planning": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "max_clarification_turns": 2
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "limits": {
+      "call_timeout_seconds": 1200,
+      "max_implementation_turns": 5,
+      "max_repair_rounds": 2,
+      "max_run_seconds": 3600
+    },
+    "fixture": "9127cbd1eff6d91c52485180c9bbe81e5441a3281af330592338c4c29fe66423",
+    "task": "category-case",
+    "prompts": {
+      "implement": "e90c747f2e030242a498f425804ed0379ccb4b3755632ca52712f0ba3d1c2d2f",
+      "review": "4918dcd4db824e159d35f1e02191716d30c088bb0fa8b9144c138c043c78f9fe",
+      "transport": "Specification.render + specification.write; one Markdown file per run, handed by path"
+    }
+  },
+  "end_to_end": {
+    "elapsed_seconds": 105.796,
+    "usage": {
+      "status": "reported",
+      "calls": 3,
+      "calls_unavailable": 0,
+      "input_tokens": 262954,
+      "cached_input_tokens": 198912,
+      "output_tokens": 5758,
+      "reasoning_output_tokens": 434,
+      "provider_cost_usd": "unavailable"
+    }
+  }
+}

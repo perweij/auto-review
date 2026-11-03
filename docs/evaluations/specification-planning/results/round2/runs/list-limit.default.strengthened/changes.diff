@@ -1,0 +1,163 @@
+diff --git a/README.md b/README.md
+index b677f4e..1bb987e 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,13 @@ A small expense ledger. Entries live in a JSON file (`--data` or `$LEDGER_DATA`)
+ 
+     python -m ledger add 2026-01-05 12.50 food "lunch"
+     python -m ledger list
++    python -m ledger list --limit 2
+     python -m ledger report --by month
+ 
++`list --limit N` shows the N most recent entries by date, oldest first. N must
++be a positive integer. Without `--limit`, all entries are shown. A limit greater
++than the entry count shows all entries; an empty or missing ledger shows nothing.
++Entries with the same date keep their storage order, with later entries retained
++when the limit cuts through that date.
++
+ Tests: `python -m unittest discover -s tests`.
+diff --git a/ledger/cli.py b/ledger/cli.py
+index c74e0ac..738d752 100644
+--- a/ledger/cli.py
++++ b/ledger/cli.py
+@@ -14,6 +14,16 @@ def parse_amount(text):
+     return int(whole) * 100 + int((fraction + "00")[:2]) * (-1 if whole.startswith("-") else 1)
+ 
+ 
++def positive_integer(text):
++    try:
++        value = int(text)
++    except ValueError:
++        raise argparse.ArgumentTypeError("limit must be a positive integer") from None
++    if value <= 0:
++        raise argparse.ArgumentTypeError("limit must be a positive integer")
++    return value
++
++
+ def build_parser():
+     parser = argparse.ArgumentParser(prog="ledger")
+     parser.add_argument("--data", default=os.environ.get("LEDGER_DATA", "ledger.json"))
+@@ -23,7 +33,11 @@ def build_parser():
+     add.add_argument("amount")
+     add.add_argument("category")
+     add.add_argument("note", nargs="?", default="")
+-    commands.add_parser("list")
++    listing = commands.add_parser("list")
++    listing.add_argument(
++        "--limit", type=positive_integer, metavar="N",
++        help="show the N most recent entries by date, oldest first (default: all entries)",
++    )
+     summary = commands.add_parser("report")
+     summary.add_argument("--by", choices=["category", "month"], default="category")
+     return parser
+@@ -46,7 +60,10 @@ def main(argv=None, out=None, err=None):
+         store.save(args.data, entries + [Entry(args.date, cents, args.category, args.note)])
+         return 0
+     if args.command == "list":
+-        for entry in sorted(entries, key=lambda e: e.date):
++        ordered = sorted(entries, key=lambda e: e.date)
++        if args.limit is not None:
++            ordered = ordered[-args.limit:]
++        for entry in ordered:
+             print(f"{entry.date} {report.format_cents(entry.amount_cents):>10} {entry.category} {entry.note}".rstrip(), file=out)
+         return 0
+     totals = report.totals_by_category(entries) if args.by == "category" else report.monthly_totals(entries)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..1605e4a 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -2,8 +2,11 @@ import io
+ import os
+ import tempfile
+ import unittest
++from contextlib import redirect_stderr, redirect_stdout
++from unittest import mock
+ 
+-from ledger import cli
++from ledger import cli, store
++from ledger.models import Entry
+ 
+ 
+ class CliTest(unittest.TestCase):
+@@ -14,7 +17,8 @@ class CliTest(unittest.TestCase):
+ 
+     def run_cli(self, *argv):
+         out, err = io.StringIO(), io.StringIO()
+-        code = cli.main(["--data", self.data, *argv], out, err)
++        with redirect_stdout(out), redirect_stderr(err):
++            code = cli.main(["--data", self.data, *argv], out, err)
+         return code, out.getvalue(), err.getvalue()
+ 
+     def test_add_list_report(self):
+@@ -25,6 +29,71 @@ class CliTest(unittest.TestCase):
+         self.assertEqual("food: 12.50\nrent: 30.00\n", self.run_cli("report")[1])
+         self.assertEqual("2026-01: 42.50\n", self.run_cli("report", "--by", "month")[1])
+ 
++    def test_list_limit_selects_latest_entries_in_date_order(self):
++        entries = [
++            Entry("2026-01-08", -50, "food", "refund"),
++            Entry("2026-01-03", 3000, "rent"),
++            Entry("2026-01-05", 1250, "food", "lunch"),
++        ]
++        store.save(self.data, entries)
++        with open(self.data, "rb") as stream:
++            original_data = stream.read()
++        rows = [
++            "2026-01-03      30.00 rent\n",
++            "2026-01-05      12.50 food lunch\n",
++            "2026-01-08      -0.50 food refund\n",
++        ]
++        for limit in (1, 2, 3, 10):
++            with self.subTest(limit=limit):
++                self.assertEqual((0, "".join(rows[-limit:]), ""),
++                                 self.run_cli("list", "--limit", str(limit)))
++        self.assertEqual((0, "".join(rows), ""), self.run_cli("list"))
++        with open(self.data, "rb") as stream:
++            self.assertEqual(original_data, stream.read())
++
++    def test_list_limit_preserves_equal_date_order_at_cutoff(self):
++        store.save(self.data, [
++            Entry("2026-01-05", 100, "food", "first"),
++            Entry("2026-01-08", 400, "food", "latest"),
++            Entry("2026-01-05", 200, "food", "second"),
++            Entry("2026-01-03", 500, "food", "oldest"),
++            Entry("2026-01-05", 300, "food", "third"),
++        ])
++        self.assertEqual((0, "2026-01-05       2.00 food second\n"
++                            "2026-01-05       3.00 food third\n"
++                            "2026-01-08       4.00 food latest\n", ""),
++                         self.run_cli("list", "--limit", "3"))
++        self.assertEqual((0, "2026-01-03       5.00 food oldest\n"
++                            "2026-01-05       1.00 food first\n"
++                            "2026-01-05       2.00 food second\n"
++                            "2026-01-05       3.00 food third\n"
++                            "2026-01-08       4.00 food latest\n", ""),
++                         self.run_cli("list"))
++
++    def test_list_limit_empty_and_missing_ledgers(self):
++        self.assertEqual((0, "", ""), self.run_cli("list", "--limit", "2"))
++        self.assertFalse(os.path.exists(self.data))
++        store.save(self.data, [])
++        self.assertEqual((0, "", ""), self.run_cli("list", "--limit", "2"))
++
++    def test_invalid_list_limits_are_usage_errors_before_loading(self):
++        for values in (("0",), ("-1",), ("abc",), ("1.5",), ("",), ()):
++            with self.subTest(values=values), mock.patch.object(store, "load") as load:
++                code, out, err = self.run_cli("list", "--limit", *values)
++                self.assertEqual(2, code)
++                self.assertEqual("", out)
++                self.assertIn("usage:", err)
++                self.assertIn("--limit", err)
++                load.assert_not_called()
++
++    def test_list_help_describes_limit(self):
++        code, out, err = self.run_cli("list", "--help")
++        self.assertEqual(0, code)
++        self.assertEqual("", err)
++        self.assertIn("--limit N", out)
++        self.assertIn("most recent entries", out)
++        self.assertIn("oldest first", out)
++
+     def test_invalid_input_exits_2(self):
+         code, _, err = self.run_cli("add", "2026-13-01", "5", "food")
+         self.assertEqual(2, code)

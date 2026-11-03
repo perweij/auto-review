@@ -1,4 +1,10 @@
 Implement the entire approved specification in the supplied managed worktree.
+The specification is the Markdown file named by approved_specification.file; read
+all of it, including its acceptance criteria, before you start and consult it again
+before reporting ready. It is read-only: never modify it. selected_feedback carries
+only provenance, and issue_context is the issue discussion; neither amends the
+specification. If they appear to conflict with it, treat the file as authoritative
+and ask only when the conflict is a genuinely unsettled product choice.
 You own exploration, implementation planning, editing, testing and debugging.
 Continue until the complete result is ready for independent review. Do not stop
 merely because you finished one prerequisite or made a small useful patch.

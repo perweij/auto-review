@@ -1,0 +1,126 @@
+diff --git a/ledger/report.py b/ledger/report.py
+index e54c38e..8c2394e 100644
+--- a/ledger/report.py
++++ b/ledger/report.py
+@@ -9,7 +9,8 @@ def format_cents(cents):
+ def totals_by_category(entries):
+     totals = {}
+     for entry in entries:
+-        totals[entry.category] = totals.get(entry.category, 0) + entry.amount_cents
++        category = entry.category.lower()
++        totals[category] = totals.get(category, 0) + entry.amount_cents
+     return dict(sorted(totals.items()))
+ 
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..dbb10a7 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,5 @@
+ import io
++import json
+ import os
+ import tempfile
+ import unittest
+@@ -30,3 +31,56 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_mixed_case_categories_are_preserved_and_reported_together(self):
++        for date, amount, category in [
++            ("2026-02-01", "30", "RENT"),
++            ("2026-01-05", "12.50", "Food"),
++            ("2026-01-20", "5", "food"),
++            ("2026-02-02", "-2.50", "FOOD"),
++        ]:
++            self.assertEqual((0, "", ""), self.run_cli("add", date, amount, category))
++
++        with open(self.data, encoding="utf-8") as stream:
++            self.assertEqual(["RENT", "Food", "food", "FOOD"], [item["category"] for item in json.load(stream)])
++        expected_list = (
++            "2026-01-05      12.50 Food\n"
++            "2026-01-20       5.00 food\n"
++            "2026-02-01      30.00 RENT\n"
++            "2026-02-02      -2.50 FOOD\n"
++        )
++        self.assertEqual((0, expected_list, ""), self.run_cli("list"))
++        with open(self.data, "rb") as stream:
++            original_contents = stream.read()
++        for args in [("report",), ("report", "--by", "category")]:
++            with self.subTest(args=args):
++                self.assertEqual((0, "food: 15.00\nrent: 30.00\n", ""), self.run_cli(*args))
++                with open(self.data, "rb") as stream:
++                    self.assertEqual(original_contents, stream.read())
++        self.assertEqual((0, "2026-01: 17.50\n2026-02: 27.50\n", ""), self.run_cli("report", "--by", "month"))
++        self.assertEqual((0, expected_list, ""), self.run_cli("list"))
++
++    def test_reports_read_existing_mixed_case_json_without_rewriting(self):
++        original_contents = (
++            b'[{"date":"2026-02-01","amount_cents":3000,"category":"Rent"},\n'
++            b' {"date":"2026-01-05","amount_cents":1250,"category":"Food"},\n'
++            b' {"date":"2026-01-20","amount_cents":500,"category":"food"},\n'
++            b' {"date":"2026-02-02","amount_cents":-250,"category":"FOOD"}]\n'
++        )
++        with open(self.data, "wb") as stream:
++            stream.write(original_contents)
++
++        for args, expected in [
++            (("report",), "food: 15.00\nrent: 30.00\n"),
++            (("report", "--by", "category"), "food: 15.00\nrent: 30.00\n"),
++            (("report", "--by", "month"), "2026-01: 17.50\n2026-02: 27.50\n"),
++        ]:
++            with self.subTest(args=args):
++                self.assertEqual((0, expected, ""), self.run_cli(*args))
++                with open(self.data, "rb") as stream:
++                    self.assertEqual(original_contents, stream.read())
++        self.assertEqual(
++            (0, "2026-01-05      12.50 Food\n2026-01-20       5.00 food\n"
++             "2026-02-01      30.00 Rent\n2026-02-02      -2.50 FOOD\n", ""),
++            self.run_cli("list"),
++        )
+diff --git a/tests/test_report.py b/tests/test_report.py
+index 92be1d7..eadc9c3 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -13,5 +13,24 @@ class ReportTest(unittest.TestCase):
+     def test_totals_by_category(self):
+         self.assertEqual({"food": 1750, "rent": 3000}, report.totals_by_category(ENTRIES))
+ 
++    def test_totals_by_category_normalizes_case_without_changing_entries(self):
++        entries = [
++            Entry("2026-02-01", 3000, "RENT"),
++            Entry("2026-01-05", 1250, "Food"),
++            Entry("2026-01-20", 500, "food"),
++            Entry("2026-02-02", -250, "FOOD"),
++            Entry("2026-01-01", 100, "Books"),
++        ]
++        original_categories = [entry.category for entry in entries]
++
++        totals = report.totals_by_category(entries)
++
++        self.assertEqual([("books", 100), ("food", 1500), ("rent", 3000)], list(totals.items()))
++        self.assertEqual(original_categories, [entry.category for entry in entries])
++        self.assertEqual({"2026-01": 1850, "2026-02": 2750}, report.monthly_totals(entries))
++
++    def test_totals_by_category_empty(self):
++        self.assertEqual({}, report.totals_by_category([]))
++
+     def test_monthly_totals(self):
+         self.assertEqual({"2026-01": 1750, "2026-02": 3000}, report.monthly_totals(ENTRIES))
+diff --git a/tests/test_store.py b/tests/test_store.py
+index d0b0077..5cf8918 100644
+--- a/tests/test_store.py
++++ b/tests/test_store.py
+@@ -13,6 +13,10 @@ class StoreTest(unittest.TestCase):
+     def test_round_trip(self):
+         with tempfile.TemporaryDirectory() as directory:
+             path = os.path.join(directory, "l.json")
+-            entries = [Entry("2026-01-05", 1250, "food", "lunch"), Entry("2026-01-06", -300, "food")]
++            entries = [
++                Entry("2026-01-05", 1250, "Food", "lunch"),
++                Entry("2026-01-06", -300, "food"),
++                Entry("2026-02-01", 500, "FOOD"),
++            ]
+             store.save(path, entries)
+             self.assertEqual(entries, store.load(path))

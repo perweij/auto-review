@@ -1,0 +1,106 @@
+diff --git a/README.md b/README.md
+index b677f4e..f968a77 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@ A small expense ledger. Entries live in a JSON file (`--data` or `$LEDGER_DATA`)
+ 
+     python -m ledger add 2026-01-05 12.50 food "lunch"
+     python -m ledger list
++    python -m ledger list --limit 10
+     python -m ledger report --by month
+ 
++Use `list --limit N` to show the N most recent entries, in ascending date
++order. N must be a positive integer. Without `--limit`, all entries are shown.
++
+ Tests: `python -m unittest discover -s tests`.
+diff --git a/ledger/cli.py b/ledger/cli.py
+index c74e0ac..9968aad 100644
+--- a/ledger/cli.py
++++ b/ledger/cli.py
+@@ -14,6 +14,16 @@ def parse_amount(text):
+     return int(whole) * 100 + int((fraction + "00")[:2]) * (-1 if whole.startswith("-") else 1)
+ 
+ 
++def positive_integer(text):
++    try:
++        value = int(text)
++    except ValueError:
++        raise argparse.ArgumentTypeError("must be a positive integer")
++    if value < 1:
++        raise argparse.ArgumentTypeError("must be a positive integer")
++    return value
++
++
+ def build_parser():
+     parser = argparse.ArgumentParser(prog="ledger")
+     parser.add_argument("--data", default=os.environ.get("LEDGER_DATA", "ledger.json"))
+@@ -23,7 +33,8 @@ def build_parser():
+     add.add_argument("amount")
+     add.add_argument("category")
+     add.add_argument("note", nargs="?", default="")
+-    commands.add_parser("list")
++    listing = commands.add_parser("list")
++    listing.add_argument("--limit", type=positive_integer, metavar="N")
+     summary = commands.add_parser("report")
+     summary.add_argument("--by", choices=["category", "month"], default="category")
+     return parser
+@@ -46,7 +57,10 @@ def main(argv=None, out=None, err=None):
+         store.save(args.data, entries + [Entry(args.date, cents, args.category, args.note)])
+         return 0
+     if args.command == "list":
+-        for entry in sorted(entries, key=lambda e: e.date):
++        sorted_entries = sorted(entries, key=lambda e: e.date)
++        if args.limit is not None:
++            sorted_entries = sorted_entries[-args.limit:]
++        for entry in sorted_entries:
+             print(f"{entry.date} {report.format_cents(entry.amount_cents):>10} {entry.category} {entry.note}".rstrip(), file=out)
+         return 0
+     totals = report.totals_by_category(entries) if args.by == "category" else report.monthly_totals(entries)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 93093b5..1839159 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,5 +1,7 @@
+ import io
+ import os
++import subprocess
++import sys
+ import tempfile
+ import unittest
+ 
+@@ -30,3 +32,35 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(2, code)
+         self.assertIn("invalid", err)
+         self.assertEqual(2, self.run_cli("add", "2026-01-01", "abc", "food")[0])
++
++    def test_list_limit(self):
++        for date, note in [("2026-01-05", "first"), ("2026-01-03", "old"),
++                           ("2026-01-05", "second"), ("2026-01-04", "middle")]:
++            self.assertEqual(0, self.run_cli("add", date, "1", "food", note)[0])
++        expected = ["2026-01-03       1.00 food old",
++                    "2026-01-04       1.00 food middle",
++                    "2026-01-05       1.00 food first",
++                    "2026-01-05       1.00 food second"]
++        for limit, lines in [(None, expected), (1, expected[-1:]),
++                             (3, expected[-3:]), (4, expected), (8, expected)]:
++            with self.subTest(limit=limit):
++                args = ("list",) if limit is None else ("list", "--limit", str(limit))
++                code, out, err = self.run_cli(*args)
++                self.assertEqual(0, code)
++                self.assertEqual(lines, out.splitlines())
++                self.assertEqual("", err)
++
++    def test_list_limit_empty(self):
++        self.assertEqual((0, "", ""), self.run_cli("list", "--limit", "1"))
++
++    def test_invalid_list_limits(self):
++        for value in [("0",), ("-1",), ("1.5",), ("text",), ()]:
++            with self.subTest(value=value):
++                result = subprocess.run(
++                    [sys.executable, "-m", "ledger", "--data", self.data,
++                     "list", "--limit", *value],
++                    capture_output=True, text=True,
++                )
++                self.assertEqual(2, result.returncode)
++                self.assertEqual("", result.stdout)
++                self.assertIn("error:", result.stderr)

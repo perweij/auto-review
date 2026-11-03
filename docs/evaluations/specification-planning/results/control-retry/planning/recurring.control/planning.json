@@ -1,0 +1,71 @@
+{
+  "treatment": "control",
+  "task": "recurring",
+  "status": "planned",
+  "turns": [
+    {
+      "turn": 1,
+      "context": {
+        "issue": {
+          "number": 103,
+          "title": "Support monthly recurring entries",
+          "body": "Add recurring entries. `ledger add` gets `--repeat monthly --until YYYY-MM-DD`: the entry becomes a recurring series that produces one entry per month on the same day of the month, from its date through the `--until` date inclusive. When a month is shorter than the day of the month, use that month's last day (so a series starting on the 31st yields Feb 28 or 29). `ledger list` and both reports include the generated entries, and each generated entry has the amount, category and note of the original. The data file must record the series itself rather than one stored row per generated entry, and data files written before this change must keep loading and extending unchanged. A `--repeat` value other than `monthly`, a missing or invalid `--until`, or an `--until` before the start date is a usage error (exit status 2, message on stderr) that leaves the data file untouched.",
+          "state": "open",
+          "assignees": [],
+          "html_url": "https://github.com/example/ledger/issues/103"
+        },
+        "comments": [],
+        "previous_plan": null,
+        "execution_blockers": [],
+        "pr_feedback": []
+      },
+      "elapsed_seconds": 29.781,
+      "usage": {
+        "status": "reported",
+        "turns_reported": 1,
+        "input_tokens": 49401,
+        "cached_input_tokens": 31104,
+        "output_tokens": 897,
+        "reasoning_output_tokens": 215,
+        "provider_cost_usd": "unavailable"
+      },
+      "status": "ok",
+      "decision": "plan",
+      "response": {
+        "decision": "plan",
+        "summary": "Add monthly recurring series with backward-compatible storage and generated entries in listings and reports.",
+        "plan": "1. Extend the entry model with optional recurrence metadata. Preserve the existing JSON list format and ordinary entry serialization; load older records without recurrence fields as one-time entries.\n2. Add --repeat monthly and --until YYYY-MM-DD to ledger add. Validate recurrence arguments before saving. Unsupported frequencies, missing or invalid end dates, and end dates before the start return status 2 with a stderr message and leave storage untouched.\n3. Implement shared occurrence expansion anchored to the original day of the month. Clamp each occurrence to its month's last day independently, include dates through the end date, and retain the original amount, category, and note.\n4. Expand series for ledger list and both category and monthly reports. Preserve chronological listing and existing report formatting. Keep stored series unexpanded when adding further entries.\n5. Document usage and storage behavior in README.md. Add focused model, storage, CLI, and report tests, then run python -m unittest discover -s tests.",
+        "acceptance": [
+          "A monthly series includes its start and every subsequent monthly occurrence on or before --until, including an occurrence exactly on that date.",
+          "Month-end clamping handles leap and non-leap February and restores the original day in longer months; year transitions work.",
+          "Generated entries retain the original amount, category, and note and appear correctly alongside one-time entries in list and both reports.",
+          "The data file stores one series record rather than generated rows; reading and reporting do not rewrite it, and later additions do not materialize occurrences.",
+          "Legacy files continue loading and accepting additions without changing the meaning or representation of existing ordinary entries.",
+          "Every specified invalid recurrence input returns status 2, emits a stderr message, preserves existing file bytes, and does not create a missing data file.",
+          "Existing tests and the new recurrence tests pass."
+        ],
+        "questions": []
+      }
+    }
+  ],
+  "clarification_turns": 0,
+  "document": "1. Extend the entry model with optional recurrence metadata. Preserve the existing JSON list format and ordinary entry serialization; load older records without recurrence fields as one-time entries.\n2. Add --repeat monthly and --until YYYY-MM-DD to ledger add. Validate recurrence arguments before saving. Unsupported frequencies, missing or invalid end dates, and end dates before the start return status 2 with a stderr message and leave storage untouched.\n3. Implement shared occurrence expansion anchored to the original day of the month. Clamp each occurrence to its month's last day independently, include dates through the end date, and retain the original amount, category, and note.\n4. Expand series for ledger list and both category and monthly reports. Preserve chronological listing and existing report formatting. Keep stored series unexpanded when adding further entries.\n5. Document usage and storage behavior in README.md. Add focused model, storage, CLI, and report tests, then run python -m unittest discover -s tests.\n\nAcceptance criteria:\n- A monthly series includes its start and every subsequent monthly occurrence on or before --until, including an occurrence exactly on that date.\n- Month-end clamping handles leap and non-leap February and restores the original day in longer months; year transitions work.\n- Generated entries retain the original amount, category, and note and appear correctly alongside one-time entries in list and both reports.\n- The data file stores one series record rather than generated rows; reading and reporting do not rewrite it, and later additions do not materialize occurrences.\n- Legacy files continue loading and accepting additions without changing the meaning or representation of existing ordinary entries.\n- Every specified invalid recurrence input returns status 2, emits a stderr message, preserves existing file bytes, and does not create a missing data file.\n- Existing tests and the new recurrence tests pass.",
+  "questions": [],
+  "document_sha256": "acaa677a39c9755e934bf45c9c7f4a076520430c7d6a6fc97e20440e3b6847f6",
+  "planner_hashes": {
+    "control/issue_planning_control.py": "2af5b46bec4ac2f4cdb9b188c0af9af54a70830a0c29f44c5d866bdf27265014"
+  },
+  "answers_supplied": false,
+  "elapsed_seconds": 29.781,
+  "usage": {
+    "status": "reported",
+    "calls": 1,
+    "calls_unavailable": 0,
+    "input_tokens": 49401,
+    "cached_input_tokens": 31104,
+    "output_tokens": 897,
+    "reasoning_output_tokens": 215,
+    "provider_cost_usd": "unavailable"
+  },
+  "comments": []
+}
