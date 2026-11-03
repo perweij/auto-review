@@ -851,7 +851,9 @@
      (auto-review-test-buffer
       (switch-to-buffer (current-buffer))
       (cl-letf (((symbol-function 'magit-auto-review--call)
-                 (lambda (_request) `((settings . ,(copy-tree (auto-review-test-settings))))))
+                 (lambda (_request)
+                   (magit-auto-review--json
+                    (json-serialize `((settings . ,(auto-review-test-settings)))))))
                 ((symbol-function 'magit-auto-review--async)
                  (lambda (request _event result _error)
                    (funcall result (auto-review-test-models (alist-get 'provider request))) nil))

@@ -131,8 +131,15 @@ When nil, a sole reviewer is used, or Codex for a pair."
           magit-auto-review--setup-owner (current-buffer))
     (when (alist-get 'session resolved)
       (setq magit-auto-review--session (alist-get 'session resolved)))
-    (setf (alist-get 'reviewers magit-auto-review--setup-settings)
-          (vconcat (alist-get 'reviewers magit-auto-review--setup-settings))))
+    ;; The protocol decoder returns lists; JSON arrays must be vectors when
+    ;; these settings are sent back, including the compatibility snapshot.
+    (setf (alist-get 'reviewer_slots magit-auto-review--setup-settings)
+          (vconcat (alist-get 'reviewer_slots magit-auto-review--setup-settings)))
+    (dolist (settings (list magit-auto-review--setup-settings
+                            (alist-get '_compatibility magit-auto-review--setup-settings)))
+      (when (assq 'reviewers settings)
+        (setf (alist-get 'reviewers settings)
+              (vconcat (alist-get 'reviewers settings))))))
   (add-hook 'kill-buffer-hook #'magit-auto-review--setup-stop nil t)
   (magit-auto-review-refresh-choices)
   (transient-setup 'magit-auto-review-setup-menu))

@@ -1,6 +1,10 @@
 #!/bin/bash
+set -euo pipefail
 
-env TERM=xterm-256color emacs --no-site-file -q \
+auto_review_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+export AUTO_REVIEW_DEV_ROOT="$auto_review_root"
+
+exec env TERM=xterm-256color emacs --no-site-file -q \
     -L /opt/emacs-lisp/compat \
     -L /opt/emacs-lisp/cond-let \
     -L /opt/emacs-lisp/llama \
@@ -8,8 +12,8 @@ env TERM=xterm-256color emacs --no-site-file -q \
     -L /opt/emacs-lisp/with-editor/lisp \
     -L /opt/emacs-lisp/transient/lisp \
     -L /opt/emacs-lisp/magit/lisp \
-    -L "$PWD/emacs" \
-    --eval "(setq load-prefer-newer t magit-auto-review-executable \"$PWD/bin/pr-review\")" \
+    -L "$auto_review_root/emacs" \
+    --eval '(setq load-prefer-newer t magit-auto-review-executable (expand-file-name "bin/pr-review" (getenv "AUTO_REVIEW_DEV_ROOT")))' \
     --eval "(load-theme 'deeper-blue t)" \
     --eval "(require 'magit-auto-review)" \
     --eval '(magit-auto-review)'
