@@ -2115,8 +2115,9 @@ class CollectorTest(unittest.TestCase):
             result = self.collect()
         self.assertFalse(result['complete'])
         self.assertEqual('invalid_request', result['error_code'])
-        self.assertIn('-i/--issue selector names a pull request', result['error'])
-        self.assertIn('-p/--pr', result['error'])
+        self.assertIn('#12 in github.com/org/repo is a pull request, not an issue.', result['error'])
+        self.assertIn('-p/--pr 12', result['error'])
+        self.assertIn('linked issue number with -i/--issue', result['error'])
         git.assert_not_called()
 
     def test_real_issue_identity_mismatch_still_blocks(self):
