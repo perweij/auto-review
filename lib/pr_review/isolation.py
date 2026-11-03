@@ -6,6 +6,7 @@ import shutil
 import tempfile
 
 from .common import ApiError, state_root
+from .events import emit
 from .processes import run as process
 from .storage import write_json
 
@@ -131,7 +132,7 @@ class IndependentWorkspace:
             self._initialize(run, stage, provider, inputs)
         except BaseException as exc:
             if self.temp is not None:
-                self.temp.cleanup()
+                self.close()
             if isinstance(exc, OSError):
                 raise ApiError("independence_failed", f"Cannot prepare reviewer workspace: {exc}") from exc
             raise
@@ -237,4 +238,10 @@ class IndependentWorkspace:
                                   self.inputs.output, self.stage)
 
     def close(self):
-        self.temp.cleanup()
+        try:
+            self.temp.cleanup()
+        except OSError as exc:
+            # Container tools can leave storage owned by mapped user IDs. A
+            # disposal failure must not discard verified output or mask errors.
+            emit('progress', message=f'Warning: Could not remove temporary reviewer workspace '
+                 f'{self.temp.name}: {exc}. Leftover files require manual cleanup.')

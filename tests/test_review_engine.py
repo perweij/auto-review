@@ -21,6 +21,26 @@ from pr_review.repository import Repository
 
 
 class SlotTest(EngineFixture):
+    def test_cleanup_permission_error_preserves_completed_reviews(self):
+        from pr_review.isolation import IndependentWorkspace
+        close = IndependentWorkspace.close
+        leftovers = []
+
+        def fail_cleanup(workspace):
+            leftovers.append(workspace.temp)
+            with patch.object(workspace.temp, 'cleanup', side_effect=PermissionError(1, 'denied', 17)):
+                close(workspace)
+
+        try:
+            with patch.object(IndependentWorkspace, 'close', fail_cleanup):
+                result = self.review()
+            self.assertEqual('completed', result.status)
+            self.assertTrue(leftovers)
+            self.assertEqual('completed', self.manifest()['phases']['reviewer-1']['status'])
+        finally:
+            for temporary in leftovers:
+                temporary.cleanup()
+
     def test_two_slots_have_independent_choices_and_a_separate_synthesis_choice(self):
         self.configure([{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
                         {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-a', 'effort': 'low'}],
