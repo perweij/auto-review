@@ -401,20 +401,22 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('base', json.loads(self.flow.file.read_text())['ready_base'])
         self.assertEqual('noop', self.flow.run()['outcome'])
 
-    def test_base_moves_after_review_blocks_readiness_and_reassesses_on_retry(self):
+    def test_base_moves_after_review_publishes_with_notice_and_reassesses_on_retry(self):
         def review_then_move_base(owner):
             self.reviewed_bases.append(self.flow.facts['base'])
+            result = Workflow.push_implementation(self.flow, owner)
             self.f['base'] = 'new-base'
-            return []
+            return result
 
         self.flow.push_implementation.side_effect = review_then_move_base
-        with self.assertRaises(ApiError) as caught:
-            self.flow.run()
-        self.assertEqual('stale_base', caught.exception.code)
-        self.assertNotEqual('ready', self.flow.state['phase'])
-        self.assertNotIn('ready_base', self.flow.state)
+        self.assertEqual('ready', self.flow.run()['outcome'])
+        self.assertEqual('base', self.flow.state['ready_base'])
         self.assertEqual(['base'], self.reviewed_bases)
-
+        notices = [call.args[0] for call in self.flow.writes.comment.call_args_list
+                   if call.args[1].startswith('base-moved:')]
+        self.assertEqual(1, len(notices))
+        self.assertIn('new-base', notices[0])
+        self.assertIn('does not establish integration', notices[0])
         self.flow.push_implementation.side_effect = lambda owner: (self.reviewed_bases.append(self.flow.facts['base']), Workflow.push_implementation(self.flow, owner))[1]
         self.assessment['decision'] = 'continue'
         self.assertEqual('ready', self.flow.run()['outcome'])
@@ -423,20 +425,17 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('new-base', json.loads(self.flow.file.read_text())['ready_base'])
         self.assertEqual('noop', self.flow.run()['outcome'])
 
-    def test_base_moves_during_ready_comment_blocks_readiness(self):
+    def test_base_moves_during_ready_comment_publishes_notice(self):
         def comment(body, key):
             if key.startswith('ready:'):
                 self.f['base'] = 'new-base'
             return {'created_at': '2026-10-30'}
 
         self.flow.writes.comment.side_effect = comment
-        with self.assertRaises(ApiError) as caught:
-            self.flow.run()
-        self.assertEqual('stale_base', caught.exception.code)
+        self.assertEqual('ready', self.flow.run()['outcome'])
         self.assertEqual('base', self.flow.state['assessed_base'])
-        self.assertEqual('new-base', self.flow.facts['base'])
-        self.assertNotIn('ready_base', self.flow.state)
-        self.assertNotEqual('ready', self.flow.state['phase'])
+        self.assertEqual('base', self.flow.state['ready_base'])
+        self.assertTrue(any(c.args[1].startswith('base-moved:') for c in self.flow.writes.comment.call_args_list))
 
 
 
@@ -1839,6 +1838,17 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assertIn(feedback, state['plan']['body'])
         self.assertEqual('approval', dispatch(self.req)['outcome'])
         self.assertEqual(2, len(self.assessments))
+
+    def test_execution_stop_notice_survives_base_movement(self):
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        def fail(*args):
+            self.f['base'] = self.head
+            raise ApiError('invalid_result', 'Malformed acceptance response')
+        with patch.object(Workflow, 'fix', side_effect=fail):
+            result = dispatch({**self.req, 'approve': 1})
+        self.assertEqual('invalid_result', result['error']['code'])
+        self.assertNotIn('notice_error', result['error'])
+        self.assertTrue(any('fix-issue stopped: invalid result' in c['body'] for c in self.f['comments']))
 
     def test_changed_base_preserves_approval_when_plan_remains_valid(self):
         self.assertEqual(2, dispatch(self.req)['exit_code'])

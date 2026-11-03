@@ -174,13 +174,22 @@ class Workflow:
             raise ApiError('preflight_failed', 'Eligibility changed; inspect checks.', checks=eligibility['checks'])
         self.facts = facts
         if self.state.get('phase') in ('approved', 'working') and facts['base'] != self.state.get('assessed_base'):
-            raise ApiError('stale_base', 'PR base changed since assessment; rerun to assess and review the current base.')
+            self.state['base_movement'] = {'assessed': self.state.get('assessed_base'), 'observed': facts['base']}
+            self.save()
         if self.state.get('phase') in ('approved', 'working') and self.state.get('approved_input'):
             if input_digest(facts, self.state) != self.state['approved_input']:
                 raise ApiError('stale_discussion', 'Issue requirements changed during execution; resume to reassess them before publication.')
             if not self.request.get('yolo') and not any(approval_comment(c, self.state) for c in facts['comments']):
                 raise ApiError('stale_approval', 'Approval was removed or changed; approve the current plan again.')
         return facts
+
+    def base_movement_notice(self):
+        movement = self.state.get('base_movement')
+        if not movement:
+            return ''
+        return (f"The base branch advanced from {movement['assessed']} to {movement['observed']} during execution. "
+                "Work was retained against its recorded snapshot; this run does not establish integration "
+                "with the newer base. Check current CI and mergeability before merging.")
 
     def notify_owner_pause(self, batch, failure):
         """Publish an actionable status, not a new requirement or approval request."""
@@ -299,6 +308,7 @@ class Workflow:
             assessment = assess_issue(context, state['configuration'], self.path / 'assessments', path,
                                       state.get('assessment'), self.request.get('trusted_snapshot'))
             self.clean(path, before)
+            state.pop('base_movement', None)
             state.update(assessment=assessment, input_digest=current, assessed_base=facts['base'])
             self.save()
         assessment = state['assessment']
@@ -669,6 +679,8 @@ class Workflow:
             data = owner.load()
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)
+            if self.base_movement_notice():
+                self.writes.comment(self.base_movement_notice(), 'base-moved:' + digest(state['base_movement']))
             state.update(phase='ready', ready_input=input_digest(self.facts, state), ready_head=state['remote_head'],
                          ready_base=state['assessed_base'],
                          ready_feedback=self.feedback_digest(), ready_configuration=digest(state['configuration']))
@@ -738,6 +750,8 @@ def dispatch(request):
                 body = ('fix-issue stopped: ' + exc.code.replace('_', ' ') + '\n\n' + execution_stops.get(exc.code, str(exc))
                         + ('\n\n' + exc.details['summary'] if exc.details.get('summary') else '')
                         + '\n\nCompleted work is retained. This is an execution stop, not a request for plan approval.')
+                if flow.base_movement_notice():
+                    body += '\n\n' + flow.base_movement_notice()
                 for blocker in exc.details.get('verification_blockers', []):
                     body += ('\n\nVerification blocked: ' + blocker['command'] + '\n' + blocker['reason']
                              + '\nManual verification: ' + blocker['manual_command'])

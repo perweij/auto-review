@@ -1224,3 +1224,12 @@ verification evidence before resuming; simply rerunning in the same unsupported
 environment does not resolve the blocker. Demonstrated code defects still warrant
 repairs independently of environment limitations. PR reviews describe these limits
 and manual checks in their coverage notes.
+
+Base-branch movement during implementation does not discard or stop work on the
+recorded candidate. Publication retains the assessed base and posts a notice of
+the newer base; it does not claim integration with that newer commit. Current CI
+and mergeability must be checked before merging. Changes to the PR head, approval,
+or issue requirements retain their existing guards. A later invocation reassesses
+against the current base. Acceptance templates and schemas are captured with the
+process's validator so editing the toolkit during a long run cannot change that
+validator's expected output format halfway through execution.

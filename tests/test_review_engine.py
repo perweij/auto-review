@@ -798,6 +798,12 @@ class FailureTest(EngineFixture):
 
 
 class ValidatorTest(unittest.TestCase):
+    def test_running_validator_keeps_its_schema_when_checkout_changes(self):
+        expected = acceptance.output_schema(KEYS, exact_outcomes=False, sources={'reviewer-1'})
+        with patch('pathlib.Path.read_text', side_effect=AssertionError('live schema read')):
+            actual = acceptance.output_schema(KEYS, exact_outcomes=False, sources={'reviewer-1'})
+        self.assertEqual(expected, actual)
+
     def check(self, value, **kwargs):
         arguments = dict(keys=KEYS, exact_outcomes=False, cases=[], tree='tree', sources={'reviewer-1', 'reviewer-2', 'both', 'new'})
         arguments.update(kwargs)

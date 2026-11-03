@@ -29,8 +29,14 @@ ACCEPTANCE_FIELDS = ('harness_review', 'harness_review_tree', 'review', 'review_
                      'verified_items', 'verified_fingerprints', 'verified_base')
 
 
+# Keep templates and schemas paired with the validator loaded by this process.
+# A long-running review may outlive edits or a pull in the toolkit checkout.
+_PROMPTS = {path.name: path.read_text() for path in (ROOT / 'prompts').iterdir()
+            if path.suffix in ('.txt', '.json')}
+
+
 def prompt(name):
-    return (ROOT / 'prompts' / name).read_text()
+    return _PROMPTS[name]
 
 
 def output_schema(keys, *, exact_outcomes, sources):
