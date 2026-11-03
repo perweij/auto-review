@@ -9,7 +9,7 @@ from .repository import Repository, normalize_remote, repository_name
 from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
-from .issue_planning import assess_issue
+from .issue_planning import assess_issue, planning_policy_digest
 from . import issue_resources, specification
 from .issue_writes import Writes, comment_marker
 
@@ -276,7 +276,7 @@ class Workflow:
         if state.get('execution_blockers') and not state.get('reassessment_generation'):
             state['reassessment_generation'] = 1
             self.save()
-        identity = [input_digest(facts, state), feedback, state['configuration'], facts['base']]
+        identity = [input_digest(facts, state), feedback, state['configuration'], facts['base'], planning_policy_digest()]
         if state.get('reassessment_generation'):
             identity.append(state['reassessment_generation'])
         current = digest(identity)
@@ -299,8 +299,6 @@ class Workflow:
             assessment = assess_issue(context, state['configuration'], self.path / 'assessments', path,
                                       state.get('assessment'), self.request.get('trusted_snapshot'))
             self.clean(path, before)
-            if state.get('plan') and facts['base'] != state.get('assessed_base') and assessment['decision'] == 'continue':
-                assessment.update(decision='plan', plan=state['plan']['text'], acceptance=state['plan']['acceptance'])
             state.update(assessment=assessment, input_digest=current, assessed_base=facts['base'])
             self.save()
         assessment = state['assessment']

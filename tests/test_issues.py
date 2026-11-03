@@ -388,7 +388,7 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('head', saved['ready_head'])
         self.assertEqual('new-base', saved['assessed_base'])
         self.assertEqual('new-base', saved['ready_base'])
-        self.assertEqual(2, saved['plan']['revision'])
+        self.assertEqual(1, saved['plan']['revision'])
         self.assertEqual('noop', self.flow.run()['outcome'])
 
     def test_missing_cached_base_revalidates_readiness(self):
@@ -1814,15 +1814,41 @@ class IssueIntegrationTest(unittest.TestCase):
         data = owner_state.OwnerSession({'session': self.path}).load()
         self.assertEqual('published', data['replies'][0]['status'])
 
-    def test_changed_base_refreshes_plan_and_requires_current_revision(self):
+    def test_updated_planning_policy_reassesses_cached_continue(self):
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        self.assessment['decision'] = 'continue'
+        with patch('pr_review.issues.planning_policy_digest', return_value='updated-policy'):
+            result = dispatch(self.req)
+            self.assertEqual('approval', result['outcome'])
+            self.assertEqual(2, len(self.assessments))
+            self.assertEqual('approval', dispatch(self.req)['outcome'])
+            self.assertEqual(2, len(self.assessments))
+        state = json.loads((Path(result['session']) / 'session.json').read_text())
+        self.assertEqual(1, state['plan']['revision'])
+
+    def test_handoff_feedback_replacement_requires_new_approval(self):
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        feedback = 'Include a manual test protocol in the PR discussion; report permission-blocked checks.'
+        self.f['comments'].append({'id': 999, 'body': feedback,
+                                   'user': {'login': 'author'}, 'created_at': '2026-10-31'})
+        self.assessment.update(plan='Implement the fix. ' + feedback)
+        result = dispatch({**self.req, 'approve': 1})
+        self.assertEqual('stale_approval', result['error']['code'])
+        state = json.loads((Path(result['session']) / 'session.json').read_text())
+        self.assertEqual(2, state['plan']['revision'])
+        self.assertIn(feedback, state['plan']['body'])
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        self.assertEqual(2, len(self.assessments))
+
+    def test_changed_base_preserves_approval_when_plan_remains_valid(self):
         self.assertEqual(2, dispatch(self.req)['exit_code'])
         self.f['base'] = self.head
         self.assessment['decision'] = 'continue'
         result = dispatch({**self.req, 'approve': 1})
-        self.assertEqual(3, result['exit_code'], result)
-        self.assertIn('stale_approval', str(result))
+        self.assertEqual(0, result['exit_code'], result)
         state = json.loads((Path(result['session']) / 'session.json').read_text())
-        self.assertEqual(2, state['plan']['revision'])
+        self.assertEqual(1, state['plan']['revision'])
+        self.assertEqual(self.head, state['assessed_base'])
 
 
 class ReplacementPlanTest(unittest.TestCase):
@@ -1871,19 +1897,13 @@ class ReplacementPlanTest(unittest.TestCase):
         self.t.f['base'] = self.t.head
         self.t.metadata['baseRefOid'] = self.t.head
         self.t.assessment['decision'] = 'continue'
-        # A new base requires approval of the replacement revision, even when
-        # inference continues the previous plan text.
-        request = {**self.req, 'yolo': False}
-        self.assertEqual('approval', dispatch(request)['outcome'])
-        self.assertEqual(1, len(self.owner.load()['batches']))
-        stale = dispatch({**request, 'approve': 1})
-        self.assertEqual('stale_approval', stale['error']['code'])
-        self.req = {**request, 'approve': 2}
-        new = self.assert_replacement_ready()
-        self.assertEqual([], new['commit_plan']['units'])
-        self.assertEqual(self.t.head, new['verified_base'])
+        result = dispatch(self.req)
+        self.assertEqual('ready', result['outcome'], result)
         state = Workflow(self.req, self.t.repo_object, self.t.f).state
+        self.assertEqual(1, state['plan']['revision'])
         self.assertEqual(self.t.head, state['ready_base'])
+        self.assertEqual(2, len(self.reviewed))
+        self.assertEqual('noop', dispatch(self.req)['outcome'])
 
     def test_new_requirement_after_commits_starts_fresh_implementation(self):
         self.t.f['comments'].append({'id': 999, 'body': 'Also retain history.',

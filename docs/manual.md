@@ -1008,6 +1008,14 @@ over-asking weakness in the first prompt that the current prompt addresses). Rep
 `python3 docs/evaluations/specification-planning/evaluate.py prepare|verify-checks|run|summarize`;
 `run` consumes provider quota and is never part of `make check-backend`.
 
+When the base branch advances, the planner reassesses the existing specification.
+If it remains valid, its revision and approval remain valid too; branch movement
+alone does not publish another plan. Changed requirements still require a revised
+specification and fresh approval. Feedback about implementation constraints,
+verification, or review handoff deliverables belongs in that specification, even
+when the feature scope is unchanged. Updates to the specification instructions
+invalidate cached planning assessments on the next planning pass.
+
 After approval, an empty commit and draft PR are created if needed. The PR body
 links to the published plan comment and includes the intended issue-closing
 reference; plan prose is not embedded, so it cannot add closing references. Bootstrap
