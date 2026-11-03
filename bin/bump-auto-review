@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+cd ~/tools/devcontainer-hardened
+branch=$(git branch | grep '^\*' | sed 's|^* ||')
+
+if [ "$branch" = main ] && [ $(git status --porcelain | wc -l) = 0 ]; then
+    . ~/secrets/github/https-credentials-autoreview2.sh
+    git pull
+    script/bump-auto-review.sh
+    git add _devcontainer_template/Dockerfile \
+	docs/securityaudit.md \
+	script/diagnose-auto-review.sh
+    git -c commit.gpgsign=false -c tag.gpgsign=false commit -m "chore: bump auto-review"
+    git push origin main
+else
+    echo "**** conditions failed: branch:$branch uncommited:$(git status --porcelain | wc -l)" >&2
+    exit 1
+fi
+
+
+cd ~/work/stable-emacs
+branch=$(git branch | grep '^\*' | sed 's|^* ||')
+
+if [ "$branch" = main ] && [ $(git status --porcelain | wc -l) = 0 ]; then
+    . ~/secrets/gitlab/https-credentials.sh
+    git pull
+    bin/bump-auto-review.sh
+    git add channel/stable/packages/auto-review.scm
+    git -c commit.gpgsign=false -c tag.gpgsign=false commit -m "chore: bump auto-review"
+    git push origin main
+else
+    echo "**** conditions failed: branch:$branch uncommited:$(git status --porcelain | wc -l)" >&2
+    exit 1
+fi
+
+
+
+fleet update
+fleet update channel stable-emacs
+fleet upgrade --yes
