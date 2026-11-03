@@ -1,8 +1,17 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["assessment", "summary", "checks", "findings", "outcomes", "case_results", "questions"],
+  "required": ["assessment", "summary", "checks", "findings", "outcomes", "case_results", "questions", "verification_blockers"],
   "properties": {
+    "verification_blockers": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["command", "reason", "manual_command"],
+      "properties": {
+        "command": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "manual_command": {"type": "string", "minLength": 1}
+      }
+    }},
     "assessment": {"type": "string", "enum": ["passed", "changes_requested", "incomplete", "needs_input"]},
     "summary": {"type": "string", "minLength": 1},
     "checks": {"type": "array", "items": {"type": "string"}},

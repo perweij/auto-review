@@ -1205,3 +1205,22 @@ already in flight can overshoot a threshold. Tokens are not converted into quota
 percentages. Neither percentage monitoring nor a runtime limit guarantees an exact
 subscription spend. With `--json`, human progress stays on stderr and stdout has
 one final result, including a versioned execution/resource summary.
+
+### Verification blocked by the review environment
+
+Reviewers inspect test prerequisites, including indirect Docker/Podman use by
+fixtures. They stop equivalent attempts after an environment restriction is
+established, continue supported checks, and report the command, observed error,
+required environment, and manual verification steps. An unavailable check alone
+is neither a code defect nor a passing test.
+
+Acceptance reports record unresolved limitations in `verification_blockers`
+(`command`, `reason`, `manual_command`). Such a report cannot pass. When only
+verification is blocked, issue execution pauses in the review phase with
+`review_incomplete` and `next_action: verify_environment`; it does not send the
+candidate back for implementation repairs. JSON error details and the execution
+stop notice retain the manual commands. Fix the environment or supply supported
+verification evidence before resuming; simply rerunning in the same unsupported
+environment does not resolve the blocker. Demonstrated code defects still warrant
+repairs independently of environment limitations. PR reviews describe these limits
+and manual checks in their coverage notes.

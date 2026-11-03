@@ -738,6 +738,9 @@ def dispatch(request):
                 body = ('fix-issue stopped: ' + exc.code.replace('_', ' ') + '\n\n' + execution_stops.get(exc.code, str(exc))
                         + ('\n\n' + exc.details['summary'] if exc.details.get('summary') else '')
                         + '\n\nCompleted work is retained. This is an execution stop, not a request for plan approval.')
+                for blocker in exc.details.get('verification_blockers', []):
+                    body += ('\n\nVerification blocked: ' + blocker['command'] + '\n' + blocker['reason']
+                             + '\nManual verification: ' + blocker['manual_command'])
                 try:
                     flow.writes.comment(body, 'execution-stop:' + digest(body))
                 except ApiError as notice_error:

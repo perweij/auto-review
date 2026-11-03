@@ -807,6 +807,16 @@ class ValidatorTest(unittest.TestCase):
         self.check(self.value('changes_requested', findings=[finding('F1', blocking=True)]))
         self.rejected(self.value('changes_requested', findings=[finding('F1', blocking=False)]))
 
+    def test_environment_blockers_are_incomplete_not_repairs_or_passes(self):
+        blockers = [{'command': 'pytest -m smoke', 'reason': 'Read-only sysctl; needs host networking',
+                     'manual_command': 'uv run pytest -m smoke -q'}]
+        value = self.value('incomplete', verification_blockers=blockers)
+        self.check(value)
+        self.assertIsNone(acceptance.project_issue(value))
+        self.rejected(self.value(verification_blockers=blockers), 'cannot produce a passed')
+        self.rejected(self.value('changes_requested', verification_blockers=blockers), 'blocking finding')
+        self.rejected(self.value('incomplete', verification_blockers=[{'command': 'pytest'}]), 'manual command')
+
     def test_needs_input_and_incomplete(self):
         self.check(self.value('needs_input', questions=['Which behavior?']))
         self.rejected(self.value('needs_input'))
