@@ -19,6 +19,7 @@ import re
 import shutil
 import tempfile
 
+from . import usage
 from .common import ApiError, now, read_json
 from . import cache, providers
 from .processes import Cancelled, run as default_runner
@@ -454,7 +455,10 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
             write_json(run.path / 'logs/commands.json', commands)
         result = runner(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
                         timeout=run.runtime.model_timeout,
-                        stdout_path=output, stderr_path=stderr, model_events=True, stage=stage)
+                        stdout_path=output, stderr_path=stderr, model_events=True, stage=stage,
+                        usage_call=usage.choice(('final-review/' if hasattr(run, 'batch') else '') + stage,
+                            {'provider': provider, 'model': model,
+                             'effort': choice.get('effort', 'unknown') if choice else run.settings.get(provider + '_effort', 'unknown')}))
         if workspace:
             try:
                 workspace.verify()

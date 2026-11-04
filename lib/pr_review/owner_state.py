@@ -281,6 +281,8 @@ class OwnerSession:
         for batch in result["batches"]:
             if isinstance(batch.get("settings"), dict) and "review" in batch["settings"]:
                 batch["effective_settings"] = effective_settings(batch["settings"])
+        from . import usage
+        result['usage'] = usage.summary(usage.owner_root(self, result))
         result.update(session=str(self.path), revision=result.pop("sequence"))
         return result
 

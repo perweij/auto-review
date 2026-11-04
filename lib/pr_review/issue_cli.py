@@ -63,11 +63,17 @@ def main(argv=None):
             result = dispatch({'command': operation, **args})
     except (ApiError, OSError, ValueError) as exc:
         result = {'outcome': 'failed', 'error': str(exc), 'exit_code': 130 if isinstance(exc, KeyboardInterrupt) else 1}
+        if getattr(exc, 'usage', None):
+            result['usage'] = exc.usage
         if isinstance(exc, ApiError):
             result.update(reason_code=exc.code, details=exc.details)
+            if exc.details.get('usage'):
+                result['usage'] = exc.details['usage']
             result['exit_code'] = 130 if exc.code == 'cancelled' else 3 if exc.code == 'busy' else exc.details.get('exit_code', 1)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as exc:
         result = {'outcome': 'interrupted', 'exit_code': 130}
+        if getattr(exc, 'usage', None):
+            result['usage'] = exc.usage
     if args['json']:
         print(json.dumps(result))
     else:

@@ -3,6 +3,7 @@ import copy
 import re
 import uuid
 
+from . import usage
 from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
@@ -313,7 +314,8 @@ def execute(session, state, request):
         owner_auto_commit.timeout()
         if request.get("verify_only"):
             raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
-    with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "kind": "owner-fix"}):
+    with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "kind": "owner-fix"}), \
+            usage.operation(usage.owner_root(session, state), legacy=bool(state.get("batches"))):
         batch = None
         completing = False
         preserve_ready = False

@@ -259,7 +259,8 @@ class Session:
             context["expected"] = workflow.expected_context(self, state, thread)
             context["participated"] = any(c.get("author", "").lower() == self.manifest.get("viewer", "").lower()
                                           for c in thread.get("comments", []))
-        return {**state, "comments": comments, "thread_contexts": thread_contexts, "operations": active,
+        from . import usage
+        return {**state, "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
                 "automation": self.automation_summary(), "analysis": self.analysis_summary(),
                 "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
                              "threads": self.manifest.get("followup_threads", [])},

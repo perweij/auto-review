@@ -748,6 +748,52 @@ draft and publication ledger. Legacy action ledgers are read-only import sources
 All model-generated staging, grouping, or wording changes happen before user
 staging, never as a side effect of sending an approved batch.
 
+## Usage reporting
+
+The `usage-reporting` capability adds a `usage` object to `read`, `owner-read`,
+`issue-read`, issue-run results, automatic-review results, `run`, `adapt`, and
+`verify-suggestions`. Errors after accounting begins include `usage` in their
+error details. It describes the stable job across resumes, rather than only the
+displayed review generation. Session reads do not contact providers.
+
+The version-1 object includes `tracked_since`, `historical_usage_unknown`,
+`storage_incomplete`, `calls`, `calls_launch_unknown`, `coverage`, `token_coverage`,
+`roles`, `quota`, and an attribution explanation. An untracked or unreadable ledger
+returns `coverage: unavailable`, an explanatory `reason`, and empty rows. Existing
+jobs are measured forward; historical logs are not imported.
+
+Role rows group `role`, `provider`, configured `model`, and `effort`. They include
+actual launched call counts, `calls_reported`, `calls_partial`, `calls_unavailable`,
+`duration_seconds`, `usage`, optional reported per-model `model_usage`, and separate
+`token_coverage` / `quota_coverage`. Model and effort are the requested effective
+configuration; delegated model activity remains attributed to its enclosing role.
+`usage` is null when token counters are unavailable, otherwise it contains
+`input_tokens` (including cached input), `cached_input_tokens`,
+`cache_creation_input_tokens`, `output_tokens`, and `total_tokens`. Reported
+`reasoning_output_tokens` is a subset of output and is never added again.
+Known partial counters remain visible, with partial coverage.
+
+Provider quota rows retain distinct meter IDs, labels, kind and scope. Where
+available they expose `consumed_points`, `remaining_percentage`, Unix UTC `reset`,
+`coverage`, and `unattributed_points`. Role `quota` rows contain their own meter
+changes and interval coverage. Null consumption means unknown, while numeric zero
+means valid readings showed no change. Resets segment observations; accumulated
+percentage points can exceed 100 across weeks. Reset or telemetry gaps remain
+partial. Role estimates are not forced to equal provider totals, and meters from
+different providers or overlapping scopes must never be added together.
+
+Provider quota changes include concurrent account activity and can be affected by
+rounding and reporting delays. API credentials and unsupported provider/CLI
+combinations may prevent subscription readings without preventing token reporting.
+There are no token-to-quota conversions. Reporting failures do not alter workflow
+outcomes or existing runtime/quota-limit enforcement.
+
+Each call emits a compact `progress` message. Both cumulative tables are emitted
+at operation exit, including pauses and recoverable failures. Existing logs retain
+these messages; no new Emacs panel or GitHub publication is introduced. The ledger
+contains counters and controller metadata, not copies of prompts or responses,
+and does not participate in planning, review-cache or publication identities.
+
 ## Errors and compatibility
 
 Important codes include `protocol_mismatch`, `stale_revision`, `historical`,

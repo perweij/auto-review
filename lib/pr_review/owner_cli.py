@@ -118,4 +118,6 @@ def main(argv):
         print("Error: " + str(exc), file=sys.stderr)
         if isinstance(exc, ApiError) and exc.details:
             print(json.dumps(exc.details), file=sys.stderr)
+        elif getattr(exc, "usage", None):
+            print(json.dumps({"usage": exc.usage}), file=sys.stderr)
         return exc.details.get("exit_code", 1) if isinstance(exc, ApiError) else 1

@@ -1,5 +1,6 @@
 """Shared application operations for the terminal and protocol adapters."""
 
+from . import usage
 from .common import ApiError, PROTOCOL, locked
 from .commands import mutate, preview_comment
 from .state import Session, discover
@@ -16,7 +17,7 @@ def dispatch(request):
         return owner_dispatch(request)
     if operation == "capabilities":
         from .owner import COMMANDS
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow"],
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting"],
                 "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
@@ -42,7 +43,8 @@ def dispatch(request):
     session = Session(request)
     if operation == 'verify-suggestions':
         from .suggestions import verify_operation
-        return verify_operation(session, request)
+        result = verify_operation(session, request)
+        return {**result, 'usage': usage.summary(session.root)}
     if operation == 'review-log':
         from .automation import review_log
         return review_log(session, request)
@@ -64,7 +66,8 @@ def dispatch(request):
         with locked(session.lock):
             state = session.load()
             session.check_write(request, state)
-        return operations.adapt(session, state, request)
+        result = operations.adapt(session, state, request)
+        return {**result, 'usage': usage.summary(session.root)}
     if operation in ('preview-comment', 'mutate'):
         with locked(session.lock):
             state = session.load()

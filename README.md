@@ -151,6 +151,32 @@ and test commands. `make check-backend` runs the deterministic backend checks;
 GNU General Public License, version 3 or later (`GPL-3.0-or-later`).
 See [LICENSE](LICENSE) for the full text.
 
+## Job usage reports
+
+`fix-issue` and `pr-review` report usage automatically after model calls and print
+cumulative tables when an operation finishes, pauses or fails. One table shows
+weekly provider meters (including scoped Claude meters such as Fable); the other
+shows role, provider, configured model, effort, calls, reported tokens and observed
+weekly percentage points. The tables also appear in existing Emacs progress logs.
+
+Accounting follows the saved job through resumes and review-generation changes.
+Planning, live authentication probes, retries, implementation, review, synthesis
+and optional model operations are included; cached results add no new calls.
+Changing a role's model or effort creates a separate row. Older jobs track forward
+from their next invocation and identify earlier usage as unknown.
+
+Quota reports read Codex's local account interface and Claude Code's structured
+`/usage` report without model inference. Availability depends on the installed CLI
+and credentials. These reports do not expand the existing quota stopping controls.
+Provider percentages are account-wide observations: other activity, delayed updates,
+rounding and weekly resets can affect attribution. Role estimates may differ from
+provider totals; overlapping meters are not additive. Missing readings and partial
+interrupted token usage are marked explicitly, not treated as zero. Tokens and
+estimated API costs are never converted into subscription percentages.
+
+CLI JSON results and session reads expose an additive versioned `usage` summary.
+See the [API reference](docs/api.md#usage-reporting) for coverage and details.
+
 ## Fix an issue from the terminal
 
 `fix-issue` plans on the GitHub issue, then delegates the approved specification to a

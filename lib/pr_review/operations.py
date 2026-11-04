@@ -7,6 +7,7 @@ import re
 import signal
 import tempfile
 import uuid
+from . import usage
 from .common import ApiError, atomic_json, locked, read_json, state_root
 from .events import emit, event_sink
 from .processes import Cancelled, cancellation_scope, run as process
@@ -95,6 +96,18 @@ def operation(owner=None):
                 exc.details.update(log_path=str(log), operation_id=identity)
             raise
         finally:
+            # An issue's accounting scope encloses nested Owner operations. Keep
+            # its final model-phase totals in the operation log without printing twice.
+            current_usage = usage._current.get()
+            if current_usage and current_usage.changed:
+                def log_usage(kind, **fields):
+                    if kind == 'progress':
+                        output.write('[stdout] ' + fields['message'] + '\n')
+                try:
+                    with event_sink(log_usage):
+                        usage.render(usage.summary(current_usage.root))
+                except (ApiError, OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
+                    pass  # Reporting cannot mask an operation's result or cleanup.
             atomic_json(file, record)
 
 
@@ -119,7 +132,7 @@ def run(request):
         session = execute(request)
     current = Session({'session': str(session.root)})
     ready = session.path == current.path and session.manifest.get('status') == 'complete'
-    outcome = {'new_review_ready': ready, 'status': session.manifest.get('status')}
+    outcome = {'new_review_ready': ready, 'status': session.manifest.get('status'), 'usage': usage.summary(session.root)}
     if not ready:
         outcome['pending_generation'] = session.id
     if not request.get('session'):
@@ -149,13 +162,14 @@ def adapt(session, state, request):
               "Do not claim tests or facts that the evidence does not support. Do not use tools.\n" +
               json.dumps({"finding": comment, "thread": context["thread"]}, ensure_ascii=True))
     from .providers import adaptation_command, environment, Runtime
-    from .settings import from_manifest
+    from .settings import from_manifest, validate
     configuration = from_manifest(session.manifest)
     env, _ = environment(configuration['processing_provider'])
-    with locked(session.pr_lock), operation({'common': session.manifest['git_common_dir'], 'pr': str(session.manifest['pr']), 'kind': 'adapt'}):
+    with locked(session.pr_lock), operation({'common': session.manifest['git_common_dir'], 'pr': str(session.manifest['pr']), 'kind': 'adapt'}), usage.operation(session.root):
         with tempfile.TemporaryDirectory(prefix='pr-review-adapt-') as neutral:
             result = process(adaptation_command(configuration), cwd=neutral, env=env, timeout=Runtime.environment().model_timeout,
-                             input_bytes=prompt.encode(), model_events=True, stage='adapt')
+                             input_bytes=prompt.encode(), model_events=True, stage='adapt',
+                             usage_call=usage.choice('adapt', validate(configuration)['processing']))
         values = []
         for event in result.events:
             if event.get('type') == 'result':

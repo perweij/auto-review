@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 tool=${0##*/}
+# Usage probes are metadata reads, separate from charged model-call assertions.
+if [[ ${PR_REVIEW_USAGE_PROBE:-} == 1 ]]; then
+    if [[ $tool == codex ]]; then
+        while IFS= read -r request; do
+            if [[ $request == *account/rateLimits/read* ]]; then
+                printf '%s\n' '{"id":2,"result":{"rateLimits":{}}}'
+                exit
+            elif [[ $request == *initialize* && $request != *initialized* ]]; then
+                printf '%s\n' '{"id":1,"result":{}}'
+            fi
+        done
+    fi
+    exit
+fi
 args=$(jq -cn --args '$ARGS.positional' -- "$@")
 call=$(jq -nc --arg tool "$tool" --argjson args "$args" '{tool:$tool,args:$args}')
 mock_bridge() {

@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import uuid
 
+from . import usage
 from .common import ApiError, atomic_json, command, digest, git, locked, now, read_json, state_root
 from .repository import Repository, normalize_remote, repository_name
 from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness
@@ -177,6 +178,7 @@ class Workflow:
                 # Keep the checked facts/snapshot intact, but report the current
                 # action rather than the action saved before this invocation.
                 'eligibility': {**self.eligibility, 'next_action': next_action},
+                'usage': usage.summary(self.path),
                 'execution': {'version': 1, 'engine': self.state.get('execution_engine'), 'resources': self.state.get('resources', {})}, **self.state.get('review_progress', {}), **extra}
 
     def guard(self):
@@ -485,6 +487,7 @@ class Workflow:
                     owner_git.clean(owner, data)
             desired = self.desired_owner_settings(data)
             data['issue_workflow'] = state['id']
+            data['usage_root'] = str(self.path)
             # Compare only after all overrides have been applied. Retain the saved
             # representation for equivalent legacy settings: batches also compare
             # their frozen settings with this object without normalization.
@@ -946,7 +949,7 @@ def dispatch(request):
         if request['command'] == 'issue-eligibility':
             return flow.eligibility
         if request['command'] == 'issue-read':
-            return {**flow.state, 'session': str(flow.path), 'eligibility': flow.eligibility}
+            return {**flow.state, 'session': str(flow.path), 'eligibility': flow.eligibility, 'usage': usage.summary(flow.path)}
         if request['command'] == 'issue-recover':
             actions = flow.writes.recover(request.get('retry_absent'))
             return flow.result('recovered' if request.get('retry_absent') else 'inspected',
@@ -958,12 +961,13 @@ def dispatch(request):
         try:
             issue_resources.validate(request)
             review_history.controls(request)
-            return flow.run()
+            with usage.operation(flow.path, legacy=flow.file.exists()):
+                return flow.run()
         except ApiError as exc:
             if exc.code == 'cancelled':
                 raise
             # Errors describe this invocation; phase records resumable progress.
-            flow.state['error'] = {'code': exc.code, 'message': str(exc), **exc.details}
+            flow.state['error'] = {'code': exc.code, 'message': str(exc), **{k: v for k, v in exc.details.items() if k != 'usage'}}
             execution_stops = {
                 'trust_required': 'Agent configuration changed and requires explicit trust before execution can continue.',
                 'model_failed': 'The coding provider could not complete its turn. Saved work and session identity are retained.',

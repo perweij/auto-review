@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
+from . import usage
 from .common import ApiError, command, locked, now, read_json
 from . import cache, providers, review_engine, settings, validation
 from .processes import Cancelled, cancellation_scope, run as process
@@ -71,7 +72,8 @@ class Review(Store):
         write_json(self.path / 'logs/commands.json', commands)
         try:
             result = process(argv, cwd=cwd, env=env, input_bytes=input_bytes, timeout=self.runtime.auth_timeout,
-                             stdout_path=output, stderr_path=stderr, model_events=True, stage=stage, pass_fds=())
+                             stdout_path=output, stderr_path=stderr, model_events=True, stage=stage, pass_fds=(), usage_call=usage.choice('auth-probe/' + provider,
+                                 {'provider': provider, 'model': model, 'effort': 'low'}))
         except ApiError as exc:
             record.update(status='interrupted' if isinstance(exc, Cancelled) or exc.code == 'resource_limit' else 'failed',
                           exit_status=exc.details.get('exit_code', record.get('exit_status', 1)), finished_at=now())
@@ -341,47 +343,48 @@ def execute(request, *, confirm_trust=None):
         if pr['isDraft']:
             say('Warning: PR is a draft')
         run = Review(repo, root, worktree, configuration, runtime, tools, viewer, permission)
-        try:
-            run.configure(kind, threads)
-            with tempfile.TemporaryDirectory(prefix='pr-review-') as scratch:
-                run.scratch = Path(scratch)
-                run.authenticate_live(enabled)
-                pr = run.snapshot(pr)
-                run.trust(request.get('trusted_snapshot'), confirm_trust)
-                run.context(pr, issues, reviews)
-                if kind == 'followup':
-                    pipeline.focused(run)
-                    ready = True
-                else:
-                    if run.manifest.get('review_restart'):
-                        pipeline.restart(run)
-                    slots = configuration['reviewer_slots']
-                    independent = requires_independent(configuration, run.manifest)
-                    if independent:
-                        pipeline.adopt_legacy_slots(run, slots)
-                        pipeline.prepare_slots(run, slots)
-                        for slot in slots:
-                            pipeline.independent(run, slot['id'])
-                    pipeline.synthesis(run)
-                    ready = pipeline.contributions(run)
-                    if ready and configuration['suggested_changes']:
-                        from .suggestions import generate
-                        generate(run)
-                run.manifest['status'] = 'complete' if ready else 'paused'
-                if ready:
-                    from .automation import manual_completion
-                    manual_completion(run)
+        with usage.operation(run.root, legacy=root is not None):
+            try:
+                run.configure(kind, threads)
+                with tempfile.TemporaryDirectory(prefix='pr-review-') as scratch:
+                    run.scratch = Path(scratch)
+                    run.authenticate_live(enabled)
+                    pr = run.snapshot(pr)
+                    run.trust(request.get('trusted_snapshot'), confirm_trust)
+                    run.context(pr, issues, reviews)
+                    if kind == 'followup':
+                        pipeline.focused(run)
+                        ready = True
+                    else:
+                        if run.manifest.get('review_restart'):
+                            pipeline.restart(run)
+                        slots = configuration['reviewer_slots']
+                        independent = requires_independent(configuration, run.manifest)
+                        if independent:
+                            pipeline.adopt_legacy_slots(run, slots)
+                            pipeline.prepare_slots(run, slots)
+                            for slot in slots:
+                                pipeline.independent(run, slot['id'])
+                        pipeline.synthesis(run)
+                        ready = pipeline.contributions(run)
+                        if ready and configuration['suggested_changes']:
+                            from .suggestions import generate
+                            generate(run)
+                    run.manifest['status'] = 'complete' if ready else 'paused'
+                    if ready:
+                        from .automation import manual_completion
+                        manual_completion(run)
+                    run.save()
+            except BaseException as exc:
+                review_engine.record_interruption(run, exc)
+                run.manifest['status'] = 'failed'
                 run.save()
-        except BaseException as exc:
-            review_engine.record_interruption(run, exc)
-            run.manifest['status'] = 'failed'
-            run.save()
-            raise
-        finally:
-            report = run.path / ('reviews/followup.json' if kind == 'followup' else 'reviews/synthesis.md')
-            say(f'\nPR:        {repo.url}\nWorktree:  {worktree}\nArtifacts: {run.path}\nReview:    {report}\nStatus:    {run.manifest["status"]}')
-            if run.pending:
-                say(f'Previous review: {run.current} (replacement not installed)\nResume session: {run.root}')
+                raise
+            finally:
+                report = run.path / ('reviews/followup.json' if kind == 'followup' else 'reviews/synthesis.md')
+                say(f'\nPR:        {repo.url}\nWorktree:  {worktree}\nArtifacts: {run.path}\nReview:    {report}\nStatus:    {run.manifest["status"]}')
+                if run.pending:
+                    say(f'Previous review: {run.current} (replacement not installed)\nResume session: {run.root}')
     return run.session()
 
 

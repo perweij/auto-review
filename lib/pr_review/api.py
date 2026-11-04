@@ -32,7 +32,8 @@ def main():
         emit("error", error={"code": exc.code, "message": str(exc), **exc.details})
         sys.exit(1)
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        emit("error", error={"code": "invalid_state", "message": str(exc)})
+        emit("error", error={"code": "invalid_state", "message": str(exc),
+                             **({"usage": exc.usage} if getattr(exc, "usage", None) else {})})
         sys.exit(1)
 
 

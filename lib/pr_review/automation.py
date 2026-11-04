@@ -186,6 +186,9 @@ class AutomaticRun:
         if state:
             receipts = [c.get('receipt', {}).get('html_url') for c in state['comments'] if c.get('receipt')]
             receipts += [a['result'].get('html_url') for a in actions(state) if a.get('result')]
+        if self.root:
+            from . import usage
+            self.record['usage'] = usage.summary(self.root)
         self.record.update(outcome=outcome, exit_code=fields.pop('exit_code', EXIT_CODES[outcome]), reason=reason,
                            finished_at=now(), receipts=sorted({u for u in receipts if u}),
                            guidance='Open this PR in Emacs. Inspect attention items; R r resumes analysis, P opens publication and recovery, L shows the saved log.', **fields)

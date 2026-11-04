@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import uuid
 
+from . import usage
 from .common import ApiError, ROOT, command, now, read_json
 from .events import emit
 from .models import discover
@@ -97,7 +98,8 @@ def preflight(session, state, *, issue_harness=False):
             response = Path(neutral) / "response.txt"
             result = run(probe_command(provider, runtime, response), cwd=neutral, env=env,
                          timeout=runtime.auth_timeout, stdout_path=log / (provider + ".jsonl"),
-                         stderr_path=log / (provider + ".stderr"), model_events=True, stage="owner-auth")
+                         stderr_path=log / (provider + ".stderr"), model_events=True, stage="owner-auth", usage_call=usage.choice('auth-probe/' + provider,
+                             {'provider': provider, 'model': 'haiku' if provider == 'claude' else runtime.probe_model, 'effort': 'low'}))
             if provider == "codex":
                 valid = response.is_file() and response.read_text().strip() == "PR_REVIEW_AUTH_OK"
                 valid = valid and any(e.get("type") == "turn.completed" for e in result.events)
@@ -274,7 +276,7 @@ def invoke(session, state, batch, role, context):
     try:
         result = run(args, cwd=state["worktree"], env=env, input_bytes=prompt.encode(),
                      timeout=Runtime.environment().model_timeout, stdout_path=directory / "events.jsonl",
-                     stderr_path=directory / "stderr.log", model_events=True, stage="owner-" + role)
+                     stderr_path=directory / "stderr.log", model_events=True, stage="owner-" + role, usage_call=usage.choice('owner/' + role, choice))
         after = owner_git.checkpoint(session, state, role + " after")
         record["after"] = after
         batch["checkpoint"] = after

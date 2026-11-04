@@ -20,6 +20,9 @@ from pr_review import publication
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        telemetry = patch('pr_review.usage_quota.read', return_value={'status': 'unavailable', 'meters': []})
+        telemetry.start()
+        self.addCleanup(telemetry.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

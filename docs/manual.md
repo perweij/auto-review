@@ -1287,6 +1287,34 @@ percentages. Neither percentage monitoring nor a runtime limit guarantees an exa
 subscription spend. With `--json`, human progress stays on stderr and stdout has
 one final result, including a versioned execution/resource summary.
 
+### Cumulative usage reporting
+
+Both commands print a short usage update after each model call and two cumulative
+tables at operation exit. The provider table shows consumed weekly percentage
+points, remaining allowance, reset time and coverage. The role table includes
+provider, configured model, effort, calls, reported tokens, weekly consumption and
+coverage. Emacs users see these in the existing progress and operation logs.
+
+Usage persists across planning feedback, runtime increases and resumed reviews.
+Different model/effort settings appear on separate rows. Live probes, retries and
+failed model calls count; reused results do not. Reported tokens include cached
+input once. Claude session-cumulative and delegated usage are accounted for without
+adding restored history again; unavailable or interrupted counters remain marked.
+Older jobs report only usage measured after tracking starts.
+
+Reporting reads Codex account meters and Claude Code's structured `/usage` report.
+The quota guards above retain their existing Codex/runtime-fallback behavior;
+reporting itself neither adds limits nor stops model work when telemetry is missing.
+Each metadata read is bounded to five seconds plus process cleanup. No model turn
+is requested to obtain quota data.
+
+Treat quota consumption as an account-wide observation. Other sessions can consume
+allowance at the same time; short calls may show zero because of rounding or late
+updates. Role figures may not sum to provider totals, and scoped limits overlap
+with all-model limits. Do not add OpenAI and Anthropic percentages or convert tokens
+to a subscription percentage. The API exposes both tables and more detailed
+counters through the versioned `usage` summary.
+
 ### Verification blocked by the review environment
 
 Reviewers inspect test prerequisites, including indirect Docker/Podman use by

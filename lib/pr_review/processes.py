@@ -110,7 +110,7 @@ class Result:
 
 
 def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
-        stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=()):
+        stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=(), usage_call=None):
     """Run without a shell; log raw bytes while interpreting complete records."""
     from .issue_resources import check as check_issue_resources, active as issue_resources_active
     check_issue_resources()
@@ -129,13 +129,22 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
     stopped = False
     silence_warned = False
     drain_deadline = None
+    from . import usage
+    accounting = usage.begin_call(usage_call, env)
+    completed_result = None
     try:
         for name, path in (("stdout", stdout_path), ("stderr", stderr_path)):
             if path is not None:
                 files[name] = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb")
+        if accounting is not None:
+            check_issue_resources()
+            cancellation.check()
+            # Metadata reads do not consume the provider-process timeout.
+            started = activity = heartbeat = time.monotonic()
         child = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  start_new_session=True, close_fds=True, pass_fds=pass_fds)
+        usage.observe(accounting, 'launched')
         with selectors.DefaultSelector() as selector:
             for name in pending:
                 os.set_blocking(getattr(child, name).fileno(), False)
@@ -160,6 +169,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                     return
                 if not isinstance(event, dict):
                     return
+                usage.observe(accounting, 'event', event)
                 failure = event_error(event)
                 if failure == "nonterminal_error":
                     if not warned:
@@ -249,9 +259,10 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
             code = 124 if reason == "timeout" else (raw_code if raw_code >= 0 else 128 - raw_code)
             if reason and not code:
                 code = 1
-            return Result(code, b"".join(captured["stdout"]).decode("utf-8", errors="replace"),
+            completed_result = Result(code, b"".join(captured["stdout"]).decode("utf-8", errors="replace"),
                           b"".join(captured["stderr"]).decode("utf-8", errors="replace"),
                           events, reason, raw_code if raw_code >= 0 else 128 - raw_code)
+            return completed_result
     except OSError as exc:
         raise ApiError("command_failed", f"Cannot complete {argv[0]}: {exc}") from exc
     finally:
@@ -262,3 +273,4 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                     pipe.close()
         for stream in files.values():
             stream.close()
+        usage.observe(accounting, 'finish', completed_result)

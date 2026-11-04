@@ -1,6 +1,7 @@
 """Read-only, discussion-aware issue assessment through shared provider tools."""
 import json
 import uuid
+from . import usage
 from .common import ApiError, ROOT, digest
 from .owner_providers import argv, obj, TEXT, STRINGS
 from .providers import Runtime, environment
@@ -56,7 +57,7 @@ def assess_issue(context, configuration, directory, cwd, previous_assessment=Non
     env.update(TMPDIR=str(directory / 'scratch'), PYTHONDONTWRITEBYTECODE='1', GIT_OPTIONAL_LOCKS='0')
     result = run(argv(choice, Runtime.environment(), 'plan', directory, directory / 'schema.json'), cwd=cwd, env=env,
                  input_bytes=prompt.encode(), timeout=Runtime.environment().model_timeout,
-                 stdout_path=directory / 'events.jsonl', stderr_path=directory / 'stderr.log', model_events=True, stage='issue-plan')
+                 stdout_path=directory / 'events.jsonl', stderr_path=directory / 'stderr.log', model_events=True, stage='issue-plan', usage_call=usage.choice('planning', choice))
     if configuration_snapshot(cwd) != before:
         raise ApiError('workspace_changed', 'Agent configuration changed during planning.')
     value = response(choice, result, directory)

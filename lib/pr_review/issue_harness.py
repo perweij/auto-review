@@ -10,6 +10,7 @@ import json
 import uuid
 from pathlib import Path
 
+from . import usage
 from .common import ApiError, digest, now
 from .events import emit
 from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit, test_evidence, review_history
@@ -193,7 +194,7 @@ def invoke(session, state, batch, specification, feedback):
         result = run(args, cwd=state['worktree'], env=env, input_bytes=prompt.encode(),
                      timeout=Runtime.environment().model_timeout, stdout_path=directory / 'events.jsonl',
                      stderr_path=directory / 'stderr.log', model_events=True, on_line=event_line,
-                     stage='issue-implementation')
+                     stage='issue-implementation', usage_call={**usage.choice('fix', choice), 'resumed': bool(conversation.get('started'))})
         after = owner_git.checkpoint(session, state, 'harness after')
         record['after'] = after
         batch['checkpoint'] = after

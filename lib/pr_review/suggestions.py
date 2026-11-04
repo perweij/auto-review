@@ -12,6 +12,7 @@ import re
 import tempfile
 import uuid
 
+from . import usage
 from .common import ApiError, ROOT, atomic_json, digest, git, locked, now, read_json
 from .processes import Cancelled, run as process
 from . import providers, settings
@@ -210,7 +211,7 @@ def invoke(session, stage, context, cwd):
     atomic_json(directory / 'invocation.json', dict(argv=argv, cwd=str(cwd), removed_environment=removed))
     result = process(argv, cwd=cwd, env=env, input_bytes=prompt.encode(), timeout=runtime.model_timeout,
                      stdout_path=directory / 'stdout.jsonl', stderr_path=directory / 'stderr.log',
-                     model_events=True, stage=stage)
+                     model_events=True, stage=stage, usage_call=usage.choice(stage, configuration['processing']))
     if result.returncode:
         raise ApiError('suggestion_failed', f'Suggestion model failed; inspect {directory}.')
     if configuration['processing_provider'] == 'codex':
@@ -398,7 +399,7 @@ def verify_operation(session, request):
     from .operations import operation
     from .repository import Repository
     from .commands import mutable
-    with operation({'kind': 'suggestion-verification', 'common': session.git.common, 'pr': str(session.manifest['pr'])}):
+    with operation({'kind': 'suggestion-verification', 'common': session.git.common, 'pr': str(session.manifest['pr'])}), usage.operation(session.root):
         with locked(session.pr_lock), locked(session.lock):
             state = session.load()
             session.check_write(request, state)
