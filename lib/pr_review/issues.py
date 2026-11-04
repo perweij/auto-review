@@ -75,6 +75,23 @@ def approval_comment(comment, state):
             and comment.get('created_at', '') >= state['plan']['published_at'])
 
 
+def configuration_identity(configuration):
+    """Role choices affect planning; named provenance and resource limits do not."""
+    from .cli_settings import effective
+    return effective(settings.validate(configuration))
+
+
+def planning_identity(facts, state, feedback, configuration, *, legacy=False):
+    # Attaching a PR with no discussion adds empty endpoint lists, not input.
+    if not legacy and not any(feedback or []):
+        feedback = []
+    identity = [input_digest(facts, state), feedback,
+                configuration if legacy else configuration_identity(configuration), facts['base'], planning_policy_digest()]
+    if state.get('reassessment_generation'):
+        identity.append(state['reassessment_generation'])
+    return digest(identity)
+
+
 def required_batches(data):
     """Keep stale execution blocking until newer work verifies every item."""
     latest = {key: batch for batch in data['batches'] for key in owner_state.active_feedback_keys(batch)}
@@ -285,12 +302,10 @@ class Workflow:
         if state.get('execution_blockers') and not state.get('reassessment_generation'):
             state['reassessment_generation'] = 1
             self.save()
-        identity = [input_digest(facts, state), feedback, state['configuration'], facts['base'], planning_policy_digest()]
-        if state.get('reassessment_generation'):
-            identity.append(state['reassessment_generation'])
-        current = digest(identity)
+        current = planning_identity(facts, state, feedback, state['configuration'])
         changed = current != state.get('input_digest') or facts['base'] != state.get('assessed_base')
         if changed or not state.get('assessment'):
+            self.prepare_terminal_models()
             path = self.workspace()
             desired = facts['head'] or facts['base']
             if self.repo.git('rev-parse', 'HEAD', cwd=path).stdout.strip() != desired:
@@ -381,6 +396,32 @@ class Workflow:
         self.save()
         return True
 
+    def desired_owner_settings(self, data):
+        """Project bootstrap's choices before quota checks or Owner mutation."""
+        desired = data['settings']
+        if self.state.get('owner_settings') and (self.request.get('_cli_config')
+                or self.request.get('settings_file') or not data.get('issue_workflow')):
+            desired = self.state['owner_settings']
+        if settings.explicit_reviewer_flags(self.request):
+            desired = {**desired, 'final_review': settings.final_review_from(self.state['configuration'])}
+        return owner_state.validate_settings(desired)
+
+    def execution_providers(self):
+        path = self.state.get('owner')
+        number = self.state.get('pr') or (self.facts.get('pr') or {}).get('number')
+        if not path and number:
+            matches = owner_state.discover({'cwd': str(self.repo.cwd),
+                'repository': self.repo.identity, 'pr': number})['sessions']
+            if matches:
+                path = matches[0]['session']
+        if path:
+            owner = owner_state.OwnerSession({'session': path})
+            with locked(owner.execution_lock):
+                data = owner.load()
+        else:
+            data = {'settings': owner_state.default_settings({'defaults': self.state['configuration']})}
+        return issue_resources.providers({**self.state, 'owner_settings': self.desired_owner_settings(data)})
+
     def bootstrap(self):
         state = self.state
         if not state.get('remote_branch'):
@@ -442,15 +483,8 @@ class Workflow:
                     raise ApiError('workspace_changed', 'Owner HEAD has an unrecorded commit; inspect before continuing.')
                 if not any(not execution_complete(b) for b in data['batches']):
                     owner_git.clean(owner, data)
+            desired = self.desired_owner_settings(data)
             data['issue_workflow'] = state['id']
-            desired = data['settings']
-            if state.get('owner_settings') and (self.request.get('settings_file') or not link):
-                desired = state['owner_settings']
-            if settings.explicit_reviewer_flags(self.request):
-                # Reviewer flags configure acceptance review. Precedence: explicit flags, then the
-                # file's final_review, then one slot derived from its review, then common defaults.
-                desired = {**desired, 'final_review': settings.final_review_from(state['configuration'])}
-            desired = owner_state.validate_settings(desired)
             # Compare only after all overrides have been applied. Retain the saved
             # representation for equivalent legacy settings: batches also compare
             # their frozen settings with this object without normalization.
@@ -558,37 +592,134 @@ class Workflow:
     def feedback_digest(self):
         return digest(self.feedback_context())
 
-    def run(self):
+    def terminal_configuration(self):
+        from . import cli_settings
+        self.previous_terminal_configuration = None
         state = self.state
-        configuration = settings.initial_settings(self.request)
-        saved_configuration = state.get('configuration')
-        if saved_configuration:
-            configuration.update(settings.validate(settings.from_manifest({'configuration': saved_configuration})))
-        settings.apply_overrides(configuration, self.request, fresh=not saved_configuration)
-        configuration = settings.validate(configuration)
-        if configuration != state.get('configuration') and state.get('owner'):
-            owner = owner_state.OwnerSession({'session': state['owner']})
-            if any(not execution_complete(b) and b.get('attempts') for b in owner.load()['batches']):
+        saved = state.get('configuration')
+        if saved:
+            saved = settings.validate(settings.from_manifest({'configuration': saved}))
+        owner = None
+        owner_path = state.get('owner')
+        if not owner_path and (state.get('pr') or self.facts.get('pr')):
+            number = state.get('pr') or self.facts['pr']['number']
+            matches = owner_state.discover({'cwd': str(self.repo.cwd), 'repository': self.repo.identity, 'pr': number})['sessions']
+            if matches:
+                owner_path = matches[0]['session']
+        if owner_path:
+            session = owner_state.OwnerSession({'session': owner_path})
+            with locked(session.execution_lock):
+                owner = session.load()
+        # Until attachment, requested workflow settings must survive the approval
+        # wait; an unrelated pre-existing Owner still has its previous choices.
+        attached = owner and owner.get('issue_workflow') == state['id']
+        saved_owner = (owner['settings'] if attached else
+                       state.get('owner_settings') or (owner['settings'] if owner else None))
+        if saved and not saved.get('_named'):
+            # Record the pre-override meaning of legacy role choices so adding
+            # terminal names cannot itself invalidate an approved assessment.
+            self.previous_terminal_configuration = cli_settings.resolve(
+                {}, saved, issue=True, owner=saved_owner, resources=state.get('resources'))
+        configuration = cli_settings.resolve(self.request, saved, issue=True, owner=saved_owner,
+                                             resources=state.get('resources'))
+        desired = {**(saved_owner or owner_state.default_settings({})),
+                   'fix': configuration['fix'], 'final_review': settings.final_review_from(configuration)}
+        desired = owner_state.validate_settings(desired)
+        desired_effective = owner_state.effective_settings(desired)
+        if saved_owner and owner_state.effective_settings(saved_owner) == desired_effective:
+            desired = saved_owner
+        frozen = [b for b in required_batches(owner) if not execution_complete(b)
+                  and (b.get('attempts') or b.get('plans') or b.get('tasks'))] if owner else []
+        if frozen:
+            desired_choices = owner_state.issue_settings(desired)
+            if (any(owner_state.issue_settings(b['settings']) != desired_choices for b in frozen)
+                    or (saved and saved.get('planning', saved['processing']) != configuration['planning'])):
                 raise ApiError('settings_changed', 'An active batch has frozen settings.')
+        return configuration, desired
+
+    def waiting_assessment_unchanged(self, configuration, state):
+        """An unchanged wait may inspect approval/discussion without model access."""
+        if (state.get('phase') != 'waiting' or state.get('waiting') not in ('approval', 'answers')
+                or not state.get('assessment') or state.get('assessed_base') != self.facts['base']
+                or (state.get('execution_blockers') and not state.get('reassessment_generation'))):
+            return False
+        feedback = self.feedback_context() if state.get('pr') else []
+        current = planning_identity(self.facts, state, feedback, configuration)
+        return current == state.get('input_digest') == state.get('applied_assessment')
+
+    def report_terminal_configuration(self):
+        from . import cli_settings
+        cli_settings.summary(self.state['configuration'], self.terminal_runtime,
+                             request=self.request, resources=self.state.get('resources'))
+
+    def prepare_terminal_models(self):
+        """Validate deferred choices before the next assessment or execution turn."""
+        if getattr(self, 'terminal_models_pending', False):
+            from . import cli_settings
+            cli_settings.validate_models(self.state['configuration'])
+            self.terminal_models_pending = False
+            self.report_terminal_configuration()
+
+    def apply_terminal_configuration(self, configuration, desired, *, cached, waiting):
+        from . import cli_settings
+        from .providers import Runtime
+        state = self.state
+        self.terminal_runtime = Runtime.environment()
+        self.terminal_models_pending = waiting and not cached
+        # Cached results and unchanged waiting assessments use saved, validated
+        # choices. A later model turn must pass prepare_terminal_models first.
+        if not cached and not waiting:
+            cli_settings.validate_models(configuration)
         state['configuration'] = configuration
-        if self.request.get('settings_file'):
-            state['owner_settings'] = owner_state.validate_settings(read_json(self.request['settings_file']))
-        self.save()
-        previous_phase = state.get('phase')
-        state['phase'] = 'intake'
-        try:
-            self.writes.reconcile()
-            self.guard()
-        finally:
-            state['phase'] = previous_phase
-        state.pop('error', None)
-        if state.get('phase') == 'complete' and state.get('finished_input') == digest([input_digest(self.facts, state), self.feedback_digest(), configuration]):
-            return self.result('complete')
+        state['owner_settings'] = desired
+        limits = {key: configuration['_named'][key] for key in cli_settings.LIMITS}
+        self.request.update(limits)
+        if state.get('resources') is not None:
+            issue_resources.apply_limits(state['resources'], limits)
+        if not self.terminal_models_pending:
+            self.report_terminal_configuration()
+
+    def configuration_identity_updates(self, previous):
+        """Prepare saved identity updates only when original inputs are provable.
+
+        Existing approvals must survive this identity-format change. Changed
+        discussion/base inputs still fail the old digest check and are reassessed.
+        """
+        state = self.state
+        legacy_hash = state.get('configuration_identity_version') != 1
+        terminal_previous = (getattr(self, 'previous_terminal_configuration', None)
+                             if self.request.get('_cli_config') else None)
+        if not legacy_hash and terminal_previous is None:
+            return {}
+        updates = {}
+        if previous:
+            normalized = terminal_previous or previous
+            feedback = self.feedback_context() if state.get('pr') else []
+            old = state.get('input_digest')
+            candidates = [feedback] if any(feedback or []) else [feedback, []]
+            if any(old == planning_identity(self.facts, state, candidate, previous, legacy=legacy_hash)
+                   for candidate in candidates):
+                current = planning_identity(self.facts, state, feedback, normalized)
+                updates['input_digest'] = current
+                if state.get('applied_assessment') == old:
+                    updates['applied_assessment'] = current
+            original = previous if legacy_hash else configuration_identity(previous)
+            if state.get('ready_configuration') == digest(original):
+                updates['ready_configuration'] = digest(configuration_identity(normalized))
+            finished = [input_digest(self.facts, state), self.feedback_digest()]
+            if state.get('finished_input') == digest([*finished, original]):
+                updates['finished_input'] = digest([*finished, configuration_identity(normalized)])
+        updates['configuration_identity_version'] = 1
+        return updates
+
+    def cached_outcome(self, configuration, state):
+        if state.get('phase') == 'complete' and state.get('finished_input') == digest([input_digest(self.facts, state), self.feedback_digest(), configuration_identity(configuration)]):
+            return 'complete'
         if (state.get('phase') == 'ready' and not self.request.get('approve')
                 and state.get('ready_input') == input_digest(self.facts, state)
                 and state.get('ready_head') == self.facts.get('head')
                 and state.get('ready_base') == self.facts['base']
-                and state.get('ready_configuration') == digest(configuration)
+                and state.get('ready_configuration') == digest(configuration_identity(configuration))
                 and state.get('ready_feedback') == self.feedback_digest()
                 and (not state.get('approval', {}).get('receipt') or any(approval_comment(c, state) for c in self.facts['comments']))):
             if state.get('owner'):
@@ -599,7 +730,49 @@ class Workflow:
                     check_owner_publication(data)
                     if owner.repo.git('rev-parse', 'HEAD', cwd=data['worktree']).stdout.strip() != state['ready_head']:
                         raise ApiError('workspace_changed', 'Owner HEAD changed outside the workflow.')
-            return self.result('noop')
+            return 'noop'
+        return None
+
+    def run(self):
+        self.terminal_models_pending = False
+        state = self.state
+        previous_configuration = state.get('configuration')
+        if self.request.get('_cli_config'):
+            configuration, desired = self.terminal_configuration()
+        else:
+            configuration = settings.initial_settings(self.request)
+            saved_configuration = state.get('configuration')
+            if saved_configuration:
+                configuration.update(settings.validate(settings.from_manifest({'configuration': saved_configuration})))
+            settings.apply_overrides(configuration, self.request, fresh=not saved_configuration)
+            configuration = settings.validate(configuration)
+            if (state.get('owner') and (not saved_configuration
+                    or configuration_identity(configuration) != configuration_identity(saved_configuration))):
+                owner = owner_state.OwnerSession({'session': state['owner']})
+                if any(not execution_complete(b) and b.get('attempts') for b in required_batches(owner.load())):
+                    raise ApiError('settings_changed', 'An active batch has frozen settings.')
+            state['configuration'] = configuration
+            if self.request.get('settings_file'):
+                state['owner_settings'] = owner_state.validate_settings(read_json(self.request['settings_file']))
+        self.save()
+        previous_phase = state.get('phase')
+        state['phase'] = 'intake'
+        try:
+            self.writes.reconcile()
+            self.guard()
+        finally:
+            state['phase'] = previous_phase
+        state.pop('error', None)
+        identity_updates = self.configuration_identity_updates(previous_configuration)
+        projected_state = {**state, **identity_updates}
+        cached = self.cached_outcome(configuration, projected_state)
+        if self.request.get('_cli_config'):
+            waiting = self.waiting_assessment_unchanged(configuration, projected_state)
+            self.apply_terminal_configuration(configuration, desired, cached=cached is not None, waiting=waiting)
+        state.update(identity_updates)
+        self.save()
+        if cached:
+            return self.result(cached)
         if state.get('phase') == 'blocked' and state.get('waiting') != 'unsuitable':
             state['phase'] = 'intake'
         if state.get('owner'):
@@ -609,11 +782,14 @@ class Workflow:
                     if not execution_complete(batch):
                         issue_harness.require_supported(batch)
         if not self.plan():
+            if getattr(self, 'terminal_models_pending', False):
+                self.report_terminal_configuration()
             return self.result(state.get('waiting') or state['phase'], 0 if state['phase'] == 'complete' else 3 if state['phase'] == 'blocked' else 2,
                                'none' if state['phase'] in ('complete', 'blocked') else 'await_answers' if state.get('waiting') == 'answers' else 'await_approval')
+        self.prepare_terminal_models()
         state['execution_engine'] = 'harness-v1'
         self.save()
-        with issue_resources.execution(state, self.save, self.request):
+        with issue_resources.execution(state, self.save, self.request, provider_scope=self.execution_providers()):
             return self.execute_approved()
 
     def execute_approved(self):
@@ -621,9 +797,11 @@ class Workflow:
         owner = self.bootstrap()
         actual_settings = owner.load()['settings']
         resource = state.get('resources', {})
-        additional = {actual_settings[r]['provider'] for r in ('fix', 'review')}
-        # A legacy value without final_review reviews with its task-check provider, already counted.
+        additional = {actual_settings['fix']['provider']}
+        # A legacy value without final_review derives acceptance from its task-check choice.
         final = actual_settings.get('final_review')
+        if not final:
+            additional.add(actual_settings['review']['provider'])
         if final:
             additional |= {slot['provider'] for slot in final['reviewer_slots']} | {final['synthesis']['provider']}
         if additional - set(resource.get('providers', [])):
@@ -651,7 +829,7 @@ class Workflow:
             if items == [state['issue_item']] and not batch.get('commit_plan', {}).get('units') and not any(b.get('commit_progress', {}).get('commits') for b in owner.load()['batches']):
                 self.writes.comment('Owner verified that no implementation changes are needed. The draft PR is retained for manual closure.\n\n' + batch['review']['summary'], 'no-change:' + str(state['plan']['revision']))
                 self.guard()
-                state.update(phase='complete', finished_input=digest([input_digest(self.facts, state), self.feedback_digest(), state['configuration']]))
+                state.update(phase='complete', finished_input=digest([input_digest(self.facts, state), self.feedback_digest(), configuration_identity(state['configuration'])]))
                 return self.result('no_change')
         # Only publish this workflow's automatic, verified replies.
         with locked(owner.execution_lock), locked(owner.repo.lock):
@@ -683,7 +861,7 @@ class Workflow:
                 self.writes.comment(self.base_movement_notice(), 'base-moved:' + digest(state['base_movement']))
             state.update(phase='ready', ready_input=input_digest(self.facts, state), ready_head=state['remote_head'],
                          ready_base=state['assessed_base'],
-                         ready_feedback=self.feedback_digest(), ready_configuration=digest(state['configuration']))
+                         ready_feedback=self.feedback_digest(), ready_configuration=digest(configuration_identity(state['configuration'])))
             self.save()
         return self.result('ready')
 

@@ -60,14 +60,15 @@ pr-review 123
 pr-review https://github.com/org/repository/pull/123 --no-publish
 pr-review 123 --repo org/repository
 pr-review 123 --repo github.example.com/org/repository
-pr-review 123 --codex-model gpt-6.1-sol --claude-model opus
-pr-review 123 --reviewers codex --codex-model gpt-6-luna --codex-effort medium
-pr-review 123 --processing-provider codex --claude-effort medium
-pr-review 123 --reviewers claude,claude --processing-provider claude --reviewer-2-model sonnet --reviewer-2-effort medium
-pr-review 123 --reviewers codex,codex --processing-provider codex --reviewer-2-model gpt-6.1-terra --reviewer-2-effort high
+pr-review 123 --codex-1-model gpt-6.1-sol --claude-1-model opus
+pr-review 123 --reviewers codex-1 --processing codex-1 --codex-1-model gpt-6-luna --codex-1-effort medium
+pr-review 123 --reviewers claude-1,claude-2 --processing claude-3 --claude-2-model sonnet
+pr-review 123 --reviewers codex-1,codex-2 --processing codex-3 --codex-2-model gpt-6.1-terra
 pr-review 123 --economical
 pr-review 123 --expensive
-pr-review 123 --economical --codex-effort medium
+pr-review 123 --economical --codex-1-effort medium
+pr-review --generate-json-config /tmp/pr-settings.json
+pr-review 123 --settings-file /tmp/pr-settings.json
 pr-review 123 --resume /absolute/path/to/run
 pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model calls
 ```
@@ -75,41 +76,88 @@ pr-review drafts /absolute/path/to/run  # inspect/edit saved drafts; no model ca
 Repository discovery uses `gh repo view`; specify `--repo` when it is ambiguous.
 Exactly one Git remote must match the target repository. Fork PRs are fetched
 through the base repository's `refs/pull/<N>/head`, without adding a fork remote.
-New reviews default to both reviewers, `gpt-6.1-sol` and `opus`, at high effort,
-with Codex/Sol processing. `--reviewers` takes one or two ordered providers,
-including two instances of the same provider. Slot-specific `--reviewer-1-model`,
-`--reviewer-2-model`, and corresponding `--reviewer-1-effort` and
-`--reviewer-2-effort` options configure the reviews independently. Individual
-providers can also be changed with `--reviewer-1-provider` and
-`--reviewer-2-provider`.
-`--processing-provider`, `--processing-model` and `--processing-effort` select
-the separate synthesis and discussion role. A fresh single-reviewer selection
-defaults to that provider; if the reviewer and processing choices differ, the
-reviewer runs first and its report is supplied to the structured review. Thread
-adaptation and fresh-discussion reassessment use the same processing choice.
+Both terminal commands use named provider/model/effort configurations. Names are
+`claude-N` or `codex-N` with any positive number; the prefix identifies the
+provider. `--NAME-model` and `--NAME-effort` define or override a choice.
+`--reviewers NAME[,NAME]` selects one or two distinct names in order;
+`--processing NAME` selects synthesis, discussion matching, adaptation, and
+reassessment. Numbers identify configurations, not positions. Every role
+referencing a name observes changes to that name, including after resume.
 
-`--economical` supplies new-review defaults: Haiku + GPT-6.1 Terra, both at high
-effort, with Terra processing. `--expensive` instead supplies Fable + GPT-6 Astra,
-both at high effort, with Astra processing. These preset flags are mutually
-exclusive. Explicit model, effort, reviewer, and processing flags override the
-preset regardless of argument order. Testing and suggested-change options are
-unaffected. Saved review settings take precedence over this defaults
-preset: use explicit flags (or the Emacs setup action) to change an existing review.
-The expanded choices are saved as ordinary settings; there is no persistent mode
-that prevents later edits. These reviewer flags work with interactive analysis,
-`--no-publish`, and `--auto-publish`; they do not configure interactive Owner sessions. For `fix-issue`,
-the same flags configure acceptance review (see [Issue fixing](#issue-fixing)).
+Default reviewers are `claude-1` (Opus/high) and `codex-1` (Sol/high).
+Processing uses independent `codex-2` (Sol/high). A fresh single reviewer falls
+back to that provider's independent processing defaults; its custom model/effort
+is not implicitly shared. Saved processing, a complete file, or explicit
+`--processing` wins. Two same-provider reviewers do not change other roles.
+Matching single-reviewer and processing triplets retain the direct optimization.
 
-Settings are retained per review, including testing policy and effort. Resume uses
-the pending/current generation's settings unless explicitly overridden. Changing
-only the processing provider reuses compatible independent reports. Completed
-reviews and human edits remain available in history if a replacement fails.
+`--economical` selects Haiku and Terra with Terra processing; `--expensive`
+selects Fable and Astra with Astra processing, all at high effort. These mutually
+exclusive presets also apply to newly introduced reviewer and processing names.
+New names used only for issue planning or implementation retain built-in provider
+defaults; explicitly shared names use the same choice in every referring role.
+Saved and file-defined choices take precedence over presets.
+
+Resolution is **defaults → preset → saved settings → complete file → explicit
+CLI flags**. Flags win regardless of argument order. Omitted CLI fields retain
+resolved values; `--no-suggested-changes` explicitly selects false. A complete
+file replaces applicable saved settings. PR resume uses pending/current settings,
+retains named identity and sharing, and reuses compatible completed independent
+reports. Human edits and completed generations remain available after failure.
+Equivalent settings, including renamed configurations and imported legacy choices,
+retain the current generation, human comment edits, and staging.
+
+### Complete terminal configuration files
+
+`--generate-json-config PATH` writes complete built-in defaults and exits without
+a target, repository discovery, authentication, network, or provider tools. It
+never exports a session or overwrites an existing destination. Generation and
+execution use the same defaults source; no separate defaults file is maintained.
+
+```sh
+pr-review --generate-json-config /tmp/pr-settings.json
+fix-issue --generate-json-config /tmp/issue-settings.json
+pr-review 123 --settings-file /tmp/pr-settings.json --no-publish
+fix-issue -i 42 --settings-file /tmp/issue-settings.json
+```
+
+The PR file contains `model_configs` (named complete `{provider, model, effort}`
+triplets), `reviewers` (ordered names), `processing` (a name), `synthesis_tests`
+(`focused` or `full`), and `suggested_changes` (boolean). Issue files additionally
+require `planning`, `fix`, `max_runtime`, `min_weekly_quota_remaining`, and
+`max_weekly_quota_use`, and exclude `suggested_changes`. Disabled execution
+limits are JSON `null`; null model choices or role references are invalid.
+
+All applicable fields and referenced triplets are required. Missing values cannot
+be repaired by defaults, saved state, or flags. Unknown fields, malformed files,
+undefined references, duplicate reviewer names, and name/provider mismatches fail.
+Every explicit definition must be referenced by a final active role, including
+roles other than reviewers. If a CLI role override leaves a file definition unused,
+remove that definition; the error names it. Inactive built-in defaults are exempt.
+Targets, publication/approval actions, recovery, trust tokens, and environment
+runtime settings are invocation controls, not file fields.
+
+Provider-wide model/effort flags, positional `--reviewer-N-provider/model/effort`,
+provider-only reviewer lists, and direct role triplets such as
+`--processing-provider/model/effort` (also planning/fix) are obsolete and rejected
+with replacement guidance. API/Emacs slot objects and interactive Owner files
+are unchanged; the new terminal schema does not migrate historical CLI files.
+
+Before model work, including authentication probes, both commands print validated
+effective settings to **stderr**: every active role and ordered reviewer, names
+and triplets, independent-review and synthesis testing policies, suggested-change
+behavior where applicable, permission, timeout, budget and auxiliary probe settings.
+Issue summaries also show approval mode, effective limits and consumed active
+runtime. Disabled/unlimited values are explicit and credentials are excluded.
+Saved and frozen choices govern the summary; rejected changes never appear as
+effective settings. Successful JSON modes keep one machine-readable result on
+stdout. See the [cookbook](cookbook.md) for complete files and shared-role examples.
 
 ## Automatic reviews
 
 ```sh
 pr-review 123 --auto-publish
-pr-review 123 --auto-publish --reviewers codex --codex-model gpt-6-luna --codex-effort medium --json
+pr-review 123 --auto-publish --reviewers codex-1 --processing codex-1 --codex-1-model gpt-6-luna --codex-1-effort medium --json
 pr-review 123 --auto-publish --resume /absolute/path/to/run --json
 ```
 
@@ -117,8 +165,8 @@ pr-review 123 --auto-publish --resume /absolute/path/to/run --json
 a menu or asks a question, even on a terminal. Ordinary CLI and Emacs runs keep
 their explicit staging and confirmation workflow. The flag cannot be combined
 with `--no-publish` or `--followup-thread`; `--json` requires `--auto-publish`.
-Settings use backend defaults, saved pending/current settings, then explicit
-flags. Enabled providers' model/effort choices are validated from fresh metadata.
+Settings use the same defaults, preset, saved settings, complete file, and explicit
+flag precedence as direct execution. Enabled providers' model/effort choices are validated from fresh metadata.
 
 The completed analysis must be current. Automatically suppressed duplicates and
 confirmed published comments are excluded; all remaining findings must pass bulk
@@ -915,7 +963,7 @@ their explicit publication behavior.
 Run from a checkout with a GitHub remote:
 
 ```sh
-fix-issue -i 123 --reviewers codex
+fix-issue -i 123 --reviewers codex-1
 fix-issue -i 123 --approve 1
 fix-issue -p 456
 ```
@@ -935,7 +983,7 @@ On first adoption the PR branch may contain only empty single-parent commits.
 Any source, documentation, configuration, or test changes prevent adoption.
 A prior merged associated PR requires manual assessment.
 
-The processing provider inspects a dedicated planning worktree and posts numbered
+The planning provider inspects a dedicated planning worktree and posts numbered
 questions or a revisioned plan on the issue. Answer in issue comments; reference
 question IDs or quote their wording. Missing details are clarified before coding.
 Approve with an issue comment `/fix-issue approve REV` or pass `--approve REV`.
@@ -1051,34 +1099,43 @@ Resume unfinished implementation with the normal command. The former issue
 attempts and plans remain readable history. Interactive Owner retains its own
 explicit replanning controls.
 
-Shared reviewer flags and economical/expensive presets use normal precedence:
-defaults, preset, saved settings, then explicit individual flags. They configure the
-acceptance review: `--reviewers`, `--reviewer-N-provider/model/effort`,
-`--processing-*`, `--claude-*`, `--codex-*` and `--synthesis-tests` set the Owner
-`final_review`, under the same frozen-settings checks. Without them a settings file's
-`final_review` applies, then one slot derived from its `review`, then the common
-defaults; a new session without a file starts from those defaults and a session
-without `final_review` stays single-reviewer. `--settings-file` accepts the Owner JSON
-shape; `review` configures interactive task checks only:
+Issue CLI roles share the named configuration namespace. `--planning NAME`
+selects issue assessment and subsequent planning turns; `--fix NAME` selects the
+implementation harness; `--reviewers` and `--processing` select acceptance review.
+Defaults use separate `codex-3` and `codex-4` Sol/high configurations for planning
+and implementation, independent of reviewer/processing presets.
 
-```json
-{
-  "fix": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
-  "review": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
-  "final_review": {
-    "reviewer_slots": [
-      {"id": "reviewer-1", "provider": "claude", "model": "opus", "effort": "high"},
-      {"id": "reviewer-2", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high"}
-    ],
-    "synthesis": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
-    "synthesis_tests": "focused"
-  },
-  "verification": "focused"
-}
+```sh
+fix-issue -i 42 \
+  --reviewers codex-1,claude-1 \
+  --planning codex-1 --processing codex-1 --fix codex-2 \
+  --codex-1-model gpt-6.1-sol --codex-1-effort high \
+  --codex-2-model gpt-6.1-terra --codex-2-effort medium \
+  --claude-1-model opus --claude-1-effort high
 ```
 
-Started batches retain their settings. Agent configuration changes require the
-normal `--trust-agent-config TOKEN` approval, reported with the blocker details.
+Here planning, processing, and the first reviewer share Sol/high; implementation
+uses Terra/medium. Fully Claude-only operation requires assigning all four role
+types to Claude names. Unused interactive Owner task-check settings do not activate
+providers. Attached Owner settings are resolved before planning begins.
+
+`--settings-file` accepts the complete named issue format described above, not
+Owner-format files. Those remain supported by the interactive Owner interface.
+Legacy saved sessions remain readable, including derived single-reviewer settings.
+For legacy workflows without an explicit implementation choice, imports retain
+the processing-derived choice under an independent name. Reusing a validated ready result or completed
+verification does not require provider discovery. Unchanged approval and answer
+polling also works without discovery; checks of eligibility, discussion, and
+published plans still run. Provider choices are validated before the next model turn.
+An existing implementation batch accepts omitted overrides or equivalent effective
+choices (including renamed configurations) without replacing its approved plan.
+Forbidden changes fail with `settings_changed` before model work, retaining settings, batch identity and evidence.
+
+Runtime and quota limits accept `none` on the CLI to disable them, equivalent to
+JSON null. Changing or disabling limits preserves the approved plan and cumulative
+runtime and quota accounting. For example: `fix-issue -i 42 --max-runtime none
+--min-weekly-quota-remaining none --max-weekly-quota-use none`.
+Agent configuration changes retain the normal `--trust-agent-config TOKEN` flow.
 
 After the engine passes the candidate, the coordinator commits, pushes, and marks
 the PR ready. Blocking findings return to the same implementation session before

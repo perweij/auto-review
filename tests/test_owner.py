@@ -20,10 +20,11 @@ from pr_review import owner_commit, owner_completion, owner_fixes, owner_git, ow
 from pr_review.providers import Runtime
 from pr_review.owner_cli import main as owner_cli
 from pr_review.state import Session as ReviewSession
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import ExitStack, redirect_stdout, redirect_stderr
 from io import StringIO
 
 REAL_INVOKE = owner_providers.invoke
+REAL_PREFLIGHT = owner_providers.preflight
 
 
 class OwnerTest(unittest.TestCase):
@@ -60,7 +61,7 @@ class OwnerTest(unittest.TestCase):
         for target, side_effect in (
             ("pr_review.pulls.github_json", self.github),
             ("pr_review.discussion.fetch", lambda repo: ({"items": copy.deepcopy(self.feedback)}, {"inline": []})),
-            ("pr_review.owner_providers.preflight", lambda session, state: None),
+            ("pr_review.owner_providers.preflight", lambda session, state, **kwargs: None),
             ("pr_review.owner_providers.invoke", self.model),
             ("pr_review.acceptance.review_owner", engine_stub.owner_review),
             ("pr_review.owner_publication.gh", self.publish),
@@ -2114,6 +2115,81 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual("Edit" in args, role != "fix")
                 self.assertIn("Bash(git commit:*)", args)
                 self.assertIn("Bash(git add:*)", args)
+
+
+class CurrentModePreflightTest(unittest.TestCase):
+    def setUp(self):
+        self.t = OwnerTest()
+        self.addCleanup(self.t.doCleanups)
+        self.t.setUp()
+        self.session = OwnerSession({'session': self.t.path})
+        state = self.session.load()
+        state['issue_workflow'] = 'historical-association'
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        state['settings'].update(fix=choice,
+            review={'provider': 'claude', 'model': 'opus', 'effort': 'high'},
+            final_review={'reviewer_slots': [{'id': 'reviewer-1', **choice}],
+                          'synthesis': choice, 'synthesis_tests': 'focused'})
+        self.session.save(state)
+        self.discovered, self.probed = [], []
+
+    def preflight(self, *, supported=True, capabilities=True, authenticated=True):
+        def discover(request):
+            provider = request['provider']
+            self.discovered.append(provider)
+            names = ['gpt-6.1-sol'] if provider == 'codex' else ['opus'] if supported else []
+            return {'models': [{'value': m, 'efforts': ['high']} for m in names]}
+        def command(argv, **kwargs):
+            flags = ('--sandbox --output-schema --ephemeral --strict-config --cd '
+                     '--skip-git-repo-check --ignore-rules --add-dir --base --output-last-message '
+                     '--json --model --config --permission-prompts --json-schema '
+                     '--no-session-persistence --disallowed --settings')
+            return SimpleNamespace(stdout='' if argv[0] == 'claude' and not capabilities else flags)
+        def run(argv, **kwargs):
+            self.probed.append(argv[0])
+            self.assertEqual([], self.t.calls)
+            if argv[0] == 'codex':
+                Path(argv[argv.index('-o') + 1]).write_text('PR_REVIEW_AUTH_OK')
+                events = [{'type': 'turn.completed'}]
+            else:
+                events = [{'type': 'result', 'subtype': 'success', 'result': 'PR_REVIEW_AUTH_OK'}]
+            return SimpleNamespace(returncode=0 if authenticated or argv[0] == 'codex' else 1, events=events)
+        stack = ExitStack()
+        stack.enter_context(patch('pr_review.owner_providers.preflight', new=REAL_PREFLIGHT))
+        stack.enter_context(patch('pr_review.owner_providers.discover', side_effect=discover))
+        stack.enter_context(patch('pr_review.owner_providers.command', side_effect=command))
+        stack.enter_context(patch('pr_review.owner_providers.run', side_effect=run))
+        return stack
+
+    def test_retained_association_validates_task_check_on_fresh_and_resumed_work(self):
+        with self.preflight(supported=False):
+            with self.assertRaises(ApiError) as error:
+                self.t.fix()
+            self.assertEqual('unsupported_model', error.exception.code)
+            state = self.session.load()
+            batch = state['batches'][-1]
+            with self.assertRaises(ApiError) as error:
+                self.t.request('owner-fix', batch=batch['id'])
+        self.assertEqual('unsupported_model', error.exception.code)
+        self.assertEqual(['codex', 'claude'] * 2, self.discovered)
+        self.assertEqual([], self.probed)
+        self.assertEqual([], self.t.calls)
+        self.assertEqual([], batch['attempts'])
+        self.assertEqual('feature\n', (Path(state['worktree']) / 'source.txt').read_text())
+
+    def test_task_check_capabilities_and_authentication_precede_implementation(self):
+        for options, code in (({'capabilities': False}, 'unsupported_cli'),
+                              ({'authenticated': False}, 'authentication_failed')):
+            with self.subTest(code=code), self.preflight(**options):
+                with self.assertRaises(ApiError) as error:
+                    self.t.fix()
+                self.assertEqual(code, error.exception.code)
+                self.assertEqual([], self.t.calls)
+        with self.preflight():
+            result = self.t.fix()
+        self.assertNotIn('error', result)
+        self.assertIn('claude', self.probed)
+        self.assertIn('review', [role for role, _ in self.t.calls])
 
 
 if __name__ == "__main__":

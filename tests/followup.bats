@@ -46,7 +46,7 @@ load helpers/fixture
 
 @test "follow-up uses the configured Codex processor and rejects missing threads" {
     discussion_fixture
-    run_review --processing-provider codex
+    run_review --processing codex-2
     assert_success
     run_review --followup-thread thread:missing
     assert_failure

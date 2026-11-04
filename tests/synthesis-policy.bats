@@ -15,7 +15,7 @@ assert_focused_independent_reviews() {
 }
 
 @test "focused policy reaches both independent reviewers and synthesis while resume reuses all stages" {
-    run_review --claude-model haiku --codex-model gpt-6-luna --processing-provider claude; assert_success
+    run_review --claude-1-model haiku --codex-1-model gpt-6-luna --processing claude-1; assert_success
     saved=$(run_directory)
     manifest_is '.phases.synthesis.testing_policy=="focused"'
     assert_focused_independent_reviews "$saved"
@@ -29,7 +29,7 @@ assert_focused_independent_reviews() {
 }
 
 @test "full-suite opt-in changes synthesis only and preserves completed drafts through failure" {
-    run_review --processing-provider claude; assert_success
+    run_review --processing claude-1; assert_success
     previous=$(run_directory)
     printf 'Human wording worth preserving\n' > "$previous/publication/review-body.md"
     hashes=$(sha256sum "$previous/reviews/synthesis.json" "$previous/publication/review-body.md")
@@ -52,7 +52,7 @@ assert_focused_independent_reviews() {
 }
 
 @test "Codex synthesis full-suite permission does not reach either independent reviewer" {
-    run_review --processing-provider codex --synthesis-tests full; assert_success
+    run_review --processing codex-2 --synthesis-tests full; assert_success
     saved=$(run_directory)
     assert_focused_independent_reviews "$saved"
     manifest_is '.phases.synthesis.testing_policy=="full"'
@@ -63,7 +63,7 @@ assert_focused_independent_reviews() {
 @test "invalid synthesis policy is rejected before authentication or model calls" {
     run_review --synthesis-tests all
     assert_failure
-    [[ $output == *'--synthesis-tests must be focused or full'* ]]
+    [[ $output == *'--synthesis-tests: invalid choice:'* && $output == *'focused, full'* || $output == *"'focused', 'full'"* ]]
     [ ! -e "$FIXTURE/calls.jsonl" ]
     run_review --synthesis-tests
     assert_failure

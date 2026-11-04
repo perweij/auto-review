@@ -33,7 +33,7 @@ class Review(Store):
 
     def configure(self, kind, threads):
         self.scope(kind, threads)
-        if (settings.validate(settings.from_manifest(self.manifest)) != self.settings and
+        if (settings.effective_review(settings.from_manifest(self.manifest)) != settings.effective_review(self.settings) and
                 any(self.manifest['phases'].get(s, {}).get('status') == 'completed' for s in ('synthesis', 'followup'))):
             self.begin()
         if getattr(self, 'resuming', False) and 'legacy_review_artifacts' not in self.manifest:
@@ -315,6 +315,10 @@ def execute(request, *, confirm_trust=None):
                                  requires_independent(configuration, saved_manifest) else [])
         tools = capabilities(enabled, configuration['processing_provider'], runtime, repo.cwd,
                              independent_providers=independent_providers)
+        if request.get('_cli_config'):
+            from .cli_settings import summary, validate_models
+            validate_models(configuration, request.get('catalogs'), reviewers=kind != 'followup')
+            summary(configuration, runtime, request=request)
         say(f'PR Review: #{repo.pr}; Repository: {repo.identity}; Remote: {repo.remote}')
         checks = [(['gh', 'auth', 'status', '--hostname', repo.host], f'GitHub authentication failed for {repo.host}')]
         if 'codex' in enabled:

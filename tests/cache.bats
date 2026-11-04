@@ -15,14 +15,14 @@ legacy_cache_records() {
 
 @test "main draft edits, UI changes and runtime limits reuse every completed model stage" {
     copy_tool
-    run_review --claude-model claude-haiku-5-5 --codex-model gpt-6-luna; assert_success
+    run_review --claude-1-model claude-haiku-5-5 --codex-1-model gpt-6-luna --codex-2-model gpt-6-luna; assert_success
     saved=$(run_directory)
     stages=$(cat "$FIXTURE/stages")
     printf 'My edited main review\n' > "$saved/publication/review-body.md"
     printf '\n# A publication UI change\n' >> "$FIXTURE/tool/lib/pr_review/terminal.py"
     printf '\n# An unrelated entry point change\n' >> "$FIXTURE/tool/bin/pr-review"
     export PR_REVIEW_MODEL_TIMEOUT=120 PR_REVIEW_CLAUDE_BUDGET=5
-    run_review --claude-model claude-haiku-5-5 --codex-model gpt-6-luna; assert_success
+    run_review --claude-1-model claude-haiku-5-5 --codex-1-model gpt-6-luna --codex-2-model gpt-6-luna; assert_success
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
     [ "$(cat "$saved/publication/review-body.md")" = 'My edited main review' ]
     manifest_is '.review_history==null and .phases["reviewer-1"].inputs.version==1'
@@ -50,7 +50,7 @@ legacy_cache_records() {
     run_review; assert_success
     saved=$(run_directory)
     legacy_cache_records
-    run_review --codex-model other-codex; assert_success
+    run_review --codex-1-model other-codex --codex-2-model other-codex; assert_success
     [[ $output == *'Reusing completed Reviewer-1 review'* && $output == *'Restarting reviewer slots: reviewer-2'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\ncodex\nsynthesis\ncontributions' ]
 }

@@ -53,14 +53,14 @@ def output_schema(role, keys):
     return schema
 
 
-def preflight(session, state):
+def preflight(session, state, *, issue_harness=False):
     """Check every role, reviewer slot and synthesis choice before any model work starts."""
     from . import review_engine, settings as reviewer_settings
     from .owner_state import effective_settings
     runtime = Runtime.environment()
     catalogs = {}
     final = effective_settings(state["settings"])["final_review"]
-    choices = [(role, role, state["settings"][role]) for role in ("fix", "review")]
+    choices = [(role, role, state["settings"][role]) for role in (("fix",) if issue_harness else ("fix", "review"))]
     choices += [(f"final review {slot['id']}", "final_review", slot) for slot in final["reviewer_slots"]]
     choices.append(("final review synthesis", "final_review", final["synthesis"]))
     for label, group, choice in choices:

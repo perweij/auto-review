@@ -31,7 +31,7 @@ invalidate_claude() {
     run_review; assert_success
     saved=$(run_directory)
     claude_hash=$(sha256sum "$saved/reviews/reviewer-1.md")
-    run_review --codex-model other-codex; assert_success
+    run_review --codex-1-model other-codex --codex-2-model other-codex; assert_success
     [[ $output == *'Restarting reviewer slots: reviewer-2'* && $output == *'Reusing completed Reviewer-1 review'* ]]
     [ "$(sha256sum "$saved/reviews/reviewer-1.md")" = "$claude_hash" ]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\ncodex\nsynthesis\ncontributions' ]
@@ -106,10 +106,10 @@ invalidate_claude() {
 }
 
 @test "processor-only replacement after publication retains independent reports" {
-    tty_review 'a p1|overall|s p1|p|yes|q' --processing-provider claude; assert_success
+    tty_review 'a p1|overall|s p1|p|yes|q' --processing claude-1; assert_success
     saved=$(run_directory)
     actions=$(sha256sum "$saved/publication/drafts.json")
-    run_review --processing-provider codex; assert_success
+    run_review --processing codex-2; assert_success
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
     [ "$(sha256sum "$saved/publication/drafts.json")" = "$actions" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
@@ -120,7 +120,7 @@ invalidate_claude() {
     receipt=$(sha256sum "$previous/publication/drafts.json")
     [ "$(jq -r '.batches[0].actions[0].marker' "$previous/publication/drafts.json")" != "$(jq -r '.batches[0].actions[0].marker' "$saved/publication/drafts.json")" ]
     export MOCK_FAIL_STAGE=claude
-    run_review --claude-model haiku; assert_failure
+    run_review --claude-1-model haiku; assert_failure
     [[ $output != *'Partially published'* ]]
     [ ! -f "$(run_directory)/publication/drafts.json" ]
     [ "$(sha256sum "$previous/publication/drafts.json")" = "$receipt" ]

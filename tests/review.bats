@@ -18,7 +18,7 @@ load helpers/fixture
     grep -q 'pr-discussion.json' "$FIXTURE/synthesis-stdin"
     jq -se 'any(.[]; .tool == "claude" and (.args | index("/code-review high --max-findings default refs/pr-review/7/base")))' "$FIXTURE/calls.jsonl"
     jq -se 'any(.[]; .tool == "codex" and (.args | index("sandbox_mode=danger-full-access")) and (.args | index("--ephemeral")) and (.args | index("--strict-config")))' "$FIXTURE/calls.jsonl"
-    jq -se 'all(.[] | select((.args | join(" ") | contains("PR_REVIEW_AUTH_OK")) | not);
+    jq -se 'all(.[] | select((.args | join(" ") | test("PR_REVIEW_AUTH_OK|--input-format stream-json")) | not);
         .args | all(.[]; test("^--(fix|comment|bare|setting-sources|strict-mcp-config)$|^--dangerously|^checks$|check-runs") | not))' "$FIXTURE/calls.jsonl"
     [ -z "$(git -C "$FIXTURE/repo-review-pr-7" status --porcelain)" ]
     [ -z "$(git for-each-ref --format='%(refname)' refs/remotes/)" ]
@@ -110,7 +110,7 @@ load helpers/fixture
 
 @test "stdout-only synthesis error points to structured output and retains reviews" {
     export MOCK_STDOUT_ERROR_STAGE=synthesis
-    run_review --processing-provider claude; assert_failure
+    run_review --processing claude-1; assert_failure
     [[ $output == *'CLI result subtype: error_during_execution'* ]]
     [[ $output == *'logs/synthesis.raw.json'* && $output == *'Captured stderr is empty:'* ]]
     [[ $output == *'model: opus'* && $output != *'fixture-provider-error-do-not-replay'* ]]
@@ -125,7 +125,7 @@ load helpers/fixture
 
 @test "expired Claude OAuth is diagnosed despite success subtype and empty stderr" {
     export MOCK_STDOUT_OAUTH_STAGE=synthesis
-    run_review --processing-provider claude; assert_failure
+    run_review --processing claude-1; assert_failure
     [[ $output == *'CLI result subtype: success'* && $output == *'is_error=true'* ]]
     [[ $output == *"Claude's OAuth session expired"* && $output == *'claude auth login'* ]]
     [[ $output == *'Captured stderr is empty:'* ]]
@@ -137,7 +137,7 @@ load helpers/fixture
 
 @test "invalid structured synthesis is retained and resumable" {
     export MOCK_SCHEMA_INVALID=1
-    run_review --processing-provider claude; assert_failure
+    run_review --processing claude-1; assert_failure
     [[ $output == *'violates the JSON schema'* ]]
     [ -s "$(run_directory)/logs/synthesis.raw.json" ]
     unset MOCK_SCHEMA_INVALID
@@ -299,7 +299,7 @@ load helpers/fixture
 
 @test "resume restarts changed independent inputs and updates a changed head" {
     run_review; assert_success
-    run_review --resume "$(run_directory)" --claude-model different; assert_success
+    run_review --resume "$(run_directory)" --claude-1-model different; assert_success
     [[ $output == *'Restarting reviewer slots: reviewer-1'* ]]
     [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force

@@ -7,12 +7,13 @@ import sys
 from .common import ApiError, local_sessions
 from .events import event_sink
 from .processes import Cancelled
+from . import cli_settings
 
 
 def parser():
-    result = argparse.ArgumentParser(prog='pr-review', description='Review a GitHub PR with optional publication. For incoming feedback and fixes, use pr-review owner --help.',
+    result = cli_settings.Parser(prog='pr-review', description='Review a GitHub PR with optional publication. For incoming feedback and fixes, use pr-review owner --help.',
         epilog='Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan), PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET (optional USD), PR_REVIEW_AUTH_TIMEOUT (default 60), PR_REVIEW_CODEX_PROBE_MODEL, XDG_STATE_HOME, VISUAL/EDITOR.')
-    result.add_argument('pr', help='positive PR number or https://HOST/OWNER/REPO/pull/NUMBER')
+    result.add_argument('pr', nargs='?', help='positive PR number or https://HOST/OWNER/REPO/pull/NUMBER')
     result.add_argument('-R', '--repo', dest='repository')
     result.add_argument('--no-publish', action='store_true', help='generate and retain reviews without opening the publication menu')
     result.add_argument('--auto-publish', action='store_true', help='analyse and publish COMMENT feedback without prompts; stop the whole batch if any finding needs attention')
@@ -26,13 +27,7 @@ def parser():
     presets.add_argument('--expensive', action='store_true',
                         help='new-review defaults: Fable + Astra at high effort, Astra processing; saved settings and explicit flags take precedence')
     result.add_argument('--followup-thread', dest='followup_threads', action='append', default=[])
-    for key in ('codex-model', 'claude-model', 'processing-provider', 'claude-effort', 'codex-effort', 'synthesis-tests'):
-        result.add_argument('--' + key, default=argparse.SUPPRESS)
-    result.add_argument('--reviewers', type=lambda value: value.split(','), default=argparse.SUPPRESS)
-    for key in ('reviewer-1-provider', 'reviewer-1-model', 'reviewer-1-effort',
-                'reviewer-2-provider', 'reviewer-2-model', 'reviewer-2-effort',
-                'processing-model', 'processing-effort'):
-        result.add_argument('--' + key, default=argparse.SUPPRESS)
+    cli_settings.add_arguments(result)
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     return result
 
@@ -59,6 +54,15 @@ def main(argv=None):
         except (KeyboardInterrupt, EOFError):
             return 130
     request = vars(parser().parse_args(argv))
+    if request.get('generate_json_config') is not None:
+        try:
+            cli_settings.generate(request['generate_json_config'])
+            return 0
+        except ApiError as exc:
+            print('Error: ' + str(exc), file=sys.stderr)
+            return 1
+    if not request.get('pr'):
+        parser().error('A PR target is required unless --generate-json-config is used.')
     if request['auto_publish'] and (request['no_publish'] or request['followup_threads']):
         parser().error('--auto-publish cannot be combined with --no-publish or --followup-thread')
     if request['json'] and not request['auto_publish']:
@@ -75,6 +79,7 @@ def main(argv=None):
     def trust(_paths):
         return input('Trust these configuration changes and run models? Type yes: ') == 'yes'
     try:
+        cli_settings.prepare(request)
         from .reviews import execute
         with local_sessions(), event_sink(progress):
             if request['auto_publish']:

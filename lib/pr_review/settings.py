@@ -125,7 +125,19 @@ def validate(settings):
                                 for field in ("model", "effort")}
     result["_compatibility"].update(reviewers=list(result["reviewers"]),
                                     processing_provider=result["processing_provider"])
+    if "_named" in settings:
+        result["_named"] = copy.deepcopy(settings["_named"])
+    for role in ("planning", "fix"):
+        if role in settings:
+            result[role] = choice(settings[role])
     return result
+
+
+def effective_review(configuration):
+    """Execution choices that define a PR generation, excluding CLI provenance."""
+    resolved = validate(configuration)
+    return {key: resolved[key] for key in
+            ('reviewer_slots', 'processing', 'synthesis_tests', 'suggested_changes')}
 
 
 def request_defaults(request):
@@ -164,6 +176,12 @@ def initial_settings(request):
 
 def apply_overrides(settings, request, *, fresh=False):
     """Apply individual choices over the already resolved defaults or saved state."""
+    if request.get("_cli_config"):
+        from .cli_settings import resolve as resolve_named
+        resolved = request.get("_cli_resolved") or resolve_named(request, None if fresh else settings)
+        settings.clear()
+        settings.update(copy.deepcopy(resolved))
+        return
     overrides = {k: request[k] for k in CONFIG_KEYS if k in request}
     compatibility = request.get("_compatibility")
     if isinstance(compatibility, dict) and "reviewer_slots" in request and "processing" in request:
@@ -225,6 +243,12 @@ def apply_overrides(settings, request, *, fresh=False):
             processing[field] = request["processing_" + field]
     settings.update(overrides)
     settings.update(reviewer_slots=slots, processing=processing)
+    if settings.get('_named'):
+        from .cli_settings import resolve as resolve_named
+        # API edits address individual roles. Retain names/sharing that still
+        # match and split changed roles instead of leaving obsolete provenance.
+        settings['_named'] = resolve_named(
+            {}, settings, issue='planning' in settings['_named'])['_named']
 
 
 def resolve(request):

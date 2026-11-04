@@ -39,7 +39,7 @@ class EligibilityTest(unittest.TestCase):
                  patch('pr_review.issue_planning.argv', return_value=['mock']) as build, \
                  patch('pr_review.issue_planning.run'), \
                  patch('pr_review.issue_planning.response', return_value=result.copy()):
-                assess_issue({}, {'processing': choice}, Path(directory), directory)
+                assess_issue({}, {'planning': choice, 'processing': {**choice, 'model': 'different-processor'}}, Path(directory), directory)
                 self.assertEqual(build.call_args.args[0], choice)
 
     def test_scanner_and_execution_same_facts(self):
@@ -309,6 +309,7 @@ class ReadinessCacheTest(unittest.TestCase):
         self.flow.writes.comment.return_value = {'created_at': '2026-10-30'}
         self.flow.feedback_context = Mock(return_value=[])
         self.flow.bootstrap = Mock(return_value=owner)
+        self.flow.execution_providers = Mock(return_value=['codex'])
         self.reviewed_bases = []
         self.flow.push_implementation = Mock(side_effect=lambda owner: (self.reviewed_bases.append(self.flow.facts['base']), Workflow.push_implementation(self.flow, owner))[1])
         self.flow.plan = Mock(wraps=self.flow.plan)
@@ -1229,6 +1230,14 @@ class IssueIntegrationTest(unittest.TestCase):
 
     def setUp(self):
         test_owner.OwnerTest.setUp(self)
+        # The integration fixture mocks providers; metadata discovery must use
+        # that same local catalog instead of launching an installed account CLI.
+        def catalog(request):
+            names = ('opus', 'sonnet') if request['provider'] == 'claude' else ('gpt-6.1-sol', 'gpt-6.1-terra', 'planning-model')
+            return {'provider': request['provider'], 'models': [{'value': n, 'efforts': ['low', 'medium', 'high']} for n in names]}
+        metadata = patch('pr_review.models.discover', side_effect=catalog)
+        metadata.start()
+        self.addCleanup(metadata.stop)
         self.feedback.clear()
         self.git('branch', 'remote-feature', self.head)
         self.f = facts()
@@ -1438,6 +1447,160 @@ class IssueIntegrationTest(unittest.TestCase):
         after = owner_state.OwnerSession({'session': self.path}).load()
         self.assertEqual(before['settings'], after['settings'])
         self.assertEqual(before['batches'], after['batches'])
+
+    def terminal_request(self, *args):
+        from pr_review.issue_cli import parser
+        from pr_review import cli_settings
+        request = {**self.without_flags(), **vars(parser().parse_args(['-i', '12', *args]))}
+        cli_settings.prepare(request, issue=True)
+        return request
+
+    def test_named_issue_roles_summary_and_attached_owner_before_planning(self):
+        from contextlib import redirect_stderr
+        owner = owner_state.OwnerSession({'session': self.path})
+        data = owner.load()
+        data['settings']['fix'] = {'provider': 'claude', 'model': 'sonnet', 'effort': 'medium'}
+        data['settings']['final_review']['synthesis'] = {'provider': 'claude', 'model': 'opus', 'effort': 'high'}
+        owner.save(data)
+        existing = bool(self.f.get('pr'))
+        output = StringIO()
+        def assess(*args):
+            self.assertIn('Effective configuration:', output.getvalue())
+            self.assertIn('claude / sonnet / medium' if existing else 'codex / gpt-6.1-sol / high', output.getvalue())
+            return self.assess(*args)
+        with redirect_stderr(output), patch('pr_review.issues.assess_issue', side_effect=assess):
+            result = dispatch(self.terminal_request('--planning', 'codex-33', '--codex-33-model', 'planning-model'))
+        self.assertEqual(2, result['exit_code'], result)
+        config = self.assessments[-1][1]
+        self.assertEqual('planning-model', config['planning']['model'])
+        self.assertEqual('opus' if existing else 'gpt-6.1-sol', config['processing']['model'])
+        self.assertEqual(data['settings']['fix'] if existing else {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, config['fix'])
+        self.assertIn('planning: codex-33', output.getvalue())
+        self.assertIn('Consumed active runtime: 0s', output.getvalue())
+
+    def test_named_settings_survive_approval_wait_before_owner_attachment(self):
+        from contextlib import redirect_stderr
+        with redirect_stderr(StringIO()):
+            first = dispatch(self.terminal_request('--fix', 'claude-7', '--claude-7-model', 'sonnet',
+                                                  '--processing', 'claude-8', '--claude-8-model', 'opus'))
+            self.assertEqual(2, first['exit_code'], first)
+            before = dispatch({**self.without_flags(), 'command': 'issue-read'})['configuration']
+            again = dispatch(self.terminal_request())
+            self.assertEqual(2, again['exit_code'], again)
+            after = dispatch({**self.without_flags(), 'command': 'issue-read'})['configuration']
+        self.assertEqual(before, after)
+
+    def test_named_frozen_resume_equivalence_limits_and_rejected_override(self):
+        from contextlib import redirect_stderr
+        from pr_review import cli_settings
+        request = self.terminal_request('--reviewers', 'claude-1', '--planning', 'claude-1',
+            '--processing', 'claude-1', '--fix', 'claude-2', '--claude-2-model', 'sonnet',
+            '--max-runtime', '2h', '--yolo')
+        before = self.interrupt_recorded_implementation(request)
+        # Read through the public workflow operation so the fixture state root is authoritative.
+        state = dispatch({**self.without_flags(), 'command': 'issue-read'})
+        old_configuration = copy.deepcopy(state['configuration'])
+        rejected_output = StringIO()
+        with redirect_stderr(rejected_output):
+            result = dispatch(self.terminal_request('--claude-2-effort', 'low', '--yolo'))
+        self.assertEqual('settings_changed', result['error']['code'], result)
+        self.assertNotIn('Effective configuration:', rejected_output.getvalue())
+        owner = owner_state.OwnerSession({'session': self.path})
+        self.assertEqual(before['settings'], owner.load()['settings'])
+        self.assertEqual(before['batches'], owner.load()['batches'])
+        state = dispatch({**self.without_flags(), 'command': 'issue-read'})
+        self.assertEqual(old_configuration, state['configuration'])
+        # Different names with identical role choices must resume the same batch.
+        value = copy.deepcopy(state['configuration']['_named'])
+        value['model_configs']['claude-22'] = value['model_configs'].pop('claude-2')
+        value['fix'] = 'claude-22'
+        value['max_runtime'] = None
+        path = self.root / 'named-settings.json'
+        path.write_text(json.dumps(value))
+        with redirect_stderr(StringIO()):
+            result = dispatch(self.terminal_request('--settings-file', str(path), '--yolo'))
+        self.assertEqual(0, result['exit_code'], result)
+        after = owner.load()
+        self.assertEqual(before['batches'][-1]['id'], after['batches'][-1]['id'])
+        self.assertEqual(before['batches'][-1]['settings'], after['batches'][-1]['settings'])
+        self.assertEqual(before['settings'], after['settings'])
+        state_after = dispatch({**self.without_flags(), 'command': 'issue-read'})
+        self.assertGreaterEqual(state_after['resources']['active_seconds'], state['resources']['active_seconds'])
+        self.assertNotIn('max_runtime', state_after['resources'])
+        self.assertEqual(['claude'], state_after['resources']['providers'])
+        self.assertEqual(cli_settings.effective(old_configuration), cli_settings.effective(state_after['configuration']))
+
+    def test_changed_attached_owner_cannot_override_frozen_batch_before_planning(self):
+        from contextlib import redirect_stderr
+        before = self.interrupt_recorded_implementation(self.terminal_request('--yolo'))
+        owner = owner_state.OwnerSession({'session': self.path})
+        changed = owner.load()
+        changed['settings']['fix']['model'] = 'changed-externally'
+        owner.save(changed)
+        errors = StringIO()
+        with redirect_stderr(errors), patch('pr_review.issues.assess_issue') as assess:
+            result = dispatch(self.terminal_request('--yolo'))
+        self.assertEqual('settings_changed', result['error']['code'], result)
+        self.assertNotIn('Effective configuration:', errors.getvalue())
+        self.assertEqual(before['batches'], owner.load()['batches'])
+        self.assertEqual(changed['settings'], owner.load()['settings'])
+        assess.assert_not_called()
+
+    def test_equivalent_attached_owner_representation_resumes_frozen_legacy_batch(self):
+        from contextlib import redirect_stderr
+        owner = owner_state.OwnerSession({'session': self.path})
+        data = owner.load()
+        data['settings'].pop('final_review')
+        owner.save(data)
+        before = self.interrupt_recorded_implementation(self.terminal_request('--yolo', '--reviewers', 'codex-1', '--processing', 'codex-1'))
+        self.assertNotIn('final_review', before['batches'][-1]['settings'])
+        data = owner.load()
+        data['settings'] = owner_state.effective_settings(data['settings'])
+        owner.save(data)
+        with redirect_stderr(StringIO()):
+            result = dispatch(self.terminal_request('--yolo'))
+        self.assertEqual(0, result['exit_code'], result)
+        after = owner.load()
+        self.assertEqual(before['batches'][-1]['id'], after['batches'][-1]['id'])
+        self.assertEqual(before['batches'][-1]['settings'], after['batches'][-1]['settings'])
+        self.assertEqual(data['settings'], after['settings'])
+
+    def test_invalid_named_implementation_is_rejected_before_planning_and_summary(self):
+        from contextlib import redirect_stderr
+        errors = StringIO()
+        with redirect_stderr(errors), patch('pr_review.issues.assess_issue') as assess:
+            result = dispatch(self.terminal_request('--codex-4-model', 'unavailable'))
+        self.assertEqual('invalid_request', result['error']['code'], result)
+        self.assertNotIn('Effective configuration:', errors.getvalue())
+        self.assertIn('fix:', result['error']['message'])
+        assess.assert_not_called()
+
+    def test_named_issue_cli_json_separates_summary_from_result(self):
+        from contextlib import redirect_stderr
+        from pr_review.issue_cli import main
+        output, errors = StringIO(), StringIO()
+        def invoke(request):
+            return dispatch({**request, 'cwd': str(self.repo)})
+        with patch('pr_review.issue_cli.dispatch', side_effect=invoke), redirect_stdout(output), redirect_stderr(errors):
+            code = main(['-i', '12', '--yolo', '--json', '--reviewers', 'codex-1',
+                         '--planning', 'codex-3', '--fix', 'codex-4', '--processing', 'codex-2'])
+        self.assertEqual(0, code, output.getvalue())
+        self.assertEqual('ready', json.loads(output.getvalue())['outcome'])
+        self.assertNotIn('Effective configuration:', output.getvalue())
+        self.assertIn('Effective configuration:', errors.getvalue())
+        self.assertIn('fix: codex-4', errors.getvalue())
+        self.assertNotIn('claude /', errors.getvalue())
+
+    def test_named_resume_without_flags_preserves_sharing(self):
+        from contextlib import redirect_stderr
+        request = self.terminal_request('--planning', 'codex-1', '--processing', 'codex-1', '--fix', 'codex-1', '--yolo')
+        before = self.interrupt_recorded_implementation(request)
+        with redirect_stderr(StringIO()):
+            result = dispatch(self.terminal_request('--yolo'))
+        self.assertEqual(0, result['exit_code'], result)
+        self.assertEqual(before['settings'], self.owner_settings())
+        state = dispatch({**self.without_flags(), 'command': 'issue-read'})
+        self.assertEqual(['codex-1'] * 3, [state['configuration']['_named'][r] for r in ('planning', 'processing', 'fix')])
 
     def test_plan_cli_approval_real_owner_commit_push_and_noop(self):
         # Dirty main checkout must survive the entire implementation.
@@ -1903,6 +2066,31 @@ class ReplacementPlanTest(unittest.TestCase):
         self.assertEqual(calls, len(self.t.calls))
         return new
 
+    def test_superseded_completed_choices_do_not_freeze_named_resume(self):
+        from pr_review.issues import required_batches
+        # A base-only update preserves the approved revision. Request actual new
+        # work so this regression exercises a superseded implementation batch.
+        self.t.f['issue']['body'] += ' Also retain history.'
+        self.t.assessment.update(decision='plan', plan='Retain history in the second case.',
+                                 acceptance=['History is retained'])
+        self.req = self.t.terminal_request('--yolo', '--fix', 'codex-44', '--codex-44-effort', 'medium')
+        new = self.assert_replacement_ready()
+        self.assertEqual('medium', new['settings']['fix']['effort'])
+        saved = copy.deepcopy(self.owner.load())
+        self.assertEqual([new['id']], [b['id'] for b in required_batches(saved)])
+        result = dispatch(self.t.terminal_request())
+        self.assertEqual('noop', result['outcome'], result)
+        self.assertEqual(saved['batches'], self.owner.load()['batches'])
+        # Missing replacement evidence must make the old work required again.
+        unverified = copy.deepcopy(saved)
+        unverified['batches'][-1]['verified_items'] = []
+        self.owner.save(unverified)
+        before = copy.deepcopy(self.owner.load())
+        result = dispatch(self.t.terminal_request())
+        self.assertEqual('settings_changed', result['error']['code'], result)
+        self.assertEqual(before['settings'], self.owner.load()['settings'])
+        self.assertEqual(before['batches'], self.owner.load()['batches'])
+
     def test_base_change_after_commits_starts_fresh_verification(self):
         self.t.f['base'] = self.t.head
         self.t.metadata['baseRefOid'] = self.t.head
@@ -2219,3 +2407,529 @@ class IssueSingleReviewGateTest(unittest.TestCase):
             self.assertEqual('ready', dispatch(request)['outcome'])
             self.assertEqual(calls, len(t.calls))
             self.assertEqual('noop', dispatch(request)['outcome'])
+
+
+class NamedApprovalRecoveryTest(unittest.TestCase):
+    """Exercise approved CLI resume, without yolo masking a replacement plan."""
+    def setUp(self):
+        self.t = IssueIntegrationTest()
+        self.addCleanup(self.t.doCleanups)
+        self.t.setUp()
+        self.owner = owner_state.OwnerSession({'session': self.t.path})
+
+    def request(self, *args):
+        return {**self.t.terminal_request(*args), 'issue': None, 'pr': 7}
+
+    def state(self):
+        return dispatch({**self.t.without_flags(), 'command': 'issue-read'})
+
+    def approved_interruption(self, *args):
+        result = dispatch(self.request(*args))
+        self.assertEqual('approval', result['outcome'], result)
+        before = self.t.interrupt_recorded_implementation(self.request('--approve', '1'))
+        self.assertEqual(1, len(self.t.assessments))
+        return before
+
+    def test_renamed_file_and_permitted_limits_preserve_approval_and_batch(self):
+        before = self.approved_interruption('--max-runtime', '2h')
+        state = self.state()
+        approval = copy.deepcopy(state['approval'])
+        value = copy.deepcopy(state['configuration']['_named'])
+        value['model_configs']['codex-44'] = value['model_configs'].pop(value['fix'])
+        value['fix'] = 'codex-44'
+        value['max_runtime'] = '3h'
+        path = self.t.root / 'renamed.json'
+        path.write_text(json.dumps(value))
+        # Keep interrupting to prove each invocation reaches the same approved
+        # harness, rather than returning approval for a newly assessed revision.
+        for args in (('--settings-file', str(path)), (), ('--max-runtime', 'none')):
+            with self.subTest(args=args):
+                previous = self.state()['resources']['active_seconds']
+                after = self.t.interrupt_recorded_implementation(self.request(*args))
+                state = self.state()
+                self.assertEqual(1, len(self.t.assessments))
+                self.assertEqual(1, state['plan']['revision'])
+                self.assertEqual({k: v for k, v in approval.items() if k != 'at'},
+                                 {k: v for k, v in state['approval'].items() if k != 'at'})
+                self.assertEqual(before['batches'][0]['id'], after['batches'][0]['id'])
+                self.assertEqual(before['batches'][0]['settings'], after['batches'][0]['settings'])
+                self.assertGreaterEqual(state['resources']['active_seconds'], previous)
+        result = dispatch(self.request())
+        self.assertEqual('ready', result['outcome'], result)
+        self.assertEqual('noop', dispatch(self.request('--max-runtime', '300h'))['outcome'])
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual(1080000.0, self.state()['resources']['max_runtime'])
+
+    def test_large_and_fractional_runtime_limits_resume_without_overrides(self):
+        before = self.approved_interruption('--max-runtime', '300h')
+        for value in (None, '1234567.8901234567s'):
+            if value:
+                self.t.interrupt_recorded_implementation(self.request('--max-runtime', value))
+            state = self.state()
+            previous = state['resources']['max_runtime']
+            resumed = self.t.interrupt_recorded_implementation(self.request())
+            self.assertEqual(previous, self.state()['resources']['max_runtime'])
+            self.assertEqual(before['batches'][0]['id'], resumed['batches'][0]['id'])
+            self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual('ready', dispatch(self.request())['outcome'])
+
+    def test_old_provenance_hashes_upgrade_without_losing_approval(self):
+        from pr_review.issues import planning_identity
+        self.approved_interruption('--max-runtime', '2h')
+        flow = Workflow(self.request(), self.t.repo_object, self.t.f)
+        previous = flow.state['configuration']
+        old = planning_identity(flow.facts, flow.state, flow.feedback_context(), previous, legacy=True)
+        flow.state.update(input_digest=old, applied_assessment=old)
+        flow.state.pop('configuration_identity_version')
+        approval = copy.deepcopy(flow.state['approval'])
+        flow.save()
+        result = dispatch(self.request())
+        self.assertEqual('ready', result['outcome'], result)
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual({k: v for k, v in approval.items() if k != 'at'},
+                         {k: v for k, v in self.state()['approval'].items() if k != 'at'})
+        # The old readiness hash can likewise be adopted without another turn.
+        flow = Workflow(self.request(), self.t.repo_object, self.t.f)
+        flow.state['ready_configuration'] = digest(flow.state['configuration'])
+        flow.state.pop('configuration_identity_version')
+        flow.save()
+        self.assertEqual('noop', dispatch(self.request('--max-runtime', 'none'))['outcome'])
+        self.assertEqual(1, len(self.t.assessments))
+
+    def test_configuration_identity_upgrade_does_not_hide_changed_requirements(self):
+        from pr_review.issues import planning_identity
+        self.approved_interruption()
+        flow = Workflow(self.request(), self.t.repo_object, self.t.f)
+        old = planning_identity(flow.facts, flow.state, flow.feedback_context(), flow.state['configuration'], legacy=True)
+        flow.state.update(input_digest=old, applied_assessment=old)
+        flow.state.pop('configuration_identity_version')
+        flow.save()
+        self.t.f['issue']['body'] += ' Also retain history.'
+        result = dispatch(self.request())
+        self.assertEqual('approval', result['outcome'], result)
+        self.assertEqual(2, len(self.t.assessments))
+        self.assertEqual(2, self.state()['plan']['revision'])
+        self.assertNotIn('approval', self.state())
+
+
+    def test_resumed_harness_uses_saved_execution_mode_for_preflight(self):
+        data = self.approved_interruption()
+        with patch('pr_review.owner_providers.preflight') as preflight:
+            result = self.t.request('owner-fix', batch=data['batches'][-1]['id'])
+        self.assertNotIn('error', result)
+        preflight.assert_called_once()
+        self.assertTrue(preflight.call_args.kwargs['issue_harness'])
+
+
+    def test_completed_verification_ignores_limits_and_upgrades_old_hash(self):
+        def no_change(session, state, batch, role, context):
+            if role == 'plan':
+                return self.t.model(session, state, batch, role, context)
+            return {'summary': 'Existing code meets the acceptance criteria',
+                    'outcomes': [{'item': i['key'], 'status': 'already_addressed',
+                                  'evidence': 'Verified existing code'} for i in context['feedback']],
+                    'complete': True, 'checks': ['Focused verification'], 'blocking': []}
+        self.assertEqual('approval', dispatch(self.request('--max-runtime', '2h'))['outcome'])
+        with patch('pr_review.owner_providers.invoke', side_effect=no_change):
+            result = dispatch(self.request('--approve', '1'))
+        self.assertEqual('no_change', result['outcome'], result)
+        self.assertEqual('complete', dispatch(self.request('--max-runtime', '3h'))['outcome'])
+        flow = Workflow(self.request(), self.t.repo_object, self.t.f)
+        flow.state['finished_input'] = digest([
+            input_digest(flow.facts, flow.state), flow.feedback_digest(), flow.state['configuration']])
+        flow.state.pop('configuration_identity_version')
+        flow.save()
+        self.assertEqual('complete', dispatch(self.request('--max-runtime', 'none'))['outcome'])
+        self.assertEqual(1, len(self.t.assessments))
+
+
+    def test_issue_number_resume_does_not_reassess_an_empty_attached_pr(self):
+        self.request = self.t.terminal_request
+        before = self.approved_interruption('--max-runtime', '2h')
+        after = self.t.interrupt_recorded_implementation(self.request())
+        self.assertEqual(before['batches'][0]['id'], after['batches'][0]['id'])
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual(1, self.state()['plan']['revision'])
+
+
+    def test_legacy_saved_choices_gain_names_without_replacing_approval(self):
+        request = {**self.t.req, 'issue': None, 'pr': 7}
+        self.assertEqual('approval', dispatch(request)['outcome'])
+        before = self.t.interrupt_recorded_implementation({**request, 'approve': 1})
+        after = self.t.interrupt_recorded_implementation(self.request())
+        self.assertEqual(before['batches'][0]['id'], after['batches'][0]['id'])
+        self.assertEqual(before['batches'][0]['settings'], after['batches'][0]['settings'])
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual('ready', dispatch(self.request())['outcome'])
+
+
+class EffectiveQuotaScopeTest(unittest.TestCase):
+    def setUp(self):
+        self.t = IssueIntegrationTest()
+        self.addCleanup(self.t.doCleanups)
+        self.t.setUp()
+        telemetry = patch('pr_review.issue_quota.read_codex',
+                          return_value={'weekly': {'used': 10, 'reset': 100}})
+        self.telemetry = telemetry.start()
+        self.addCleanup(telemetry.stop)
+
+    def request(self, *args):
+        return {**self.t.terminal_request(*args), 'issue': None, 'pr': 7}
+
+    def api_request(self, **fields):
+        return {**self.t.without_flags(), 'issue': None, 'pr': 7, 'yolo': True,
+                'min_weekly_quota_remaining': 20, **fields}
+
+    def workflow(self):
+        return dispatch({**self.t.without_flags(), 'command': 'issue-read'})
+
+    def assert_codex_execution(self, result):
+        self.assertEqual('ready', result['outcome'], result)
+        state = self.workflow()
+        self.assertEqual(['codex'], state['resources']['providers'])
+        self.assertFalse(state['resources'].get('quota_unavailable'))
+        self.assertNotIn('max_runtime', state['resources'])
+        self.telemetry.assert_called()
+        self.assertTrue(self.t.calls)
+        owner = self.t.owner_settings()
+        self.assertEqual('codex', owner['fix']['provider'])
+        self.assertEqual((['codex'], 'codex'), self.t.final_providers(owner['final_review']))
+
+    def test_api_overrides_remove_obsolete_named_quota_providers_before_bootstrap(self):
+        result = dispatch(self.request('--reviewers', 'claude-1', '--processing', 'claude-1'))
+        self.assertEqual('approval', result['outcome'], result)
+        self.assertIn('claude', {c['provider'] for c in self.workflow()['configuration']['_named']['model_configs'].values()})
+        result = dispatch(self.api_request(reviewers=['codex'], processing_provider='codex'))
+        self.assert_codex_execution(result)
+        named = self.workflow()['configuration']['_named']
+        self.assertEqual({'codex'}, {c['provider'] for c in named['model_configs'].values()})
+
+    def test_attached_owner_choices_override_obsolete_workflow_acceptance_providers(self):
+        result = dispatch(self.request('--reviewers', 'claude-1', '--processing', 'claude-1', '--yolo'))
+        self.assertEqual('ready', result['outcome'], result)
+        owner = self.t.owner_settings()
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        owner['review'] = {'provider': 'claude', 'model': 'opus', 'effort': 'high'}
+        owner['final_review'] = {'reviewer_slots': [{'id': 'reviewer-1', **choice}],
+                                 'synthesis': choice, 'synthesis_tests': 'focused'}
+        self.t.request('owner-mutate', operation='settings', settings=owner)
+        self.t.f['issue']['body'] += ' Also preserve publication receipts.'
+        self.t.calls.clear()
+        result = dispatch(self.api_request())
+        self.assert_codex_execution(result)
+        # The saved reviewer metadata still describes the earlier CLI review;
+        # attached Owner choices, including its unused task check, govern scope.
+        self.assertEqual('claude', self.workflow()['configuration']['reviewer_slots'][0]['provider'])
+
+    def test_new_active_provider_is_checked_before_implementation(self):
+        result = dispatch(self.request('--reviewers', 'codex-1', '--processing', 'codex-1'))
+        self.assertEqual('approval', result['outcome'], result)
+        result = dispatch(self.api_request(reviewers=['claude'], processing_provider='claude'))
+        self.assertEqual('resource_limit', result['error']['code'], result)
+        self.assertEqual(['claude'], self.workflow()['resources']['quota_unavailable'])
+        self.assertEqual([], self.t.calls)
+
+
+    def test_api_resume_reconciles_stale_names_without_changing_frozen_choices(self):
+        from pr_review import cli_settings
+        before = self.t.interrupt_recorded_implementation(
+            self.request('--reviewers', 'codex-1', '--processing', 'codex-1', '--yolo'))
+        flow = Workflow(self.api_request(), self.t.repo_object, self.t.f)
+        obsolete = cli_settings.resolve({'cli_reviewers': ['claude-1'],
+            **{'cli_' + role: 'claude-1' for role in ('processing', 'planning', 'fix')}}, issue=True)
+        flow.state['configuration']['_named'] = obsolete['_named']
+        flow.save()
+        result = dispatch(self.api_request())
+        self.assert_codex_execution(result)
+        after = owner_state.OwnerSession({'session': self.t.path}).load()
+        self.assertEqual(before['batches'][0]['id'], after['batches'][0]['id'])
+        self.assertEqual(before['batches'][0]['settings'], after['batches'][0]['settings'])
+        self.assertEqual(1, len(self.t.assessments))
+
+
+class CachedTerminalRecoveryTest(unittest.TestCase):
+    def setUp(self):
+        self.t = IssueIntegrationTest()
+        self.addCleanup(self.t.doCleanups)
+        self.t.setUp()
+        self.owner = owner_state.OwnerSession({'session': self.t.path})
+
+    def request(self, *args):
+        return {**self.t.terminal_request(*args), 'issue': None, 'pr': 7}
+
+    def state(self):
+        return dispatch({**self.t.without_flags(), 'command': 'issue-read'})
+
+    def ready(self):
+        result = dispatch(self.request('--yolo'))
+        self.assertEqual('ready', result['outcome'], result)
+        return copy.deepcopy(self.state())
+
+    def unavailable(self):
+        return patch('pr_review.models.discover', side_effect=ApiError('discovery_failed', 'Metadata unavailable'))
+
+    def test_cached_ready_and_equivalent_file_need_no_provider_discovery(self):
+        from contextlib import redirect_stderr
+        before = self.ready()
+        batches = copy.deepcopy(self.owner.load()['batches'])
+        calls = len(self.t.calls)
+        value = copy.deepcopy(before['configuration']['_named'])
+        name = value['fix']
+        value['model_configs']['codex-44'] = value['model_configs'].pop(name)
+        value['fix'] = 'codex-44'
+        file = self.t.root / 'equivalent.json'
+        file.write_text(json.dumps(value))
+        for args in ((), ('--settings-file', str(file)), ('--max-runtime', 'none')):
+            with self.subTest(args=args), self.unavailable() as discover, \
+                    patch('pr_review.owner_providers.preflight') as preflight, redirect_stderr(StringIO()) as errors:
+                result = dispatch(self.request(*args))
+            self.assertEqual('noop', result['outcome'], result)
+            discover.assert_not_called()
+            preflight.assert_not_called()
+            self.assertIn('Effective configuration:', errors.getvalue())
+            self.assertEqual(before['ready_head'], self.state()['ready_head'])
+            self.assertEqual(before['plan'], self.state()['plan'])
+            self.assertEqual(batches, self.owner.load()['batches'])
+            self.assertEqual(calls, len(self.t.calls))
+
+    def test_cached_completed_verification_needs_no_provider_discovery(self):
+        def no_change(session, state, batch, role, context):
+            if role == 'plan':
+                return self.t.model(session, state, batch, role, context)
+            return {'summary': 'Already correct', 'complete': True, 'checks': ['Focused verification'],
+                    'blocking': [], 'outcomes': [{'item': i['key'], 'status': 'already_addressed',
+                    'evidence': 'Checked current behavior'} for i in context['feedback']]}
+        with patch('pr_review.owner_providers.invoke', side_effect=no_change):
+            result = dispatch(self.request('--yolo'))
+        self.assertEqual('no_change', result['outcome'], result)
+        before = copy.deepcopy(self.owner.load()['batches'])
+        with self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual('complete', result['outcome'], result)
+        discover.assert_not_called()
+        self.assertEqual(before, self.owner.load()['batches'])
+
+    def test_cached_ready_still_checks_owner_evidence(self):
+        self.ready()
+        data = self.owner.load()
+        data['batches'][-1]['commit_execution']['inspection_required'] = True
+        self.owner.save(data)
+        with self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual('needs_attention', result['error']['code'], result)
+        discover.assert_not_called()
+
+    def test_changed_or_invalid_settings_cannot_use_the_cached_result(self):
+        from contextlib import redirect_stderr
+        before = self.ready()
+        batches = copy.deepcopy(self.owner.load()['batches'])
+        with self.unavailable() as discover, redirect_stderr(StringIO()) as errors:
+            result = dispatch(self.request('--codex-4-effort', 'medium'))
+        self.assertEqual('discovery_failed', result['error']['code'], result)
+        discover.assert_called()
+        self.assertNotIn('Effective configuration:', errors.getvalue())
+        self.assertEqual(before['configuration'], self.state()['configuration'])
+        with self.unavailable() as discover:
+            result = dispatch(self.request('--codex-44-effort', 'medium'))
+        self.assertEqual('invalid_request', result['error']['code'], result)
+        discover.assert_not_called()
+        self.assertEqual(before['configuration'], self.state()['configuration'])
+        self.assertEqual(before['ready_head'], self.state()['ready_head'])
+        self.assertEqual(batches, self.owner.load()['batches'])
+
+
+class LegacyImplementationChoiceTest(unittest.TestCase):
+    def check_resume(self, provider, model, effort):
+        from contextlib import redirect_stderr
+        t = BootstrapTest()
+        self.addCleanup(t.doCleanups)
+        t.setUp()
+        request = {**t.req, 'processing_provider': provider, 'processing_model': model,
+                   'processing_effort': effort}
+        result = dispatch(request)
+        self.assertEqual('approval', result['outcome'], result)
+        flow = Workflow(request, t.repo_object, t.f)
+        self.assertNotIn('owner', flow.state)
+        self.assertNotIn('fix', flow.state['configuration'])
+        self.assertNotIn('_named', flow.state['configuration'])
+        before = copy.deepcopy(flow.state)
+        with redirect_stderr(StringIO()) as errors:
+            rejected = dispatch(t.terminal_request('--fix', 'codex-44', '--codex-44-model', 'unavailable'))
+        self.assertEqual('invalid_request', rejected['error']['code'], rejected)
+        self.assertNotIn('Effective configuration:', errors.getvalue())
+        after = dispatch({**t.without_flags(), 'command': 'issue-read'})
+        for key in ('configuration', 'input_digest', 'applied_assessment', 'plan'):
+            self.assertEqual(before[key], after[key], key)
+        choice = {'provider': provider, 'model': model, 'effort': effort}
+        seen = []
+        output = StringIO()
+        def implement(session, state, batch, *args):
+            seen.append(copy.deepcopy(batch['settings']['fix']))
+            self.assertIn(f'{provider} / {model} / {effort}', output.getvalue())
+            return t.harness(session, state, batch, *args)
+        with patch('pr_review.issue_harness.invoke', side_effect=implement), redirect_stderr(output):
+            result = dispatch(t.terminal_request('--approve', '1'))
+        self.assertEqual('ready', result['outcome'], result)
+        self.assertEqual([choice], seen)
+        self.assertEqual(1, len(t.assessments))
+        state = dispatch({**t.without_flags(), 'command': 'issue-read'})
+        self.assertEqual(1, state['approval']['revision'])
+        self.assertEqual(choice, state['configuration']['fix'])
+        named = state['configuration']['_named']
+        self.assertNotEqual(named['processing'], named['fix'])
+        self.assertNotEqual(named['planning'], named['fix'])
+
+    def test_legacy_claude_processing_remains_the_implementation_choice(self):
+        self.check_resume('claude', 'sonnet', 'medium')
+
+    def test_legacy_nondefault_codex_processing_remains_the_implementation_choice(self):
+        self.check_resume('codex', 'gpt-6.1-terra', 'low')
+
+
+class WaitingTerminalRecoveryTest(unittest.TestCase):
+    def setUp(self):
+        self.t = BootstrapTest()
+        self.addCleanup(self.t.doCleanups)
+        self.t.setUp()
+
+    def request(self, *args):
+        return self.t.terminal_request(*args)
+
+    def state(self):
+        return dispatch({**self.t.without_flags(), 'command': 'issue-read'})
+
+    def unavailable(self):
+        return patch('pr_review.models.discover', side_effect=ApiError('discovery_failed', 'Metadata unavailable'))
+
+    def approval_wait(self):
+        result = dispatch(self.request())
+        self.assertEqual('approval', result['outcome'], result)
+        return copy.deepcopy(self.state())
+
+    def test_approval_polling_without_metadata_keeps_plan_and_json_then_resumes(self):
+        from contextlib import redirect_stderr
+        from pr_review.issue_cli import main
+        before = self.approval_wait()
+        output, errors = StringIO(), StringIO()
+        with self.unavailable() as discover, patch('pr_review.owner_providers.preflight') as preflight, \
+                patch('pr_review.issue_cli.dispatch', side_effect=lambda request: dispatch({**request, 'cwd': str(self.t.repo)})), \
+                redirect_stdout(output), redirect_stderr(errors):
+            code = main(['-i', '12', '--json'])
+        result = json.loads(output.getvalue())
+        self.assertEqual(2, code)
+        self.assertEqual(('approval', 'waiting', 'await_approval'),
+                         (result['outcome'], result['phase'], result['next_action']))
+        self.assertIn('Effective configuration:', errors.getvalue())
+        self.assertNotIn('Effective configuration:', output.getvalue())
+        discover.assert_not_called()
+        preflight.assert_not_called()
+        after = self.state()
+        for key in ('plan', 'configuration', 'input_digest', 'applied_assessment', 'actions'):
+            self.assertEqual(before[key], after[key], key)
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual([], self.t.calls)
+        self.assertEqual('ready', dispatch(self.request('--approve', '1'))['outcome'])
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual(before['plan'], self.state()['plan'])
+
+    def check_execution_requires_metadata(self, *args, approval_comment=False):
+        from contextlib import redirect_stderr
+        before = self.approval_wait()
+        if approval_comment:
+            self.t.f['comments'].append({'id': 900, 'body': '/fix-issue approve 1',
+                'user': {'login': 'author'}, 'created_at': before['plan']['published_at']})
+        with self.unavailable() as discover, redirect_stderr(StringIO()) as errors:
+            result = dispatch(self.request(*args))
+        self.assertEqual('discovery_failed', result['error']['code'], result)
+        discover.assert_called()
+        self.assertNotIn('Effective configuration:', errors.getvalue())
+        self.assertEqual([], self.t.calls)
+        self.assertEqual(before['plan'], self.state()['plan'])
+        self.assertEqual(1, len(self.t.assessments))
+        # A recorded approval survives unavailable metadata and needs no new plan.
+        resume = ('--yolo',) if '--yolo' in args else ()
+        self.assertEqual('ready', dispatch(self.request(*resume))['outcome'])
+        self.assertEqual(1, len(self.t.assessments))
+
+    def test_explicit_approval_validates_before_implementation(self):
+        self.check_execution_requires_metadata('--approve', '1')
+
+    def test_github_approval_validates_before_implementation(self):
+        self.check_execution_requires_metadata(approval_comment=True)
+
+    def test_yolo_validates_before_implementation(self):
+        self.check_execution_requires_metadata('--yolo')
+
+    def test_answer_polling_without_metadata_stops_at_a_new_answer(self):
+        self.t.assessment.update(decision='questions', questions=['Which behavior should change?'])
+        self.assertEqual('answers', dispatch(self.request())['outcome'])
+        before = copy.deepcopy(self.state())
+        with self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual(('answers', 'await_answers', 2),
+                         (result['outcome'], result['next_action'], result['exit_code']))
+        discover.assert_not_called()
+        self.assertEqual(before['assessment'], self.state()['assessment'])
+        self.assertEqual(1, len(self.t.assessments))
+        self.t.f['comments'].append({'id': 900, 'body': 'Retain published history.',
+                                    'user': {'login': 'author'}, 'created_at': '2026-11-03'})
+        with self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual('discovery_failed', result['error']['code'], result)
+        discover.assert_called()
+        self.assertEqual(1, len(self.t.assessments))
+        self.t.assessment.update(decision='plan', questions=[])
+        self.assertEqual('approval', dispatch(self.request())['outcome'])
+        self.assertEqual(2, len(self.t.assessments))
+        self.assertEqual('ready', dispatch(self.request('--approve', '1'))['outcome'])
+
+    def test_changes_to_settings_base_or_discussion_require_metadata(self):
+        before = self.approval_wait()
+        original_body, original_base = self.t.f['issue']['body'], self.t.f['base']
+        for changed in ('settings', 'base', 'discussion'):
+            with self.subTest(changed=changed):
+                args = ('--codex-4-effort', 'medium') if changed == 'settings' else ()
+                if changed == 'base':
+                    self.t.f['base'] = self.t.head
+                if changed == 'discussion':
+                    self.t.f['issue']['body'] += ' Preserve history.'
+                with self.unavailable() as discover:
+                    result = dispatch(self.request(*args))
+                self.assertEqual('discovery_failed', result['error']['code'], result)
+                discover.assert_called()
+                self.assertEqual(before['configuration'], self.state()['configuration'])
+                self.assertEqual(before['plan'], self.state()['plan'])
+                self.assertEqual(1, len(self.t.assessments))
+                self.t.f['issue']['body'], self.t.f['base'] = original_body, original_base
+        with self.unavailable() as discover:
+            self.assertEqual('approval', dispatch(self.request())['outcome'])
+        discover.assert_not_called()
+
+    def test_approval_polling_still_checks_eligibility(self):
+        self.approval_wait()
+        self.t.f['issue']['state'] = 'closed'
+        with self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual('preflight_failed', result['error']['code'], result)
+        discover.assert_not_called()
+
+    def test_approval_polling_still_checks_published_plan_receipts(self):
+        self.approval_wait()
+        self.t.f['comments'].clear()
+        with self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual('uncertain', result['error']['code'], result)
+        discover.assert_not_called()
+
+    def test_discussion_changed_after_wait_detection_validates_before_assessment(self):
+        self.approval_wait()
+        original = Workflow.plan
+        def changed(flow):
+            flow.facts['issue']['body'] += ' Newly observed requirement.'
+            return original(flow)
+        with patch.object(Workflow, 'plan', new=changed), self.unavailable() as discover:
+            result = dispatch(self.request())
+        self.assertEqual('discovery_failed', result['error']['code'], result)
+        discover.assert_called()
+        self.assertEqual(1, len(self.t.assessments))
+        self.assertEqual([], self.t.calls)

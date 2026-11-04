@@ -128,7 +128,7 @@ anchored_findings() {
 }
 
 @test "automatic model catalog rejection happens before analysis" {
-    auto_review --codex-model unavailable
+    auto_review --codex-1-model unavailable --codex-2-model unavailable
     [ "$status" = 1 ]
     jq -e '.error_code=="invalid_request"' <<< "$output"
     [ ! -e "$FIXTURE/stages" ]
