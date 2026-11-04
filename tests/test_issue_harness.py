@@ -278,13 +278,17 @@ class ExecutionTest(unittest.TestCase):
     def test_incomplete_review_writes_no_proof_and_keeps_the_review_phase(self):
         from pr_review import review_engine
         from pr_review.common import ApiError
-        value = {'assessment': 'incomplete', 'summary': 'The test environment is broken', 'findings': []}
+        value = {'assessment': 'incomplete', 'summary': 'The test environment is broken', 'findings': [],
+                 'verification_blockers': [{'command': 'pytest -m smoke', 'reason': 'read-only sysctl',
+                                            'manual_command': 'uv run pytest -m smoke -q'}]}
         incomplete = review_engine.Result(value, 'incomplete', Path('/retained/synthesis-incomplete-1.json'))
         with patch('pr_review.issue_harness.invoke', side_effect=self.fix), \
                 patch('pr_review.acceptance.review_issue', return_value=(incomplete, None)), \
                 self.assertRaises(ApiError) as caught:
             self.f.start(issue_harness=True)
         self.assertEqual('review_incomplete', caught.exception.code)
+        self.assertEqual('verify_environment', caught.exception.details['next_action'])
+        self.assertEqual(value['verification_blockers'], caught.exception.details['verification_blockers'])
         batch = self.f.owner.load()['batches'][-1]
         self.assertEqual('review', batch['harness_phase'])
         self.assertEqual('paused', batch['status'])

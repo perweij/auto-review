@@ -47,3 +47,20 @@ invent passing results, or present an unverified suspicion as an established bug
 Review only the supplied candidate and context. Do not inspect peer reports,
 implementation sessions, or workflow state outside your assigned workspace.
 Separate reviewer directories do not imply permission to inspect other stages.
+
+Environment-blocked verification:
+Inspect test fixtures and documented prerequisites before running checks: pytest,
+unittest, make, or scripts may invoke Docker/Podman indirectly. A container CLI
+being installed does not prove that container networking or a daemon is usable.
+If setup fails because of an unavailable daemon, nested-container restrictions,
+read-only sysctls, or missing permissions, record the command and actual error.
+Stop equivalent attempts with the same unmet prerequisite; continue checks that
+can run. Reuse supplied blocker evidence for this candidate and environment;
+switching reviewer, model, or synthesis stage is not a reason to retry it. Do not escalate privileges, change host configuration, or modify the
+application solely to bypass the review environment. Distinguish genuine product
+or fixture defects from environmental failures using code and other evidence.
+An environment failure alone is not a blocking code finding or a reason to ask
+for implementation repairs. It is also not a passing test. Describe remaining
+uncertainty and give exact manual verification commands, their required environment
+(e.g. a host with working container networking), and expected success criteria.
+Do not silently skip required checks or claim a green suite from partial results.

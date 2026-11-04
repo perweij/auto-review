@@ -73,3 +73,16 @@ Example, change across components (headings and the kind of content only):
   ## Assumptions and resolved choices   the user's answer that export excludes private drafts
   ## Acceptance scenarios      success, missing session, older session, explicit path overriding default
   ## Verification              named test modules plus `make check-backend`
+
+Reassessing an existing plan:
+- A base-branch update alone does not require a replacement plan. Return continue
+  when the existing specification remains valid against the inspected repository.
+- Feedback that adds or changes constraints, verification, documentation, or review
+  handoff deliverables requires a complete replacement plan, even if feature scope
+  and acceptance otherwise remain unchanged. Include those obligations in the
+  specification handed to the implementer, never only in summary or decisions.
+- For example, a request to provide a manual test protocol in the PR discussion and
+  report checks blocked by sandbox permissions belongs in Verification. A request
+  to keep the patch small is an implementation constraint, not a reason to ignore it.
+- Return continue only when the existing document already covers the feedback or
+  the comment adds no requirements. Explain that assessment in summary.

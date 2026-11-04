@@ -21,6 +21,26 @@ from pr_review.repository import Repository
 
 
 class SlotTest(EngineFixture):
+    def test_cleanup_permission_error_preserves_completed_reviews(self):
+        from pr_review.isolation import IndependentWorkspace
+        close = IndependentWorkspace.close
+        leftovers = []
+
+        def fail_cleanup(workspace):
+            leftovers.append(workspace.temp)
+            with patch.object(workspace.temp, 'cleanup', side_effect=PermissionError(1, 'denied', 17)):
+                close(workspace)
+
+        try:
+            with patch.object(IndependentWorkspace, 'close', fail_cleanup):
+                result = self.review()
+            self.assertEqual('completed', result.status)
+            self.assertTrue(leftovers)
+            self.assertEqual('completed', self.manifest()['phases']['reviewer-1']['status'])
+        finally:
+            for temporary in leftovers:
+                temporary.cleanup()
+
     def test_two_slots_have_independent_choices_and_a_separate_synthesis_choice(self):
         self.configure([{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
                         {'id': 'reviewer-2', 'provider': 'codex', 'model': 'gpt-a', 'effort': 'low'}],
@@ -778,6 +798,12 @@ class FailureTest(EngineFixture):
 
 
 class ValidatorTest(unittest.TestCase):
+    def test_running_validator_keeps_its_schema_when_checkout_changes(self):
+        expected = acceptance.output_schema(KEYS, exact_outcomes=False, sources={'reviewer-1'})
+        with patch('pathlib.Path.read_text', side_effect=AssertionError('live schema read')):
+            actual = acceptance.output_schema(KEYS, exact_outcomes=False, sources={'reviewer-1'})
+        self.assertEqual(expected, actual)
+
     def check(self, value, **kwargs):
         arguments = dict(keys=KEYS, exact_outcomes=False, cases=[], tree='tree', sources={'reviewer-1', 'reviewer-2', 'both', 'new'})
         arguments.update(kwargs)
@@ -806,6 +832,16 @@ class ValidatorTest(unittest.TestCase):
     def test_changes_requested_needs_a_blocking_finding(self):
         self.check(self.value('changes_requested', findings=[finding('F1', blocking=True)]))
         self.rejected(self.value('changes_requested', findings=[finding('F1', blocking=False)]))
+
+    def test_environment_blockers_are_incomplete_not_repairs_or_passes(self):
+        blockers = [{'command': 'pytest -m smoke', 'reason': 'Read-only sysctl; needs host networking',
+                     'manual_command': 'uv run pytest -m smoke -q'}]
+        value = self.value('incomplete', verification_blockers=blockers)
+        self.check(value)
+        self.assertIsNone(acceptance.project_issue(value))
+        self.rejected(self.value(verification_blockers=blockers), 'cannot produce a passed')
+        self.rejected(self.value('changes_requested', verification_blockers=blockers), 'blocking finding')
+        self.rejected(self.value('incomplete', verification_blockers=[{'command': 'pytest'}]), 'manual command')
 
     def test_needs_input_and_incomplete(self):
         self.check(self.value('needs_input', questions=['Which behavior?']))

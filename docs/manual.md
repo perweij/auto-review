@@ -754,8 +754,10 @@ new fix fast-forwards a clean owner worktree when it is behind the fetched PR
 head, with progress messages showing both commits. Unfinished batches at that
 HEAD, Git operations in progress, local changes, and genuinely diverged branches
 require inspection in Magit. Ignored files are never overwritten by this update.
-Agent-configuration changes return
-the exact diff and a token for explicit `--trust-agent-config TOKEN`.
+A new session automatically accepts tracked agent configuration unchanged from
+the PR merge base. PR-introduced configuration, local or ignored additions, and
+changes after that initial baseline return the exact diff and a token for explicit
+`--trust-agent-config TOKEN`.
 
 Skipping an unrelated task cannot authorize replay of an interrupted fixer.
 Adopting partial work preserves the initial fix step for tasks that have not yet
@@ -1054,6 +1056,14 @@ over-asking weakness in the first prompt that the current prompt addresses). Rep
 `python3 docs/evaluations/specification-planning/evaluate.py prepare|verify-checks|run|summarize`;
 `run` consumes provider quota and is never part of `make check-backend`.
 
+When the base branch advances, the planner reassesses the existing specification.
+If it remains valid, its revision and approval remain valid too; branch movement
+alone does not publish another plan. Changed requirements still require a revised
+specification and fresh approval. Feedback about implementation constraints,
+verification, or review handoff deliverables belongs in that specification, even
+when the feature scope is unchanged. Updates to the specification instructions
+invalidate cached planning assessments on the next planning pass.
+
 After approval, an empty commit and draft PR are created if needed. The PR body
 links to the published plan comment and includes the intended issue-closing
 reference; plan prose is not embedded, so it cannot add closing references. Bootstrap
@@ -1252,3 +1262,31 @@ already in flight can overshoot a threshold. Tokens are not converted into quota
 percentages. Neither percentage monitoring nor a runtime limit guarantees an exact
 subscription spend. With `--json`, human progress stays on stderr and stdout has
 one final result, including a versioned execution/resource summary.
+
+### Verification blocked by the review environment
+
+Reviewers inspect test prerequisites, including indirect Docker/Podman use by
+fixtures. They stop equivalent attempts after an environment restriction is
+established, continue supported checks, and report the command, observed error,
+required environment, and manual verification steps. An unavailable check alone
+is neither a code defect nor a passing test.
+
+Acceptance reports record unresolved limitations in `verification_blockers`
+(`command`, `reason`, `manual_command`). Such a report cannot pass. When only
+verification is blocked, issue execution pauses in the review phase with
+`review_incomplete` and `next_action: verify_environment`; it does not send the
+candidate back for implementation repairs. JSON error details and the execution
+stop notice retain the manual commands. Fix the environment or supply supported
+verification evidence before resuming; simply rerunning in the same unsupported
+environment does not resolve the blocker. Demonstrated code defects still warrant
+repairs independently of environment limitations. PR reviews describe these limits
+and manual checks in their coverage notes.
+
+Base-branch movement during implementation does not discard or stop work on the
+recorded candidate. Publication retains the assessed base and posts a notice of
+the newer base; it does not claim integration with that newer commit. Current CI
+and mergeability must be checked before merging. Changes to the PR head, approval,
+or issue requirements retain their existing guards. A later invocation reassesses
+against the current base. Acceptance templates and schemas are captured with the
+process's validator so editing the toolkit during a long run cannot change that
+validator's expected output format halfway through execution.

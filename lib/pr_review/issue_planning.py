@@ -18,6 +18,10 @@ SCHEMA = obj({'decision': {'type': 'string', 'enum': DECISIONS},
                   'topic': TEXT, 'kind': {'type': 'string', 'enum': list(specification.KINDS)},
                   'status': {'type': 'string', 'enum': list(specification.STATUSES)}, 'detail': TEXT})}})
 
+def planning_policy_digest():
+    """Invalidate saved assessments when the specification instructions change."""
+    return digest((ROOT / 'prompts' / 'issue-specification.txt').read_text())
+
 
 def assess_issue(context, configuration, directory, cwd, previous_assessment=None, trusted_snapshot=None):
     """No writes to source; cache ownership and publication belong to the caller."""
@@ -41,7 +45,7 @@ def assess_issue(context, configuration, directory, cwd, previous_assessment=Non
               'contains both a plan and questions. Follow the specification standard below. '
               'Return unsuitable for unrelated or unintelligible goals, no_change only with concrete verification evidence '
               '(cite it in inspected). '
-              'When previous_plan is supplied, return continue if new comments do not change scope or acceptance; '
+              'When previous_plan is supplied, return continue only if the existing document already covers all requirements in new comments; '
               'return a complete replacement plan or questions for material changes. '
               'For product questions reported by the implementation harness in execution_blockers, clarify only '
               'unresolved requirements or externally observable behavior; explain the alternatives and their effects. '

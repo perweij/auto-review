@@ -389,7 +389,7 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('head', saved['ready_head'])
         self.assertEqual('new-base', saved['assessed_base'])
         self.assertEqual('new-base', saved['ready_base'])
-        self.assertEqual(2, saved['plan']['revision'])
+        self.assertEqual(1, saved['plan']['revision'])
         self.assertEqual('noop', self.flow.run()['outcome'])
 
     def test_missing_cached_base_revalidates_readiness(self):
@@ -402,20 +402,22 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('base', json.loads(self.flow.file.read_text())['ready_base'])
         self.assertEqual('noop', self.flow.run()['outcome'])
 
-    def test_base_moves_after_review_blocks_readiness_and_reassesses_on_retry(self):
+    def test_base_moves_after_review_publishes_with_notice_and_reassesses_on_retry(self):
         def review_then_move_base(owner):
             self.reviewed_bases.append(self.flow.facts['base'])
+            result = Workflow.push_implementation(self.flow, owner)
             self.f['base'] = 'new-base'
-            return []
+            return result
 
         self.flow.push_implementation.side_effect = review_then_move_base
-        with self.assertRaises(ApiError) as caught:
-            self.flow.run()
-        self.assertEqual('stale_base', caught.exception.code)
-        self.assertNotEqual('ready', self.flow.state['phase'])
-        self.assertNotIn('ready_base', self.flow.state)
+        self.assertEqual('ready', self.flow.run()['outcome'])
+        self.assertEqual('base', self.flow.state['ready_base'])
         self.assertEqual(['base'], self.reviewed_bases)
-
+        notices = [call.args[0] for call in self.flow.writes.comment.call_args_list
+                   if call.args[1].startswith('base-moved:')]
+        self.assertEqual(1, len(notices))
+        self.assertIn('new-base', notices[0])
+        self.assertIn('does not establish integration', notices[0])
         self.flow.push_implementation.side_effect = lambda owner: (self.reviewed_bases.append(self.flow.facts['base']), Workflow.push_implementation(self.flow, owner))[1]
         self.assessment['decision'] = 'continue'
         self.assertEqual('ready', self.flow.run()['outcome'])
@@ -424,20 +426,17 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual('new-base', json.loads(self.flow.file.read_text())['ready_base'])
         self.assertEqual('noop', self.flow.run()['outcome'])
 
-    def test_base_moves_during_ready_comment_blocks_readiness(self):
+    def test_base_moves_during_ready_comment_publishes_notice(self):
         def comment(body, key):
             if key.startswith('ready:'):
                 self.f['base'] = 'new-base'
             return {'created_at': '2026-10-30'}
 
         self.flow.writes.comment.side_effect = comment
-        with self.assertRaises(ApiError) as caught:
-            self.flow.run()
-        self.assertEqual('stale_base', caught.exception.code)
+        self.assertEqual('ready', self.flow.run()['outcome'])
         self.assertEqual('base', self.flow.state['assessed_base'])
-        self.assertEqual('new-base', self.flow.facts['base'])
-        self.assertNotIn('ready_base', self.flow.state)
-        self.assertNotEqual('ready', self.flow.state['phase'])
+        self.assertEqual('base', self.flow.state['ready_base'])
+        self.assertTrue(any(c.args[1].startswith('base-moved:') for c in self.flow.writes.comment.call_args_list))
 
 
 
@@ -1977,15 +1976,52 @@ class IssueIntegrationTest(unittest.TestCase):
         data = owner_state.OwnerSession({'session': self.path}).load()
         self.assertEqual('published', data['replies'][0]['status'])
 
-    def test_changed_base_refreshes_plan_and_requires_current_revision(self):
+    def test_updated_planning_policy_reassesses_cached_continue(self):
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        self.assessment['decision'] = 'continue'
+        with patch('pr_review.issues.planning_policy_digest', return_value='updated-policy'):
+            result = dispatch(self.req)
+            self.assertEqual('approval', result['outcome'])
+            self.assertEqual(2, len(self.assessments))
+            self.assertEqual('approval', dispatch(self.req)['outcome'])
+            self.assertEqual(2, len(self.assessments))
+        state = json.loads((Path(result['session']) / 'session.json').read_text())
+        self.assertEqual(1, state['plan']['revision'])
+
+    def test_handoff_feedback_replacement_requires_new_approval(self):
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        feedback = 'Include a manual test protocol in the PR discussion; report permission-blocked checks.'
+        self.f['comments'].append({'id': 999, 'body': feedback,
+                                   'user': {'login': 'author'}, 'created_at': '2026-10-31'})
+        self.assessment.update(plan='Implement the fix. ' + feedback)
+        result = dispatch({**self.req, 'approve': 1})
+        self.assertEqual('stale_approval', result['error']['code'])
+        state = json.loads((Path(result['session']) / 'session.json').read_text())
+        self.assertEqual(2, state['plan']['revision'])
+        self.assertIn(feedback, state['plan']['body'])
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        self.assertEqual(2, len(self.assessments))
+
+    def test_execution_stop_notice_survives_base_movement(self):
+        self.assertEqual('approval', dispatch(self.req)['outcome'])
+        def fail(*args):
+            self.f['base'] = self.head
+            raise ApiError('invalid_result', 'Malformed acceptance response')
+        with patch.object(Workflow, 'fix', side_effect=fail):
+            result = dispatch({**self.req, 'approve': 1})
+        self.assertEqual('invalid_result', result['error']['code'])
+        self.assertNotIn('notice_error', result['error'])
+        self.assertTrue(any('fix-issue stopped: invalid result' in c['body'] for c in self.f['comments']))
+
+    def test_changed_base_preserves_approval_when_plan_remains_valid(self):
         self.assertEqual(2, dispatch(self.req)['exit_code'])
         self.f['base'] = self.head
         self.assessment['decision'] = 'continue'
         result = dispatch({**self.req, 'approve': 1})
-        self.assertEqual(3, result['exit_code'], result)
-        self.assertIn('stale_approval', str(result))
+        self.assertEqual(0, result['exit_code'], result)
         state = json.loads((Path(result['session']) / 'session.json').read_text())
-        self.assertEqual(2, state['plan']['revision'])
+        self.assertEqual(1, state['plan']['revision'])
+        self.assertEqual(self.head, state['assessed_base'])
 
 
 class ReplacementPlanTest(unittest.TestCase):
@@ -2032,9 +2068,11 @@ class ReplacementPlanTest(unittest.TestCase):
 
     def test_superseded_completed_choices_do_not_freeze_named_resume(self):
         from pr_review.issues import required_batches
-        self.t.f['base'] = self.t.head
-        self.t.metadata['baseRefOid'] = self.t.head
-        self.t.assessment['decision'] = 'continue'
+        # A base-only update preserves the approved revision. Request actual new
+        # work so this regression exercises a superseded implementation batch.
+        self.t.f['issue']['body'] += ' Also retain history.'
+        self.t.assessment.update(decision='plan', plan='Retain history in the second case.',
+                                 acceptance=['History is retained'])
         self.req = self.t.terminal_request('--yolo', '--fix', 'codex-44', '--codex-44-effort', 'medium')
         new = self.assert_replacement_ready()
         self.assertEqual('medium', new['settings']['fix']['effort'])
@@ -2057,19 +2095,13 @@ class ReplacementPlanTest(unittest.TestCase):
         self.t.f['base'] = self.t.head
         self.t.metadata['baseRefOid'] = self.t.head
         self.t.assessment['decision'] = 'continue'
-        # A new base requires approval of the replacement revision, even when
-        # inference continues the previous plan text.
-        request = {**self.req, 'yolo': False}
-        self.assertEqual('approval', dispatch(request)['outcome'])
-        self.assertEqual(1, len(self.owner.load()['batches']))
-        stale = dispatch({**request, 'approve': 1})
-        self.assertEqual('stale_approval', stale['error']['code'])
-        self.req = {**request, 'approve': 2}
-        new = self.assert_replacement_ready()
-        self.assertEqual([], new['commit_plan']['units'])
-        self.assertEqual(self.t.head, new['verified_base'])
+        result = dispatch(self.req)
+        self.assertEqual('ready', result['outcome'], result)
         state = Workflow(self.req, self.t.repo_object, self.t.f).state
+        self.assertEqual(1, state['plan']['revision'])
         self.assertEqual(self.t.head, state['ready_base'])
+        self.assertEqual(2, len(self.reviewed))
+        self.assertEqual('noop', dispatch(self.req)['outcome'])
 
     def test_new_requirement_after_commits_starts_fresh_implementation(self):
         self.t.f['comments'].append({'id': 999, 'body': 'Also retain history.',

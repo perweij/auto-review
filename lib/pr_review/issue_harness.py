@@ -307,7 +307,9 @@ def execute(session, state, batch, remote):
             # An incomplete review writes no proof. The phase stays 'review', so
             # resume reruns only the stages that lack valid evidence.
             raise ApiError('review_incomplete', 'Acceptance review could not finish: ' + result.value['summary'],
-                           summary=result.value['summary'], artifact=str(result.artifact), next_action='retry')
+                           summary=result.value['summary'], artifact=str(result.artifact),
+                           verification_blockers=result.value.get('verification_blockers', []),
+                           next_action='verify_environment' if result.value.get('verification_blockers') else 'retry')
         batch['harness_review'] = review
         batch['harness_review_tree'] = batch['checkpoint']['tree']
         if review['status'] == 'needs_input':

@@ -19,7 +19,7 @@ from .processes import Cancelled
 from .storage import atomic_bytes, hash_bytes, json_bytes, write_json
 from .structured import response
 
-VALIDATOR_VERSION = 1
+VALIDATOR_VERSION = 2
 ASSESSMENTS = ('passed', 'changes_requested', 'incomplete', 'needs_input')
 OUTCOME_STATUSES = ('fixed', 'already_addressed', 'clarify', 'no_change')
 PASSED_OUTCOMES = ('fixed', 'already_addressed', 'no_change')
@@ -29,8 +29,14 @@ ACCEPTANCE_FIELDS = ('harness_review', 'harness_review_tree', 'review', 'review_
                      'verified_items', 'verified_fingerprints', 'verified_base')
 
 
+# Keep templates and schemas paired with the validator loaded by this process.
+# A long-running review may outlive edits or a pull in the toolkit checkout.
+_PROMPTS = {path.name: path.read_text() for path in (ROOT / 'prompts').iterdir()
+            if path.suffix in ('.txt', '.json')}
+
+
 def prompt(name):
-    return (ROOT / 'prompts' / name).read_text()
+    return _PROMPTS[name]
 
 
 def output_schema(keys, *, exact_outcomes, sources):
@@ -48,7 +54,7 @@ def validate_acceptance(value, *, keys, exact_outcomes, cases, tree, sources):
     """The shared acceptance rules. Owner results are also bound to their verification cases."""
     def invalid(message):
         raise ApiError('invalid_result', message)
-    if not isinstance(value, dict) or set(value) != KEYS or value.get('assessment') not in ASSESSMENTS:
+    if not isinstance(value, dict) or set(value) not in (KEYS, KEYS | {'verification_blockers'}) or value.get('assessment') not in ASSESSMENTS:
         invalid('Acceptance result violates its schema.')
     if not validation.text(value['summary']):
         invalid('An acceptance result needs a summary.')
@@ -60,6 +66,13 @@ def validate_acceptance(value, *, keys, exact_outcomes, cases, tree, sources):
     if ids is None or len(ids) != len(set(ids)) or any(
             'severity' not in f or not validation.text(f.get('source')) or f['source'] not in sources for f in value['findings']):
         invalid('Findings violate the acceptance schema, repeat an ID or lack a reviewer attribution.')
+    verification_blockers = value.get('verification_blockers', [])
+    if (not isinstance(verification_blockers, list) or any(
+            not isinstance(b, dict) or set(b) != {'command', 'reason', 'manual_command'}
+            or any(not validation.text(v) for v in b.values()) for b in verification_blockers)):
+        invalid('Verification blockers need a command, reason and manual command.')
+    if verification_blockers and value['assessment'] == 'passed':
+        invalid('Unresolved verification blockers cannot produce a passed assessment.')
     outcomes = value['outcomes']
     if (not isinstance(outcomes, list)
             or any(not isinstance(o, dict) or set(o) != {'item', 'status', 'evidence'} or o['item'] not in keys
@@ -341,6 +354,9 @@ class AcceptanceAdapter(review_engine.Adapter):
 
     def finalize(self, run, value):
         lines = [f'# Acceptance review: {value["assessment"]}', '', value['summary'], '']
+        for blocker in value.get('verification_blockers', []):
+            lines += ['Verification blocked: ' + blocker['command'], blocker['reason'],
+                      'Manual verification: ' + blocker['manual_command'], '']
         for finding in value['findings']:
             lines += [f'- {"BLOCKING" if finding["blocking"] else "observation"} {finding["id"]} '
                       f'[{finding["severity"]}, {finding["validity"]}, {finding["source"]}] {finding["title"]}']
