@@ -13,7 +13,7 @@ review_hashes() {
     hashes=$(review_hashes "$previous")
     phases=$(jq -c '.phases | {claude,codex,synthesis,contributions}' "$previous/manifest.json")
     export MOCK_SLEEP_STAGE=claude MOCK_SLEEP_SECONDS=30
-    run python3 "$PROJECT_ROOT/tests/helpers/interrupt_runner.py" "$CLI" 7 --no-publish --claude-model replacement
+    run python3 "$PROJECT_ROOT/tests/helpers/interrupt_runner.py" "$CLI" 7 --no-publish --claude-1-model replacement
     [ "$status" = 130 ]
     candidate=$(run_directory)
     [ "$candidate" != "$previous" ]
@@ -23,14 +23,14 @@ review_hashes() {
     [ -L "$previous/.pending-review" ]
     manifest_is '.phases["reviewer-1"].status=="interrupted" and .attempt.status=="building"'
     unset MOCK_SLEEP_STAGE
-    run_review --claude-model replacement; assert_success
+    run_review --claude-1-model replacement; assert_success
     [ "$(run_directory)" = "$candidate" ]
     [ "$(realpath -e "$previous/.current-review")" = "$candidate" ]
     [ ! -L "$previous/.pending-review" ]
     [ "$(review_hashes "$previous")" = "$hashes" ]
     [ "$(cat "$candidate/publication/review-body.md")" = 'My carefully edited review' ]
     stages=$(cat "$FIXTURE/stages")
-    run_review --claude-model replacement; assert_success
+    run_review --claude-1-model replacement; assert_success
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
 }
 
@@ -39,19 +39,19 @@ review_hashes() {
     previous=$(run_directory)
     hashes=$(review_hashes "$previous")
     export MOCK_FAIL_STAGE=synthesis
-    run_review --codex-model replacement; assert_failure
+    run_review --codex-1-model replacement --codex-2-model replacement; assert_failure
     candidate=$(run_directory)
     [ ! -L "$previous/.current-review" ]
     [ "$(review_hashes "$previous")" = "$hashes" ]
     [ "$(grep -c '^claude$' "$FIXTURE/stages")" = 1 ]
     export MOCK_FAIL_STAGE=contributions
-    run_review --codex-model replacement; assert_failure
+    run_review --codex-1-model replacement --codex-2-model replacement; assert_failure
     [ "$(run_directory)" = "$candidate" ]
     [ ! -L "$previous/.current-review" ]
     [ "$(review_hashes "$previous")" = "$hashes" ]
     [ "$(grep -c '^codex$' "$FIXTURE/stages")" = 2 ]
     unset MOCK_FAIL_STAGE
-    run_review --codex-model replacement; assert_success
+    run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     [ "$(realpath -e "$previous/.current-review")" = "$candidate" ]
     [ "$(grep -c '^claude$' "$FIXTURE/stages")" = 1 ]
     [ "$(grep -c '^codex$' "$FIXTURE/stages")" = 2 ]
@@ -80,19 +80,19 @@ review_hashes() {
 @test "interrupted promotion is completed without rerunning reviewers" {
     run_review; assert_success
     session=$(session_directory)
-    run_review --codex-model replacement; assert_success
+    run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     candidate=$(run_directory)
     stages=$(cat "$FIXTURE/stages")
     # Simulate stopping immediately before the atomic pointer switch.
     rm "$session/.current-review"
     ln -s "$candidate" "$session/.pending-review"
-    run_review --codex-model replacement; assert_success
+    run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     [ "$(realpath -e "$session/.current-review")" = "$candidate" ]
     [ ! -L "$session/.pending-review" ]
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
     # Simulate stopping just after switching, but before removing pending.
     ln -s "$candidate" "$session/.pending-review"
-    run_review --codex-model replacement; assert_success
+    run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     [ ! -L "$session/.pending-review" ]
     [ "$(cat "$FIXTURE/stages")" = "$stages" ]
 }
@@ -144,16 +144,16 @@ review_hashes() {
 @test "later failed replacement leaves the previously promoted generation current" {
     run_review; assert_success
     session=$(session_directory)
-    run_review --codex-model first-replacement; assert_success
+    run_review --codex-1-model first-replacement --codex-2-model first-replacement; assert_success
     previous=$(run_directory)
     hashes=$(review_hashes "$previous")
     export MOCK_FAIL_STAGE=codex
-    run_review --codex-model second-replacement; assert_failure
+    run_review --codex-1-model second-replacement --codex-2-model second-replacement; assert_failure
     [ "$(realpath -e "$session/.current-review")" = "$previous" ]
     [ "$(run_directory)" != "$previous" ]
     [ "$(review_hashes "$previous")" = "$hashes" ]
     unset MOCK_FAIL_STAGE
-    run_review --codex-model second-replacement; assert_success
+    run_review --codex-1-model second-replacement --codex-2-model second-replacement; assert_success
     [ "$(realpath -e "$session/.current-review")" = "$(run_directory)" ]
     [ "$(review_hashes "$previous")" = "$hashes" ]
 }

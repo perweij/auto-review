@@ -7,7 +7,7 @@ from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
 from . import acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts
-from .owner_state import refresh, superseded_batches, active_feedback_keys
+from .owner_state import refresh, superseded_batches, active_feedback_keys, issue_settings
 
 
 def validate_plan(value, items):
@@ -416,7 +416,9 @@ def execute(session, state, request):
                         for task in batch["tasks"]:
                             if task['status'] != 'skipped' and any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
                                 task["status"] = "queued"
-                if batch["settings"] != state["settings"]:
+                same_settings = (issue_settings(batch["settings"]) == issue_settings(state["settings"]) if is_harness
+                                 else batch["settings"] == state["settings"])
+                if not same_settings:
                     if batch.get("attempts") or batch.get("plans") or batch.get("tasks"):
                         raise ApiError("settings_changed", "Model work has already started. Restore the batch's saved provider settings (shown in its details) before resuming it.")
                     # Preflight may reject the initial choices before any model
@@ -446,7 +448,7 @@ def execute(session, state, request):
             # Only an unchanged, already verified batch survives a failed auth
             # probe. Source/feedback/settings/trust guards above still invalidate.
             preserve_ready = batch['status'] == 'ready' and not any(request.get(k) for k in ('adopt', 'replan', 'skip'))
-            models.preflight(session, state)
+            models.preflight(session, state, issue_harness=is_harness)
             preserve_ready = False
             batch.pop('preflight_error', None)
             if is_harness:

@@ -1,276 +1,230 @@
 # CLI cookbook
 
-Run these commands from a checkout of the target repository. Replace PR `123`
-and issue `42` with your numbers. Examples use the installed `pr-review` command;
-use `bin/pr-review` and `bin/fix-issue` to run this checkout's version.
-Authenticate `gh` and each provider selected for any role. Model names and effort
-levels must be supported by your installed provider CLI and account.
+Run review and issue commands from a checkout of the target repository. Replace
+PR `123` and issue `42` with your numbers. Use `bin/pr-review` and `bin/fix-issue`
+for this checkout's version. Authenticate `gh` and the providers used by your
+active roles. Model names and efforts must be supported by your installed CLI
+and account.
+
+## Generate a complete configuration
+
+Generation needs no target, checkout, authentication, network, or provider tools:
+
+```sh
+pr-review --generate-json-config /tmp/pr-settings.json
+fix-issue --generate-json-config /tmp/issue-settings.json
+```
+
+These commands write built-in defaults from the execution defaults source, never
+export a saved session, and refuse to overwrite an existing destination. Edit the
+file, then use it:
+
+```sh
+pr-review 123 --settings-file /tmp/pr-settings.json --no-publish
+fix-issue -i 42 --settings-file /tmp/issue-settings.json
+```
+
+Files must be complete. Every referenced name needs a complete
+`{"provider", "model", "effort"}` triplet in `model_configs`. PR files require
+`reviewers`, `processing`, `synthesis_tests`, and `suggested_changes`. Issue files
+require `reviewers`, `processing`, `planning`, `fix`, `synthesis_tests`,
+`max_runtime`, `min_weekly_quota_remaining`, and `max_weekly_quota_use`; they exclude
+`suggested_changes`. Disabled limits are JSON `null`. Missing fields, unknown
+fields, undefined references, duplicate reviewers, and name/provider mismatches
+are errors. Accompanying flags cannot repair an incomplete file.
 
 ## Two reviewers from the same provider
 
-Two independent Claude reviews, using the same model at different efforts, with
-Claude handling synthesis and discussion matching:
+Independent Claude reviews with separate processing:
 
 ```sh
 pr-review 123 --no-publish \
-  --reviewers claude,claude \
-  --claude-model opus \
-  --reviewer-1-effort medium \
-  --reviewer-2-effort high \
-  --processing-provider claude \
-  --processing-model opus --processing-effort high
+  --reviewers claude-1,claude-2 \
+  --claude-1-model opus --claude-1-effort medium \
+  --claude-2-model opus --claude-2-effort high \
+  --processing claude-3 --claude-3-model opus --claude-3-effort high
 ```
 
-Two independent Codex reviews, with different models and efforts:
+Independent Codex reviews with different choices:
 
 ```sh
 pr-review 123 --no-publish \
-  --reviewers codex,codex \
-  --reviewer-1-model gpt-6.1-terra --reviewer-1-effort medium \
-  --reviewer-2-model gpt-6.1-sol --reviewer-2-effort high \
-  --processing-provider codex \
-  --processing-model gpt-6.1-sol --processing-effort high
+  --reviewers codex-1,codex-2 \
+  --codex-1-model gpt-6.1-terra --codex-1-effort medium \
+  --codex-2-model gpt-6.1-sol --codex-2-effort high \
+  --processing codex-3 --codex-3-model gpt-6.1-sol --codex-3-effort high
 ```
 
-Slots are ordered: the first entry in `--reviewers` is `reviewer-1`, the second
-is `reviewer-2`. They run independently even when their provider and model match.
-Select both slots with `--reviewers`; a `--reviewer-2-model` flag alone does not
-add a second slot to a saved single-reviewer configuration.
+Names identify configurations, not reviewer positions. Reversing `--reviewers`
+reverses execution order while preserving each name's choices. Use one or two
+distinct names. Any positive number is supported, including `codex-17`.
+Selecting two Claude reviewers leaves default Codex processing active unless you
+assign processing explicitly.
 
-For a same-provider pair, explicitly select the processing provider too. A new
-review otherwise defaults to Codex processing, even with `claude,claude`.
+## Shared choices and independent roles
 
-## Mixed providers and independent processing
-
-Claude first, Codex second, with a separate Codex processing choice:
+All roles reference the same namespace. To deliberately share a choice:
 
 ```sh
-pr-review 123 --no-publish \
-  --reviewers claude,codex \
-  --reviewer-1-model opus --reviewer-1-effort medium \
-  --reviewer-2-model gpt-6.1-sol --reviewer-2-effort high \
-  --processing-provider codex \
-  --processing-model gpt-6.1-terra --processing-effort high
+fix-issue -i 42 \
+  --reviewers codex-1,claude-1 \
+  --planning codex-1 --processing codex-1 --fix codex-2 \
+  --codex-1-model gpt-6.1-sol --codex-1-effort high \
+  --codex-2-model gpt-6.1-terra --codex-2-effort medium \
+  --claude-1-model opus --claude-1-effort high
 ```
 
-Processing need not use a reviewer provider. For example, run two Codex reviews
-and use Claude for synthesis and discussion matching:
+Changing `codex-1` changes planning, processing, and the first reviewer. Changing
+`codex-2` changes implementation only. Planning assesses the issue and handles
+later planning turns. Processing synthesizes acceptance reviews. The implementation
+harness uses `fix`; the completed candidate goes through the shared review engine.
+There is no separate post-push PR review.
+
+A complete file equivalent to those model flags is:
+
+```json
+{
+  "model_configs": {
+    "codex-1": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+    "codex-2": {"provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
+    "claude-1": {"provider": "claude", "model": "opus", "effort": "high"}
+  },
+  "reviewers": ["codex-1", "claude-1"],
+  "planning": "codex-1",
+  "processing": "codex-1",
+  "fix": "codex-2",
+  "synthesis_tests": "focused",
+  "max_runtime": null,
+  "min_weekly_quota_remaining": null,
+  "max_weekly_quota_use": null
+}
+```
+
+Every explicitly defined configuration must be used by a final role. A definition
+used only by planning, processing, or fix is valid. If a CLI role override makes a
+file definition unused, remove that definition from the file. Inactive built-in
+defaults are exempt and do not activate providers.
+
+## Single-provider operation
+
+Claude-only PR review, deliberately sharing reviewer and processing choices:
 
 ```sh
-pr-review 123 --no-publish \
-  --reviewers codex,codex \
-  --codex-model gpt-6.1-sol --codex-effort high \
-  --processing-provider claude \
-  --processing-model opus --processing-effort high
+pr-review 123 --no-publish --reviewers claude-1 --processing claude-1 \
+  --claude-1-model opus --claude-1-effort high
 ```
 
-This last combination requires both subscriptions. To use only one provider,
-select it for every reviewer slot and for processing.
-
-## One reviewer
-
-Explicit Claude-only operation:
+Codex-only issue work with independent implementation:
 
 ```sh
-pr-review 123 --no-publish \
-  --reviewers claude --claude-model opus --claude-effort high \
-  --processing-provider claude \
-  --processing-model opus --processing-effort high
+fix-issue -i 42 --reviewers codex-1 --processing codex-1 \
+  --planning codex-3 --fix codex-4 \
+  --codex-4-model gpt-6.1-terra --codex-4-effort medium
 ```
 
-Explicit Codex-only operation:
+Fully Claude-only issue work requires every role to select Claude:
 
 ```sh
-pr-review 123 --no-publish \
-  --reviewers codex --codex-model gpt-6.1-sol --codex-effort high \
-  --processing-provider codex \
-  --processing-model gpt-6.1-sol --processing-effort high
+fix-issue -i 42 --reviewers claude-1 --processing claude-1 \
+  --planning claude-2 --fix claude-3 --max-runtime 2h --json
 ```
 
-For a fresh review, selecting one reviewer also selects that provider for
-processing unless processing was explicitly configured. Saved processing choices
-are preserved on resume, so the explicit forms above also work for existing runs.
-If the sole reviewer and processing choices match, the pipeline uses a direct
-structured review; otherwise it supplies the independent report to processing.
+A fresh single reviewer implicitly selects independent processing defaults for
+that provider. Customizing that reviewer does not customize processing. Saved
+processing choices, a complete file, and explicit `--processing` take precedence.
+If the sole reviewer's effective triplet matches processing, the engine uses its
+direct structured-review optimization; otherwise it runs the independent reviewer
+before synthesis.
 
-## Which flags affect which roles?
+## Defaults, presets, precedence, and resume
 
-| Flags | Scope |
-| --- | --- |
-| `--reviewers claude,codex` | Number, order, and providers of the one or two reviewer slots |
-| `--claude-model`, `--claude-effort` | All Claude reviewer slots and Claude processing |
-| `--codex-model`, `--codex-effort` | All Codex reviewer slots and Codex processing |
-| `--reviewer-1-provider/model/effort` | First reviewer only; these are three separate flags |
-| `--reviewer-2-provider/model/effort` | Second reviewer only; these are three separate flags |
-| `--processing-provider/model/effort` | Processing only; these are three separate flags |
-| `--synthesis-tests focused` or `full` | Testing policy during synthesis |
+| Role | Default reference | Default choice |
+| --- | --- | --- |
+| First reviewer | `claude-1` | Claude / Opus / high |
+| Second reviewer | `codex-1` | Codex / GPT-6.1 Sol / high |
+| Processing | `codex-2` | Codex / GPT-6.1 Sol / high |
+| Issue planning | `codex-3` | Codex / GPT-6.1 Sol / high |
+| Issue implementation | `codex-4` | Codex / GPT-6.1 Sol / high |
 
-Role-specific model and effort flags override provider-wide flags, regardless of
-argument order. For example, this sets both Codex reviewers to Sol/high, then
-specializes the first reviewer and processing:
+Default references are separate. `--economical` selects Haiku and Terra reviewers
+with Terra processing; `--expensive` selects Fable and Astra with Astra processing.
+Both use high effort and leave issue planning and implementation defaults unchanged.
+New reviewer or processing names also use the selected preset's provider defaults.
+Names used only for planning or implementation start from built-in provider defaults.
+An explicitly shared name keeps one choice for every referring role; saved and
+file-defined choices take precedence over presets.
+
+Precedence is **defaults → preset → saved settings → complete file → explicit
+CLI flags**, regardless of argument order. Omitted flags retain resolved values.
+Files replace applicable saved configuration. Explicit false and disabled values
+are supported:
 
 ```sh
-pr-review 123 --no-publish \
-  --reviewers codex,codex \
-  --codex-model gpt-6.1-sol --codex-effort high \
-  --reviewer-1-model gpt-6.1-terra --reviewer-1-effort medium \
-  --processing-provider codex --processing-effort medium \
-  --synthesis-tests full
+pr-review 123 --no-publish --settings-file /tmp/pr-settings.json \
+  --no-suggested-changes --codex-1-effort medium
+fix-issue -i 42 --settings-file /tmp/issue-settings.json \
+  --max-runtime none --min-weekly-quota-remaining none --max-weekly-quota-use none
 ```
 
-## Presets and saved settings
+Runtime accepts positive durations such as `30m` or `2h`. Quota thresholds accept
+percentages greater than zero and at most 100. Runtime and observed quota
+consumption remain cumulative when limits change or are disabled.
 
-| New-review preset | Claude reviewer | Codex reviewer | Processing |
-| --- | --- | --- | --- |
-| Default | Opus/high | GPT-6.1 Sol/high | Codex, Sol/high |
-| `--economical` | Haiku/high | GPT-6.1 Terra/high | Codex, Terra/high |
-| `--expensive` | Fable/high | GPT-6 Astra/high | Codex, Astra/high |
-
-Override parts of a preset with explicit flags:
-
-```sh
-pr-review 123 --no-publish --economical --reviewer-2-effort medium
-```
-
-Precedence is backend/user defaults, preset, saved settings, then explicit flags.
-Presets do not reset an existing review. To change a saved review, supply the
-individual flags, optionally selecting its exact saved run:
+Resume keeps saved names and sharing. Equivalent PR settings retain the current
+generation, human comment edits, and staging. PR resume selects the pending/current
+generation; changing processing can reuse compatible independent reports:
 
 ```sh
 pr-review 123 --no-publish --resume /absolute/path/to/run \
-  --processing-provider claude \
-  --processing-model opus --processing-effort high
+  --processing claude-3 --claude-3-model opus
+fix-issue -i 42
 ```
 
-Compatible completed independent reports can be reused when only processing
-changes. With no explicit changes, a resumed run keeps its saved choices.
+Reusing a validated ready result or completed issue verification does not require
+provider discovery. Polling an unchanged approval or answer wait also needs no
+provider discovery. Approval or new discussion requiring model work triggers
+validation before that work begins.
+Legacy workflows keep their processing-derived implementation choice when imported,
+with separate names so later role overrides remain independent.
 
-## Publication and machine-readable output
+Started implementation batches freeze effective model and review settings.
+Omitted overrides and equivalent choices resume the same batch, including an
+equivalent file with renamed configurations. Renaming configurations or changing
+runtime/quota limits preserves the approved plan and cumulative accounting.
+Forbidden changes fail with
+`settings_changed`, preserving saved settings and evidence.
 
-The examples above save drafts without opening the publication menu. Omit
-`--no-publish` for interactive inspection and publication. To authorize automatic
-COMMENT publication, replace it with `--auto-publish`:
+## Output and publication
+
+The effective configuration is printed to stderr before model work, including
+authentication probes. It lists ordered reviewer names, all active roles and
+triplets, testing policies, relevant permission/timeout/budget/probe settings,
+and issue approval mode and cumulative resource settings. Disabled limits are
+shown explicitly. Credentials are omitted.
 
 ```sh
-pr-review 123 --auto-publish --json \
-  --reviewers claude,claude --claude-model opus --claude-effort high \
-  --processing-provider claude \
-  --processing-model opus --processing-effort high \
+pr-review 123 --auto-publish --json --reviewers codex-1 --processing codex-1 \
   >result.json 2>progress.log
+fix-issue -i 42 --json >issue-result.json 2>issue-progress.log
 ```
 
-For `pr-review`, `--json` requires `--auto-publish`; progress goes to stderr and
-the result goes to stdout. Add `--suggested-changes` to generate independently
-verified GitHub code suggestions. Automatic publication can stop for findings
-requiring attention; see [automatic reviews](manual.md#automatic-reviews).
+For PR review, `--json` requires `--auto-publish`. Successful JSON stdout contains
+one result. Omit `--no-publish` for the interactive publication menu, or use
+`--auto-publish` to authorize automatic COMMENT publication. Add
+`--suggested-changes` to generate separately verified GitHub suggestions.
+Issue commands retain plan approval; `--yolo` skips approval for that invocation,
+but unanswered product questions still block.
 
-## Issue implementation and Owner settings
+## Compatibility
 
-`fix-issue` uses processing settings for issue assessment and planning. The
-approved implementation uses the Owner `fix` choice. The finished local candidate
-is then reviewed by the same engine as `pr-review`: one or two independent
-reviewers followed by an adversarial synthesis. Reviewer slots do not add a
-post-push PR review to this workflow.
+Provider-wide `--codex-model/effort` and `--claude-model/effort`, positional
+`--reviewer-N-provider/model/effort`, provider-only reviewer lists, and direct
+`--processing-provider/model/effort` (also planning/fix) are rejected with named
+configuration guidance.
 
-Owner settings have four parts:
-
-| Setting | Configures |
-| --- | --- |
-| `fix` | The implementation session |
-| `review` | Focused per-task checks in interactive Owner only. One lightweight call, no engine |
-| `final_review` | Acceptance review of a `fix-issue` candidate and final verification of an interactive Owner batch: `reviewer_slots` (one or two, the same provider allowed), a `synthesis` choice and `synthesis_tests` (`focused` or `full`) |
-| `verification` | Always `"focused"` |
-
-Without a settings file, new work uses the common defaults: Claude and Codex
-reviewers with Codex synthesis. A settings file or a saved session without
-`final_review` stays valid and single-reviewer: its `review` choice is both the
-only slot and the synthesis. Claude-only and Codex-only users therefore need no
-second provider. That value is derived when needed and never written back.
-
-Precedence for the final review is: explicit reviewer flags, then `final_review` in
-the settings file, then one slot derived from the file's `review`, then the common
-defaults. Started batches freeze their settings.
-
-For Claude-only issue work, create an Owner settings file:
-
-```sh
-cat > /tmp/owner-claude.json <<'JSON'
-{
-  "fix": {"provider": "claude", "model": "opus", "effort": "high"},
-  "review": {"provider": "claude", "model": "opus", "effort": "medium"},
-  "final_review": {
-    "reviewer_slots": [{"id": "reviewer-1", "provider": "claude", "model": "opus", "effort": "high"}],
-    "synthesis": {"provider": "claude", "model": "opus", "effort": "high"},
-    "synthesis_tests": "focused"
-  },
-  "verification": "focused"
-}
-JSON
-
-bin/fix-issue -i 42 --settings-file /tmp/owner-claude.json --max-runtime 2h --json
-```
-
-One slot that matches the synthesis choice uses the direct path. For Codex-only work with two independent Codex reviewers of different
-models and a Sol synthesis:
-
-```sh
-cat > /tmp/owner-codex.json <<'JSON'
-{
-  "fix": {"provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
-  "review": {"provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
-  "final_review": {
-    "reviewer_slots": [
-      {"id": "reviewer-1", "provider": "codex", "model": "gpt-6.1-terra", "effort": "medium"},
-      {"id": "reviewer-2", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high"}
-    ],
-    "synthesis": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
-    "synthesis_tests": "focused"
-  },
-  "verification": "focused"
-}
-JSON
-
-bin/fix-issue -i 42 --settings-file /tmp/owner-codex.json --max-runtime 2h --json
-```
-
-Independent reviewers use separate checkouts inside the enclosing sandbox container
-and require each provider's review capability; preflight names anything missing before any model work starts.
-
-The shared reviewer flags now configure acceptance review. `--reviewers`,
-`--reviewer-N-provider/model/effort`, `--processing-*`, `--claude-*`, `--codex-*`,
-`--synthesis-tests` and the presets override the settings file for the final review:
-
-```sh
-bin/fix-issue -i 42 --reviewers claude,codex \
-  --reviewer-1-model opus --reviewer-2-model gpt-6.1-sol \
-  --processing-provider codex --processing-model gpt-6.1-sol --processing-effort high \
-  --max-runtime 2h --json
-```
-
-They never change `fix` or `review`, and never start a post-push PR review. A
-started batch keeps its settings; changing them stops with `settings_changed`.
-
-The two Owner roles can also use different providers. Without a settings file,
-new Owner sessions derive them from processing; existing sessions retain their
-saved Owner choices. These examples retain plan approval; `--yolo` skips approval
-for that invocation, but unanswered product questions still block. Runtime is
-cumulative across invocations.
-
-The Owner JSON requires `verification: "focused"` for compatibility with
-interactive Owner. This does not constrain the issue harness's whole-specification
-implementation and verification.
-
-For interactive Owner fixes against PR feedback, apply the same file separately:
-
-```sh
-pr-review owner 123 settings --settings-file /tmp/owner-claude.json
-pr-review owner 123 settings
-```
-
-The second command displays saved settings, including the effective final-review
-configuration of a session that has none saved. Reviewer CLI flags configure
-`fix-issue` acceptance review only; interactive Owner takes its settings from the
-file, the saved session and, in Emacs, `R f` (fix) and `R r` (task checks). See the
-[Owner workflow](manual.md#pr-owner-workflow), the
-[shared review engine](manual.md#shared-review-engine) and the
-[issue workflow](manual.md#issue-fixing) for execution details.
+The API, Emacs slot representation, and interactive Owner settings interface are
+unchanged. Historical saved sessions remain readable. Owner-format settings files
+remain supported by `pr-review owner ... settings --settings-file`, but are not
+the new terminal file format. Interactive Owner's focused task-check `review`
+role is outside the issue CLI schema and does not activate a provider for issue
+execution. See the [manual](manual.md#issue-fixing) for workflow details.

@@ -253,11 +253,11 @@ class ApiTest(unittest.TestCase):
                          ('opus', 'gpt-6.1-sol', 'codex'))
         self.assertEqual(default_settings({})['fix'],
                          dict(provider='codex', model='gpt-6.1-sol', effort='high'))
-        args = vars(parser().parse_args(['8', '--economical', '--codex-effort', 'medium']))
+        args = vars(parser().parse_args(['8', '--economical', '--codex-1-effort', 'medium']))
         economical = dispatch({**fresh, **args})['settings']
         self.assertEqual((economical['claude_model'], economical['codex_model']), ('haiku', 'gpt-6.1-terra'))
         self.assertEqual(economical['processing_provider'], 'codex')
-        self.assertEqual((economical['claude_effort'], economical['codex_effort']), ('high', 'medium'))
+        self.assertEqual((economical['reviewer_slots'][0]['effort'], economical['reviewer_slots'][1]['effort']), ('high', 'medium'))
         legacy = from_manifest(self.manifest)
         self.assertEqual((legacy['processing_provider'], legacy['claude_model'], legacy['codex_model']),
                          ('claude', 'fable', 'gpt-6-astra'))
@@ -275,9 +275,9 @@ class ApiTest(unittest.TestCase):
         self.assertEqual((settings['claude_model'], settings['codex_model'], settings['processing_provider']),
                          ('fable', 'gpt-6-astra', 'codex'))
         self.assertEqual((settings['claude_effort'], settings['codex_effort']), ('high', 'high'))
-        for argv in (['--expensive', '--codex-model', 'chosen'], ['--codex-model', 'chosen', '--expensive']):
+        for argv in (['--expensive', '--codex-1-model', 'chosen'], ['--codex-1-model', 'chosen', '--expensive']):
             explicit = vars(parser().parse_args(['8', *argv]))
-            self.assertEqual(dispatch({**fresh, **explicit})['settings']['codex_model'], 'chosen')
+            self.assertEqual(dispatch({**fresh, **explicit})['settings']['reviewer_slots'][1]['model'], 'chosen')
         saved = dispatch(self.request('settings'))['settings']
         self.assertEqual(dispatch(self.request('settings', expensive=True))['settings'], saved)
         for invalid in ({'expensive': 'yes'}, {'expensive': True, 'economical': True}):
@@ -405,6 +405,50 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c["status"], "unstaged")
         self.change("automatic", comment="p1")
         self.assertFalse(self.session.load()["comments"][0]["override"])
+
+    def test_equivalent_named_settings_preserve_current_generation_and_human_drafts(self):
+        from pr_review import cli_settings, settings
+        from pr_review.providers import Runtime
+        from pr_review.repository import Repository
+        from pr_review.reviews import Review
+        from pr_review.state import generation
+        from pr_review.storage import hash_file
+        config = settings.validate(settings.DEFAULTS)
+        self.manifest.update(configuration=config, analysis_kind='full',
+                             phases={'synthesis': {'status': 'completed',
+                                'output_hash': hash_file(self.path / 'reviews/synthesis.json')}})
+        atomic_json(self.path / 'manifest.json', self.manifest)
+        repo = Repository(self.repo, self.repo / '.git', 'github.com/org/repo', 7, 'origin')
+        review = Review(repo, self.path, self.repo, config, Runtime(), {}, 'reviewer', 'WRITE')
+        self.change('edit', comment='p1', body='Keep this human wording')
+        self.change('stage', comment='p1')
+        before = copy.deepcopy(self.session.load())
+        original_path, original_generation = review.path, self.session.id
+        imported = cli_settings.resolve({}, config)
+        renamed = copy.deepcopy(imported['_named'])
+        names = {name: name.split('-')[0] + '-' + str(int(name.split('-')[1]) + 10)
+                 for name in renamed['model_configs']}
+        renamed['model_configs'] = {names[n]: c for n, c in renamed['model_configs'].items()}
+        renamed['reviewers'] = [names[n] for n in renamed['reviewers']]
+        renamed['processing'] = names[renamed['processing']]
+        file = self.root / 'equivalent.json'
+        file.write_text(json.dumps(renamed))
+        request = {'cli_settings_file': str(file)}
+        cli_settings.prepare(request)
+        for resolved in (imported, cli_settings.resolve(request, imported)):
+            review.settings = resolved
+            review.configure('full', [])
+            draft = Session({'session': str(self.path),
+                             'generation': generation(review.path, review.manifest)})
+            draft.save(draft.load())
+            review.promote(['synthesis'])
+            self.session = Session({'session': str(self.path)})
+            self.assertEqual(original_path, review.path)
+            self.assertEqual(original_generation, self.session.id)
+            after = self.session.load()
+            for key in before.keys() - {'sequence', 'updated_at'}:
+                self.assertEqual(before[key], after[key], key)
+            self.assertEqual(resolved['_named'], self.session.manifest['configuration']['_named'])
 
     def test_new_generation_is_explicit_and_old_edits_recoverable(self):
         self.change("edit", comment="p1", body="Hours of human work")

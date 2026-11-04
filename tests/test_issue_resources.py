@@ -71,3 +71,52 @@ class IssueProviderScopeTest(unittest.TestCase):
         self.assertEqual(['codex'], providers(state))
         state['owner_settings']['review']['provider'] = 'claude'
         self.assertEqual(['claude', 'codex'], providers(state))
+
+
+class NamedResourceTest(unittest.TestCase):
+    def test_none_disables_each_limit_without_refunding_consumption(self):
+        record = {'version': 1, 'active_seconds': 15, 'max_runtime': 30,
+                  'min_weekly_quota_remaining': 10, 'max_weekly_quota_use': 2,
+                  'quota_consumed': {'codex:weekly': 1}}
+        resources.apply_limits(record, dict.fromkeys(('max_runtime', 'min_weekly_quota_remaining', 'max_weekly_quota_use')))
+        self.assertEqual({'version': 1, 'active_seconds': 15, 'quota_consumed': {'codex:weekly': 1}}, record)
+        with patch('pr_review.issue_resources.time.monotonic', side_effect=[100, 101, 101, 102]):
+            with resources.execution({'resources': record}, lambda: None, {}):
+                pass
+        self.assertEqual(17, record['active_seconds'])
+        self.assertEqual({'codex:weekly': 1}, record['quota_consumed'])
+        resources.apply_limits(record, {'max_runtime': '1m'})
+        self.assertEqual(60, record['max_runtime'])
+        self.assertEqual(17, record['active_seconds'])
+
+    def test_named_scope_uses_all_active_roles_and_ignores_interactive_review(self):
+        from pr_review import cli_settings
+        for provider in ('claude', 'codex'):
+            request = {'cli_reviewers': [provider + '-1'], **{'cli_' + r: provider + '-1' for r in ('processing', 'planning', 'fix')}}
+            configuration = cli_settings.resolve(request, issue=True)
+            state = {'configuration': configuration, 'owner_settings': {'review': {'provider': 'codex' if provider == 'claude' else 'claude'}}}
+            self.assertEqual([provider], resources.providers(state))
+        configuration = cli_settings.resolve({**request, 'cli_planning': 'claude-2'}, issue=True)
+        self.assertEqual(['claude', 'codex'], resources.providers({'configuration': configuration}))
+
+    def test_saved_duration_round_trips_without_exponents_or_precision_loss(self):
+        from pr_review import cli_settings
+        for seconds in (1080000.0, 1234567.8901234567, 1e-9, 1e100):
+            with self.subTest(seconds=seconds):
+                text = resources.duration_text(seconds)
+                self.assertNotIn('e', text)
+                self.assertEqual(seconds, resources.duration(text))
+                saved = cli_settings.resolve({}, issue=True)
+                resumed = cli_settings.resolve({}, saved, issue=True, resources={'max_runtime': seconds})
+                self.assertEqual(seconds, resources.duration(resumed['_named']['max_runtime']))
+
+
+    def test_stale_named_providers_do_not_override_effective_roles(self):
+        from pr_review import cli_settings
+        config = cli_settings.resolve({}, issue=True)
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        config.update(reviewer_slots=[{'id': 'reviewer-1', **choice}], processing=choice)
+        self.assertEqual(['codex'], resources.providers({'configuration': config}))
+        config['planning'] = {'provider': 'claude', 'model': 'opus', 'effort': 'high'}
+        config['_named']['model_configs'] = {'codex-1': choice}
+        self.assertEqual(['claude', 'codex'], resources.providers({'configuration': config}))

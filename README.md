@@ -94,9 +94,9 @@ Run from a checkout of the repository you want to review:
 
 ```sh
 pr-review 123
-pr-review 123 --reviewers codex
-pr-review 123 --reviewers claude,claude --processing-provider claude
-pr-review 123 --reviewers codex,codex --processing-provider codex
+pr-review 123 --reviewers codex-1
+pr-review 123 --reviewers claude-1,claude-2 --processing claude-3
+pr-review 123 --reviewers codex-1,codex-2 --processing codex-3
 pr-review https://github.com/org/repository/pull/123 --no-publish
 pr-review 123 --resume /absolute/path/to/run
 pr-review drafts /absolute/path/to/run
@@ -109,7 +109,7 @@ Fresh proposals start Unstaged; publication requires a preview and final `yes`.
 For explicit unattended review and publication:
 
 ```sh
-pr-review 123 --auto-publish --reviewers codex --codex-model gpt-6-luna --codex-effort medium --json
+pr-review 123 --auto-publish --reviewers codex-1 --processing codex-1 --codex-1-model gpt-6-luna --codex-1-effort medium --json
 ```
 
 Automatic mode posts COMMENT feedback only. If any finding needs judgment or

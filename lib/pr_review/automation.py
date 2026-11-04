@@ -328,7 +328,8 @@ def _execute(request, controller):
         required = set(configured['reviewers']) | {configured['processing_provider']}
         catalogs = {p: models.discover({'provider': p}) for p in sorted(required)}
         models.validate_selection(configured, catalogs)
-        session = reviews.execute({**request, **configured, 'catalogs': catalogs})
+        session = reviews.execute({**request, **configured, 'catalogs': catalogs,
+                                   **({'_cli_resolved': configured} if request.get('_cli_config') else {})})
         return controller.publish(session)
     except (ApiError, OSError, ValueError, KeyboardInterrupt, EOFError) as exc:
         if isinstance(exc, Cancelled) or isinstance(exc, (KeyboardInterrupt, EOFError)):

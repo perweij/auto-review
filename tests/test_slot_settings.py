@@ -217,7 +217,7 @@ class SlotSettingsTest(unittest.TestCase):
                     return settings.resolve({**request, 'session': '/unused'})['settings']
             for reviewers in ([provider, provider], [provider]):
                 for args in ({'reviewers': reviewers},
-                             vars(parser().parse_args(['1', '--reviewers', ','.join(reviewers)]))):
+                             vars(parser().parse_args(['1', '--reviewers', ','.join(f'{p}-{i}' for i, p in enumerate(reviewers, 1))]))):
                     result = resolve(**args)
                     self.assertEqual(result['reviewer_slots'], slots[:len(reviewers)])
                     self.assertEqual(result['processing'], processor)
@@ -299,13 +299,13 @@ class SlotSettingsTest(unittest.TestCase):
 
     def test_public_slot_controls_and_roundtrip(self):
         from pr_review.cli import parser
-        args = vars(parser().parse_args(['1', '--reviewers', 'codex,claude',
-                                        '--reviewer-1-model', 'first', '--reviewer-1-effort', 'low',
-                                        '--reviewer-2-model', 'second', '--processing-model', 'processor']))
+        args = vars(parser().parse_args(['1', '--reviewers', 'codex-1,claude-1',
+                                        '--codex-1-model', 'first', '--codex-1-effort', 'low',
+                                        '--claude-1-model', 'second', '--codex-2-model', 'processor']))
         args.pop('pr')
         from pr_review.issue_cli import parser as issue_parser
-        issue_args = vars(issue_parser().parse_args(['--issue', '1', '--reviewer-1-model', 'first', '--processing-model', 'processor']))
-        self.assertEqual((issue_args['reviewer_1_model'], issue_args['processing_model']), ('first', 'processor'))
+        issue_args = vars(issue_parser().parse_args(['--issue', '1', '--codex-1-model', 'first', '--codex-2-model', 'processor']))
+        self.assertEqual((issue_args['named_codex-1-model'], issue_args['named_codex-2-model']), ('first', 'processor'))
         config = settings.resolve(args)['settings']
         self.assertEqual([s['provider'] for s in config['reviewer_slots']], ['codex', 'claude'])
         self.assertEqual(config['reviewer_slots'][0]['model'], 'first')
@@ -330,6 +330,39 @@ class SlotSettingsTest(unittest.TestCase):
         with patch('pr_review.reviews.say'):
             review.configure('review', [])
         review.begin.assert_not_called()
+
+
+    def test_actual_review_changes_still_replace_a_completed_generation(self):
+        import copy
+        from pr_review import cli_settings
+        from pr_review.reviews import Review
+        original = cli_settings.resolve({})
+        variants = []
+        for role in ('processing', 'reviewer_slots'):
+            for field in ('model', 'effort'):
+                changed = copy.deepcopy(original)
+                choice = changed[role][0] if role == 'reviewer_slots' else changed[role]
+                choice[field] = 'other' if field == 'model' else 'low'
+                variants.append(changed)
+        for key, value in (('synthesis_tests', 'full'), ('suggested_changes', True)):
+            variants.append({**original, key: value})
+        reordered = copy.deepcopy(original)
+        reordered['reviewer_slots'].reverse()
+        for index, slot in enumerate(reordered['reviewer_slots'], 1):
+            slot['id'] = f'reviewer-{index}'
+        variants.append(reordered)
+        for config in variants:
+            with self.subTest(configuration=config):
+                review = Review.__new__(Review)
+                review.manifest = {'configuration': original, 'phases': {'synthesis': {'status': 'completed'}}}
+                review.settings = config
+                review.runtime = SimpleNamespace(permission='default')
+                review.tools, review.viewer, review.permission = {}, None, None
+                review.path = Path('/unused')
+                review.scope, review.begin, review.save = Mock(), Mock(), Mock()
+                with patch('pr_review.reviews.say'):
+                    review.configure('full', [])
+                review.begin.assert_called_once()
 
 
 class OwnerFinalReviewSettingsTest(unittest.TestCase):
@@ -417,11 +450,14 @@ class OwnerFinalReviewSettingsTest(unittest.TestCase):
 class OwnerPreflightTest(unittest.TestCase):
     """Preflight names a missing provider, or capability before any model work starts."""
 
-    def run_preflight(self, final_review, *, bwrap=True, help_text=None, models=None):
+    def run_preflight(self, final_review, *, bwrap=True, help_text=None, models=None, issue=False):
         import tempfile
         from pr_review import owner_providers
         state = {'settings': {'fix': dict(OwnerFinalReviewSettingsTest.CHOICE), 'review': dict(OwnerFinalReviewSettingsTest.CHOICE),
                               'verification': 'focused', **({'final_review': final_review} if final_review else {})}}
+        if issue:
+            state['issue_workflow'] = 'workflow-id'
+            state['settings']['fix'] = dict(final_review['synthesis'])
         session = SimpleNamespace(path=Path(tempfile.mkdtemp()), save=Mock())
         self.addCleanup(__import__('shutil').rmtree, session.path, True)
         catalogs = models or {'claude': ['opus', 'sonnet'], 'codex': ['gpt-6.1-sol']}
@@ -449,8 +485,15 @@ class OwnerPreflightTest(unittest.TestCase):
                 patch('pr_review.owner_providers.command', side_effect=command), \
                 patch('pr_review.owner_providers.run', side_effect=run), \
                 patch('shutil.which', side_effect=lambda name, *a, **k: '/usr/bin/bwrap' if name == 'bwrap' and bwrap else None):
-            owner_providers.preflight(session, state)
+            owner_providers.preflight(session, state, issue_harness=issue)
         return seen
+
+    def test_issue_preflight_does_not_discover_or_probe_unused_task_check_provider(self):
+        choice = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        final = {'reviewer_slots': [{'id': 'reviewer-1', **choice}], 'synthesis': choice, 'synthesis_tests': 'focused'}
+        seen = self.run_preflight(final, issue=True)
+        self.assertIn('probe codex', seen)
+        self.assertFalse(any('claude' in item for item in seen), seen)
 
     def test_every_slot_and_the_synthesis_choice_are_checked_before_model_work(self):
         final = {'reviewer_slots': [{'id': 'reviewer-1', 'provider': 'claude', 'model': 'opus', 'effort': 'high'},
@@ -485,3 +528,315 @@ class OwnerPreflightTest(unittest.TestCase):
                       '--settings --permission-prompts --json-schema --no-session-persistence --disallowed'
         with self.assertRaisesRegex(ApiError, 'review capabilities'):
             self.run_preflight(final, help_text=owner_flags)
+
+
+class NamedTerminalSettingsTest(unittest.TestCase):
+    def request(self, *args, issue=False):
+        from pr_review.cli import parser
+        from pr_review.issue_cli import parser as issue_parser
+        return vars((issue_parser() if issue else parser()).parse_args((['-i', '1'] if issue else ['1']) + list(args)))
+
+    def resolve(self, *args, issue=False, saved=None, **kwargs):
+        from pr_review import cli_settings
+        request = self.request(*args, issue=issue)
+        cli_settings.prepare(request, issue=issue)
+        return cli_settings.resolve(request, saved, issue=issue, **kwargs)
+
+    def test_shared_roles_and_independent_defaults(self):
+        from pr_review import cli_settings
+        default = self.resolve(issue=True)
+        changed = self.resolve('--codex-1-model', 'custom', issue=True)
+        for role in ('processing', 'planning', 'fix'):
+            self.assertEqual(default[role], changed[role])
+        shared = self.resolve('--planning', 'codex-1', '--processing', 'codex-1', '--fix', 'codex-2',
+                              '--codex-1-model', 'shared', '--codex-2-model', 'implementation', issue=True)
+        self.assertEqual('shared', shared['planning']['model'])
+        self.assertEqual(shared['planning'], shared['processing'])
+        self.assertEqual('shared', shared['reviewer_slots'][1]['model'])
+        self.assertEqual('implementation', shared['fix']['model'])
+        # Saved identity, including intentional sharing, survives a partial override.
+        resumed = self.resolve('--codex-1-effort', 'low', saved=shared, issue=True)
+        self.assertEqual('low', resumed['planning']['effort'])
+        self.assertEqual('low', resumed['processing']['effort'])
+        self.assertEqual('high', resumed['fix']['effort'])
+        self.assertEqual(cli_settings.effective(shared), cli_settings.effective(self.resolve(saved=shared, issue=True)))
+
+    def test_order_namespace_and_unused_definitions(self):
+        first = self.resolve('--reviewers', 'codex-11,codex-12', '--codex-11-model', 'first', '--codex-12-model', 'second')
+        second = self.resolve('--reviewers', 'codex-12,codex-11', saved=first)
+        self.assertEqual(['second', 'first'], [s['model'] for s in second['reviewer_slots']])
+        with self.assertRaisesRegex(ApiError, 'Unused.*claude-22'):
+            self.resolve('--claude-22-effort', 'low')
+        for args in (('--reviewers', 'codex'), ('--reviewers', 'codex-1,codex-1'),
+                     ('--reviewers', 'codex-1,codex-2,codex-3'), ('--processing', 'codex-0')):
+            with self.subTest(args=args), self.assertRaises(ApiError):
+                self.resolve(*args)
+        result = self.resolve('--processing', 'claude-22', '--claude-22-model', 'processing-only')
+        self.assertEqual('processing-only', result['processing']['model'])
+
+    def test_fallback_saved_explicit_and_presets(self):
+        single = self.resolve('--reviewers', 'claude-1', '--claude-1-model', 'custom')
+        self.assertEqual('opus', single['processing']['model'])
+        self.assertEqual('claude', single['processing']['provider'])
+        self.assertNotEqual(single['_named']['processing'], single['_named']['reviewers'][0])
+        explicit = self.resolve('--reviewers', 'claude-1', '--processing', 'codex-2')
+        self.assertEqual('codex', explicit['processing']['provider'])
+        self.assertEqual('codex', self.resolve('--reviewers', 'claude-1', saved=explicit)['processing']['provider'])
+        self.assertEqual('codex', self.resolve('--reviewers', 'claude-1,claude-2')['processing']['provider'])
+        for preset in ('economical', 'expensive'):
+            result = self.resolve('--' + preset, issue=True)
+            self.assertEqual(settings.DEFAULTS['codex_model'], result['planning']['model'])
+            self.assertEqual(settings.DEFAULTS['codex_model'], result['fix']['model'])
+            custom = self.resolve('--' + preset, '--planning', 'codex-33', '--fix', 'codex-44', issue=True)
+            self.assertEqual(settings.DEFAULTS['codex_model'], custom['planning']['model'])
+            self.assertEqual(settings.DEFAULTS['codex_model'], custom['fix']['model'])
+            resumed = self.resolve('--' + preset, saved=explicit)
+            self.assertEqual(explicit, resumed)
+
+    def test_presets_apply_to_new_reviewer_and_processing_names(self):
+        for issue in (False, True):
+            for preset, values in settings.PRESETS.items():
+                for provider in ('claude', 'codex'):
+                    with self.subTest(issue=issue, preset=preset, provider=provider):
+                        result = self.resolve('--' + preset, '--reviewers', f'{provider}-9,{provider}-10',
+                                              '--processing', f'{provider}-11', issue=issue)
+                        for choice in [*result['reviewer_slots'], result['processing']]:
+                            self.assertEqual(provider, choice['provider'])
+                            self.assertEqual(values[provider + '_model'], choice['model'])
+                            self.assertEqual(values[provider + '_effort'], choice['effort'])
+
+    def test_single_new_reviewer_presets_keep_fallback_independent(self):
+        for issue in (False, True):
+            for preset, values in settings.PRESETS.items():
+                for provider in ('claude', 'codex'):
+                    with self.subTest(issue=issue, preset=preset, provider=provider):
+                        result = self.resolve('--' + preset, '--reviewers', f'{provider}-9',
+                                              f'--{provider}-9-effort', 'low', issue=issue)
+                        self.assertEqual(values[provider + '_model'], result['reviewer_slots'][0]['model'])
+                        self.assertEqual('low', result['reviewer_slots'][0]['effort'])
+                        self.assertEqual({'provider': provider, 'model': values[provider + '_model'],
+                                          'effort': values[provider + '_effort']}, result['processing'])
+                        self.assertNotEqual(result['_named']['processing'], result['_named']['reviewers'][0])
+
+    def test_presets_leave_new_planning_and_fix_only_names_at_defaults(self):
+        for preset in settings.PRESETS:
+            for provider in ('claude', 'codex'):
+                with self.subTest(preset=preset, provider=provider):
+                    result = self.resolve('--' + preset, '--planning', f'{provider}-33',
+                                          '--fix', f'{provider}-44', issue=True)
+                    for role in ('planning', 'fix'):
+                        self.assertEqual({'provider': provider, 'model': settings.DEFAULTS[provider + '_model'],
+                                          'effort': settings.DEFAULTS[provider + '_effort']}, result[role])
+
+    def test_new_shared_names_use_review_presets_for_every_referencing_role(self):
+        for preset, values in settings.PRESETS.items():
+            for provider in ('claude', 'codex'):
+                for review_role in ('reviewers', 'processing'):
+                    with self.subTest(preset=preset, provider=provider, review_role=review_role):
+                        result = self.resolve('--' + preset, '--' + review_role, f'{provider}-9',
+                                              '--planning', f'{provider}-9', '--fix', f'{provider}-9', issue=True)
+                        choice = {'provider': provider, 'model': values[provider + '_model'],
+                                  'effort': values[provider + '_effort']}
+                        self.assertEqual(choice, result['planning'])
+                        self.assertEqual(choice, result['fix'])
+                        self.assertEqual(choice, result['_named']['model_configs'][f'{provider}-9'])
+
+    def test_saved_named_choices_win_over_presets_while_new_names_use_them(self):
+        for issue in (False, True):
+            saved = self.resolve('--reviewers', 'claude-9,codex-9', '--processing', 'codex-10',
+                                 '--claude-9-model', 'saved-reviewer', '--codex-10-model', 'saved-processor', issue=issue)
+            for preset, values in settings.PRESETS.items():
+                with self.subTest(issue=issue, preset=preset):
+                    self.assertEqual(saved, self.resolve('--' + preset, saved=saved, issue=issue))
+                    changed = self.resolve('--' + preset, '--reviewers', 'claude-9,codex-11', saved=saved, issue=issue)
+                    self.assertEqual(saved['reviewer_slots'][0], changed['reviewer_slots'][0])
+                    self.assertEqual(saved['processing'], changed['processing'])
+                    self.assertEqual(values['codex_model'], changed['reviewer_slots'][1]['model'])
+
+    def test_named_file_choices_override_presets_and_flags_apply_last(self):
+        import json
+        import tempfile
+        for issue in (False, True):
+            saved = self.resolve('--economical', '--reviewers', 'claude-9,codex-9', '--processing', 'codex-10', issue=issue)
+            value = self.resolve('--reviewers', 'claude-9,codex-9', '--processing', 'codex-10',
+                                 '--claude-9-model', 'file-reviewer', '--codex-10-model', 'file-processor', issue=issue)['_named']
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'settings.json'
+                path.write_text(json.dumps(value))
+                for preset in settings.PRESETS:
+                    for file_first in (False, True):
+                        with self.subTest(issue=issue, preset=preset, file_first=file_first):
+                            file_args = ['--settings-file', str(path)]
+                            flags = ['--' + preset, '--codex-9-model', 'explicit', '--claude-9-effort', 'low']
+                            result = self.resolve(*(file_args + flags if file_first else flags + file_args),
+                                                  saved=saved, issue=issue)
+                            self.assertEqual(['file-reviewer', 'explicit'], [c['model'] for c in result['reviewer_slots']])
+                            self.assertEqual('low', result['reviewer_slots'][0]['effort'])
+                            self.assertEqual('file-processor', result['processing']['model'])
+
+    def test_legacy_fix_retains_processing_while_fresh_fix_uses_its_own_default(self):
+        fresh = self.resolve('--reviewers', 'claude-1', '--processing', 'claude-1', issue=True)
+        self.assertEqual({'provider': 'codex', 'model': settings.DEFAULTS['codex_model'],
+                          'effort': settings.DEFAULTS['codex_effort']}, fresh['fix'])
+        choice = {'provider': 'claude', 'model': 'sonnet', 'effort': 'low'}
+        saved = settings.validate({'processing': choice})
+        imported = self.resolve(saved=saved, issue=True)
+        self.assertEqual(choice, imported['fix'])
+        self.assertNotEqual(imported['_named']['fix'], imported['_named']['processing'])
+        changed = self.resolve('--processing', 'codex-9', saved=saved, issue=True)
+        self.assertEqual('codex', changed['processing']['provider'])
+        self.assertEqual(choice, changed['fix'])
+
+    def test_legacy_import_keeps_equal_roles_independent(self):
+        for issue in (False, True):
+            for providers in (('codex', 'codex'), ('claude', 'claude'), ('claude', 'codex')):
+                with self.subTest(issue=issue, providers=providers):
+                    saved = settings.validate({'reviewer_slots': [
+                        {'id': f'reviewer-{i}', 'provider': p,
+                         'model': settings.DEFAULTS[p + '_model'], 'effort': 'high'}
+                        for i, p in enumerate(providers, 1)]})
+                    imported = self.resolve(saved=saved, issue=issue)
+                    named = imported['_named']
+                    roles = ('processing', 'planning', 'fix') if issue else ('processing',)
+                    references = [*named['reviewers'], *(named[r] for r in roles)]
+                    self.assertEqual(len(references), len(set(references)))
+                    for name in references:
+                        changed = self.resolve('--' + name + '-effort', 'medium', saved=imported, issue=issue)
+                        for index, reviewer in enumerate(named['reviewers']):
+                            self.assertEqual('medium' if reviewer == name else 'high',
+                                             changed['reviewer_slots'][index]['effort'])
+                        for role in roles:
+                            self.assertEqual('medium' if named[role] == name else 'high', changed[role]['effort'])
+
+    def test_api_role_edits_reconcile_names_without_losing_unedited_sharing(self):
+        shared = self.resolve('--reviewers', 'claude-1', '--processing', 'claude-1',
+                              '--planning', 'claude-1', '--fix', 'claude-1', issue=True)
+        settings.apply_overrides(shared, {'reviewer_1_provider': 'codex'})
+        named = shared['_named']
+        self.assertEqual(['codex-1'], named['reviewers'])
+        self.assertEqual(['claude-1'] * 3, [named[r] for r in ('processing', 'planning', 'fix')])
+        self.assertEqual('codex', named['model_configs']['codex-1']['provider'])
+        resumed = self.resolve('--claude-1-effort', 'medium', saved=shared, issue=True)
+        self.assertEqual('high', resumed['reviewer_slots'][0]['effort'])
+        self.assertEqual(['medium'] * 3, [resumed[r]['effort'] for r in ('processing', 'planning', 'fix')])
+
+    def test_generation_and_complete_file_roundtrip_without_external_work(self):
+        import json
+        import tempfile
+        from pr_review import cli_settings
+        from pr_review.cli import main
+        from pr_review.issue_cli import main as issue_main
+        for issue, entry in ((False, main), (True, issue_main)):
+            with self.subTest(issue=issue), tempfile.TemporaryDirectory() as directory, \
+                    patch('subprocess.Popen', side_effect=AssertionError('generation must not launch commands')), \
+                    patch('pr_review.repository.Repository.resolve', side_effect=AssertionError('no repository')):
+                path = Path(directory) / 'defaults.json'
+                self.assertEqual(0, entry(['--generate-json-config', str(path)]))
+                original = path.read_bytes()
+                value = json.loads(original)
+                self.assertEqual(cli_settings.defaults(issue=issue), value)
+                generated = self.resolve('--settings-file', str(path), issue=issue)
+                self.assertEqual(self.resolve(issue=issue), generated)
+                self.assertEqual(1, entry(['--generate-json-config', str(path)]))
+                self.assertEqual(original, path.read_bytes())
+                self.assertEqual(1, entry(['--generate-json-config', str(path / 'missing')]))
+
+    def test_complete_validation_and_final_reference_validation(self):
+        import copy
+        from pr_review import cli_settings as c
+        for issue in (False, True):
+            default = c.defaults(issue=issue)
+            for field in default:
+                invalid = copy.deepcopy(default)
+                del invalid[field]
+                with self.subTest(issue=issue, field=field), self.assertRaisesRegex(ApiError, field):
+                    c.validate(invalid, issue=issue)
+            for field in ('provider', 'model', 'effort'):
+                invalid = copy.deepcopy(default)
+                del invalid['model_configs']['codex-1'][field]
+                with self.assertRaisesRegex(ApiError, 'codex-1'):
+                    c.validate(invalid, issue=issue)
+            for patch_value in ({'processing': None}, {'processing': 'codex-9'}, {'unknown': True},
+                                {'reviewers': None}, {'synthesis_tests': None}, {'processing': {}},
+                                {'reviewers': ['codex-1', 'codex-1']}):
+                with self.subTest(patch_value=patch_value), self.assertRaises(ApiError):
+                    c.validate({**default, **patch_value}, issue=issue)
+            for bad_choice in ({'provider': 'claude', 'model': 'opus', 'effort': 'high'},
+                               {'provider': 'codex', 'model': None, 'effort': 'high'},
+                               {'provider': 'codex', 'model': 'ok', 'effort': '-bad'}):
+                invalid = copy.deepcopy(default)
+                invalid['model_configs']['codex-1'] = bad_choice
+                with self.assertRaisesRegex(ApiError, 'codex-1'):
+                    c.validate(invalid, issue=issue)
+        with self.assertRaisesRegex(ApiError, 'Unused.*claude-1'):
+            c.resolve({'_cli_file': c.defaults(), 'cli_reviewers': ['codex-1']})
+
+    def test_file_replaces_saved_flags_win_in_any_order_and_cannot_repair_file(self):
+        import json
+        import tempfile
+        from pr_review import cli_settings as c
+        saved = self.resolve('--codex-1-model', 'saved', '--synthesis-tests', 'full', issue=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'settings.json'
+            value = c.defaults(issue=True)
+            value.update(max_runtime='30m', max_weekly_quota_use=5)
+            path.write_text(json.dumps(value))
+            for before in (True, False):
+                file_args = ['--settings-file', str(path)]
+                flags = ['--codex-1-model', 'explicit', '--max-runtime', 'none', '--max-weekly-quota-use', 'none']
+                result = self.resolve(*(file_args + flags if before else flags + file_args), saved=saved, issue=True)
+                self.assertEqual('explicit', result['reviewer_slots'][1]['model'])
+                self.assertEqual('focused', result['synthesis_tests'])
+                self.assertIsNone(result['_named']['max_runtime'])
+                self.assertIsNone(result['_named']['max_weekly_quota_use'])
+            del value['fix']
+            path.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ApiError, 'Missing fields: fix'):
+                self.resolve('--settings-file', str(path), '--fix', 'codex-4', saved=saved, issue=True)
+            path.write_text('{')
+            with self.assertRaisesRegex(ApiError, 'Cannot read settings file'):
+                self.resolve('--settings-file', str(path))
+            path.write_text(json.dumps({**c.defaults(), 'suggested_changes': True}))
+            self.assertFalse(self.resolve('--no-suggested-changes', '--settings-file', str(path))['suggested_changes'])
+
+    def test_obsolete_options_explain_replacement_for_both_parsers(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        for issue in (False, True):
+            for flag in ('--codex-model', '--claude-effort', '--reviewer-2-model', '--processing-model', '--planning-provider', '--fix-effort'):
+                output = StringIO()
+                with self.subTest(issue=issue, flag=flag), redirect_stderr(output), self.assertRaises(SystemExit):
+                    self.request(flag, 'old', issue=issue)
+                self.assertIn('obsolete', output.getvalue())
+                self.assertIn('--NAME-model', output.getvalue())
+
+    def test_api_edit_of_named_session_does_not_restore_stale_choices(self):
+        saved = self.resolve()
+        settings.apply_overrides(saved, {'reviewer_1_model': 'api-edit'})
+        resumed = self.resolve(saved=saved)
+        self.assertEqual('api-edit', resumed['reviewer_slots'][0]['model'])
+
+
+    def test_model_validation_discovers_only_active_roles_and_rejects_before_summary(self):
+        from pr_review import cli_settings
+        for provider in ('claude', 'codex'):
+            result = self.resolve('--reviewers', provider + '-1', '--processing', provider + '-2',
+                                  '--planning', provider + '-3', '--fix', provider + '-4', issue=True)
+            def catalog(request):
+                return {'provider': provider, 'models': [{'value': settings.DEFAULTS[provider + '_model'], 'efforts': ['high']}]}
+            with patch('pr_review.models.discover', side_effect=catalog) as discover:
+                cli_settings.validate_models(result)
+                discover.assert_called_once_with({'provider': provider})
+                result['fix']['model'] = 'unavailable'
+                with self.assertRaisesRegex(ApiError, 'fix: Choose a listed'):
+                    cli_settings.validate_models(result)
+        result = self.resolve('--synthesis-tests', 'full')
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from pr_review.providers import Runtime
+        output = StringIO()
+        with redirect_stderr(output):
+            cli_settings.summary(result, Runtime(), request={'followup_threads': ['thread:T1']})
+        self.assertIn('Follow-up tests: focused', output.getvalue())
+        self.assertNotIn('reviewer-1:', output.getvalue())
+        self.assertNotIn('Claude budget:', output.getvalue())

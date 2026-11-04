@@ -8,11 +8,12 @@ from .application import dispatch
 from .common import ApiError, local_sessions
 from .events import event_sink
 from .processes import cancellation_scope
+from . import cli_settings
 
 
 def parser():
-    result = argparse.ArgumentParser(prog='fix-issue', description='Plan GitHub issues and delegate approved implementation to a coding harness.')
-    target = result.add_mutually_exclusive_group(required=True)
+    result = cli_settings.Parser(prog='fix-issue', description='Plan GitHub issues and delegate approved implementation to a coding harness.')
+    target = result.add_mutually_exclusive_group(required=False)
     target.add_argument('-i', '--issue', type=int)
     target.add_argument('-p', '--pr', type=int)
     result.add_argument('-R', '--repo', dest='repository')
@@ -24,47 +25,37 @@ def parser():
     recovery = result.add_mutually_exclusive_group()
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
     recovery.add_argument('--retry-absent', metavar='ACTION', help='confirm after inspection that this uncertain action was not sent; allow a later retry')
-    result.add_argument('--min-weekly-quota-remaining', type=float, help='stop at this remaining account weekly percentage')
-    result.add_argument('--max-weekly-quota-use', type=float, help='maximum observed weekly percentage-point increase during execution')
-    result.add_argument('--max-runtime', help='cumulative active execution allowance, e.g. 30m or 2h')
+    result.add_argument('--min-weekly-quota-remaining', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; stop at this remaining account weekly percentage')
+    result.add_argument('--max-weekly-quota-use', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; maximum observed weekly percentage-point increase during execution')
+    result.add_argument('--max-runtime', type=lambda v: None if v == 'none' else v, default=argparse.SUPPRESS, help='cumulative active execution allowance, e.g. 30m or 2h; none disables')
     result.add_argument('--json', action='store_true')
-    result.add_argument('--settings-file', help='Owner settings JSON: fix, review (focused task checks only), '
-                        'and optionally final_review {reviewer_slots, synthesis, synthesis_tests} for acceptance review')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     presets = result.add_mutually_exclusive_group()
     presets.add_argument('--economical', action='store_true')
     presets.add_argument('--expensive', action='store_true')
-    result.add_argument('--reviewers', type=lambda value: value.split(','), default=argparse.SUPPRESS,
-                        help='one or two comma-separated reviewer providers for acceptance review of the local candidate '
-                             '(claude, codex); there is no post-push PR review')
-    for key, text in (('reviewer-1-provider', 'provider of acceptance reviewer slot 1'),
-                      ('reviewer-1-model', 'model of acceptance reviewer slot 1'),
-                      ('reviewer-1-effort', 'effort of acceptance reviewer slot 1'),
-                      ('reviewer-2-provider', 'provider of acceptance reviewer slot 2'),
-                      ('reviewer-2-model', 'model of acceptance reviewer slot 2'),
-                      ('reviewer-2-effort', 'effort of acceptance reviewer slot 2'),
-                      ('processing-model', 'model of the acceptance synthesis'),
-                      ('processing-effort', 'effort of the acceptance synthesis')):
-        result.add_argument('--' + key, default=argparse.SUPPRESS, help=text)
-    for key, text in (('codex-model', 'default Codex model for reviewers and synthesis'),
-                      ('claude-model', 'default Claude model for reviewers and synthesis'),
-                      ('processing-provider', 'provider of the acceptance synthesis'),
-                      ('claude-effort', 'default Claude effort for reviewers and synthesis'),
-                      ('codex-effort', 'default Codex effort for reviewers and synthesis'),
-                      ('synthesis-tests', 'acceptance synthesis verification policy (focused or full)')):
-        result.add_argument('--' + key, default=argparse.SUPPRESS, help=text)
+    cli_settings.add_arguments(result, issue=True)
     return result
 
 
 def main(argv=None):
     os.umask(0o077)
     args = vars(parser().parse_args(argv))
+    if args.get('generate_json_config') is not None:
+        try:
+            cli_settings.generate(args['generate_json_config'], issue=True)
+            return 0
+        except ApiError as exc:
+            print('Error: ' + str(exc), file=sys.stderr)
+            return 1
+    if not args.get('issue') and not args.get('pr'):
+        parser().error('An issue or PR target is required unless --generate-json-config is used.')
     if any(args.get(k) is not None and args[k] < 1 for k in ('issue', 'pr', 'approve')):
         parser().error('Issue, PR, and revision must be positive integers.')
     def progress(kind, **fields):
         if kind == 'progress':
             print(fields['message'], file=sys.stderr, flush=True)
     try:
+        cli_settings.prepare(args, issue=True)
         with local_sessions(), cancellation_scope(), event_sink(progress), contextlib.redirect_stdout(sys.stderr):
             operation = 'issue-recover' if args['inspect_writes'] or args['retry_absent'] is not None else 'issue-run'
             result = dispatch({'command': operation, **args})

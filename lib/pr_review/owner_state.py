@@ -57,6 +57,12 @@ def effective_settings(settings):
     return result
 
 
+def issue_settings(settings):
+    """Effective harness and acceptance choices, excluding unused task checks."""
+    effective = effective_settings(settings)
+    return {key: effective[key] for key in ('fix', 'final_review')}
+
+
 def local_repository(request):
     cwd = Path(request.get("cwd", ".")).resolve()
     identity = request.get("repository")

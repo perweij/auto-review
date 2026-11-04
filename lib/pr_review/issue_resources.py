@@ -4,6 +4,7 @@ import re
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from decimal import Decimal
 from .common import ApiError, now
 from .events import emit
 from . import issue_quota
@@ -21,6 +22,11 @@ def duration(value):
     return seconds
 
 
+def duration_text(seconds):
+    """Round-trip saved seconds through the decimal-only duration grammar."""
+    return format(Decimal(str(seconds)), 'f') + 's'
+
+
 def validate(request):
     if request.get('max_runtime') is not None:
         duration(request['max_runtime'])
@@ -30,18 +36,29 @@ def validate(request):
             raise ApiError('invalid_request', key + ' must be greater than zero and at most 100.')
 
 
-@contextmanager
-def execution(state, save, request):
+def apply_limits(record, request):
+    """Change limits without refunding active runtime or cumulative quota use."""
     validate(request)
-    record = state.setdefault('resources', {'version': 1, 'active_seconds': 0, 'started_at': now()})
-    if request.get('max_runtime') is not None:
-        record['max_runtime'] = duration(request['max_runtime'])
+    if 'max_runtime' in request:
+        if request['max_runtime'] is None:
+            record.pop('max_runtime', None)
+        else:
+            record['max_runtime'] = duration(request['max_runtime'])
     for key in ('min_weekly_quota_remaining', 'max_weekly_quota_use'):
-        if request.get(key) is not None:
+        if key in request and request[key] is None:
+            record.pop(key, None)
+        elif request.get(key) is not None:
             value = request[key]
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 100:
                 raise ApiError('invalid_request', key + ' must be greater than zero and at most 100.')
             record[key] = value
+
+
+@contextmanager
+def execution(state, save, request, *, provider_scope=None):
+    validate(request)
+    record = state.setdefault('resources', {'version': 1, 'active_seconds': 0, 'started_at': now()})
+    apply_limits(record, request)
     record['quota_baselines'] = {}
     record.pop('quota_polled', None)
     started = time.monotonic()
@@ -49,7 +66,7 @@ def execution(state, save, request):
     token = _current.set((record, save, started, base))
     try:
         save()
-        record["providers"] = providers(state)
+        record["providers"] = providers(state) if provider_scope is None else provider_scope
         check()
         yield
     finally:
@@ -82,12 +99,25 @@ def check():
 
 def providers(state):
     configuration = state.get('configuration', {})
-    # PR-review providers no longer participate in issue execution.
-    found = {configuration.get('processing_provider', 'claude')}
-    for role in ('fix', 'review'):
-        choice = state.get('owner_settings', {}).get(role, {})
-        if isinstance(choice, dict) and choice.get('provider'):
-            found.add(choice['provider'])
+    # Named references are provenance. API edits and attached Owner settings
+    # determine the roles that will actually execute.
+    found = {configuration.get('planning', configuration.get('processing', {})).get(
+        'provider', configuration.get('processing_provider', 'claude'))}
+    owner = state.get('owner_settings', {})
+    implementation = owner.get('fix', configuration.get('fix', {}))
+    if implementation.get('provider'):
+        found.add(implementation['provider'])
+    final = owner.get('final_review')
+    if final:
+        found.update(s['provider'] for s in final['reviewer_slots'])
+        found.add(final['synthesis']['provider'])
+    elif owner.get('fix') and owner.get('review'):
+        # Legacy Owner settings derive acceptance from the task-check choice.
+        found.add(owner['review']['provider'])
+    else:
+        found.update(s['provider'] for s in configuration.get('reviewer_slots', []))
+        if configuration.get('processing'):
+            found.add(configuration['processing']['provider'])
     return sorted(found)
 
 

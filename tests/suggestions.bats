@@ -24,7 +24,7 @@ suggestion_fixture() {
 
 @test "codex processing verifies suggestions and retains them for interactive review" {
     suggestion_fixture
-    run_review --suggested-changes --reviewers codex
+    run_review --suggested-changes --reviewers codex-1
     assert_success
     draft_is '.comments[0].suggestion.verification.status=="accepted" and .comments[0].status=="unstaged"'
     tty_drafts $'i p1\nq\n'
