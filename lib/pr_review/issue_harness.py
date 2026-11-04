@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .common import ApiError, digest, now
 from .events import emit
-from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit
+from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit, test_evidence
 from .providers import Runtime, environment
 from .processes import run
 from .storage import write_json, atomic_bytes
@@ -25,6 +25,63 @@ SCHEMA = owner_providers.obj({
     'findings': owner_providers.STRINGS,
     'questions': owner_providers.STRINGS,
 })
+
+
+# Historical reports keep SCHEMA/validate unchanged. Only newly stamped attempts
+# receive this schema; an empty evidence array is a valid declaration.
+EVIDENCE_SCHEMA = copy.deepcopy(SCHEMA)
+EVIDENCE_SCHEMA['properties']['test_evidence'] = {'type': 'array', 'maxItems': test_evidence.MAX_DECLARATIONS,
+    'items': owner_providers.obj({
+        'command': owner_providers.TEXT, 'cwd': owner_providers.TEXT,
+        'log_paths': {**owner_providers.STRINGS, 'maxItems': test_evidence.MAX_LOGS}, 'tested_tree': owner_providers.TEXT,
+        'summary': owner_providers.TEXT, 'tool_id': {'type': ['string', 'null']},
+        'event_id': {'type': ['string', 'null']}})}
+EVIDENCE_SCHEMA['required'].append('test_evidence')
+
+
+def validate_evidence(value):
+    validate(value)
+    test_evidence.declarations(value.get('test_evidence'))
+    return value
+
+
+def finish_capture(session, state, record):
+    """A saved validated completion can finish capture without provider execution."""
+    if record.get('test_evidence_version') != test_evidence.VERSION:
+        return
+    if record.get('provider_completion') != 'completed' or not isinstance(record.get('result'), dict):
+        return
+    validate_evidence(record['result'])
+    directory = Path(record['path'])
+    if not record.get('test_evidence_bundle') and not (directory / 'test-evidence-seal.json').exists():
+        # The controller result is durable before this file; recreating it is
+        # allowed only while there is no frozen seal/reference to invalidate.
+        write_json(directory / 'result.json', record['result'])
+    record['test_evidence_bundle'] = test_evidence.capture(record)
+    record.update(status='complete', capture_status='complete')
+    session.save(state)
+
+
+def recover_capture(session, state, batch):
+    """Finish pending completed turns before the execute loop can launch a model."""
+    recovered = None
+    for record in batch.get('attempts', []):
+        if record.get('kind') != 'issue_harness' or record.get('test_evidence_version') != test_evidence.VERSION:
+            continue
+        pending = not record.get('implementation_consumed')
+        finish_capture(session, state, record)
+        if pending and record.get('status') == 'complete':
+            if record.get('after', {}).get('tree') != batch['checkpoint']['tree']:
+                record.update(implementation_consumed=True, candidate_recovery='stale_candidate')
+                session.save(state)
+                continue
+            recovered = record
+    if recovered is not None and batch.get('harness_phase') != 'review':
+        batch['harness_candidate'] = recovered['result']
+        batch['harness_candidate_tree'] = recovered['after']['tree']
+        # Execute still owns non-ready continuation and question handling.
+        batch['harness_recovered_result'] = recovered['result']
+        session.save(state)
 
 
 def validate(value):
@@ -82,7 +139,7 @@ def invoke(session, state, batch, specification, feedback):
     directory.mkdir(parents=True)
     (directory / 'scratch').mkdir()
     schema = directory / 'schema.json'
-    write_json(schema, copy.deepcopy(SCHEMA))
+    write_json(schema, copy.deepcopy(EVIDENCE_SCHEMA))
     before = owner_git.checkpoint(session, state, 'harness before')
     if before['tree'] != batch['checkpoint']['tree']:
         raise ApiError('worktree_changed', 'Source changed between harness turns; inspect before continuing.')
@@ -107,7 +164,7 @@ def invoke(session, state, batch, specification, feedback):
     args = arguments(choice, directory, schema, conversation)
     record = {'role': 'fix', 'kind': 'issue_harness', 'choice': copy.deepcopy(choice),
               'path': str(directory), 'argv': args, 'before': before, 'git_admin_before': admin,
-              'status': 'running', 'started_at': now()}
+              'status': 'running', 'started_at': now(), 'test_evidence_version': test_evidence.VERSION}
     batch.setdefault('attempts', []).append(record)
     session.save(state)
     def event_line(stream, line):
@@ -145,7 +202,7 @@ def invoke(session, state, batch, specification, feedback):
         # The provider could write anywhere; the approved document must be what it was handed.
         handoff(session, state, batch)
         try:
-            value = validate(response(choice, result, directory))
+            value = validate_evidence(response(choice, result, directory))
             if not conversation.get('session_id'):
                 raise ApiError('model_failed', 'Provider did not identify its implementation session; inspect the saved events.')
         except ApiError as exc:
@@ -153,12 +210,17 @@ def invoke(session, state, batch, specification, feedback):
                     str(exc) in ('Provider returned invalid structured output.', 'Provider returned no structured object.')):
                 raise ApiError('invalid_result', str(exc)) from exc
             raise
+        # Save validated declarations and observed completion before capture. A
+        # crash from here resumes this turn rather than calling the provider.
+        record.update(status='capturing', result=value, provider_completion='completed',
+                      protected_state='unchanged', git_admin_after=admin, capture_status='pending')
+        session.save(state)
         write_json(directory / 'result.json', value)
-        record.update(status='complete', result=value)
+        finish_capture(session, state, record)
         conversation['started'] = True
         return value
     except BaseException as exc:
-        record.update(status='failed', error=str(exc))
+        record.update(status='capture_failed' if record.get('capture_status') == 'pending' else 'failed', error=str(exc))
         raise
     finally:
         if 'after' not in record:
@@ -253,6 +315,24 @@ def execution_failure(batch):
     return {'stage': 'commit', 'summary': reason, 'blocking': [reason], 'next_action': 'inspect_owner'}
 
 
+def consume_result(batch, candidate):
+    # Persist consumption together with execute's phase/continuation transition.
+    for record in reversed(batch.get('attempts', [])):
+        if (record.get('kind') == 'issue_harness' and record.get('test_evidence_version') == test_evidence.VERSION
+                and record.get('status') == 'complete' and record.get('result') == candidate):
+            record['implementation_consumed'] = True
+            return
+
+
+def verification_action(blockers):
+    if not blockers:
+        return 'retry'
+    categories = {b.get('category') for b in blockers}
+    return ({'environment': 'verify_environment', 'evidence': 'verify_evidence', 'policy': 'review_policy'}
+            .get(next(iter(categories)), 'resolve_verification_blockers') if len(categories) == 1 and None not in categories
+            else 'resolve_verification_blockers')
+
+
 def execute(session, state, batch, remote):
     """Use the existing batch only as a publication/commit compatibility record."""
     approved = next((i['source']['plan'] for i in state['feedback']
@@ -266,6 +346,7 @@ def execute(session, state, batch, remote):
         batch['harness_phase'] = 'implement'
     batch.pop('error', None)
     batch['status'] = 'running'
+    recover_capture(session, state, batch)
     if batch.get('discussion_stale'):
         batch.update(harness_phase='implement', discussion_stale=False)
         for field in ('harness_feedback', 'harness_unchanged', 'harness_repeated_rejection', 'harness_rejected_tree'):
@@ -281,16 +362,20 @@ def execute(session, state, batch, remote):
         session.save(state)
         if batch.get('harness_phase') != 'review':
             before = batch['checkpoint']['tree']
-            candidate = report(session, state, batch, approved, implementation_feedback)
+            candidate = batch.pop('harness_recovered_result', None) or report(session, state, batch, approved, implementation_feedback)
             batch['harness_candidate'] = candidate
             batch['harness_candidate_tree'] = batch['checkpoint']['tree']
             if candidate['status'] == 'needs_input':
+                consume_result(batch, candidate)
                 batch.update(status='paused', harness_questions=candidate['questions'])
                 session.save(state)
                 return session.view(state)
             if candidate['status'] == 'blocked_external':
+                consume_result(batch, candidate)
+                session.save(state)
                 raise ApiError('blocked_external', candidate['summary'])
             if candidate['status'] != 'ready':
+                consume_result(batch, candidate)
                 # Continue the same harness conversation. Do not review or replay
                 # test commands for an implementation that says it is unfinished.
                 unchanged = batch.get('harness_unchanged', 0) + 1 if before == batch['checkpoint']['tree'] else 0
@@ -301,6 +386,7 @@ def execute(session, state, batch, remote):
                 continue
             batch['harness_unchanged'] = 0
             batch['harness_phase'] = 'review'
+            consume_result(batch, candidate)
             session.save(state)
         result, review = acceptance.review_issue(session, state, batch, approved)
         if review is None:
@@ -309,7 +395,9 @@ def execute(session, state, batch, remote):
             raise ApiError('review_incomplete', 'Acceptance review could not finish: ' + result.value['summary'],
                            summary=result.value['summary'], artifact=str(result.artifact),
                            verification_blockers=result.value.get('verification_blockers', []),
-                           next_action='verify_environment' if result.value.get('verification_blockers') else 'retry')
+                           next_action=verification_action(result.value.get('verification_blockers', [])))
+        if test_evidence.references(batch):
+            batch['harness_evidence_proof'] = {'tree': batch['checkpoint']['tree'], 'bundles': test_evidence.references(batch)}
         batch['harness_review'] = review
         batch['harness_review_tree'] = batch['checkpoint']['tree']
         if review['status'] == 'needs_input':

@@ -69,6 +69,9 @@ class IssueEngineTest(ScriptedProviders, unittest.TestCase):
         # ... and the unchanged guards accept the candidate and commit it.
         self.assertTrue(owner_contracts.current(batch))
         self.assertTrue(batch['commit_progress']['complete'])
+        prompt = self.stdin_copy.read_text()
+        self.assertIn('claims to assess, not\nevidence', prompt)
+        self.assertNotIn('implementation_test_evidence', prompt)
         kinds = [a['kind'] for a in batch['attempts']]
         self.assertEqual(['review_engine'], [k for k in kinds if k == 'review_engine'])
         attempt = next(a for a in batch['attempts'] if a['kind'] == 'review_engine')

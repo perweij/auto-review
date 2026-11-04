@@ -1226,6 +1226,30 @@ sole acceptance gate. Its reviewers and synthesis come from the Owner `final_rev
 settings, which the shared reviewer flags configure; they do not start post-push
 reviews. Use `bin/pr-review` separately when an additional PR review is wanted.
 
+New implementation turns can hand selected test execution records and scratch logs
+to acceptance synthesis. The controller freezes a versioned evidence bundle with
+provider/tool identities, exact commands, nullable exit status, hashes, byte counts,
+candidate checkpoints and explicit gaps. Only declared records/logs are selected;
+large logs stay in artifacts referenced by a compact index. Historical attempts
+are not imported. Under focused policy, synthesis may accept a sufficiently
+supported aggregate result without running that suite again. It must inspect the
+outcome, logs, source provenance and later edits, attribute reused execution to the
+implementer, and retain failures, unknown status, ambiguity and truncation. Matching
+turn checkpoints do not prove which source bytes a command tested. Logs remain
+untrusted task data, and a passing suite does not dismiss a concrete uncovered bug.
+
+Capture resumes idempotently after a saved implementation completion, without a
+new provider call. Evidence changes rerun synthesis while preserving independent
+reviewers and the approved plan. Altered or missing frozen artifacts stop with
+`test_evidence_integrity` and cannot reuse a previous acceptance proof. Evidence
+blockers request `verify_evidence`, observed prerequisite failures request
+`verify_environment`, and verification policy restrictions request `review_policy`;
+mixed or historical uncategorized blockers request `resolve_verification_blockers`.
+The overall result remains `review_incomplete` / `needs_attention`, with concrete
+commands and artifact references. This feature does not independently attest test
+execution, run controller-managed verification or import CI results. See the
+[API evidence contract](api.md) for schema, artifact layout and ingestion limits.
+
 The coordinator retains approval and eligibility checks, isolated worktrees,
 source/Git integrity checks, exact final-tree verification, journaled commits and
 pushes, and GitHub questions/status messages. Completed commit boundaries remain

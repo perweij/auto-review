@@ -861,6 +861,69 @@ Incomplete and unanswered results are retained but never reusable as completed
 evidence, so resume reruns synthesis on the unchanged candidate while valid reviewer
 reports are reused.
 
+New issue implementation attempts record `test_evidence_version: 1` before provider
+execution. Their completion schema adds required `test_evidence` (an empty array is
+valid) alongside the existing `checks` summary. Each declaration contains `command`
+(the exact provider-reported string, including wrappers), `cwd`, `log_paths`
+(relative to that attempt's scratch directory), `tested_tree` (an implementer
+claim), `summary`, and nullable `tool_id` / `event_id`. IDs disambiguate commands;
+otherwise matching requires one exact command. Shell syntax is never split into
+invented subcommand outcomes. Legacy attempts keep their original schema and are
+not retrospectively ingested.
+
+After a validated provider completion and source/protected-state checks, the
+controller saves the result/declarations, freezes `attempts/<id>/test-evidence/`
+and records `test_evidence_bundle` with its manifest hash. The versioned manifest
+separates controller observations, implementer declarations, provider command
+records, copied logs and gaps. Artifacts use relative paths, SHA-256 hashes and byte
+lengths. Codex command items and Claude Bash tool/results keep provider/event/tool
+identity, exact command, reported cwd when present, completion, nullable numeric
+exit code and selected output. Claude's non-error tool result does not imply zero.
+Missing stream data, ambiguous matches, unavailable logs and truncation are explicit.
+Only declared commands/logs are selected; the complete conversation, reasoning and
+unrelated tool output are excluded. Log reads reject traversal, symlinks (including
+ancestors) and special files. Ingestion is bounded: 64 declarations, 16 log paths
+per declaration, 1 MiB total declaration metadata, a 32 MiB provider stream,
+2 MiB per event, 128 KiB selected command
+output, 4 MiB per log and 16 MiB total copied logs. Oversized streams/logs become
+gaps; output truncation stays visible. These are sensitive, untrusted artifacts;
+there is no guarantee of universal secret redaction.
+
+Issue synthesis receives a compact `implementation_test_evidence` index with
+artifact locations, not large log contents. Under focused policy, sufficiently
+supported implementation execution records may satisfy required aggregate checks
+without re-executing them. Synthesis assesses command outcomes, logs, provenance
+and later edits and attributes reuse to implementation execution. Matching turn
+checkpoints do not attest command-time source bytes. Earlier versioned attempts in
+the current batch keep their original candidate identity; old tests are never
+relabeled as execution against later code. Failed, unknown, stale, ambiguous or
+truncated evidence cannot establish a passing check, and passing tests do not
+rebut a concrete uncovered defect. No automatic pass, requirement skip or expansion
+to full verification is introduced. Interactive Owner and standalone PR review
+retain their existing inputs and behavior.
+
+A durable seal makes interrupted capture idempotent, including a frozen bundle
+not yet referenced in state. A saved completed implementation can finish capture
+on resume without another provider call. Bundle/source integrity is checked before
+synthesis, after execution and before cached acceptance reuse. Evidence changes
+invalidate synthesis only; independent reviewer reports, approved plans and
+implementation checkpoints are preserved. Altered/missing artifacts fail with
+`test_evidence_integrity`, rather than being rehashed or silently omitted. New
+issue acceptance proofs also bind the bundle references and tree; later evidence
+tampering invalidates the existing commit/publication guard. Evidence provides
+provenance, not independent execution attestation. Controller-run verification,
+external/CI imports and legacy-session repair remain outside this feature.
+
+Issue `verification_blockers` add `category`: `environment` for an observed
+execution prerequisite failure (`next_action: verify_environment`), `evidence` for
+missing/stale/unsupported records (`verify_evidence`), or `policy` when a required
+check cannot run under the selected policy without sufficient reusable evidence
+(`review_policy`). Mixed categories and historical uncategorized blockers use
+`resolve_verification_blockers`. Each blocker retains `command`, concrete `reason`
+and `manual_command`; invalid categories and passed results carrying unresolved
+blockers are rejected. The enclosing stop remains `review_incomplete` /
+`needs_attention`. No host failure is inferred from missing evidence alone.
+
 `batch.attempts` gains `kind: review_engine` records (`role`: `acceptance` or
 `final_review`, `status`, `path`, `candidate`, `choice`, `result`, `assessment`). New
 batches record `review_engine: 1`; an unfinished batch with attempts and no marker is

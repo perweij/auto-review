@@ -27,3 +27,13 @@ Return ready only for a complete tested candidate. Report actual checks and
 limitations honestly. working means you hit a turn boundary and need continuation,
 not that you want the coordinator to inspect an unfinished implementation.
 blocked_external requires a concrete external obstacle you cannot resolve locally.
+
+For this new-format attempt, include test_evidence (an empty array is valid), while
+retaining the human-readable checks summary. Each declaration needs the exact
+provider-reported command (including shell wrappers/compound syntax), cwd,
+log_paths relative to this attempt's scratch directory, tested_tree (your claimed
+source tree), summary, and tool_id/event_id (null when unknown). Use available tool
+IDs to disambiguate repeated commands. Save selected test logs in scratch; do not
+include unrelated output or credentials. A summary or successful provider exit
+alone is not execution evidence. Do not claim checkpoint equality attests the
+source bytes at command execution time. The controller does not run tests for you.

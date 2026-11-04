@@ -279,7 +279,7 @@ class ExecutionTest(unittest.TestCase):
         from pr_review import review_engine
         from pr_review.common import ApiError
         value = {'assessment': 'incomplete', 'summary': 'The test environment is broken', 'findings': [],
-                 'verification_blockers': [{'command': 'pytest -m smoke', 'reason': 'read-only sysctl',
+                 'verification_blockers': [{'category': 'environment', 'command': 'pytest -m smoke', 'reason': 'read-only sysctl',
                                             'manual_command': 'uv run pytest -m smoke -q'}]}
         incomplete = review_engine.Result(value, 'incomplete', Path('/retained/synthesis-incomplete-1.json'))
         with patch('pr_review.issue_harness.invoke', side_effect=self.fix), \
@@ -304,7 +304,7 @@ class ExecutionTest(unittest.TestCase):
             commands.append(argv)
             kwargs['on_line']('stdout', json.dumps({'type': 'thread.started', 'thread_id': identity}))
             (Path(self.f.owner.load()['worktree']) / f'turn-{len(commands)}.txt').write_text('work')
-            value = {'status': 'ready', 'summary': 'Tested complete candidate', 'checks': ['ok'], 'questions': [], 'findings': []}
+            value = {'status': 'ready', 'summary': 'Tested complete candidate', 'checks': ['ok'], 'questions': [], 'findings': [], 'test_evidence': []}
             Path(kwargs['stdout_path']).with_name('result.json').write_text(json.dumps(value))
             return SimpleNamespace(returncode=0, events=[{'type': 'turn.completed'}])
         reviews = 0
@@ -355,7 +355,7 @@ class TransportTest(unittest.TestCase):
         saved = self.session.load()['issue_harness_sessions']
         self.assertEqual(self.identity, next(iter(saved.values()))['session_id'])
         value = {'status': 'ready', 'summary': 'Tested complete candidate',
-                 'checks': ['Focused check passed'], 'questions': [], 'findings': []}
+                 'checks': ['Focused check passed'], 'questions': [], 'findings': [], 'test_evidence': []}
         Path(kwargs['stdout_path']).with_name('result.json').write_text(json.dumps(value))
         return SimpleNamespace(returncode=0, events=[{'type': 'turn.completed'}] if provider == 'codex' else [
             {'type': 'result', 'subtype': 'success', 'structured_output': value}])

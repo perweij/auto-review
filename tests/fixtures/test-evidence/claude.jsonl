@@ -1,0 +1,11 @@
+{"type":"system","subtype":"init","session_id":"session-sanitized"}
+{"type":"assistant","uuid":"a-0","message":{"role":"assistant","content":[{"type":"thinking","thinking":"UNRELATED_HIDDEN_REASONING"},{"type":"text","text":"UNRELATED_PRIVATE_CONVERSATION"}]}}
+{"type":"assistant","uuid":"a-1","message":{"role":"assistant","content":[{"type":"tool_use","id":"bash-1","name":"Bash","input":{"command":"make check-backend","cwd":"/candidate"}}]}}
+{"type":"user","uuid":"u-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bash-1","content":"Ran 415 tests\nOK\n","is_error":false}]},"tool_use_result":{"stdout":"Ran 415 tests\nOK\n","stderr":"","interrupted":false}}
+{"type":"assistant","uuid":"a-2","message":{"role":"assistant","content":[{"type":"tool_use","id":"bash-2","name":"Bash","input":{"command":"make check-emacs"}}]}}
+{"type":"user","uuid":"u-2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bash-2","content":"Exit code: 1\ndependency missing","is_error":true}]}}
+{"type":"assistant","uuid":"a-3","message":{"role":"assistant","content":[{"type":"tool_use","id":"bash-3","name":"Bash","input":{"command":"echo one &&\necho two | tee test.log"}}]}}
+{"type":"user","uuid":"u-3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bash-3","content":[{"type":"text","text":"one\ntwo"}],"is_error":false}]},"tool_use_result":{"exit_code":0}}
+{"type":"assistant","uuid":"a-4","message":{"role":"assistant","content":[{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"/elsewhere"}}]}}
+{"type":"user","uuid":"u-4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"UNRELATED_READ_OUTPUT"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"UNRELATED_FINAL_PROSE"}

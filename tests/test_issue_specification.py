@@ -309,7 +309,7 @@ class HandoffCase(unittest.TestCase):
             'type': 'system', 'subtype': 'init', 'session_id': identity}
         kwargs['on_line']('stdout', json.dumps(event))
         value = {'status': 'ready', 'summary': 'Tested complete candidate', 'checks': ['Focused check passed'],
-                 'questions': [], 'findings': []}
+                 'questions': [], 'findings': [], 'test_evidence': []}
         Path(kwargs['stdout_path']).with_name('result.json').write_text(json.dumps(value))
         if getattr(self, 'during', None):
             self.during()

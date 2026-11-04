@@ -95,7 +95,8 @@ def verified(report, required, tree):
 
 def current(batch):
     if batch.get('execution_kind') == 'issue_harness':
-        return (batch.get('harness_candidate', {}).get('status') == 'ready'
+        from .test_evidence import proof_current
+        return (proof_current(batch) and batch.get('harness_candidate', {}).get('status') == 'ready'
                 and batch.get('harness_candidate_tree') == batch.get('final_tree')
                 and batch.get('harness_review', {}).get('status') == 'ready'
                 and bool(batch.get('final_tree'))

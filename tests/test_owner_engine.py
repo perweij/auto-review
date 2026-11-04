@@ -76,6 +76,9 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual(['config', 'pipeline'], [c['task']['rationale'] for c in task_checks])
         self.assertFalse(any(c.get('scope') for c in task_checks))      # the final review is not an invoke() call
         self.assertEqual(1, self.counts()['synthesis'])
+        prompt = self.stdin_copy.read_text()
+        self.assertIn('claims to assess, not\nevidence', prompt)
+        self.assertNotIn('implementation_test_evidence', prompt)
         self.assertEqual(1, batch['review_engine'])
         self.assertTrue(owner_contracts.current(batch))
         self.assertEqual(['p1-config', 'p1-pipeline'], [t['id'] for t in batch['tasks']])

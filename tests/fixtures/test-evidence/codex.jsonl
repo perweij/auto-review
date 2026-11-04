@@ -1,0 +1,13 @@
+{"type":"thread.started","thread_id":"thread-sanitized"}
+{"type":"item.completed","item":{"id":"msg-0","type":"agent_message","text":"UNRELATED_PRIVATE_CONVERSATION"}}
+{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","command":"make check-backend","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"make check-backend","aggregated_output":"Ran 415 tests\nOK\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"cmd-2","type":"command_execution","command":"make check-emacs","aggregated_output":"dependency missing\n","exit_code":2,"status":"failed"}}
+{"type":"item.started","item":{"id":"cmd-3","type":"command_execution","command":"python3 -m unittest","aggregated_output":"running","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"cmd-4","type":"command_execution","command":"echo one &&\necho two | tee test.log","aggregated_output":"one\ntwo\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"cmd-5","type":"command_execution","command":"make repeated","aggregated_output":"first\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"cmd-6","type":"command_execution","command":"make repeated","aggregated_output":"second\n","exit_code":1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"cmd-7","type":"command_execution","command":"make long","aggregated_output":"Earlier output\n[output truncated]\nOK","exit_code":0,"status":"completed","output_truncated":true}}
+{"type":"item.completed","item":{"id":"cmd-unrelated","type":"command_execution","command":"printenv","aggregated_output":"UNRELATED_ENVIRONMENT_OUTPUT","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"cmd-8","type":"command_execution","command":"make warning","aggregated_output":"Warning: truncated output (original token count: 200000)\nFinal summary: OK","exit_code":0,"status":"completed"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":10}}
