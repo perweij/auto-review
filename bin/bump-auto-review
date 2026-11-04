@@ -6,7 +6,7 @@ cd ~/tools/devcontainer-hardened
 branch=$(git branch | grep '^\*' | sed 's|^* ||')
 
 if [ "$branch" = main ] && [ $(git status --porcelain | wc -l) = 0 ]; then
-    . ~/secrets/github/https-credentials-autoreview2.sh
+    . ~/secrets/gitlab/https-credentials.sh
     git pull
     script/bump-auto-review.sh
     git add _devcontainer_template/Dockerfile \
