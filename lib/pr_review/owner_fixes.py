@@ -6,7 +6,7 @@ import uuid
 from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
-from . import acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts
+from . import acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts, review_history
 from .owner_state import refresh, superseded_batches, active_feedback_keys, issue_settings
 
 
@@ -306,6 +306,7 @@ def plan_tasks(session, state, batch, keys):
 
 def execute(session, state, request):
     """Caller holds only the owner execution lock throughout inference."""
+    review_history.controls(request)
     if "auto_commit" in request and type(request["auto_commit"]) is not bool:
         raise ApiError("invalid_request", "auto_commit must be a Boolean.")
     if request.get("auto_commit"):
@@ -335,6 +336,10 @@ def execute(session, state, request):
                 except ApiError:
                     batch = None  # Reject without rewriting the retired record.
                     raise
+                if is_harness and ((not review_history.enabled(batch) and
+                                    ('max_repair_cycles' in request or request.get('retry_review_adjudication')))
+                                   or request.get('retry_review_adjudication') and batch['status'] == 'ready'):
+                    raise ApiError('invalid_request', 'Review controls require a versioned batch with a retryable saved conflict.')
                 replacements = superseded_batches(state).get(batch["id"])
                 if replacements:
                     batch = None  # Preserve the original stop reason and artifacts.
@@ -442,13 +447,17 @@ def execute(session, state, request):
                 if is_harness:
                     batch.update(execution_kind='issue_harness', harness_phase='implement',
                                  harness_before=copy.deepcopy(snapshot))
+                    review_history.initialize(batch, request)
                 state["batches"].append(batch)
                 session.save(state)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
             # Only an unchanged, already verified batch survives a failed auth
             # probe. Source/feedback/settings/trust guards above still invalidate.
             preserve_ready = batch['status'] == 'ready' and not any(request.get(k) for k in ('adopt', 'replan', 'skip'))
-            models.preflight(session, state, issue_harness=is_harness)
+            if is_harness:
+                review_history.resume_guard(session, state, batch, request)
+            if batch.get('harness_phase') != 'adjudication':
+                models.preflight(session, state, issue_harness=is_harness)
             preserve_ready = False
             batch.pop('preflight_error', None)
             if is_harness:

@@ -462,8 +462,10 @@ class HandoffTest(HandoffCase):
     def test_acceptance_review_stops_on_a_modified_document(self):
         Path(self.item()['source']['specification']['path']).chmod(0o600)
         Path(self.item()['source']['specification']['path']).write_text('x')
-        adapter = acceptance.IssueAdapter(self.session, self.state, self.batch, self.plan())
         with self.assertRaises(ApiError) as caught:
+            # Versioned batches verify before freezing synthesis inputs; legacy
+            # adapters still verify when materializing the reviewer context.
+            adapter = acceptance.IssueAdapter(self.session, self.state, self.batch, self.plan())
             adapter.reviewer_context()
         self.assertEqual('specification_modified', caught.exception.code)
 

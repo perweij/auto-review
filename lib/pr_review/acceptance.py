@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .common import ApiError, ROOT, digest, now
-from . import cache, isolation, owner_contracts, owner_providers, providers, review_engine, review_workspace, validation, test_evidence
+from . import cache, isolation, owner_contracts, owner_providers, providers, review_engine, review_workspace, validation, test_evidence, review_history, owner_git
 from .common import state_root
 from .processes import Cancelled
 from .storage import atomic_bytes, hash_bytes, json_bytes, write_json
@@ -389,6 +389,11 @@ class IssueAdapter(AcceptanceAdapter):
         self.evidence_index = test_evidence.index(self.evidence_references)
         self.evidence_versioned = any(a.get('test_evidence_version') == test_evidence.VERSION
                                       for a in batch.get('attempts', []))
+        self.history_versioned = review_history.enabled(batch)
+        if self.history_versioned:
+            identity = review_history.context_identity(session, state, batch)
+            self.history_key, self.history_input = review_history.snapshot(batch, identity)
+            session.save(state)
 
     def keys(self):
         return list(self.batch['items'])
@@ -410,6 +415,13 @@ class IssueAdapter(AcceptanceAdapter):
         if self.evidence_versioned:
             context['implementation_test_evidence'] = {'format_version': test_evidence.VERSION,
                                                        'bundles': self.evidence_index}
+        if self.history_versioned:
+            previous = self.history_input['rounds'][-1]['candidate'] if self.history_input['rounds'] else None
+            change = (owner_git.diff(self.session, previous['tree'], self.batch['checkpoint']['tree']) if previous else '').encode()
+            context['review_history'] = self.history_input
+            context['changes_since_previous_review'] = {'previous_candidate': previous,
+                'diff': change[:65536].decode(errors='replace'), 'truncated': len(change) > 65536}
+            context['implementer_report'] = copy.deepcopy(candidate)
         return context
 
     def identity(self, run, stage):
@@ -420,6 +432,8 @@ class IssueAdapter(AcceptanceAdapter):
 
     def artifacts(self, run, stage):
         result = super().artifacts(run, stage)
+        if not review_engine.slot_of(run, stage) and self.history_versioned:
+            result['review_history_validator'] = 'issue-history/1'
         if not review_engine.slot_of(run, stage) and self.evidence_versioned:
             result['validator'] = 'acceptance/issue-acceptance/3'
             result['test_evidence'] = self.evidence_references
@@ -447,8 +461,15 @@ class IssueAdapter(AcceptanceAdapter):
                 'reason (including the concrete missing evidence, observed failure or policy restriction), and manual_command.')
             atomic_bytes(path, content.encode() + b'\n' + prompt('acceptance-issue-evidence.txt').encode())
 
+        if self.history_versioned:
+            path = run.path / 'prompts/synthesis-prompt.txt'
+            atomic_bytes(path, path.read_bytes() + b'\n' + prompt('acceptance-issue-history.txt').encode())
+
     def synthesis_schema(self, run):
         schema = super().synthesis_schema(run)
+        if self.history_versioned:
+            schema['properties'].update(review_history.schema_fields())
+            schema['required'].extend(sorted(review_history.FIELDS))
         if self.evidence_versioned:
             blocker = schema['properties']['verification_blockers']['items']
             blocker['properties']['category'] = {'type': 'string', 'enum': ['environment', 'evidence', 'policy']}
@@ -457,8 +478,17 @@ class IssueAdapter(AcceptanceAdapter):
 
     def validate(self, run, value, *, new):
         self.verify_evidence()
-        return validate_acceptance(value, keys=self.keys(), exact_outcomes=self.exact_outcomes, cases=self.cases(),
-                                   tree=run.candidate['tree'], sources=self.sources(run), issue_categories=True)
+        validate_acceptance(review_history.base_value(value) if self.history_versioned and isinstance(value, dict) else value,
+                            keys=self.keys(), exact_outcomes=self.exact_outcomes, cases=self.cases(),
+                            tree=run.candidate['tree'], sources=self.sources(run), issue_categories=True)
+        if self.history_versioned:
+            review_history.validate(value, self.history_input)
+        return value
+
+    def classify(self, value):
+        if self.history_versioned and value.get('verification_blockers'):
+            return 'incomplete'
+        return super().classify(value)
 
     def verify_snapshot(self, run, stage, when, context=None):
         if not review_engine.slot_of(run, stage):
@@ -556,11 +586,199 @@ def review_issue(session, state, batch, specification):
     from .issue_harness import recover_capture
     recover_capture(session, state, batch)
     batch.pop('harness_evidence_proof', None)
-    result = execute(session, state, batch, IssueAdapter(session, state, batch, specification), role='acceptance')
-    return result, project_issue(result.value)
+    adapter = IssueAdapter(session, state, batch, specification)
+    result = execute(session, state, batch, adapter, role='acceptance')
+    value = result.value
+    if adapter.history_versioned:
+        candidate = next(a['candidate'] for a in reversed(batch['attempts']) if a.get('kind') == 'review_engine')
+        record = review_history.ingest(batch, value, adapter.history_input, candidate, result.artifact, adapter.history_key)
+        batch['review_round'] = record['id']
+        session.save(state)
+    return result, project_issue(value)
 
 
 def review_owner(session, state, batch, keys, data):
     """Final verification of the combined Owner fixes, projected to an Owner review."""
     result = execute(session, state, batch, OwnerAdapter(session, state, batch, keys, data), role='final_review')
     return result, project_owner(result.value, list(keys))
+
+
+class AdjudicationAdapter(IssueAdapter):
+    """One focused call, with the same immutable candidate and checkout guards."""
+    def __init__(self, session, state, batch, specification, record, request_id):
+        super().__init__(session, state, batch, specification)
+        self.record, self.request_id = record, request_id
+        self.kind = 'issue-adjudication/' + request_id
+
+    def artifacts(self, run, stage):
+        return {'validator': 'issue-adjudication/1', 'request': self.request_id,
+                'schema': cache.hash_file(run.path / 'prompts/adjudication.schema.json'),
+                'prompt': cache.hash_file(run.path / 'prompts/adjudication.txt')}
+
+    def identity(self, run, stage):
+        return {'candidate': self.candidate_identity(run), 'request': self.request_id}
+
+    def synthesis_command(self, run):
+        args = owner_providers.argv(run.settings['processing'], run.runtime, 'review', run.stage_dir('adjudication'),
+                                   run.path / 'prompts/adjudication.schema.json', cwd=run.checkout_path('adjudication'))
+        if run.settings['processing']['provider'] == 'claude':
+            args += ['--add-dir', str(run.path / 'context')]
+            for directory in sorted({str(Path(r['path']).parent) for r in self.record['adjudication_requests'][str(self.record.get('adjudication_generation', 0))]['reviewer_reports']}):
+                args += ['--add-dir', directory]
+            for reference in self.evidence_references:
+                args += ['--add-dir', str(Path(reference['attempt_path']) / reference['bundle'])]
+        return args
+
+
+def adjudicate(session, state, batch, specification, record):
+    from .common import read_json
+    from .providers import Runtime
+    context = review_history.context_identity(session, state, batch)
+    schema = owner_providers.obj({'decisions': {'type': 'array', 'items': owner_providers.obj({
+        'finding_id': {'type': 'string', 'enum': record['disputes']},
+        'decision': {'type': 'string', 'enum': ['uphold', 'reject', 'unresolved']},
+        'reason': owner_providers.TEXT, 'evidence': owner_providers.TEXT})}})
+    reports = [{'path': str(path), 'sha256': cache.hash_file(path)}
+               for path in sorted(Path(record['artifact']).parent.glob('reviewer-*.md'))]
+    request = {'reviewer_reports': reports, 'schema': digest(schema), 'context': context, 'candidate': record['candidate'], 'raw_artifact': record['artifact_hash'],
+               'disputed_history': {key: review_history.ledger(batch)['findings'][key] for key in record['disputes']},
+               'round': record['id'], 'generation': record.get('adjudication_generation', 0),
+               'instructions': prompt('acceptance-issue-adjudication.txt') + '\n' + prompt('synthesis-testing-focused.txt'),
+               'validator': 'issue-adjudication/1'}
+    generation = str(record.get('adjudication_generation', 0))
+    request = record.setdefault('adjudication_requests', {}).setdefault(generation, copy.deepcopy(request))
+    request_id = digest(request)
+    for report in request['reviewer_reports']:
+        if cache.hash_file(Path(report['path'])) != report['sha256']:
+            raise ApiError('invalid_artifact', 'A supplied adjudication reviewer report changed.')
+    saved = record.setdefault('adjudications', {}).setdefault(request_id, {'request': copy.deepcopy(request), 'status': 'pending'})
+    session.save(state)
+    adapter = AdjudicationAdapter(session, state, batch, specification, record, request_id)
+    run = review_workspace.CandidateReview.open(session, state, batch, adapter,
+                tree=batch['checkpoint']['tree'], runtime=Runtime.environment())
+    write_json(run.path / 'prompts/adjudication.schema.json', schema)
+    if 'model_input' not in saved:
+        saved['model_input'] = copy.deepcopy({
+            'request': request, 'specification': adapter.reviewer_context(),
+            'implementation': batch.get('harness_candidate'), 'review_history': review_history.public_snapshot(batch),
+            'test_evidence': adapter.evidence_index, 'raw_acceptance': record['raw']})
+        saved['input_hash'] = hash_bytes(json_bytes(saved['model_input']))
+        session.save(state)
+    input_path = run.path / 'context/adjudication.json'
+    if not input_path.exists():
+        write_json(input_path, saved['model_input'])
+    if cache.hash_file(input_path) != saved['input_hash']:
+        raise ApiError('invalid_artifact', 'Frozen adjudication input changed.')
+    instructions = (request['instructions'] + '\nContext: ' + str(input_path)
+                    + '\nCandidate: ' + json.dumps(record['candidate']))
+    atomic_bytes(run.path / 'prompts/adjudication.txt', instructions.encode())
+    output = run.path / 'reviews/adjudication.json'
+    def validate_decisions(value):
+        decisions = value.get('decisions') if isinstance(value, dict) and set(value) == {'decisions'} else None
+        if (not isinstance(decisions, list) or len(decisions) != len(record['disputes'])
+                or any(not isinstance(d, dict) or set(d) != {'finding_id', 'decision', 'reason', 'evidence'}
+                    or d['finding_id'] not in record['disputes'] or d['decision'] not in ('uphold', 'reject', 'unresolved')
+                    or any(not validation.text(d[k]) for k in ('reason', 'evidence')) for d in decisions)
+                or len({d['finding_id'] for d in decisions}) != len(record['disputes'])):
+            raise ApiError('invalid_result', 'Adjudication must decide every disputed stable ID exactly once with evidence and a reason.')
+        return value
+    attempt = {'role': 'adjudication', 'kind': 'review_adjudication', 'status': 'running',
+               'path': str(run.path), 'request_id': request_id, 'candidate': record['candidate'],
+               'choice': copy.deepcopy(run.settings['processing']), 'started_at': now()}
+    batch['attempts'].append(attempt)
+    run.attempt = attempt
+    session.save(state)
+    try:
+        review_workspace.verify_live(run, 'before')
+        if saved.get('response') is not None:
+            value = validate_decisions(saved['response'])
+            if not output.is_file() or cache.hash_file(output) != saved.get('response_hash'):
+                raise ApiError('invalid_artifact', 'Saved adjudication response changed or is missing.')
+        elif output.is_file():
+            value = validate_decisions(read_json(output))
+        else:
+            # A successful guarded subprocess may be durable before response
+            # validation/state save. Recover that exact request's raw response,
+            # rather than charging another adjudication after this crash window.
+            value = None
+            phase = run.manifest['phases'].get('adjudication', {})
+            expected = cache.inputs(run, 'adjudication')
+            if (phase.get('status') in ('running', 'completed') and not phase.get('failure_reason')
+                    and phase.get('exit_status') == 0 and phase.get('inputs') == expected
+                    and phase.get('fingerprint') == cache.fingerprint(expected)):
+                events = []
+                log = run.stage_dir('adjudication') / 'events.jsonl'
+                for line in log.read_text().splitlines() if log.is_file() else []:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(event, dict):
+                        events.append(event)
+                try:
+                    value = validate_decisions(response(run.settings['processing'],
+                        SimpleNamespace(returncode=0, events=events), run.stage_dir('adjudication')))
+                except ApiError:
+                    value = None
+            if value is None:
+                result, _ = run.model('adjudication', run.command('adjudication'), instructions.encode())
+                value = validate_decisions(response(run.settings['processing'], result, run.stage_dir('adjudication')))
+            write_json(output, value)
+        saved.update(response=copy.deepcopy(value), response_hash=cache.hash_file(output), status='validated', artifact=str(output))
+        session.save(state)                       # Durable response precedes disposition application.
+        if 'adjudication' in run.manifest['phases']:
+            run.complete('adjudication', output)
+        adapter.verify_evidence()
+        review_workspace.verify_live(run, 'after')
+        projected = review_history.base_value(record['raw'])
+        projected = copy.deepcopy(projected)
+        unresolved = []
+        for decision in value['decisions']:
+            key = decision['finding_id']
+            if decision['decision'] == 'unresolved':
+                unresolved.append(key)
+            if decision['decision'] == 'reject':
+                for finding in projected['findings']:
+                    if record['lineage'][finding['id']] == key:
+                        finding['blocking'] = False
+            if not saved.get('applied'):
+                entry = review_history.ledger(batch)['findings'][key]
+                entry['status'] = 'rejected' if decision['decision'] == 'reject' else 'open'
+                entry['blocking'] = decision['decision'] != 'reject'
+                entry['dispositions'].append({'adjudication': request_id, **copy.deepcopy(decision)})
+                if decision['decision'] != 'unresolved':
+                    entry['survived_cycles'] = []
+                    entry['last_adjudicated_cycle'] = record['cycle']
+        if not saved.get('applied'):
+            review_history.ledger(batch)['revision'] += 1
+        saved.update(applied=True, projected=projected)
+        attempt.update(status='complete', result=str(output))
+        session.save(state)
+        if not blocking_findings(projected) and projected['assessment'] == 'changes_requested':
+            projected['assessment'] = 'passed'
+        try:
+            validate_acceptance(projected, keys=adapter.keys(), exact_outcomes=False, cases=adapter.cases(),
+                                tree=run.candidate['tree'], sources=adapter.sources(run), issue_categories=True)
+        except ApiError as exc:
+            unresolved.append('acceptance: ' + str(exc))
+        if unresolved:
+            if batch.get('review_adjudication_authorization'):
+                batch['review_adjudication_authorization']['status'] = 'complete'
+            record['retry_pending'] = False
+            review_history.stop(batch, 'review_conflict', record,
+                'Adjudication could not establish complete acceptance: ' + '; '.join(unresolved), context=context)
+        record['retry_pending'] = False
+        batch.pop('review_stop', None)
+        saved['projected'] = copy.deepcopy(projected)
+        record['projected'] = copy.deepcopy(projected)
+        session.save(state)
+        write_json(run.path / 'reviews/projected-acceptance.json', projected)
+        return projected
+    except BaseException as exc:
+        if attempt['status'] != 'complete':
+            attempt.update(status='failed', error=str(exc))
+        raise
+    finally:
+        attempt['finished_at'] = now()
+        run.close()
+        session.save(state)

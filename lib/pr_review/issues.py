@@ -10,7 +10,7 @@ from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
 from .issue_planning import assess_issue, planning_policy_digest
-from . import issue_resources, specification
+from . import issue_resources, specification, review_history
 from .issue_writes import Writes, comment_marker
 
 
@@ -177,7 +177,7 @@ class Workflow:
                 # Keep the checked facts/snapshot intact, but report the current
                 # action rather than the action saved before this invocation.
                 'eligibility': {**self.eligibility, 'next_action': next_action},
-                'execution': {'version': 1, 'engine': self.state.get('execution_engine'), 'resources': self.state.get('resources', {})}, **extra}
+                'execution': {'version': 1, 'engine': self.state.get('execution_engine'), 'resources': self.state.get('resources', {})}, **self.state.get('review_progress', {}), **extra}
 
     def guard(self):
         target = {'issue': self.state['issue']}
@@ -511,10 +511,26 @@ class Workflow:
                             if b['items'] == keys and not execution_complete(b, current_discussion=False)), None)
             request = {'items': keys, 'auto_commit': True, 'issue_harness': True,
                        'trusted_snapshot': self.request.get('trusted_snapshot')}
+            for control in ('max_repair_cycles', 'retry_review_adjudication'):
+                if control in self.request:
+                    request[control] = self.request[control]
             if pending:
                 request['batch'] = pending['id']
                 request['adopt'] = bool(self.request.get('adopt'))
-            view = owner_fixes.execute(owner, data, request)
+            try:
+                view = owner_fixes.execute(owner, data, request)
+            finally:
+                latest = owner.load()
+                state['worktree'] = latest.get('worktree')
+                current = next((b for b in reversed(latest['batches']) if b['items'] == keys), None)
+                if current and review_history.enabled(current):
+                    state['review_progress'] = {
+                        'stage': 'complete' if execution_complete(current) else current.get('harness_phase', 'implementation'),
+                        'implementation_turn': sum(a.get('kind') == 'issue_harness' for a in current['attempts']),
+                        'repair_cycles_used': len(review_history.ledger(current)['cycles']),
+                        'max_repair_cycles': current['max_repair_cycles'],
+                        'stop_reason': current.get('review_stop', {}).get('code')}
+                self.save()
             batch = next(b for b in reversed(view['batches']) if b['items'] == keys)
             state['worktree'] = view['worktree']
             self.save()
@@ -733,6 +749,43 @@ class Workflow:
             return 'noop'
         return None
 
+    def stopped_review_resume(self, configuration, projected_state):
+        # This path precedes terminal model discovery and Owner auth probes.
+        if not self.state.get('owner'):
+            if self.request.get('retry_review_adjudication'):
+                raise ApiError('invalid_request', 'There is no retryable saved review conflict.')
+            return
+        if self.request.get('adopt'):
+            return
+        feedback = self.feedback_context() if self.state.get('pr') else []
+        if (planning_identity(self.facts, projected_state, feedback, configuration) != projected_state.get('input_digest')
+                or self.facts['base'] != projected_state.get('assessed_base')):
+            if self.request.get('retry_review_adjudication'):
+                raise ApiError('invalid_request', 'Requirements or review context changed; resume normally for reassessment before retrying adjudication.')
+            return
+        owner = owner_state.OwnerSession({'session': self.state['owner']})
+        with locked(owner.execution_lock):
+            data = owner.load()
+            batch = next((b for b in reversed(list(required_batches(data))) if not execution_complete(b)), None)
+            pending_authorization = batch and batch.get('review_adjudication_authorization', {}).get('status') == 'pending'
+            if not batch or not review_history.enabled(batch) or not (batch.get('review_stop') or pending_authorization):
+                if self.request.get('retry_review_adjudication'):
+                    raise ApiError('invalid_request', 'There is no retryable saved review conflict.')
+                return
+            from . import owner_git
+            owner_git.validate(owner, data)
+            if owner.repo.git('rev-parse', 'HEAD', cwd=data['worktree']).stdout.strip() != batch['baseline']:
+                raise ApiError('stale_source', 'HEAD changed; reconcile in Owner before resuming.')
+            current = owner_git.checkpoint(owner, data, 'stopped review resume')
+            if current['tree'] != batch['checkpoint']['tree']:
+                raise ApiError('worktree_changed', 'Inspect and adopt the retained changes before continuing.')
+            if batch.get('integrity_failure') or owner_git.admin(owner, data) != batch['git_admin']:
+                raise ApiError('integrity_failed', 'Protected Git state changed; inspect before continuing.')
+            owner_git.trust(owner, data, current['tree'], approval=self.request.get('trusted_snapshot'))
+            review_history.resume_guard(owner, data, batch, self.request)
+            owner.save(data)
+            return batch.get('harness_phase') == 'adjudication'
+
     def run(self):
         self.terminal_models_pending = False
         state = self.state
@@ -766,8 +819,9 @@ class Workflow:
         identity_updates = self.configuration_identity_updates(previous_configuration)
         projected_state = {**state, **identity_updates}
         cached = self.cached_outcome(configuration, projected_state)
+        adjudication_only = self.stopped_review_resume(configuration, projected_state)
         if self.request.get('_cli_config'):
-            waiting = self.waiting_assessment_unchanged(configuration, projected_state)
+            waiting = adjudication_only or self.waiting_assessment_unchanged(configuration, projected_state)
             self.apply_terminal_configuration(configuration, desired, cached=cached is not None, waiting=waiting)
         state.update(identity_updates)
         self.save()
@@ -786,7 +840,8 @@ class Workflow:
                 self.report_terminal_configuration()
             return self.result(state.get('waiting') or state['phase'], 0 if state['phase'] == 'complete' else 3 if state['phase'] == 'blocked' else 2,
                                'none' if state['phase'] in ('complete', 'blocked') else 'await_answers' if state.get('waiting') == 'answers' else 'await_approval')
-        self.prepare_terminal_models()
+        if not adjudication_only:
+            self.prepare_terminal_models()
         state['execution_engine'] = 'harness-v1'
         self.save()
         with issue_resources.execution(state, self.save, self.request, provider_scope=self.execution_providers()):
@@ -902,6 +957,7 @@ def dispatch(request):
             return flow.result('complete')
         try:
             issue_resources.validate(request)
+            review_history.controls(request)
             return flow.run()
         except ApiError as exc:
             if exc.code == 'cancelled':
@@ -914,6 +970,8 @@ def dispatch(request):
                 'provider_failed': 'The coding provider could not complete its turn. Saved work and session identity are retained.',
                 'invalid_result': 'The provider could not supply a usable completion report after correction. No implementation was published.',
                 'integrity_failed': 'Protected worktree or Git state changed. Inspect the retained changes before continuing.',
+                'repair_limit': 'The repair allowance is exhausted. Completed work remains local and unaccepted.',
+                'review_conflict': 'Review adjudication is unresolved. Completed work remains local and unaccepted.',
                 'review_incomplete': 'Acceptance review could not finish. Its partial result is retained; resume to rerun only the stages without valid evidence.',
                 'independence_failed': 'The independent reviewer workspace could not be prepared. Fix the workspace problem and resume; the review never runs without its workspace.',
                 'review_checkout_modified': 'A reviewer changed its disposable candidate checkout, so its result was discarded. The live worktree is unchanged and no adoption is needed; resume to rerun in a fresh checkout.',
@@ -923,11 +981,19 @@ def dispatch(request):
                 'interrupted_task': 'An older interrupted run left unverified changes. Inspect and adopt the retained changes before continuing.',
             }
             if (exc.code in ('automation_failed', 'resource_limit', 'blocked_external') or
+                    exc.details.get('stop_reason') == 'adjudication_complete' or
                     flow.state.get('execution_engine') == 'harness-v1' and flow.state.get('phase') == 'working'
                     and exc.code in execution_stops):
                 body = ('fix-issue stopped: ' + exc.code.replace('_', ' ') + '\n\n' + execution_stops.get(exc.code, str(exc))
                         + ('\n\n' + exc.details['summary'] if exc.details.get('summary') else '')
                         + '\n\nCompleted work is retained. This is an execution stop, not a request for plan approval.')
+                if exc.code in ('repair_limit', 'review_conflict') or exc.details.get('stop_reason') == 'adjudication_complete':
+                    details = exc.details
+                    resume = review_history.resume_command(flow.state['issue'], flow.repo.identity, exc.code, details)
+                    body += (f"\n\nDisputed findings: {', '.join(details.get('disputed_findings', [])) or 'none'}"
+                             f"\nRepair cycles: {details['repair_cycles_used']}/{details['max_repair_cycles']}"
+                             f"\nLocal worktree: {flow.state.get('worktree')}\nArtifact: {details.get('artifact')}"
+                             f"\nResume: `{resume}`")
                 if flow.base_movement_notice():
                     body += '\n\n' + flow.base_movement_notice()
                 for blocker in exc.details.get('verification_blockers', []):
@@ -940,4 +1006,5 @@ def dispatch(request):
             flow.save()
             return flow.result('uncertain' if exc.code == 'uncertain' else 'partial' if exc.code == 'partial' else exc.code if exc.code in ('automation_failed', 'resource_limit', 'blocked_external') else 'needs_attention',
                                5 if exc.code == 'uncertain' else 4 if exc.code == 'partial' else 3,
-                               exc.details.get('next_action', 'recover'), error=flow.state['error'])
+                               exc.details.get('next_action', 'recover'), error=flow.state['error'],
+                               **{key: exc.details[key] for key in ('stage', 'stop_reason', 'repair_cycles_used', 'max_repair_cycles', 'disputed_findings') if key in exc.details})

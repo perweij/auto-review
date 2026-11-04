@@ -1,0 +1,12 @@
+The review_history context is an immutable ledger of earlier decisions, including
+rejected concerns. Earlier decisions are evidence, not authority over current code.
+Assign finding_lineage to every current finding exactly once: local_id is its ID
+in this result; prior_id is the stable ledger ID of the same concern, or null for
+a new concern. Titles and local IDs may change; never infer identity from titles.
+Provide previous_dispositions for every previously open blocking ledger finding:
+finding_id, status (open/resolved/rejected), concrete evidence and reason. An open
+disposition must link a current blocker. Closed dispositions cannot link blockers.
+A closed concern can reopen only with new evidence and a reason, using its stable
+ID and an open disposition. This requires controller adjudication. Explicitly
+assess all acceptance outcomes and verification limitations even when rejecting
+an earlier concern. Do not omit missing acceptance evidence.

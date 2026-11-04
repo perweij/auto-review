@@ -1,6 +1,6 @@
 # Hand recorded test evidence from implementation to acceptance review
 
-Status: implemented on `fix-issue-test-evidence`; pending merge.
+Status: merged to main at `fb3edae` (2026-11-04).
 Implementation base: main at 2c08939. Do not retrofit or restart #15 as
 part of this work.
 

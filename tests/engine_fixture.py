@@ -37,7 +37,7 @@ else printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"
 
 # Synthesis. It runs in a fresh checkout of the candidate on the host.
 SYNTH_SCRIPT = r'''
-out=$1; style=$2
+out=$1; style=$2; review_root=$3
 cat > "${STDIN_COPY:-/dev/null}"
 printf 'synthesis cwd=%s tmp=%s content=%s\n' "$(pwd)" "${TMPDIR:-}" "$(cat source.txt new.txt | tr '\n' ,)" >> "$MARKS"
 env | cut -d= -f1 | sort > "${ENV_NAMES:-/dev/null}"
@@ -51,10 +51,30 @@ case "${MISBEHAVE:-}" in
   admin) git -C "$OWNER_WORKTREE" add new.txt ;;
   head) git commit -q --allow-empty -m moved ;;
 esac
+# Mock issue synthesis explicitly links fixture findings to the frozen ledger.
+# Real providers receive the same file; malformed explicit test values are retained.
+fixture_result="$TMPDIR/fixture-result.json"
+python3 - "$RESULT_FILE" "$review_root" "$fixture_result" <<'PYCODE'
+import json, pathlib, sys
+value = json.load(open(sys.argv[1]))
+root = pathlib.Path(sys.argv[2])
+schema = json.load(open(root / 'prompts/synthesis.schema.json')) if (root / 'prompts/synthesis.schema.json').exists() else {}
+if 'finding_lineage' in schema.get('required', []) and 'finding_lineage' not in value:
+    history = json.load(open(root / 'context/review_history.json'))
+    prior = history['findings']
+    links = {f['id']: next((key for key, old in prior.items() if old['observations'][-1]['finding']['id'] == f['id']), None) for f in value['findings']}
+    value['finding_lineage'] = [{'local_id': key, 'prior_id': previous} for key, previous in links.items()]
+    value['previous_dispositions'] = []
+    for key, old in prior.items():
+        current = next((f for f in value['findings'] if links[f['id']] == key and f['blocking']), None)
+        if old['status'] == 'open' and old['blocking'] or current:
+            value['previous_dispositions'].append({'finding_id': key, 'status': 'open' if current else 'resolved', 'reason': 'Fixture checked current candidate', 'evidence': current['evidence'] if current else 'Repair verified'})
+json.dump(value, open(sys.argv[3], 'w'))
+PYCODE
 if [ "$style" = claude ]; then
-  python3 -c 'import json,sys; print(json.dumps({"type":"result","subtype":"success","is_error":False,"structured_output":json.load(open(sys.argv[1]))}))' "$RESULT_FILE"
+  python3 -c 'import json,sys; print(json.dumps({"type":"result","subtype":"success","is_error":False,"structured_output":json.load(open(sys.argv[1]))}))' "$fixture_result"
 else
-  if [ -s "$RESULT_FILE" ]; then cp "$RESULT_FILE" "$out"; else : > "$out"; fi
+  if [ -s "$RESULT_FILE" ]; then cp "$fixture_result" "$out"; else : > "$out"; fi
   printf '%s\n' '{"type":"turn.completed"}'
 fi
 '''
@@ -125,7 +145,7 @@ class ScriptedProviders:
             return argv + [f'--model={slot["model"]}', f'--effort={slot["effort"]}']
         choice = run.settings['processing']
         return ['/bin/sh', '-c', SYNTH_SCRIPT, 'synthesis', str(run.stage_dir('synthesis') / 'result.json'),
-                choice['provider'], f'--model={choice["model"]}', f'--effort={choice["effort"]}']
+                choice['provider'], str(run.path), f'--model={choice["model"]}', f'--effort={choice["effort"]}']
 
     def verdict(self, assessment='passed', findings=(), questions=(), outcomes=None, cases=None, summary='Assessment summary'):
         required = getattr(self, 'data', {}).get('verification_cases', [])

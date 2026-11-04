@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .common import ApiError, digest, now
 from .events import emit
-from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit, test_evidence
+from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit, test_evidence, review_history
 from .providers import Runtime, environment
 from .processes import run
 from .storage import write_json, atomic_bytes
@@ -187,7 +187,8 @@ def invoke(session, state, batch, specification, feedback):
     env, _ = environment(choice['provider'])
     env.update(TMPDIR=str(directory / 'scratch'), PYTHONDONTWRITEBYTECODE='1', GIT_OPTIONAL_LOCKS='0')
     turn = sum(a.get('kind') == 'issue_harness' and a.get('role') == 'fix' for a in batch['attempts'])
-    emit('progress', message=f"Issue implementation turn {turn}: {choice['provider']} / {choice['model']} ({choice['effort']})")
+    cycles = f", repair cycle {len(review_history.ledger(batch)['cycles'])}/{batch['max_repair_cycles']}" if review_history.enabled(batch) else ''
+    emit('progress', message=f"Issue implementation turn {turn}{cycles}: {choice['provider']} / {choice['model']} ({choice['effort']})")
     try:
         result = run(args, cwd=state['worktree'], env=env, input_bytes=prompt.encode(),
                      timeout=Runtime.environment().model_timeout, stdout_path=directory / 'events.jsonl',
@@ -360,7 +361,7 @@ def execute(session, state, batch, remote):
     while True:
         check_fresh(session, state, batch)
         session.save(state)
-        if batch.get('harness_phase') != 'review':
+        if batch.get('harness_phase') not in ('review', 'adjudication', 'review_decision'):
             before = batch['checkpoint']['tree']
             candidate = batch.pop('harness_recovered_result', None) or report(session, state, batch, approved, implementation_feedback)
             batch['harness_candidate'] = candidate
@@ -388,14 +389,41 @@ def execute(session, state, batch, remote):
             batch['harness_phase'] = 'review'
             consume_result(batch, candidate)
             session.save(state)
-        result, review = acceptance.review_issue(session, state, batch, approved)
-        if review is None:
+        saved_stop = batch.get('review_stop') if review_history.enabled(batch) else None
+        adjudication_only = batch.get('harness_phase') == 'adjudication'
+        saved_decision = batch.get('review_decision')
+        if adjudication_only or saved_decision or saved_stop and saved_stop['code'] == 'repair_limit':
+            from types import SimpleNamespace
+            from .storage import hash_file
+            record = next(r for r in review_history.ledger(batch)['rounds'] if r['id'] == (saved_stop or saved_decision or {}).get('round', batch.get('review_round')))
+            if hash_file(Path(record['artifact'])) != record['artifact_hash']:
+                raise ApiError('invalid_artifact', 'Saved acceptance synthesis changed.')
+            value = (acceptance.adjudicate(session, state, batch, approved, record)
+                     if batch.get('harness_phase') == 'adjudication' else record.get('projected', record['raw']))
+            result = SimpleNamespace(value=value, artifact=record['artifact'])
+            review = acceptance.project_issue(value)
+        else:
+            result, review = acceptance.review_issue(session, state, batch, approved)
+        if review is None or review_history.enabled(batch) and result.value.get('verification_blockers'):
             # An incomplete review writes no proof. The phase stays 'review', so
             # resume reruns only the stages that lack valid evidence.
             raise ApiError('review_incomplete', 'Acceptance review could not finish: ' + result.value['summary'],
                            summary=result.value['summary'], artifact=str(result.artifact),
                            verification_blockers=result.value.get('verification_blockers', []),
                            next_action=verification_action(result.value.get('verification_blockers', [])))
+        if review_history.enabled(batch):
+            record = next(r for r in review_history.ledger(batch)['rounds'] if r['id'] == batch['review_round'])
+            if review['status'] == 'changes_requested' and batch.get('harness_counted_rejection') != record['id']:
+                repeated = batch.get('harness_rejected_tree') == batch['checkpoint']['tree']
+                batch['harness_repeated_rejection'] = batch.get('harness_repeated_rejection', 0) + 1 if repeated else 1
+                batch['harness_rejected_tree'] = batch['checkpoint']['tree']
+                batch['harness_counted_rejection'] = record['id']
+            if review['status'] == 'changes_requested' and batch.get('harness_repeated_rejection', 0) >= 3:
+                raise ApiError('automation_failed', 'The same unchanged candidate was repeatedly rejected.',
+                               summary='; '.join(review['findings']))
+            if record['disputes'] and record['completed'] and not (adjudication_only or saved_decision or saved_stop):
+                value = acceptance.adjudicate(session, state, batch, approved, record)
+                review = acceptance.project_issue(value)
         if test_evidence.references(batch):
             batch['harness_evidence_proof'] = {'tree': batch['checkpoint']['tree'], 'bundles': test_evidence.references(batch)}
         batch['harness_review'] = review
@@ -404,16 +432,40 @@ def execute(session, state, batch, remote):
             batch.update(status='paused', harness_questions=review['questions'])
             session.save(state)
             return session.view(state)
+        if adjudication_only and review['status'] != 'ready':
+            batch['review_decision'] = {'round': batch['review_round'],
+                'context': review_history.context_identity(session, state, batch)}
+            batch['harness_phase'] = 'review_decision'
+            batch['review_adjudication_authorization']['status'] = 'complete'
+            session.save(state)
+            raise ApiError('needs_attention', 'Adjudication is complete; blocking findings require a normal resume for repair.',
+                           stage='repair', stop_reason='adjudication_complete', next_action='resume_repair',
+                           repair_cycles_used=len(review_history.ledger(batch)['cycles']),
+                           max_repair_cycles=batch['max_repair_cycles'],
+                           disputed_findings=record['disputes'], artifact=record['artifact'])
         if review['status'] != 'ready':
             repeated = batch.get('harness_rejected_tree') == batch['checkpoint']['tree']
-            batch['harness_repeated_rejection'] = batch.get('harness_repeated_rejection', 0) + 1 if repeated else 1
-            batch['harness_rejected_tree'] = batch['checkpoint']['tree']
+            round_id = batch.get('review_round') if review_history.enabled(batch) else None
+            if round_id is None or batch.get('harness_counted_rejection') != round_id:
+                batch['harness_repeated_rejection'] = batch.get('harness_repeated_rejection', 0) + 1 if repeated else 1
+                batch['harness_rejected_tree'] = batch['checkpoint']['tree']
+                batch['harness_counted_rejection'] = round_id
             if batch['harness_repeated_rejection'] >= 3:
                 raise ApiError('automation_failed', 'The same unchanged candidate was repeatedly rejected.', summary='; '.join(review['findings']))
             # Only blocking findings return to the implementation session.
             feedback = review['findings'] or [review['summary']]
             implementation_feedback = feedback
-            batch.update(harness_feedback=feedback, harness_phase='implement')
+            if review_history.enabled(batch):
+                record = next(r for r in review_history.ledger(batch)['rounds'] if r['id'] == batch['review_round'])
+                try:
+                    review_history.allocate(batch, record, feedback)
+                except ApiError:
+                    batch['review_stop']['context'] = review_history.context_identity(session, state, batch)
+                    session.save(state)
+                    raise
+                session.save(state)  # Allocation and implementation transition precede the provider.
+            else:
+                batch.update(harness_feedback=feedback, harness_phase='implement')
             continue
         check_fresh(session, state, batch)
         tree = batch['checkpoint']['tree']
@@ -432,6 +484,9 @@ def execute(session, state, batch, remote):
             batch['tasks'].append(task)
         if task is not None:
             task.update(status='complete', after=batch['checkpoint'], review=proof)
+        if adjudication_only:
+            batch['review_adjudication_authorization']['status'] = 'complete'
+            batch['harness_phase'] = 'review'
         batch.update(status='ready', review=proof, review_tree=tree, final_tree=tree,
                      completed_at=now(), verified_items=batch['items'],
                      verified_fingerprints={i['key']: i['fingerprint'] for i in session.items(state, batch['items'])},

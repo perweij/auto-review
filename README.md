@@ -177,7 +177,17 @@ worktree. Successful independent harness verification marks the PR ready after a
 After approval, one implementation harness owns planning the code changes, coding,
 testing and debugging until the entire specification is ready. The shared review
 engine (the same independent reviewers and synthesis as `pr-review`) checks the candidate;
-blocking findings return to the same implementation session.
+blocking findings return to the same implementation session. New batches preserve
+explicit finding lineage and earlier decisions in a versioned ledger. Synthesis
+sees that history, the latest implementation report, changes since the previous
+reviewed candidate and references to immutable test-evidence bundles. Independent
+reviewers inspect the candidate without that history. Reopened closed blockers,
+or a blocker surviving two completed repairs, receive one focused adjudication.
+After an adjudication, persistence requires two further completed repairs before
+another adjudication; a reopened closed concern still triggers immediately.
+Existing no-progress safeguards take precedence after review establishes a third
+unchanged rejection, stopping before adjudication. A new report or evidence can
+still establish acceptance of unchanged source.
 The coordinator handles safeguards and GitHub communication. There is no second
 post-push PR-review pipeline. It does not launch a new coding agent for each task or replay test suites.
 Real product questions still require an answer. Interactive Owner retains its
@@ -186,9 +196,38 @@ existing task workflow and focused verification policy.
 Progress goes to stderr; `--json` emits one final result on stdout. Optional limits:
 
 ```sh
+bin/fix-issue -i 10 --max-repair-cycles 5 --json
+bin/fix-issue -i 10 --retry-review-adjudication --json
 bin/fix-issue -i 10 --max-runtime 2h --json
 bin/fix-issue -i 10 --min-weekly-quota-remaining 20 --max-weekly-quota-use 5 --max-runtime 2h --json
 ```
+
+New batches allow three repair cycles by default. Initial implementation/review,
+format corrections and interrupted continuations do not each consume a cycle.
+`--max-repair-cycles` accepts a positive integer; omission on resume preserves the
+saved allowance. Increasing it retains approval, completed reviews and consumed
+cycles. Lowering it preserves consumed cycles and finishes an already allocated
+cycle, then prevents further allocations above the new allowance. Legacy batches
+retain their existing behavior and reject these new review controls.
+
+An unresolved adjudication stops with `review_conflict`; unchanged ordinary resume
+makes no model or authentication calls. `--retry-review-adjudication` authorizes
+one more focused adjudication of the saved current conflict. That invocation runs
+only adjudication: if blocking findings remain after a resolved decision, it
+returns `needs_attention` with `next_action: resume_repair`; resume normally to
+start repair from that saved decision. A complete acceptance can proceed through the existing
+commit/publication guards. Changed source, requirements, trust or evidence require
+normal review. Rejection of findings cannot supply missing acceptance outcomes,
+answer questions or erase verification limitations.
+
+A repair-limit or review-conflict stop retains unaccepted code locally and posts
+a deduplicated status with cycles, stable finding IDs, worktree/artifact locations
+and a resume command. It does not push the checkpoint or mark the PR ready. Keep
+that local worktree and its session artifacts available for recovery; draft
+checkpoint publication and external evidence imports are separate work.
+Implementation turns and repair cycles are reported separately. JSON results
+include execution stage, cycle counts and stop reason. Adjudication consumes the
+same runtime/quota allowance as other model work.
 
 Runtime is cumulative active execution across resumes. Weekly usage is an
 account-wide observation in percentage points, not a token-derived estimate or

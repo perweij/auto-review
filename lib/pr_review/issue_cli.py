@@ -21,6 +21,8 @@ def parser():
     approval = result.add_mutually_exclusive_group()
     approval.add_argument('--yolo', action='store_true', help='skip plan approval for this invocation; questions still block')
     approval.add_argument('--approve', type=int, metavar='REV', help='record approval of this exact published plan revision')
+    result.add_argument('--max-repair-cycles', type=int, default=argparse.SUPPRESS, help='positive repair-cycle allowance; new batches default to 3')
+    result.add_argument('--retry-review-adjudication', action='store_true', help='retry only the saved unresolved adjudication once')
     result.add_argument('--adopt', action='store_true', help='adopt inspected partial Owner workspace changes and reverify')
     recovery = result.add_mutually_exclusive_group()
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
@@ -49,8 +51,8 @@ def main(argv=None):
             return 1
     if not args.get('issue') and not args.get('pr'):
         parser().error('An issue or PR target is required unless --generate-json-config is used.')
-    if any(args.get(k) is not None and args[k] < 1 for k in ('issue', 'pr', 'approve')):
-        parser().error('Issue, PR, and revision must be positive integers.')
+    if any(args.get(k) is not None and args[k] < 1 for k in ('issue', 'pr', 'approve', 'max_repair_cycles')):
+        parser().error('Issue, PR, revision and repair allowance must be positive integers.')
     def progress(kind, **fields):
         if kind == 'progress':
             print(fields['message'], file=sys.stderr, flush=True)
