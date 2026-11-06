@@ -771,7 +771,13 @@ configuration; delegated model activity remains attributed to its enclosing role
 `input_tokens` (including cached input), `cached_input_tokens`,
 `cache_creation_input_tokens`, `output_tokens`, and `total_tokens`. Reported
 `reasoning_output_tokens` is a subset of output and is never added again.
-Known partial counters remain visible, with partial coverage.
+Known partial counters remain visible, with partial coverage. Optional
+`token_warnings` on role rows explain suspicious telemetry. A Codex turn reporting
+all-zero counters after observed model activity (such as tool execution or model
+text) contributes unavailable usage, rather than a trusted zero. Other known
+turns still contribute to the role's partial total. Explicit zero counters without
+such activity remain valid. These checks apply to newly observed events; existing
+ledger entries are not reinterpreted from historical logs.
 
 Provider quota rows retain distinct meter IDs, labels, kind and scope. Where
 available they expose `consumed_points`, `remaining_percentage`, Unix UTC `reset`,
@@ -787,6 +793,11 @@ rounding and reporting delays. API credentials and unsupported provider/CLI
 combinations may prevent subscription readings without preventing token reporting.
 There are no token-to-quota conversions. Reporting failures do not alter workflow
 outcomes or existing runtime/quota-limit enforcement.
+
+The text tables label quota deltas as observed changes and display token and quota
+coverage separately. `Cache read` shows `cached_input_tokens` already included in
+`Reported tokens`; it must not be added to that total. An unchanged quota reading
+does not establish zero consumption.
 
 Each call emits a compact `progress` message. Both cumulative tables are emitted
 at operation exit, including pauses and recoverable failures. Existing logs retain

@@ -186,6 +186,84 @@ class UsageTest(unittest.TestCase):
         self.assertIsNone(missing['usage'])
         self.assertEqual('partial', self.report()['coverage'])
 
+    def test_codex_zero_counters_after_model_activity_are_unavailable_across_resumes(self):
+        # exec review can execute tools and produce a report, yet finish with zero counters.
+        events = [codex()[0], {'type': 'turn.started'},
+                  {'type': 'item.completed', 'item': {'type': 'command_execution', 'command': 'pwd'}},
+                  {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'No defects found.'}},
+                  codex(0, 0, 0)[-1]]
+        with usage.operation(self.root, legacy=False):
+            self.assertEqual(0, self.call(events, role='reviewer-1').returncode)
+        value = self.report()
+        role = value['roles'][0]
+        self.assertIsNone(role['usage'])
+        self.assertEqual('unavailable', role['token_coverage'])
+        self.assertEqual('reported', role['quota_coverage'])
+        self.assertEqual('partial', value['coverage'])
+        self.assertIn('zero tokens despite model activity', role['token_warnings'][0])
+        self.assertTrue(any('tokens unavailable' in m for m in self.messages))
+        self.assertTrue(any('Warning:' in m and 'zero tokens' in m for m in self.messages))
+        with usage.operation(self.root):
+            self.call(role='reviewer-1')
+        role = self.report()['roles'][0]
+        self.assertEqual((2, 1, 1), (role['calls'], role['calls_reported'], role['calls_unavailable']))
+        self.assertEqual(110, role['usage']['total_tokens'])
+        self.assertEqual('partial', role['token_coverage'])
+        self.assertEqual(1, len(role['token_warnings']))
+
+    def test_codex_activity_requires_counters_but_does_not_invalidate_positive_usage(self):
+        for item in ({'type': 'agent_message', 'text': 'A finding'},
+                     {'type': 'command_execution', 'command': 'pwd'},
+                     {'type': 'mcp_tool_call', 'tool': 'read_file'},
+                     {'type': 'reasoning', 'text': 'Inspect the diff'}):
+            with self.subTest(item=item['type']), usage.operation(self.root, legacy=False):
+                activity = {'type': 'item.completed', 'item': item}
+                self.call([codex()[0], activity, codex(0, 0, 0)[-1]], role=item['type'] + '/zero')
+                self.call([codex()[0], activity, codex()[-1]], role=item['type'] + '/positive')
+        for zero, positive in zip(self.report()['roles'][::2], self.report()['roles'][1::2]):
+            self.assertIsNone(zero['usage'])
+            self.assertEqual(110, positive['usage']['total_tokens'])
+            self.assertEqual('reported', positive['token_coverage'])
+            self.assertEqual([], positive['token_warnings'])
+
+    def test_codex_missing_and_suspicious_turns_preserve_known_usage_as_partial(self):
+        positive = codex()[-1]
+        for incomplete in ({'type': 'turn.completed', 'turn_id': 'turn-2'},
+                           dict(codex(0, 0, 0)[-1], turn_id='turn-2')):
+            for order in ('before', 'after'):
+                with self.subTest(incomplete=incomplete, order=order):
+                    activity = {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Report'}}
+                    turns = [activity, incomplete, positive] if order == 'before' else [positive, activity, incomplete]
+                    role_name = str(len(self.report()['roles']))
+                    with usage.operation(self.root, legacy=False):
+                        self.call([codex()[0], *turns], role=role_name)
+                    role = self.report()['roles'][-1]
+                    self.assertEqual(110, role['usage']['total_tokens'])
+                    self.assertEqual('partial', role['token_coverage'])
+
+    def test_duplicate_suspicious_codex_completion_does_not_restore_reported_coverage(self):
+        activity = {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Report'}}
+        zero = codex(0, 0, 0)[-1]
+        with usage.operation(self.root, legacy=False):
+            self.call([codex()[0], activity, zero, zero])
+        self.assertIsNone(self.report()['roles'][0]['usage'])
+        self.assertEqual('unavailable', self.report()['token_coverage'])
+
+    def test_usage_tables_distinguish_observed_quota_and_cached_tokens(self):
+        with usage.operation(self.root, legacy=False):
+            self.call()
+        text = '\n'.join(self.messages)
+        self.assertIn('Observed change (pp)', text)
+        self.assertIn('Weekly change (pp)', text)
+        self.assertIn('Token coverage', text)
+        self.assertIn('Quota coverage', text)
+        self.assertIn('Cache read', text)
+        self.assertIn('Cache read is a subset of Reported tokens', text)
+        self.assertIn('Zero quota change means unchanged readings', text)
+        row = next(line for line in text.splitlines() if line.startswith('fix '))
+        self.assertEqual(['110', '60', '0', 'reported', 'reported'],
+                         [cell.strip() for cell in row.split('|')][5:])
+
     def test_failed_calls_keep_usage_and_exit_status(self):
         with usage.operation(self.root, legacy=False):
             result = self.call(code=7)

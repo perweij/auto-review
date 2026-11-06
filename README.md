@@ -156,8 +156,11 @@ See [LICENSE](LICENSE) for the full text.
 `fix-issue` and `pr-review` report usage automatically after model calls and print
 cumulative tables when an operation finishes, pauses or fails. One table shows
 weekly provider meters (including scoped Claude meters such as Fable); the other
-shows role, provider, configured model, effort, calls, reported tokens and observed
-weekly percentage points. The tables also appear in existing Emacs progress logs.
+shows role, provider, configured model, effort, calls, reported tokens, cache-read
+tokens, observed weekly percentage points, and separate token/quota coverage.
+Reported tokens include cached input and repeated context across requests; the
+cache-read column is a subset of that total. The tables also appear in existing
+Emacs progress logs.
 
 Accounting follows the saved job through resumes and review-generation changes.
 Planning, live authentication probes, retries, implementation, review, synthesis
@@ -173,6 +176,12 @@ rounding and weekly resets can affect attribution. Role estimates may differ fro
 provider totals; overlapping meters are not additive. Missing readings and partial
 interrupted token usage are marked explicitly, not treated as zero. Tokens and
 estimated API costs are never converted into subscription percentages.
+
+Zero quota change means readings stayed unchanged, rather than proving that no
+quota was consumed. Codex turns that execute tools or produce model text but
+report all-zero token counters are flagged as unavailable with a warning. Known
+counters from other turns remain visible with partial token coverage. Explicit
+zero counters without observed model activity remain valid.
 
 CLI JSON results and session reads expose an additive versioned `usage` summary.
 See the [API reference](docs/api.md#usage-reporting) for coverage and details.

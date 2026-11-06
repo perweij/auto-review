@@ -160,6 +160,8 @@ class Call:
                            status='pending', started_at=now(), coverage='unavailable', usage=None,
                            session_id=None, model_usage={}, duration_seconds=0)
         self.steps, self.turns = {}, {}
+        self.turn_activity = False
+        self.suspicious_turns = set()
         self.models = None
         self.baselines = copy.deepcopy(ledger.data['sessions'])
         self.started = None
@@ -184,14 +186,30 @@ class Call:
         if isinstance(event.get('claude_code_version'), str):
             self.record['provider_version'] = event['claude_code_version']
         changed = False
-        if provider == 'codex' and kind == 'turn.completed':
-            value = tokens(event.get('usage'))
-            if value:
+        if provider == 'codex':
+            if kind in ('item.started', 'item.completed'):
+                item = event.get('item') or {}
+                if (item.get('type') in ('command_execution', 'mcp_tool_call', 'web_search') or
+                        item.get('type') in ('agent_message', 'reasoning') and item.get('text')):
+                    self.turn_activity = True
+            if kind == 'turn.completed':
                 # exec emits one completion per turn; explicit IDs also make replay idempotent.
                 key = event.get('turn_id') or event.get('id') or str(len(self.turns))
+                value = tokens(event.get('usage'))
+                if value and value['total_tokens'] == 0 and (self.turn_activity or key in self.suspicious_turns):
+                    self.suspicious_turns.add(key)
+                    value = None
+                else:
+                    self.suspicious_turns.discard(key)
                 self.turns[key] = value
-                self.record['usage'] = _sum(self.turns.values())
-                self.record['coverage'] = 'reported'
+                known = [v for v in self.turns.values() if v is not None]
+                self.record['usage'] = _sum(known) if known else None
+                self.record['coverage'] = ('reported' if len(known) == len(self.turns) else
+                                           'partial' if known else 'unavailable')
+                self.record['token_warnings'] = ([
+                    'Codex reported zero tokens despite model activity; affected turn usage is unavailable.'
+                ] if self.suspicious_turns else [])
+                self.turn_activity = False
                 changed = True
         elif provider == 'claude':
             if kind == 'assistant' and isinstance(event.get('message'), dict):
@@ -266,7 +284,10 @@ class Call:
             overall = [m for m in _meter_changes(self.record.get('quota_before', {}), self.record.get('quota_after', {})) if m['kind'] == 'weekly_all']
             points = ', '.join(_amount(m['consumed_points']) for m in overall) or 'unavailable'
             _progress(f"Usage [{self.record['role']}]: {self.record['provider']} / {self.record['model']} "
-                      f"({self.record['effort']}), tokens {count}; weekly quota {points} pp observed; {self.record['coverage']}")
+                      f"({self.record['effort']}), tokens {count}; weekly quota change {points} pp observed; "
+                      f"token coverage {self.record['coverage']}")
+            for warning in self.record.get('token_warnings', []):
+                _warning(f"[{self.record['role']}]: {warning}")
 
 
 def _progress(message):
@@ -365,13 +386,17 @@ def report(data):
         key = tuple(call[k] for k in ('role', 'provider', 'model', 'effort'))
         row = roles.setdefault(key, dict(zip(('role', 'provider', 'model', 'effort'), key), calls=0,
                                         calls_reported=0, calls_partial=0, calls_unavailable=0,
-                                        duration_seconds=0, usage=_sum([]), quota={}, model_usage={}, quota_missing_calls=0))
+                                        duration_seconds=0, usage=_sum([]), quota={}, model_usage={}, quota_missing_calls=0,
+                                        token_warnings=[]))
         row['calls'] += 1
         coverage = call.get('coverage', 'unavailable')
         row['calls_' + ('reported' if coverage == 'reported' else 'partial' if call.get('usage') else 'unavailable')] += 1
         row['duration_seconds'] += call.get('duration_seconds', 0)
         if call.get('usage'):
             row['usage'] = _sum([row['usage'], call['usage']])
+        for warning in call.get('token_warnings', []):
+            if warning not in row['token_warnings']:
+                row['token_warnings'].append(warning)
         for model, value in call.get('model_usage', {}).items():
             row['model_usage'][model] = _sum([row['model_usage'].get(model, _sum([])), value])
         before, after = call.get('quota_before', {}), call.get('quota_after', {})
@@ -459,12 +484,20 @@ def render(value):
     for pool in value['quota']:
         reset = datetime.datetime.fromtimestamp(pool['reset'], datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if pool.get('reset') else 'unknown'
         rows.append([pool['label'], _amount(pool['consumed_points']), _amount(pool['remaining_percentage']), reset, pool['coverage']])
-    _progress(_table(['Provider / meter', 'Consumed (pp)', 'Remaining (%)', 'Resets at', 'Coverage'], rows))
+    _progress(_table(['Provider / meter', 'Observed change (pp)', 'Remaining (%)', 'Resets at', 'Quota coverage'], rows))
     rows = []
     for role in value['roles']:
         overall = [m for m in role['quota'] if m['kind'] == 'weekly_all']
         consumption = ', '.join(_amount(m['consumed_points']) for m in overall) or 'unavailable'
         rows.append([role['role'], role['provider'], role['model'], role['effort'], role['calls'],
-                     role['usage']['total_tokens'] if role['usage'] else 'unavailable', consumption, role['coverage']])
-    _progress(_table(['Role', 'Provider', 'Model', 'Effort', 'Calls', 'Reported tokens', 'Weekly (pp)', 'Coverage'], rows))
+                     role['usage']['total_tokens'] if role['usage'] else 'unavailable',
+                     role['usage']['cached_input_tokens'] if role['usage'] else 'unavailable',
+                     consumption, role['token_coverage'], role['quota_coverage']])
+    _progress(_table(['Role', 'Provider', 'Model', 'Effort', 'Calls', 'Reported tokens', 'Cache read',
+                     'Weekly change (pp)', 'Token coverage', 'Quota coverage'], rows))
+    for role in value['roles']:
+        for warning in role.get('token_warnings', []):
+            _warning(f"[{role['role']} / {role['provider']} / {role['model']} ({role['effort']})]: {warning}")
+    _progress('Reported tokens include cache reads and repeated context across requests; Cache read is a subset of Reported tokens.')
+    _progress('Zero quota change means unchanged readings, not zero consumption; rounding and delayed updates can hide use.')
     _progress(value['attribution'] + ' Role estimates may not sum to provider totals; different meters are not additive.')
