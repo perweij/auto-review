@@ -219,7 +219,9 @@ def context_identity(session, state, batch):
     return digest({'tree': batch['checkpoint']['tree'], 'baseline': batch['baseline'],
         'specification': document['locator'], 'feedback': [specification.provenance(i) for i in session.items(state, batch['items'])],
         'trust': [state.get('trusted_snapshot'), state.get('trusted_configuration')],
-        'settings': batch['settings'], 'evidence': refs, 'report': batch.get('harness_candidate'),
+        'settings': batch.get('review_identity_settings', batch['settings']),
+        **({'review_reruns': batch['review_reruns']} if batch.get('review_reruns') else {}),
+        'evidence': refs, 'report': batch.get('harness_candidate'),
         'instructions': {k: v for k, v in acceptance._PROMPTS.items() if 'acceptance' in k or k.startswith('synthesis-testing-')},
         'validator': [acceptance.VALIDATOR_VERSION, VERSION]})
 

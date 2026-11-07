@@ -549,6 +549,7 @@ def execute(session, state, batch, adapter, *, role):
     from .providers import Runtime
     tree = batch['checkpoint']['tree']
     run = review_workspace.CandidateReview.open(session, state, batch, adapter, tree=tree, runtime=Runtime.environment())
+    run.prepare_choices()
     attempt = {'role': role, 'kind': 'review_engine', 'status': 'running', 'path': str(run.path), 'started_at': now(),
                'candidate': {'sha': run.candidate['sha'], 'tree': tree, 'baseline': run.candidate['baseline']},
                'choice': {'reviewer_slots': run.settings['reviewer_slots'], 'synthesis': run.settings['processing'],
@@ -559,10 +560,18 @@ def execute(session, state, batch, adapter, *, role):
     try:
         review_workspace.verify_live(run, 'before')
         result = review_engine.review(run)
+        attempt['choice'] = {'reviewer_slots': copy.deepcopy(run.settings['reviewer_slots']),
+                             'synthesis': copy.deepcopy(run.settings['processing']),
+                             'synthesis_tests': run.settings['synthesis_tests']}
         if isinstance(adapter, IssueAdapter):
             adapter.verify_evidence()
         # Evidence, whether produced or reused, is accepted only on the verified current tree.
         review_workspace.verify_live(run, 'after')
+        if result.status == 'completed':
+            applied = batch.setdefault('review_reruns_applied', [])
+            for token in batch.get('review_reruns', {}).values():
+                if token not in applied:
+                    applied.append(token)
     except BaseException as exc:
         attempt.update(status='interrupted' if isinstance(exc, Cancelled) or getattr(exc, 'code', None) in
                        ('cancelled', 'resource_limit') else 'failed', error=str(exc), code=getattr(exc, 'code', None))
@@ -684,17 +693,22 @@ def adjudicate(session, state, batch, specification, record):
         return value
     attempt = {'role': 'adjudication', 'kind': 'review_adjudication', 'status': 'running',
                'path': str(run.path), 'request_id': request_id, 'candidate': record['candidate'],
-               'choice': copy.deepcopy(run.settings['processing']), 'started_at': now()}
+               'choice': copy.deepcopy(run.settings['processing']),
+               'requested_choice': copy.deepcopy(run.settings['processing']), 'started_at': now()}
     batch['attempts'].append(attempt)
     run.attempt = attempt
     session.save(state)
     try:
         review_workspace.verify_live(run, 'before')
         if saved.get('response') is not None:
+            # Replaying a validated response is not a new call under the newly
+            # requested model. Older responses may lack choice provenance.
+            attempt.update(choice=copy.deepcopy(saved.get('choice')), reused=True)
             value = validate_decisions(saved['response'])
             if not output.is_file() or cache.hash_file(output) != saved.get('response_hash'):
                 raise ApiError('invalid_artifact', 'Saved adjudication response changed or is missing.')
         elif output.is_file():
+            attempt.update(choice=copy.deepcopy(saved.get('choice')), reused=True)
             value = validate_decisions(read_json(output))
         else:
             # A successful guarded subprocess may be durable before response
@@ -723,6 +737,8 @@ def adjudicate(session, state, batch, specification, record):
             if value is None:
                 result, _ = run.model('adjudication', run.command('adjudication'), instructions.encode())
                 value = validate_decisions(response(run.settings['processing'], result, run.stage_dir('adjudication')))
+            saved['choice'] = copy.deepcopy(run.settings['processing'])
+            session.save(state)  # Provenance must survive a crash after the artifact write.
             write_json(output, value)
         saved.update(response=copy.deepcopy(value), response_hash=cache.hash_file(output), status='validated', artifact=str(output))
         session.save(state)                       # Durable response precedes disposition application.

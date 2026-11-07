@@ -128,9 +128,8 @@ def handoff(session, state, batch=None):
 def invoke(session, state, batch, specification, feedback):
     """One implementation turn of the persistent ``fix`` session."""
     choice = batch['settings']['fix']
-    key = digest([state['issue_workflow'], specification, choice])
-    conversations = state.setdefault('issue_harness_sessions', {})
-    conversation = conversations.setdefault(key, {'choice': copy.deepcopy(choice)})
+    from .issue_settings import select_conversation
+    key, conversation, continuation = select_conversation(state, specification, choice)
     if choice['provider'] == 'claude':
         conversation.setdefault('session_id', str(uuid.uuid4()))
     directory = session.path / 'attempts' / uuid.uuid4().hex
@@ -151,6 +150,15 @@ def invoke(session, state, batch, specification, feedback):
     prompt = (Path(__file__).resolve().parents[2] / 'prompts' / 'issue-implement.txt').read_text()
     # Re-verify the approved document immediately before each turn (including resumption).
     document = handoff(session, state, batch)
+    latest = next((a for a in reversed(batch.get('attempts', []))
+                   if a.get('kind') == 'issue_harness' and a.get('result')), {})
+    previous = latest.get('result') or batch.get('harness_candidate') or {}
+    continuation_report = {'status': previous.get('status'), 'summary': previous.get('summary', '')[:4000],
+                           'directory': latest.get('path')}
+    for field in ('checks', 'findings', 'questions'):
+        continuation_report[field] = [v[:2000] for v in previous.get(field, [])[:10]]
+    continuation_report['truncated'] = any(continuation_report[k] != previous.get(k, [] if k != 'summary' else '')
+                                           for k in ('summary', 'checks', 'findings', 'questions'))
     prompt, _ = owner_providers.context_prompt(prompt + '\n', {
         'approved_specification': {'format': 'markdown', 'file': document['path'], 'revision': document['plan']['revision'],
                                    'sha256': document['locator']['sha256'], 'bytes': document['locator']['bytes']},
@@ -160,10 +168,13 @@ def invoke(session, state, batch, specification, feedback):
                                if i['kind'] == 'issue_plan' and not i.get('missing')), {}),
         'scratch': str(directory / 'scratch'), 'baseline': batch['baseline'],
         'prior_checks': batch.get('harness_candidate', {}).get('checks', []),
+        'continuation': {'handoff': conversation.get('handoff'),
+                         'checkpoint': before, 'previous_report': continuation_report},
         'previous_attempts': [a['path'] for a in batch.get('attempts', [])[-4:]]}, directory)
     atomic_bytes(directory / 'prompt.txt', prompt.encode())
     args = arguments(choice, directory, schema, conversation)
     record = {'role': 'fix', 'kind': 'issue_harness', 'choice': copy.deepcopy(choice),
+              'conversation': key, 'session_resumed': bool(conversation.get('started')),
               'path': str(directory), 'argv': args, 'before': before, 'git_admin_before': admin,
               'status': 'running', 'started_at': now(), 'test_evidence_version': test_evidence.VERSION}
     batch.setdefault('attempts', []).append(record)
@@ -190,6 +201,9 @@ def invoke(session, state, batch, specification, feedback):
     turn = sum(a.get('kind') == 'issue_harness' and a.get('role') == 'fix' for a in batch['attempts'])
     cycles = f", repair cycle {len(review_history.ledger(batch)['cycles'])}/{batch['max_repair_cycles']}" if review_history.enabled(batch) else ''
     emit('progress', message=f"Issue implementation turn {turn}{cycles}: {choice['provider']} / {choice['model']} ({choice['effort']})")
+    emit('progress', message=('Starting a fresh provider session from the approved specification and saved work.'
+                             if continuation else 'Continuing the saved provider session.'
+                             if conversation.get('started') else 'Starting the implementation session.'))
     try:
         result = run(args, cwd=state['worktree'], env=env, input_bytes=prompt.encode(),
                      timeout=Runtime.environment().model_timeout, stdout_path=directory / 'events.jsonl',

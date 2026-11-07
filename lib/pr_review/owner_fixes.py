@@ -352,7 +352,7 @@ def execute(session, state, request):
                 if "auto_commit" in request:
                     batch["auto_commit"] = request["auto_commit"]
                     session.save(state)
-                controls = any(request.get(k) for k in ("adopt", "replan", "skip"))
+                controls = any(request.get(k) for k in ("adopt", "replan", "skip", "rerun_review"))
                 if batch.get("commit_execution") and controls:
                     head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
                     if head != batch["baseline"]:
@@ -426,12 +426,15 @@ def execute(session, state, request):
                 same_settings = (issue_settings(batch["settings"]) == issue_settings(state["settings"]) if is_harness
                                  else batch["settings"] == state["settings"])
                 if not same_settings:
-                    if batch.get("attempts") or batch.get("plans") or batch.get("tasks"):
+                    if is_harness:
+                        from .issue_settings import change_batch
+                        change_batch(session, state, batch)
+                    elif batch.get("attempts") or batch.get("plans") or batch.get("tasks"):
                         raise ApiError("settings_changed", "Model work has already started. Restore the batch's saved provider settings (shown in its details) before resuming it.")
-                    # Preflight may reject the initial choices before any model
-                    # work. Let that untouched batch use corrected settings.
-                    batch["settings"] = copy.deepcopy(state["settings"])
-                    session.save(state)
+                    else:
+                        # Untouched interactive batches can correct preflight choices.
+                        batch["settings"] = copy.deepcopy(state["settings"])
+                        session.save(state)
             else:
                 items = session.items(state, request.get("items"))
                 if any(not i["actionable"] for i in items):
@@ -453,6 +456,9 @@ def execute(session, state, request):
                 state["batches"].append(batch)
                 session.save(state)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
+            if is_harness and request.get('rerun_review'):
+                from .issue_settings import request_rerun
+                request_rerun(session, state, batch, request['rerun_review'], request.get('review_rerun_id'))
             # Only an unchanged, already verified batch survives a failed auth
             # probe. Source/feedback/settings/trust guards above still invalidate.
             preserve_ready = batch['status'] == 'ready' and not any(request.get(k) for k in ('adopt', 'replan', 'skip'))

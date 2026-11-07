@@ -1375,7 +1375,7 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assertEqual(0, dispatch({**self.without_flags(), 'yolo': True})['exit_code'])
         self.assertNotIn('final_review', self.owner_settings())
 
-    def test_reviewer_flags_cannot_change_the_settings_of_a_started_batch(self):
+    def test_reviewer_flags_change_future_settings_of_a_stopped_issue_batch(self):
         from pr_review.common import ApiError
         def fix(*args):
             raise ApiError('model_failed', 'Provider interrupted')
@@ -1386,7 +1386,12 @@ class IssueIntegrationTest(unittest.TestCase):
         state = owner.load()
         state['batches'][-1]['attempts'] = [{'role': 'fix', 'kind': 'issue_harness', 'status': 'failed'}]
         owner.save(state)
-        self.assertEqual('settings_changed', dispatch({**self.req, 'reviewers': ['claude'], 'yolo': True})['error']['code'])
+        assessments = len(self.assessments)
+        result = dispatch({**self.req, 'reviewers': ['claude'], 'yolo': True})
+        self.assertEqual(0, result['exit_code'], result)
+        self.assertEqual(assessments, len(self.assessments))
+        self.assertEqual(state['batches'][-1]['id'], owner.load()['batches'][-1]['id'])
+        self.assertEqual('claude', owner.load()['batches'][-1]['settings']['final_review']['reviewer_slots'][0]['provider'])
 
     def interrupt_recorded_implementation(self, request):
         def interrupted(session, state, batch, *args):
@@ -1433,7 +1438,7 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assertEqual(0, result['exit_code'], result)
         self.assertEqual(before['settings'], self.owner_settings())
 
-    def test_changed_file_cannot_replace_frozen_effective_settings(self):
+    def test_changed_file_updates_stopped_issue_settings_without_replanning(self):
         choice = {'provider': 'claude', 'model': 'sonnet', 'effort': 'high'}
         path = self.settings_file(fix=choice, review=choice, verification='focused')
         request = {**self.req, 'settings_file': path, 'reviewers': ['claude'],
@@ -1443,10 +1448,12 @@ class IssueIntegrationTest(unittest.TestCase):
         changed['fix']['effort'] = 'medium'
         Path(path).write_text(json.dumps(changed))
         result = dispatch(request)
-        self.assertEqual('settings_changed', result['error']['code'])
+        self.assertEqual(0, result['exit_code'], result)
         after = owner_state.OwnerSession({'session': self.path}).load()
-        self.assertEqual(before['settings'], after['settings'])
-        self.assertEqual(before['batches'], after['batches'])
+        self.assertEqual(before['batches'][-1]['id'], after['batches'][-1]['id'])
+        self.assertEqual('medium', after['batches'][-1]['settings']['fix']['effort'])
+        self.assertEqual(before['batches'][-1]['attempts'][0], after['batches'][-1]['attempts'][0])
+        self.assertEqual(1, len(self.assessments))
 
     def terminal_request(self, *args):
         from pr_review.issue_cli import parser
@@ -1490,7 +1497,7 @@ class IssueIntegrationTest(unittest.TestCase):
             after = dispatch({**self.without_flags(), 'command': 'issue-read'})['configuration']
         self.assertEqual(before, after)
 
-    def test_named_frozen_resume_equivalence_limits_and_rejected_override(self):
+    def test_named_resume_equivalence_limits_and_invalid_override(self):
         from contextlib import redirect_stderr
         from pr_review import cli_settings
         request = self.terminal_request('--reviewers', 'claude-1', '--planning', 'claude-1',
@@ -1502,8 +1509,8 @@ class IssueIntegrationTest(unittest.TestCase):
         old_configuration = copy.deepcopy(state['configuration'])
         rejected_output = StringIO()
         with redirect_stderr(rejected_output):
-            result = dispatch(self.terminal_request('--claude-2-effort', 'low', '--yolo'))
-        self.assertEqual('settings_changed', result['error']['code'], result)
+            result = dispatch(self.terminal_request('--claude-2-model', 'missing-model', '--yolo'))
+        self.assertEqual('invalid_request', result['error']['code'], result)
         self.assertNotIn('Effective configuration:', rejected_output.getvalue())
         owner = owner_state.OwnerSession({'session': self.path})
         self.assertEqual(before['settings'], owner.load()['settings'])
@@ -1530,7 +1537,7 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assertEqual(['claude'], state_after['resources']['providers'])
         self.assertEqual(cli_settings.effective(old_configuration), cli_settings.effective(state_after['configuration']))
 
-    def test_changed_attached_owner_cannot_override_frozen_batch_before_planning(self):
+    def test_invalid_attached_owner_choice_fails_before_planning_or_batch_changes(self):
         from contextlib import redirect_stderr
         before = self.interrupt_recorded_implementation(self.terminal_request('--yolo'))
         owner = owner_state.OwnerSession({'session': self.path})
@@ -1540,7 +1547,7 @@ class IssueIntegrationTest(unittest.TestCase):
         errors = StringIO()
         with redirect_stderr(errors), patch('pr_review.issues.assess_issue') as assess:
             result = dispatch(self.terminal_request('--yolo'))
-        self.assertEqual('settings_changed', result['error']['code'], result)
+        self.assertEqual('invalid_request', result['error']['code'], result)
         self.assertNotIn('Effective configuration:', errors.getvalue())
         self.assertEqual(before['batches'], owner.load()['batches'])
         self.assertEqual(changed['settings'], owner.load()['settings'])
@@ -2087,7 +2094,7 @@ class ReplacementPlanTest(unittest.TestCase):
         self.owner.save(unverified)
         before = copy.deepcopy(self.owner.load())
         result = dispatch(self.t.terminal_request())
-        self.assertEqual('settings_changed', result['error']['code'], result)
+        self.assertEqual('needs_attention', result['error']['code'], result)
         self.assertEqual(before['settings'], self.owner.load()['settings'])
         self.assertEqual(before['batches'], self.owner.load()['batches'])
 
@@ -2719,21 +2726,22 @@ class CachedTerminalRecoveryTest(unittest.TestCase):
         self.assertEqual('needs_attention', result['error']['code'], result)
         discover.assert_not_called()
 
-    def test_changed_or_invalid_settings_cannot_use_the_cached_result(self):
+    def test_future_settings_keep_cached_evidence_but_invalid_references_fail(self):
         from contextlib import redirect_stderr
         before = self.ready()
         batches = copy.deepcopy(self.owner.load()['batches'])
         with self.unavailable() as discover, redirect_stderr(StringIO()) as errors:
             result = dispatch(self.request('--codex-4-effort', 'medium'))
-        self.assertEqual('discovery_failed', result['error']['code'], result)
-        discover.assert_called()
-        self.assertNotIn('Effective configuration:', errors.getvalue())
-        self.assertEqual(before['configuration'], self.state()['configuration'])
+        self.assertEqual('noop', result['outcome'], result)
+        discover.assert_not_called()
+        self.assertIn('Effective configuration:', errors.getvalue())
+        self.assertEqual('medium', self.state()['configuration']['fix']['effort'])
+        saved = copy.deepcopy(self.state()['configuration'])
         with self.unavailable() as discover:
             result = dispatch(self.request('--codex-44-effort', 'medium'))
         self.assertEqual('invalid_request', result['error']['code'], result)
         discover.assert_not_called()
-        self.assertEqual(before['configuration'], self.state()['configuration'])
+        self.assertEqual(saved, self.state()['configuration'])
         self.assertEqual(before['ready_head'], self.state()['ready_head'])
         self.assertEqual(batches, self.owner.load()['batches'])
 
@@ -2754,7 +2762,9 @@ class LegacyImplementationChoiceTest(unittest.TestCase):
         self.assertNotIn('_named', flow.state['configuration'])
         before = copy.deepcopy(flow.state)
         with redirect_stderr(StringIO()) as errors:
-            rejected = dispatch(t.terminal_request('--fix', 'codex-44', '--codex-44-model', 'unavailable'))
+            # Availability of future choices may be deferred while waiting, but
+            # malformed choices must not replace the saved legacy defaults.
+            rejected = dispatch(t.terminal_request('--fix', 'codex-44', '--codex-44-model', ''))
         self.assertEqual('invalid_request', rejected['error']['code'], rejected)
         self.assertNotIn('Effective configuration:', errors.getvalue())
         after = dispatch({**t.without_flags(), 'command': 'issue-read'})
@@ -2883,18 +2893,32 @@ class WaitingTerminalRecoveryTest(unittest.TestCase):
         self.assertEqual(2, len(self.t.assessments))
         self.assertEqual('ready', dispatch(self.request('--approve', '1'))['outcome'])
 
-    def test_changes_to_settings_base_or_discussion_require_metadata(self):
+    def test_future_settings_in_an_approval_wait_defer_metadata_until_execution(self):
+        before = self.approval_wait()
+        with self.unavailable() as discover:
+            result = dispatch(self.request('--codex-4-effort', 'medium'))
+        self.assertEqual('approval', result['outcome'], result)
+        discover.assert_not_called()
+        self.assertEqual(before['plan'], self.state()['plan'])
+        self.assertEqual('medium', self.state()['configuration']['fix']['effort'])
+        self.assertEqual(1, len(self.t.assessments))
+        with self.unavailable() as discover:
+            result = dispatch(self.request('--approve', '1'))
+        self.assertEqual('discovery_failed', result['error']['code'], result)
+        discover.assert_called()
+        self.assertEqual([], self.t.calls)
+
+    def test_changes_to_base_or_discussion_require_metadata(self):
         before = self.approval_wait()
         original_body, original_base = self.t.f['issue']['body'], self.t.f['base']
-        for changed in ('settings', 'base', 'discussion'):
+        for changed in ('base', 'discussion'):
             with self.subTest(changed=changed):
-                args = ('--codex-4-effort', 'medium') if changed == 'settings' else ()
                 if changed == 'base':
                     self.t.f['base'] = self.t.head
                 if changed == 'discussion':
                     self.t.f['issue']['body'] += ' Preserve history.'
                 with self.unavailable() as discover:
-                    result = dispatch(self.request(*args))
+                    result = dispatch(self.request())
                 self.assertEqual('discovery_failed', result['error']['code'], result)
                 discover.assert_called()
                 self.assertEqual(before['configuration'], self.state()['configuration'])

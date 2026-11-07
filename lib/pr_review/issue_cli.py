@@ -23,6 +23,8 @@ def parser():
     approval.add_argument('--approve', type=int, metavar='REV', help='record approval of this exact published plan revision')
     result.add_argument('--max-repair-cycles', type=int, default=argparse.SUPPRESS, help='positive repair-cycle allowance; new batches default to 3')
     result.add_argument('--retry-review-adjudication', action='store_true', help='retry only the saved unresolved adjudication once')
+    result.add_argument('--rerun-review', action='append', choices=('reviewer-1', 'reviewer-2', 'synthesis'),
+                        default=argparse.SUPPRESS, help='explicitly regenerate this saved review stage before committing; repeat for multiple stages')
     result.add_argument('--adopt', action='store_true', help='adopt inspected partial Owner workspace changes and reverify')
     recovery = result.add_mutually_exclusive_group()
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')

@@ -91,10 +91,15 @@ def inputs(run, stage, *, followup_input=None, followup_prompt=None):
         content = followup_prompt if followup_prompt is not None else (path / f'prompts/{stage}-prompt.txt').read_bytes()
         artifacts.update(prompt=prompt_hash(stage, content, path), validator=VALIDATORS[stage],
                          schema=hash_file(ROOT / f'prompts/{stage}.schema.json'))
+    versions = getattr(run, 'retained_versions', {})
+    cli_version = versions[stage] if stage in versions else run.tools[provider_for(run.settings, stage)]
     identity = dict(version=1, stage=stage, head=run.manifest['snapshot']['head'],
                     merge_base=run.manifest['snapshot']['merge_base'],
-                    cli_version=run.tools[provider_for(run.settings, stage)],
+                    cli_version=cli_version,
                     command=cache_command(run.command(stage)), artifacts=artifacts)
+    rerun = getattr(run, 'batch', {}).get('review_reruns', {}).get(stage)
+    if rerun:
+        identity['review_rerun'] = rerun
     if adapter is not None:
         # Non-PR workflows add their candidate and specification identity. The PR
         # adapter contributes nothing, so saved PR fingerprints stay byte-identical.

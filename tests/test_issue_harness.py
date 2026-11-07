@@ -383,6 +383,44 @@ class TransportTest(unittest.TestCase):
         self.assertIn('--session-id', self.commands[0])
         self.assertIn('--resume', self.commands[1])
 
+    def test_changed_codex_model_and_effort_resume_the_exact_session(self):
+        self.batch['settings']['fix'] = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}
+        with patch('pr_review.issue_harness.run', side_effect=self.transport):
+            self.invoke()
+            self.batch['settings']['fix'].update(model='gpt-6.1-terra', effort='medium')
+            self.invoke()
+        self.assertEqual(['codex', 'exec', 'resume'], self.commands[1][:3])
+        self.assertIn(self.identity, self.commands[1])
+        self.assertEqual('gpt-6.1-terra', self.commands[1][self.commands[1].index('-m') + 1])
+        self.assertIn('model_reasoning_effort=medium', self.commands[1])
+        attempts = self.session.load()['batches'][-1]['attempts'][-2:]
+        self.assertEqual(['gpt-6.1-sol', 'gpt-6.1-terra'], [a['choice']['model'] for a in attempts])
+
+    def test_provider_switch_uses_a_fresh_session_and_a_saved_work_handoff(self):
+        from types import SimpleNamespace
+        from uuid import UUID
+        self.batch['settings']['fix']['provider'] = 'codex'
+        with patch('pr_review.issue_harness.run', side_effect=self.transport):
+            self.invoke()
+        old = self.state['issue_harness_active_session']
+        identity = '00000000-0000-4000-8000-000000000002'
+        self.batch['settings']['fix'] = {'provider': 'claude', 'model': 'sonnet', 'effort': 'medium'}
+        def handoff(argv, **kwargs):
+            self.assertIn('--session-id', argv)
+            self.assertNotIn('--resume', argv)
+            self.assertIn(identity, argv)
+            self.assertIn('previous_choice', kwargs['input_bytes'].decode())
+            self.assertIn('Tested complete candidate', kwargs['input_bytes'].decode())
+            kwargs['on_line']('stdout', json.dumps({'type': 'system', 'subtype': 'init', 'session_id': identity}))
+            value = {'status': 'ready', 'summary': 'Continued saved work', 'checks': [],
+                     'questions': [], 'findings': [], 'test_evidence': []}
+            return SimpleNamespace(returncode=0, events=[{'type': 'result', 'subtype': 'success', 'structured_output': value}])
+        with patch('pr_review.issue_harness.uuid.uuid4', return_value=UUID(identity)), \
+                patch('pr_review.issue_harness.run', side_effect=handoff):
+            self.invoke()
+        self.assertNotEqual(old, self.state['issue_harness_active_session'])
+        self.assertEqual(2, len(self.session.load()['issue_harness_sessions']))
+
     def test_interruption_records_partial_tree_and_session_before_propagating(self):
         from pr_review.common import ApiError
         self.batch['settings']['fix']['provider'] = 'codex'

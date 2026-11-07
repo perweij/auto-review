@@ -1,7 +1,8 @@
 """Named terminal configuration, translated to the stable slot/Owner contracts.
 
-Only terminal adapters opt in. Saved names are provenance; execution and frozen
-batch comparisons continue to use normalized role choices.
+Only terminal adapters opt in. Saved names are provenance; execution choices and
+stopped issue transitions compare normalized roles. Interactive task batches
+retain their frozen-settings rules.
 """
 import argparse
 import copy

@@ -154,7 +154,7 @@ def record_interruption(run, exc):
 
 
 # ---- slot preparation and invalidation -------------------------------------------------
-def prepare_slots(run, slots, downstream=PR_DOWNSTREAM):
+def prepare_slots(run, slots, downstream=PR_DOWNSTREAM, *, force=()):
     """Preserve invalid slot and downstream artifacts without invalidating peers."""
     journal = run.manifest.get('slot_restart')
     if not journal:
@@ -164,6 +164,7 @@ def prepare_slots(run, slots, downstream=PR_DOWNSTREAM):
             output = run.path / 'reviews' / (stage + '.md')
             if not cache.reusable(run, stage, output, cache.inputs(run, stage)):
                 invalid.append(stage)
+        invalid.extend(stage for stage in force if stage not in invalid)
         phases = run.manifest['phases']
         if not invalid or not (any((run.path / 'reviews' / (stage + '.md')).exists() or stage in phases for stage in invalid)
                                or any(stage in phases for stage in downstream)):
@@ -177,7 +178,7 @@ def prepare_slots(run, slots, downstream=PR_DOWNSTREAM):
         if history.resolve().parent != run.path.resolve():
             raise ApiError('invalid_artifact', 'Invalid slot restart preservation directory')
         archive = Path(tempfile.mkdtemp(prefix='slots-', dir=history))
-        affected = invalid + list(downstream)
+        affected = list(dict.fromkeys(invalid + list(downstream)))
         files = []
         for folder in ('reviews', 'prompts', 'logs'):
             for path in (run.path / folder).iterdir():
@@ -186,7 +187,9 @@ def prepare_slots(run, slots, downstream=PR_DOWNSTREAM):
         journal = dict(stages=affected, files=files, archive=str(archive))
         run.manifest['slot_restart'] = journal
         run.save()
-    say('Restarting reviewer slots: ' + ', '.join(stage for stage in journal['stages'] if stage.startswith('reviewer-'))
+    reviewers = [stage for stage in journal['stages'] if stage.startswith('reviewer-')]
+    say(('Restarting reviewer slots: ' + ', '.join(reviewers) if reviewers else
+         'Restarting review stages: ' + ', '.join(journal['stages']))
         + f". Previous artifacts are preserved in: {journal['archive']}")
     archive = Path(journal['archive']).resolve()
     history = run.path / 'restart-history'

@@ -64,13 +64,31 @@ class CandidateReview:
         manifest = read_json(self.path / 'manifest.json', None)
         if not isinstance(manifest, dict) or manifest.get('format_version') != 1:
             manifest = {'format_version': 1, 'phases': {}, 'warnings': [], 'generated_files': []}
+        self.previous_configuration = manifest.get('configuration')
         # The bridge commit is the head and the baseline the base, so the shared
         # fingerprint scheme keeps reading ``snapshot`` as it does for a PR.
         manifest.update(adapter=self.adapter.name, candidate=self.candidate, configuration=self.settings, tools=self.tools,
                         snapshot={'head': self.candidate['sha'], 'base': self.candidate['baseline'],
                                   'merge_base': self.candidate['baseline']})
+        if (self.previous_configuration and self.adapter.name == 'issue-acceptance'
+                and (self.batch.get('settings_transitions') or self.batch.get('review_reruns'))):
+            # Keep original completed-stage provenance through a crash before
+            # prepare_choices atomically saves the resolved mix of choices.
+            manifest['configuration'] = self.previous_configuration
         write_json(self.path / 'manifest.json', manifest)
         return manifest
+
+    def prepare_choices(self):
+        if self.adapter.name == 'issue-acceptance' and (self.batch.get('settings_transitions') or self.batch.get('review_reruns')):
+            from .issue_settings import retain_review_choices
+            retain_review_choices(self)
+            from .review_engine import prepare_slots
+            pending = self.batch.get('review_reruns', {}).get('synthesis')
+            old = self.manifest['phases'].get('synthesis', {})
+            if pending and old and old.get('inputs', {}).get('review_rerun') != pending:
+                prepare_slots(self, [], self.adapter.downstream, force=('synthesis',))
+            self.manifest['configuration'] = self.settings
+            self.save()
 
     # ---- the run protocol used by the engine ------------------------------------------
     @property

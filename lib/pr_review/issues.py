@@ -1,4 +1,5 @@
 """Issue coordination around a persistent implementation harness and guarded publication."""
+import copy
 import json
 from pathlib import Path
 import re
@@ -11,8 +12,9 @@ from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner
 from .owner_completion import execution_complete
 from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
 from .issue_planning import assess_issue, planning_policy_digest
-from . import issue_resources, specification, review_history
+from . import issue_resources, specification, review_history, issue_settings
 from .issue_writes import Writes, comment_marker
+from .events import emit
 
 
 def resolve(request):
@@ -77,17 +79,19 @@ def approval_comment(comment, state):
 
 
 def configuration_identity(configuration):
-    """Role choices affect planning; named provenance and resource limits do not."""
+    """Execution choices, excluding named provenance and resource limits."""
     from .cli_settings import effective
     return effective(settings.validate(configuration))
 
 
-def planning_identity(facts, state, feedback, configuration, *, legacy=False):
+def planning_identity(facts, state, feedback, configuration, *, legacy=False, configured=False):
     # Attaching a PR with no discussion adds empty endpoint lists, not input.
     if not legacy and not any(feedback or []):
         feedback = []
-    identity = [input_digest(facts, state), feedback,
-                configuration if legacy else configuration_identity(configuration), facts['base'], planning_policy_digest()]
+    identity = [input_digest(facts, state), feedback]
+    if legacy or configured:
+        identity.append(configuration if legacy else configuration_identity(configuration))
+    identity += [facts['base'], planning_policy_digest()]
     if state.get('reassessment_generation'):
         identity.append(state['reassessment_generation'])
     return digest(identity)
@@ -300,6 +304,10 @@ class Workflow:
         self.writes.reconcile()
         state, facts = self.state, self.facts
         feedback = self.feedback_context() if state.get('pr') else []
+        rerun = state.get('review_rerun')
+        if rerun and rerun['status'] == 'pending' and rerun.get('input') != input_digest(facts, state):
+            rerun.update(status='superseded', reason='Issue requirements changed; normal assessment and verification apply.')
+            self.save()
         # Adopt pending blockers from sessions created before generations existed.
         if state.get('execution_blockers') and not state.get('reassessment_generation'):
             state['reassessment_generation'] = 1
@@ -326,7 +334,8 @@ class Workflow:
                                       state.get('assessment'), self.request.get('trusted_snapshot'))
             self.clean(path, before)
             state.pop('base_movement', None)
-            state.update(assessment=assessment, input_digest=current, assessed_base=facts['base'])
+            state.update(assessment=assessment, assessment_configuration=copy.deepcopy(state['configuration']),
+                         input_digest=current, assessed_base=facts['base'])
             self.save()
         assessment = state['assessment']
         if state.get('applied_assessment') != current:
@@ -492,10 +501,11 @@ class Workflow:
             # representation for equivalent legacy settings: batches also compare
             # their frozen settings with this object without normalization.
             if owner_state.effective_settings(data['settings']) != owner_state.effective_settings(desired):
-                if any(b.get('status') != 'ready' and b.get('attempts') for b in data['batches']):
-                    raise ApiError('settings_changed', 'Active Owner batch settings are frozen.')
                 data['settings'] = desired
             owner.save(data)
+        for transition in state.get('settings_transitions', []):
+            if transition['status'] == 'pending':
+                transition.update(status='applied', applied_at=now())
         state['owner'] = str(owner.path)
         _, canonical = self.document()
         state['issue_item'] = owner_import.from_issue(owner, state['plan'], self.facts['issue'], state['id'],
@@ -517,6 +527,19 @@ class Workflow:
             for control in ('max_repair_cycles', 'retry_review_adjudication'):
                 if control in self.request:
                     request[control] = self.request[control]
+            rerun = state.get('review_rerun')
+            if rerun and rerun['status'] == 'pending':
+                same_scope = (pending and pending['id'] == rerun.get('batch')
+                              and state['plan']['digest'] == rerun.get('plan')
+                              and state.get('approved_input') == rerun.get('input'))
+                if same_scope and self.request.get('adopt'):
+                    current = owner_git.checkpoint(owner, data, 'review regeneration resume')
+                    same_scope = current['tree'] == rerun.get('tree')
+                if same_scope:
+                    request.update(rerun_review=rerun['stages'], review_rerun_id=rerun['id'])
+                else:
+                    rerun.update(status='superseded', reason='The specification, selected work or adopted candidate changed; normal verification applies.')
+                    self.save()
             if pending:
                 request['batch'] = pending['id']
                 request['adopt'] = bool(self.request.get('adopt'))
@@ -533,6 +556,8 @@ class Workflow:
                         'repair_cycles_used': len(review_history.ledger(current)['cycles']),
                         'max_repair_cycles': current['max_repair_cycles'],
                         'stop_reason': current.get('review_stop', {}).get('code')}
+                if rerun and rerun['id'] in (current or {}).get('review_reruns_applied', []):
+                    rerun['status'] = 'complete'
                 self.save()
             batch = next(b for b in reversed(view['batches']) if b['items'] == keys)
             state['worktree'] = view['worktree']
@@ -632,7 +657,8 @@ class Workflow:
         # Until attachment, requested workflow settings must survive the approval
         # wait; an unrelated pre-existing Owner still has its previous choices.
         attached = owner and owner.get('issue_workflow') == state['id']
-        saved_owner = (owner['settings'] if attached else
+        pending = any(t['status'] == 'pending' for t in state.get('settings_transitions', []))
+        saved_owner = (state.get('owner_settings') if pending else owner['settings'] if attached else
                        state.get('owner_settings') or (owner['settings'] if owner else None))
         if saved and not saved.get('_named'):
             # Record the pre-override meaning of legacy role choices so adding
@@ -647,13 +673,6 @@ class Workflow:
         desired_effective = owner_state.effective_settings(desired)
         if saved_owner and owner_state.effective_settings(saved_owner) == desired_effective:
             desired = saved_owner
-        frozen = [b for b in required_batches(owner) if not execution_complete(b)
-                  and (b.get('attempts') or b.get('plans') or b.get('tasks'))] if owner else []
-        if frozen:
-            desired_choices = owner_state.issue_settings(desired)
-            if (any(owner_state.issue_settings(b['settings']) != desired_choices for b in frozen)
-                    or (saved and saved.get('planning', saved['processing']) != configuration['planning'])):
-                raise ApiError('settings_changed', 'An active batch has frozen settings.')
         return configuration, desired
 
     def waiting_assessment_unchanged(self, configuration, state):
@@ -685,10 +704,11 @@ class Workflow:
         state = self.state
         self.terminal_runtime = Runtime.environment()
         self.terminal_models_pending = waiting and not cached
-        # Cached results and unchanged waiting assessments use saved, validated
-        # choices. A later model turn must pass prepare_terminal_models first.
+        # Saving future choices does not need a provider when no model work is
+        # due. Every deferred model turn validates before launch.
         if not cached and not waiting:
             cli_settings.validate_models(configuration)
+        self.record_settings_change(configuration, desired)
         state['configuration'] = configuration
         state['owner_settings'] = desired
         limits = {key: configuration['_named'][key] for key in cli_settings.LIMITS}
@@ -698,40 +718,90 @@ class Workflow:
         if not self.terminal_models_pending:
             self.report_terminal_configuration()
 
-    def configuration_identity_updates(self, previous):
+    def record_settings_change(self, configuration, desired):
+        previous = self.state.get('configuration')
+        old_owner = self.state.get('owner_settings')
+        owner_changed = (desired is not None and old_owner is not None and
+                         owner_state.issue_settings(old_owner) != owner_state.issue_settings(desired))
+        if previous and (configuration_identity(previous) != configuration_identity(configuration) or owner_changed):
+            transition = {'id': uuid.uuid4().hex, 'at': now(), 'before': copy.deepcopy(previous),
+                          'after': copy.deepcopy(configuration), 'owner_settings': copy.deepcopy(desired),
+                          'status': 'pending' if self.state.get('owner') else 'applied'}
+            for pending in self.state.get('settings_transitions', []):
+                if pending['status'] == 'pending':
+                    pending.update(status='superseded', superseded_by=transition['id'])
+            self.state.setdefault('settings_transitions', []).append(transition)
+            self.state.setdefault('assessment_configuration', copy.deepcopy(previous))
+            def rows(config, owner):
+                result = {s['id']: s for s in config.get('reviewer_slots', [])}
+                result.update({r: config[r] for r in ('processing', 'planning', 'fix') if r in config})
+                if owner:
+                    result['fix'] = owner['fix']
+                return result
+            def label(choice):
+                return f"{choice['provider']} / {choice['model']} ({choice['effort']})" if choice else 'none'
+            before, after = rows(previous, old_owner), rows(configuration, desired)
+            for role in dict.fromkeys([*before, *after]):
+                if before.get(role) != after.get(role):
+                    emit('progress', message=f'Changed {role}: {label(before.get(role))} -> {label(after.get(role))}')
+            emit('progress', message='Approved requirements and valid completed results are retained.')
+
+    def apply_cached_owner_settings(self):
+        """Save future choices without reopening completed batches or providers."""
+        if (not self.state.get('owner')
+                or not any(t['status'] == 'pending' for t in self.state.get('settings_transitions', []))):
+            return
+        owner = owner_state.OwnerSession({'session': self.state['owner']})
+        with locked(owner.execution_lock):
+            data = owner.load()
+            if data.get('issue_workflow') != self.state['id']:
+                raise ApiError('busy', 'Owner belongs to another issue workflow.')
+            desired = self.desired_owner_settings(data)
+            if owner_state.effective_settings(data['settings']) != owner_state.effective_settings(desired):
+                data['settings'] = desired
+                owner.save(data)
+        for transition in self.state.get('settings_transitions', []):
+            if transition['status'] == 'pending':
+                transition.update(status='applied', applied_at=now())
+        self.save()
+
+    def configuration_identity_updates(self, previous, configuration):
         """Prepare saved identity updates only when original inputs are provable.
 
         Existing approvals must survive this identity-format change. Changed
         discussion/base inputs still fail the old digest check and are reassessed.
         """
         state = self.state
-        legacy_hash = state.get('configuration_identity_version') != 1
+        version = state.get('configuration_identity_version', 0)
+        legacy_hash = version == 0
         terminal_previous = (getattr(self, 'previous_terminal_configuration', None)
                              if self.request.get('_cli_config') else None)
-        if not legacy_hash and terminal_previous is None:
-            return {}
         updates = {}
         if previous:
             normalized = terminal_previous or previous
             feedback = self.feedback_context() if state.get('pr') else []
             old = state.get('input_digest')
             candidates = [feedback] if any(feedback or []) else [feedback, []]
-            if any(old == planning_identity(self.facts, state, candidate, previous, legacy=legacy_hash)
+            if any(old == planning_identity(self.facts, state, candidate, previous, legacy=legacy_hash,
+                                           configured=version == 1)
                    for candidate in candidates):
                 current = planning_identity(self.facts, state, feedback, normalized)
                 updates['input_digest'] = current
                 if state.get('applied_assessment') == old:
                     updates['applied_assessment'] = current
             original = previous if legacy_hash else configuration_identity(previous)
-            if state.get('ready_configuration') == digest(original):
-                updates['ready_configuration'] = digest(configuration_identity(normalized))
+            same_policy = previous.get('synthesis_tests') == configuration.get('synthesis_tests')
+            if same_policy and state.get('ready_configuration') == digest(original):
+                updates['ready_configuration'] = digest(configuration_identity(configuration))
             finished = [input_digest(self.facts, state), self.feedback_digest()]
-            if state.get('finished_input') == digest([*finished, original]):
-                updates['finished_input'] = digest([*finished, configuration_identity(normalized)])
-        updates['configuration_identity_version'] = 1
+            if same_policy and state.get('finished_input') == digest([*finished, original]):
+                updates['finished_input'] = digest([*finished, configuration_identity(configuration)])
+        updates['configuration_identity_version'] = 2
         return updates
 
     def cached_outcome(self, configuration, state):
+        if self.request.get('rerun_review') or state.get('review_rerun', {}).get('status') == 'pending':
+            return None
         if state.get('phase') == 'complete' and state.get('finished_input') == digest([input_digest(self.facts, state), self.feedback_digest(), configuration_identity(configuration)]):
             return 'complete'
         if (state.get('phase') == 'ready' and not self.request.get('approve')
@@ -754,6 +824,17 @@ class Workflow:
 
     def stopped_review_resume(self, configuration, projected_state):
         # This path precedes terminal model discovery and Owner auth probes.
+        if self.request.get('rerun_review') or self.state.get('review_rerun', {}).get('status') == 'pending':
+            if (not self.request.get('rerun_review')
+                    and self.state['review_rerun'].get('input') != input_digest(self.facts, self.state)):
+                return  # Planning supersedes the old intent when requirements changed.
+            if self.state.get('owner'):
+                owner = owner_state.OwnerSession({'session': self.state['owner']})
+                with locked(owner.execution_lock):
+                    batches = list(required_batches(owner.load()))
+                    if batches:
+                        issue_settings.validate_rerun_boundary(batches[-1])
+            return
         if not self.state.get('owner'):
             if self.request.get('retry_review_adjudication'):
                 raise ApiError('invalid_request', 'There is no retryable saved review conflict.')
@@ -789,6 +870,18 @@ class Workflow:
             owner.save(data)
             return batch.get('harness_phase') == 'adjudication'
 
+    def reconcile_review_rerun(self):
+        """Recover an applied Owner receipt before interpreting workflow intent."""
+        rerun = self.state.get('review_rerun', {})
+        if rerun.get('status') != 'pending' or not self.state.get('owner'):
+            return
+        owner = owner_state.OwnerSession({'session': self.state['owner']})
+        with locked(owner.execution_lock):
+            batch = next((b for b in required_batches(owner.load()) if b['id'] == rerun['batch']), {})
+            if rerun['id'] in batch.get('review_reruns_applied', []):
+                rerun['status'] = 'complete'
+                self.save()
+
     def run(self):
         self.terminal_models_pending = False
         state = self.state
@@ -802,11 +895,10 @@ class Workflow:
                 configuration.update(settings.validate(settings.from_manifest({'configuration': saved_configuration})))
             settings.apply_overrides(configuration, self.request, fresh=not saved_configuration)
             configuration = settings.validate(configuration)
-            if (state.get('owner') and (not saved_configuration
-                    or configuration_identity(configuration) != configuration_identity(saved_configuration))):
-                owner = owner_state.OwnerSession({'session': state['owner']})
-                if any(not execution_complete(b) and b.get('attempts') for b in required_batches(owner.load())):
-                    raise ApiError('settings_changed', 'An active batch has frozen settings.')
+            desired = state.get('owner_settings')
+            if self.request.get('settings_file'):
+                desired = owner_state.validate_settings(read_json(self.request['settings_file']))
+            self.record_settings_change(configuration, desired)
             state['configuration'] = configuration
             if self.request.get('settings_file'):
                 state['owner_settings'] = owner_state.validate_settings(read_json(self.request['settings_file']))
@@ -819,7 +911,8 @@ class Workflow:
         finally:
             state['phase'] = previous_phase
         state.pop('error', None)
-        identity_updates = self.configuration_identity_updates(previous_configuration)
+        self.reconcile_review_rerun()
+        identity_updates = self.configuration_identity_updates(previous_configuration, configuration)
         projected_state = {**state, **identity_updates}
         cached = self.cached_outcome(configuration, projected_state)
         adjudication_only = self.stopped_review_resume(configuration, projected_state)
@@ -829,7 +922,29 @@ class Workflow:
         state.update(identity_updates)
         self.save()
         if cached:
+            self.apply_cached_owner_settings()
             return self.result(cached)
+        requested_reruns = issue_settings.reruns(self.request)
+        previous_rerun = state.get('review_rerun', {})
+        if requested_reruns and (previous_rerun.get('status') != 'pending'
+                                 or set(previous_rerun['stages']) != set(requested_reruns)):
+            if not state.get('owner'):
+                raise ApiError('invalid_request', 'There is no saved candidate review to regenerate.')
+            owner = owner_state.OwnerSession({'session': state['owner']})
+            with locked(owner.execution_lock):
+                data = owner.load()
+                batches = list(required_batches(data))
+                if not batches:
+                    raise ApiError('invalid_request', 'There is no saved candidate review to regenerate.')
+                issue_settings.validate_rerun(batches[-1], self.desired_owner_settings(data), requested_reruns)
+            state['review_rerun'] = {'id': uuid.uuid4().hex, 'stages': requested_reruns, 'status': 'pending',
+                                    'batch': batches[-1]['id'], 'tree': batches[-1]['checkpoint']['tree'],
+                                    'plan': state['plan']['digest'], 'input': state.get('approved_input')}
+            if previous_rerun.get('status') == 'pending':
+                state.setdefault('review_rerun_history', []).append({**previous_rerun, 'status': 'superseded',
+                    'superseded_by': state['review_rerun']['id'], 'reason': 'New explicit stage selection.'})
+                emit('progress', message='Updated the pending review regeneration selection.')
+            self.save()
         if state.get('phase') == 'blocked' and state.get('waiting') != 'unsuitable':
             state['phase'] = 'intake'
         if state.get('owner'):
@@ -925,6 +1040,7 @@ class Workflow:
 
 
 def dispatch(request):
+    issue_settings.reruns(request)
     if request.get('retry_absent') is not None and (
             request.get('command') != 'issue-recover' or not isinstance(request['retry_absent'], str) or not request['retry_absent']):
         raise ApiError('invalid_request', 'retry_absent requires issue-recover and an action key.')

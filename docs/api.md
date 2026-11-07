@@ -884,8 +884,31 @@ invalidates that candidate. Unfinished pre-harness issue sessions are rejected w
 
 The shared review engine is the sole acceptance gate for a completed local candidate.
 It is configured by the Owner `final_review` settings (see `owner-mutate`
-`settings`), which the shared reviewer fields of `issue-run` set under the frozen
-settings rules. After verification the coordinator commits, pushes, and marks the PR
+`settings`), which the shared reviewer fields of `issue-run` select. Stopped issue
+batches accept explicit execution-choice changes without reassessment or another
+approval solely because settings changed. Omitted choices retain saved values;
+completed evidence retains its original configuration and substantive checks.
+Same-provider implementation sessions continue with new model/effort arguments;
+provider changes automatically hand saved work and the approved specification to a
+fresh session. Workflow and batch `settings_transitions` preserve before/after
+choices and application state; `assessment_configuration` attributes the retained
+assessment. Cached completion applies future Owner settings and marks their
+transitions applied without changing completed batches; later Owner settings edits
+are respected. Resource usage and publication receipts are not reset.
+
+Optional `rerun_review` lists `reviewer-1`, `reviewer-2`, or `synthesis` for explicit
+regeneration before committing. Rerunning a reviewer also invalidates synthesis,
+preserving peers and archiving affected artifacts. Rerun intent is durable and
+resumes without allocating a duplicate request. A different explicit stage selection
+supersedes the pending intent automatically; already allocated review work remains
+durable. Regeneration cannot bypass saved repair/adjudication decisions and is
+refused for completed execution, including no-change verification. Changed specification, selected
+work or adopted candidate automatically supersedes the pending regeneration and
+uses normal verification. A completed assessment is not
+regenerated merely by selecting a different model for future planning calls.
+Interactive Owner task batches retain their original frozen-settings behavior.
+
+After verification the coordinator commits, pushes, and marks the PR
 ready; it does not invoke the PR-review pipeline for a PR. Legacy `review_session`
 references are retained as history and are not resumed.
 

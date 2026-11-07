@@ -176,6 +176,80 @@ class ContinuityEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual(5, self.counts()['synthesis'])
         self.assertEqual(4, len(history.ledger(self.last())['cycles']))
 
+    def test_regeneration_cannot_bypass_repair_limit(self):
+        self.blockers()
+        with self.assertRaises(ApiError) as caught:
+            self.start(max_repair_cycles=1)
+        self.assertEqual('repair_limit', caught.exception.code)
+        self.assert_rerun_refused(self.last())
+
+    def assert_rerun_refused(self, batch):
+        before = copy.deepcopy(batch)
+        counts, turns = self.counts(), len(self.turns)
+        self.verdict('passed')
+        with self.assertRaises(ApiError) as caught:
+            self.start(batch=batch['id'], rerun_review=['synthesis'], review_rerun_id='bypass')
+        self.assertEqual('invalid_request', caught.exception.code)
+        after = self.last()
+        for field in ('review_stop', 'review_decision', 'review_adjudication_authorization',
+                      'review_history', 'harness_phase', 'review_reruns'):
+            self.assertEqual(before.get(field), after.get(field), field)
+        self.assertEqual(counts, self.counts())
+        self.assertEqual(turns, len(self.turns))
+
+    def test_regeneration_cannot_bypass_conflict_or_adjudication_decision(self):
+        batch = self.conflict()
+        self.assert_rerun_refused(batch)
+        self.adjudication('uphold')
+        with self.assertRaises(ApiError) as caught:
+            self.start(batch=batch['id'], retry_review_adjudication=True)
+        self.assertEqual('needs_attention', caught.exception.code)
+        self.assert_rerun_refused(self.last())
+
+    def test_regeneration_cannot_replace_pending_adjudication_authorization(self):
+        batch = self.conflict()
+        with patch('pr_review.acceptance.adjudicate', side_effect=ApiError('model_failed', 'Interrupted adjudication')):
+            with self.assertRaises(ApiError):
+                self.start(batch=batch['id'], retry_review_adjudication=True)
+        self.assertEqual('pending', self.last()['review_adjudication_authorization']['status'])
+        self.assert_rerun_refused(self.last())
+
+    def test_regeneration_cannot_discard_a_durably_ingested_blocking_verdict(self):
+        from pr_review.owner_state import OwnerSession
+        real_save = OwnerSession.save
+        self.blockers()
+        def save(instance, state):
+            real_save(instance, state)
+            batches = state.get('batches', [])
+            if batches and batches[-1].get('review_round'):
+                raise RuntimeError('ingested verdict crash')
+        with patch.object(OwnerSession, 'save', new=save), self.assertRaisesRegex(RuntimeError, 'ingested verdict crash'):
+            self.start()
+        self.assert_rerun_refused(self.last())
+
+    def test_regeneration_after_completed_repair_allows_unchanged_source(self):
+        self.blockers()
+        def fix(session, state, batch, specification, feedback):
+            report = self.fix(session, state, batch, specification, feedback)
+            if len(self.turns) == 2:
+                # A completed repair may supply evidence without source changes.
+                (Path(state['worktree']) / 'implementation.txt').write_text('turn 1\n')
+                batch['checkpoint'] = owner_git.checkpoint(session, state, 'same-source repair')
+                self.verdict('passed')
+                os.environ['MISBEHAVE'] = 'fail'
+            return report
+        with patch.dict(os.environ, {'MISBEHAVE': ''}), \
+             patch('pr_review.issue_harness.invoke', side_effect=fix), self.assertRaises(ApiError):
+            self.f.start(issue_harness=True)
+        batch = self.last()
+        self.assertEqual(2, len(self.turns))
+        self.assertEqual('allocated', history.ledger(batch)['cycles'][-1]['status'])
+        self.assertEqual(history.ledger(batch)['rounds'][-1]['candidate']['tree'], batch['checkpoint']['tree'])
+        with patch('pr_review.issue_harness.invoke', side_effect=AssertionError('implementation')):
+            result = self.f.start(batch=batch['id'], rerun_review=['synthesis'], review_rerun_id='same-source')
+        self.assertEqual('ready', result['batches'][-1]['status'])
+        self.assertEqual(1, len(history.ledger(self.last())['cycles']))
+
     def test_ordinary_conflict_resume_has_no_model_discovery_or_auth_calls(self):
         batch = self.conflict()
         counts = self.counts()
@@ -231,11 +305,18 @@ class ContinuityEngineTest(ScriptedProviders, unittest.TestCase):
         context_path = Path(saved['artifact']).parent.parent / 'context/adjudication.json'
         input_bytes = context_path.read_bytes()
         counts = self.counts()
+        state = self.session.load()
+        state['settings']['final_review']['synthesis']['effort'] = 'medium'
+        self.session.save(state)
         result = self.start(batch=batch['id'])
         self.assertEqual(input_bytes, context_path.read_bytes())
         self.assertEqual('ready', result['batches'][-1]['status'])
         self.assertEqual(1, self.adjudication_count())
         self.assertEqual(counts, self.counts())
+        attempt = next(a for a in reversed(self.last()['attempts']) if a.get('kind') == 'review_adjudication')
+        self.assertTrue(attempt['reused'])
+        self.assertEqual('high', attempt['choice']['effort'])
+        self.assertEqual('medium', attempt['requested_choice']['effort'])
         self.assertEqual(1, sum('adjudication' in d for d in history.ledger(self.last())['findings']['R1']['dispositions']))
 
     def test_base_and_lineage_invalid_output_gets_one_format_correction(self):
@@ -317,6 +398,7 @@ class ContinuityEngineTest(ScriptedProviders, unittest.TestCase):
         batch = self.last()
         self.assertEqual(1, len(self.turns))
         self.assertEqual(1, len(history.ledger(batch)['cycles']))
+        self.assert_rerun_refused(batch)
         self.verdict('passed')
         result = self.start(batch=batch['id'])
         self.assertEqual('ready', result['batches'][-1]['status'])
@@ -469,7 +551,7 @@ class ContinuityEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual([], history.ledger(batch)['findings']['R1']['survived_cycles'])
         self.verdict('passed')
         with patch('pr_review.issue_harness.invoke', side_effect=AssertionError('implementation')):
-            result = self.f.start(batch=batch['id'])
+            result = self.f.start(batch=batch['id'], rerun_review=['synthesis'], review_rerun_id='after-repair')
         self.assertEqual('ready', result['batches'][-1]['status'])
         self.assertEqual('complete', history.ledger(self.last())['cycles'][-1]['status'])
         self.assertEqual(1, len(history.ledger(self.last())['cycles']))

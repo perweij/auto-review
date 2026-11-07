@@ -9,8 +9,10 @@ and safe publication. This supersedes the controller/requirement-ledger/recovery
 strategy design: those added mechanisms duplicated the harness and caused frequent
 handoffs before a complete candidate existed.
 
-Implementation resumes by explicit provider session ID. Model/settings changes or
-approved specification changes select a different session. PR feedback under the
+Implementation resumes by explicit provider session ID. Same-provider model and
+effort changes continue that session; provider or approved-specification changes
+select a fresh session with saved work and continuation context. See the
+[settings-resume contract](issue-settings-resume.md). PR feedback under the
 same specification returns to the existing implementation session. Review runs in
 a fresh read-only session only after implementation reports ready. Independent
 review findings go back to implementation. Neither reports nor review automatically

@@ -1127,9 +1127,36 @@ the processing-derived choice under an independent name. Reusing a validated rea
 verification does not require provider discovery. Unchanged approval and answer
 polling also works without discovery; checks of eligibility, discussion, and
 published plans still run. Provider choices are validated before the next model turn.
-An existing implementation batch accepts omitted overrides or equivalent effective
-choices (including renamed configurations) without replacing its approved plan.
-Forbidden changes fail with `settings_changed` before model work, retaining settings, batch identity and evidence.
+To change models, effort or provider on a stopped issue job, edit its settings file
+or pass the usual named options and rerun the same command. No replacement plan or
+extra approval is needed solely for that change. Omitted choices retain their saved
+values; the startup output shows changes before model work begins.
+
+For example, if implementation uses `codex-4`, resume it more economically with:
+
+```sh
+fix-issue -i 42 --codex-4-model gpt-6.1-terra --codex-4-effort medium --max-runtime 3h
+```
+
+The same-provider implementation session continues with the new choices. Switching
+provider automatically starts a fresh session with the approved specification,
+current saved work, feedback and continuation context. Completed assessments and
+valid review stages retain their original attribution; new choices govern unfinished
+and future calls. Source, requirements, trust, policy and evidence changes still
+receive their normal checks. Runtime and quota consumption are retained.
+Saving future choices on a completed job updates the Owner settings without
+reopening its completed batches. Later Owner settings edits take precedence on
+the next resume unless explicitly overridden.
+
+For deliberate regeneration before committing, optionally use
+`--rerun-review reviewer-1`, `--rerun-review reviewer-2`, or
+`--rerun-review synthesis` (repeat to select several stages). A reviewer rerun also
+regenerates synthesis; valid peers are retained. Interrupted regeneration resumes
+the saved request; a different explicit selection updates that request automatically.
+Saved repair or adjudication decisions must be resolved through their normal recovery
+actions first. Completed work, including verification requiring no changes, retains
+its original evidence. Ordinary settings changes require no rerun flag. Interactive Owner's
+non-issue task batches retain their frozen-settings rules.
 
 Runtime and quota limits accept `none` on the CLI to disable them, equivalent to
 JSON null. Changing or disabling limits preserves the approved plan and cumulative
