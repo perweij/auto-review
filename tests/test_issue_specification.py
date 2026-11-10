@@ -24,7 +24,7 @@ UNICODE_PLAN = ('## Outcome\nExport résumé ✓ 日本語 \U0001F600 verbatim.\
 
 
 def comment_document(comment):
-    body = comment['body']
+    body = comment['body'].removeprefix('@author\n\n')
     return re.fullmatch(r'## Plan revision \d+\n\n(.*)\n\nApprove with `/fix-issue approve \d+` or `fix-issue -i \d+ --approve \d+`\.'
                         r'\n\n<!-- fix-issue workflow=\w+ action=\w+ -->', body, re.S).group(1)
 
@@ -50,7 +50,7 @@ class WorkflowSpecificationTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def plans(self):
-        return [c for c in self.t.f['comments'] if c['body'].startswith('## Plan revision')]
+        return [c for c in self.t.f['comments'] if c['body'].removeprefix('@author\n\n').startswith('## Plan revision')]
 
     def state(self, result=None):
         return Workflow(self.req, self.t.repo_object, self.t.f).state
@@ -75,6 +75,8 @@ class WorkflowSpecificationTest(unittest.TestCase):
         self.assertEqual(digest(document), state['plan']['digest'])
         self.assertEqual(state['plan']['digest'], state['specifications']['1']['digest'])
         self.assertIn('Acceptance criteria:\n- Round trip keeps ✓\n- Exports are complete', document)
+        self.assertTrue(self.plans()[0]['body'].startswith('@author\n\n'))
+        self.assertNotIn('@author', document)
         # Revision labels and commands are not part of the approved document.
         self.assertNotIn('Approve with', document)
         self.assertNotIn('Plan revision', document)
@@ -135,7 +137,7 @@ class WorkflowSpecificationTest(unittest.TestCase):
         self.assertEqual(2, self.state()['plan']['revision'])
         self.assertEqual(first, self.artifact(1).read_bytes())
         self.assertIn('Exports and history.', self.artifact(2).read_text(encoding='utf-8'))
-        self.assertEqual([1, 2], [int(re.match(r'## Plan revision (\d+)', c['body']).group(1)) for c in self.plans()])
+        self.assertEqual([1, 2], [int(re.match(r'## Plan revision (\d+)', c['body'].removeprefix('@author\n\n')).group(1)) for c in self.plans()])
         self.assertEqual('stale_approval', dispatch({**self.req, 'approve': 1})['error']['code'])
         self.assertEqual('ready', dispatch({**self.req, 'approve': 2})['outcome'])
         self.assertEqual({self.artifact(2).read_text(encoding='utf-8')}, {d['text'] for d in self.delivered})
@@ -238,7 +240,7 @@ class WorkflowSpecificationTest(unittest.TestCase):
 
         def lost_response(endpoint, payload, method='POST'):
             value = real(endpoint, payload, method)
-            if payload.get('body', '').startswith('## Plan revision') and not failures:
+            if payload.get('body', '').removeprefix('@author\n\n').startswith('## Plan revision') and not failures:
                 failures.append(value)
                 raise ApiError('provider_failed', 'HTTP 502 after acceptance')
             return value

@@ -1417,3 +1417,16 @@ excluding approval waits. Saved workflows retain their execution-only scope;
 existing consumption is never reset. Startup summaries identify the scope.
 The existing quota guards and runtime fallback still apply; accounting reports
 each planning stage separately, including failed calls and correction attempts.
+
+### Issue command acknowledgment and attention
+
+During normal `fix-issue` processing, 👀 on a standalone approval command from
+its initiator means **seen**, not accepted. Stale or premature approvals receive
+an explanation with the current next action. Quoted commands, other authors,
+and recorded workflow publications are not acknowledged.
+
+New questions, approval requests, rejected-approval explanations, and actionable
+blocker notices mention the saved initiator. Routine updates do not. Signals are
+produced when the workflow next runs; there is no background listener. Reaction
+failures are recorded and retried on a later run without blocking execution.
+Existing published and pending comments retain their exact bodies and receipts.

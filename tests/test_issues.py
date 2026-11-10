@@ -582,7 +582,9 @@ class QuestionPublicationRecoveryTest(unittest.TestCase):
     def collect(self, *args):
         return {**copy.deepcopy(self.f), 'comments': copy.deepcopy(self.remote)}
 
-    def post(self, endpoint, payload):
+    def post(self, endpoint, payload, **kwargs):
+        if endpoint.endswith('/reactions'):
+            return {'id': 100, 'content': payload['content']}
         self.posts += 1
         if self.store:
             self.remote.append({'id': self.posts, 'body': payload['body'], 'user': {'login': 'author'},
@@ -788,7 +790,9 @@ class TerminalRecoveryTest(unittest.TestCase):
     def collect(self, *args):
         return {**copy.deepcopy(self.f), 'comments': copy.deepcopy(self.remote)}
 
-    def post(self, endpoint, payload):
+    def post(self, endpoint, payload, **kwargs):
+        if endpoint.endswith('/reactions'):
+            return {'id': 100, 'content': payload['content']}
         self.assertTrue(endpoint.endswith('/issues/12/comments'))
         self.remote.append({'id': len(self.remote) + 1, 'body': payload['body'],
                             'user': {'login': 'author'}, 'created_at': '2026-10-30'})
@@ -906,7 +910,7 @@ class TerminalRecoveryTest(unittest.TestCase):
             Workflow.bootstrap.assert_called_once()
         self.assertNotEqual(old_input, self.flow().state['applied_assessment'])
         self.assertEqual(2, self.assess.call_count)
-        self.assertEqual(2, self.api.call_count)
+        self.assertEqual(2, sum(c.args[0].endswith('/issues/12/comments') for c in self.api.call_args_list))
 
     def test_approved_retry_can_publish_replacement_questions(self):
         self.execution_phase = 'approved'
@@ -1018,7 +1022,9 @@ class WriteRecoveryTest(unittest.TestCase):
         self.assertEqual('complete', self.state['actions']['create-pr']['status'])
         self.writes.api.assert_not_called()
 
-    def post(self, endpoint, payload):
+    def post(self, endpoint, payload, **kwargs):
+        if endpoint.endswith('/reactions'):
+            return {'id': 100, 'content': payload['content']}
         value = {'id': 101, 'body': payload['body'], 'user': {'login': 'author'}, 'created_at': '2026-10-30'}
         if endpoint.endswith('/pulls'):
             value.update(number=7, base={'ref': 'main'}, head={'ref': 'fix-issue/12', 'repo': {'full_name': 'org/repo'}})
@@ -1303,7 +1309,9 @@ class IssueIntegrationTest(unittest.TestCase):
     def page(self, repo, endpoint):
         return copy.deepcopy(self.f['comments']) if '/issues/12/comments' in endpoint else copy.deepcopy(self.feedback) if '/pulls/7/comments' in endpoint else []
 
-    def api(self, endpoint, payload, method='POST'):
+    def api(self, endpoint, payload, method='POST', **kwargs):
+        if endpoint.endswith('/reactions'):
+            return {'id': 100, 'content': payload['content']}
         if endpoint == 'graphql':
             if payload['query'].startswith('query'):
                 return {'data': {'repository': {'pullRequest': {'id': 'P7', 'state': 'OPEN', 'isDraft': self.f['pr']['draft']}}}}
@@ -2172,7 +2180,9 @@ class BootstrapTest(IssueIntegrationTest):
             return copy.deepcopy(self.created)
         return super().page(repo, endpoint)
 
-    def api(self, endpoint, payload, method='POST'):
+    def api(self, endpoint, payload, method='POST', **kwargs):
+        if endpoint.endswith('/reactions'):
+            return {'id': 100, 'content': payload['content']}
         if endpoint == 'repos/org/repo/pulls':
             self.assertTrue(payload['draft'])
             self.metadata['headRefName'] = payload['head']

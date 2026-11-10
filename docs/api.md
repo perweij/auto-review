@@ -1069,3 +1069,14 @@ assessments include `review_dispositions`, `planning_artifacts`, and
 workflow's saved `budget_scope`, assessment context, and regeneration intent.
 New workflows use `planning-and-execution`; missing scope means legacy
 execution-only limits. Changed model choices preserve valid completed evidence.
+
+### Issue interaction signals
+
+Normal `issue-run` processing acknowledges recognized initiator approval comments
+with an `eyes` reaction and journals explanations for rejected approvals. This
+adds no request fields or exit codes. `issue-read` and publication recovery do not
+initiate acknowledgments. Saved `command_signals` records reaction receipts,
+retryable failures, and accepted command versions separately from publication
+`actions`; these records do not contribute to requirements identity.
+New attention-bearing comments deterministically mention the saved initiator.
+Legacy publication intents retain their original formatting and receipts.

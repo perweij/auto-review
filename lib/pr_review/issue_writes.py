@@ -15,9 +15,9 @@ class Writes:
     def __init__(self, repo, state, save, guard):
         self.repo, self.state, self.save, self.guard = repo, state, save, guard
 
-    def api(self, endpoint, payload, method='POST'):
+    def api(self, endpoint, payload, method='POST', *, timeout=None):
         return json.loads(command(['gh', 'api', '--hostname', self.repo.host, '-X', method, endpoint, '--input', '-'],
-                                 cwd=self.repo.cwd, input_text=json.dumps(payload)).stdout)
+                                 cwd=self.repo.cwd, input_text=json.dumps(payload), timeout=timeout).stdout)
 
     def comment_text(self, body, key):
         return body + '\n\n' + comment_marker(self.state["id"], key)
@@ -97,8 +97,21 @@ class Writes:
             inspected[key] = {**copy.deepcopy(action), 'readback': observation}
         return inspected
 
+    def attention_body(self, body, key):
+        saved = self.state.get('actions', {}).get(key)
+        if saved is not None:
+            # Old intents keep their exact format; new ones record the undecorated input.
+            if saved.get('source_body', saved['body']) != body:
+                raise ApiError('action_changed', 'Saved publication content changed.')
+            return saved['body']
+        if key.startswith(('questions:', 'plan:', 'blockers:', 'execution-stop:', 'approval-rejected:')):
+            return '@' + self.state['viewer'] + '\n\n' + body
+        return body
+
     def comment(self, body, key, *, approval=False):
-        action = self.state.setdefault('actions', {}).setdefault(key, {'status': 'pending', 'body': body, 'approval': approval})
+        source_body = body
+        body = self.attention_body(body, key)
+        action = self.state.setdefault('actions', {}).setdefault(key, {'status': 'pending', 'body': body, 'source_body': source_body, 'approval': approval})
         if action['body'] != body:
             raise ApiError('action_changed', 'Saved publication content changed.')
         text = self.comment_text(body, key)

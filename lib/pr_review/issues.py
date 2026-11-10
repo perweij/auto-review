@@ -281,7 +281,7 @@ class Workflow:
         body = (f'## Plan revision {revision}\n\n{document}\n\nApprove with `/fix-issue approve {revision}` '
                 f'or `fix-issue -i {self.state["issue"]} --approve {revision}`.')
         if published:
-            return body + '\n\n' + comment_marker(self.state['id'], 'plan:' + str(revision))
+            return '@' + self.state['viewer'] + '\n\n' + body + '\n\n' + comment_marker(self.state['id'], 'plan:' + str(revision))
         return body
 
     def document(self, plan=None):
@@ -964,6 +964,8 @@ class Workflow:
         finally:
             state['phase'] = previous_phase
         state.pop('error', None)
+        from . import issue_signals
+        issue_signals.acknowledge(self)
         self.reconcile_review_rerun()
         identity_updates = self.configuration_identity_updates(previous_configuration, configuration)
         projected_state = {**state, **identity_updates}
@@ -975,6 +977,7 @@ class Workflow:
         state.update(identity_updates)
         self.save()
         if cached:
+            issue_signals.explain(self)
             self.apply_cached_owner_settings()
             return self.result(cached)
         requested_reruns = issue_settings.reruns(self.request)
@@ -1006,7 +1009,9 @@ class Workflow:
                 for batch in required_batches(owner.load()):
                     if not execution_complete(batch):
                         issue_harness.require_supported(batch)
-        if not self.plan():
+        planned = self.plan()
+        issue_signals.explain(self)
+        if not planned:
             if getattr(self, 'terminal_models_pending', False):
                 self.report_terminal_configuration()
             return self.result(state.get('waiting') or state['phase'], 0 if state['phase'] == 'complete' else 3 if state['phase'] == 'blocked' else 2,
