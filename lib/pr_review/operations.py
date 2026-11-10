@@ -161,15 +161,25 @@ def adapt(session, state, request):
               "Consider the complete discussion, acknowledge points already addressed, and contribute only the finding's new aspect. "
               "Do not claim tests or facts that the evidence does not support. Do not use tools.\n" +
               json.dumps({"finding": comment, "thread": context["thread"]}, ensure_ascii=True))
+    return processing_text(session, request, prompt, 'adapt', comment['id'])
+
+
+def processing_text(session, request, prompt, kind, comment_id):
+    """One explicit, cancellable processing call; never modifies draft state."""
     from .providers import adaptation_command, environment, Runtime
     from .settings import from_manifest, validate
     configuration = from_manifest(session.manifest)
     env, _ = environment(configuration['processing_provider'])
-    with locked(session.pr_lock), operation({'common': session.manifest['git_common_dir'], 'pr': str(session.manifest['pr']), 'kind': 'adapt'}), usage.operation(session.root):
+    with locked(session.pr_lock), operation({'common': session.manifest['git_common_dir'], 'pr': str(session.manifest['pr']), 'kind': kind}), usage.operation(session.root):
         with tempfile.TemporaryDirectory(prefix='pr-review-adapt-') as neutral:
-            result = process(adaptation_command(configuration), cwd=neutral, env=env, timeout=Runtime.environment().model_timeout,
-                             input_bytes=prompt.encode(), model_events=True, stage='adapt',
-                             usage_call=usage.choice('adapt', validate(configuration)['processing']))
+            args = adaptation_command(configuration)
+            if kind == 'elaborate' and configuration['processing_provider'] == 'codex':
+                args[2:2] = ['--disable', 'shell_tool', '--disable', 'unified_exec',
+                             '--disable', 'multi_agent', '-c', 'web_search=disabled']
+                args = ['sandbox_mode=read-only' if a == 'sandbox_mode=danger-full-access' else a for a in args]
+            result = process(args, cwd=neutral, env=env, timeout=Runtime.environment().model_timeout,
+                             input_bytes=prompt.encode(), model_events=True, stage=kind,
+                             usage_call=usage.choice(kind, validate(configuration)['processing']))
         values = []
         for event in result.events:
             if event.get('type') == 'result':
@@ -177,5 +187,5 @@ def adapt(session, state, request):
             elif event.get('type') == 'item.completed' and event.get('item', {}).get('type') == 'agent_message':
                 values.append({'result': event['item'].get('text', '')})
         if result.returncode or not values or values[-1].get('is_error') or not values[-1].get('result', '').strip():
-            raise ApiError('model_failed', 'No successful wording suggestion was returned; original text retained.')
-        return {'body': values[-1]['result'], 'generation': session.id, 'comment': comment['id'], 'revision': request['revision']}
+            raise ApiError('model_failed', 'No successful model response was returned; original text retained.')
+        return {'body': values[-1]['result'], 'generation': session.id, 'comment': comment_id, 'revision': request['revision']}

@@ -447,6 +447,36 @@
     (magit-auto-review-file-mode 1)
     (goto-char (point-min))))
 
+(defun magit-auto-review-elaborate ()
+  "Explain the selected finding using the configured processing model."
+  (interactive)
+  (let* ((editor magit-auto-review--editor)
+         (id (if editor (plist-get editor :id) (magit-auto-review--id)))
+         (comment (magit-auto-review--comment id))
+         (origin (point-marker))
+         (body (if editor
+                   (buffer-substring-no-properties (plist-get editor :start) (plist-get editor :end))
+                 (alist-get 'body comment))))
+    (unless (alist-get 'finding_ids comment)
+      (user-error "Select a comment linked to review findings"))
+    (magit-auto-review--start
+     (magit-auto-review--request "elaborate" `(comment . ,id) `(body . ,body))
+     (lambda (result)
+       (let ((buffer (generate-new-buffer "*Finding elaboration*")))
+         (with-current-buffer buffer
+           (insert (format "Finding %s · generation %s\nExplanation of wording captured when requested.\n\n"
+                           id (alist-get 'generation result))
+                   (alist-get 'body result))
+           (special-mode)
+           (use-local-map (copy-keymap (current-local-map)))
+           (local-set-key (kbd "q")
+                          (lambda () (interactive)
+                            (quit-window)
+                            (when (marker-buffer origin)
+                              (pop-to-buffer (marker-buffer origin))
+                              (goto-char origin)))))
+         (display-buffer buffer))))))
+
 (defun magit-auto-review-adapt ()
   "Explicitly request wording that considers the full attached conversation."
   (interactive)
@@ -633,6 +663,8 @@
 (transient-define-prefix magit-auto-review-edit-menu ()
   "Save or cancel the active inline comment."
   ["Inline comment · these actions do not publish to GitHub"
+   ("l" "Elaborate finding (model)" magit-auto-review-elaborate)
+   ("K" "Cancel model operation" magit-auto-review-cancel-operation)
    ("s" "Save draft locally" magit-auto-review-save)
    ("k" (lambda () (if (plist-get magit-auto-review--editor :new) "Cancel new comment" "Cancel edits"))
     magit-auto-review-cancel-edit)
@@ -743,6 +775,7 @@
     ("c" "New comment…" magit-auto-review-new-comment :if magit-auto-review--mutable-p)
     ("f" "New follow-up draft" magit-auto-review-follow-up :if (lambda () (and (magit-auto-review--mutable-p) (magit-auto-review--status-p "published"))))]
    ["Context and history"
+    ("E" "Elaborate finding (model)" magit-auto-review-elaborate)
     ("C" "Conversations and follow-up" magit-auto-review-conversations :if (lambda () magit-auto-review--review))
     ("RET" "Reviewed file" magit-auto-review-visit :if magit-auto-review--code-context-p)
     ("d" "Full PR diff" magit-auto-review-diff :if (lambda () magit-auto-review--review))
@@ -767,7 +800,7 @@
     ("T" "Confirm agent configuration" magit-auto-review-trust-config)
     ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])
 
-(dolist (binding '(("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
+(dolist (binding '(("E" . magit-auto-review-elaborate) ("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
                    ("S" . magit-auto-review-suggestion-menu)
                    ("o" . magit-auto-review-send-to-owner)
                    ("B" . magit-auto-review-pull-requests)

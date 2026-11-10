@@ -1960,3 +1960,26 @@
       (magit-auto-review-setup-economical)
       (should (assq 'reviewer_slots (alist-get 'defaults request)))
       (should-not (assq 'reviewer_1_model request)))))
+
+(ert-deftest auto-review/elaboration-captures-editor-without-changing-it ()
+  (with-temp-buffer
+    (insert "unsaved finding")
+    (let* ((magit-auto-review--editor (list :id "p1" :start (point-min-marker) :end (point-max-marker)))
+           (magit-auto-review--review '((revision . "r") (comments . (((id . "p1") (finding_ids . ("F1")) (body . "saved"))))))
+           (before (buffer-string))
+           captured)
+      (cl-letf (((symbol-function 'magit-auto-review--start)
+                 (lambda (request _callback) (setq captured request))))
+        (magit-auto-review-elaborate))
+      (should (equal "unsaved finding" (alist-get 'body captured)))
+      (should (equal "elaborate" (alist-get 'command captured)))
+      (should (equal before (buffer-string)))
+      (should magit-auto-review--editor))))
+
+(ert-deftest auto-review/elaboration-bindings-and-no-selection ()
+  (should (eq #'magit-auto-review-elaborate (lookup-key magit-auto-review-mode-map (kbd "E"))))
+  (should (eq #'magit-auto-review-elaborate (lookup-key magit-auto-review-edit-map (kbd "C-c C-l"))))
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'magit-auto-review--id) (lambda () nil))
+              ((symbol-function 'magit-auto-review--start) (lambda (&rest _) (ert-fail "Unexpected model call"))))
+      (should-error (magit-auto-review-elaborate) :type 'user-error))))

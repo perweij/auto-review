@@ -317,6 +317,20 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(result["body"], "A contextual reply")
         self.assertEqual(state, before)
 
+    def test_elaboration_uses_processing_operation_without_saving_drafts(self):
+        from pr_review import operations
+        before = copy.deepcopy(self.session.load())
+        events = [{'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Manual verification; no source change requested.'}}]
+        with patch.object(operations, 'process', return_value=__import__('types').SimpleNamespace(returncode=0, events=events)) as process:
+            result = dispatch(self.request('elaborate', comment='p1', body='Unsaved wording'))
+        self.assertEqual('Unsaved wording', result['captured_wording'])
+        self.assertIn('--tools', process.call_args.args[0])
+        self.assertEqual('', process.call_args.args[0][process.call_args.args[0].index('--tools') + 1])
+        self.assertEqual('elaborate', process.call_args.kwargs['stage'])
+        self.assertEqual('elaborate', process.call_args.kwargs['usage_call']['role'])
+        self.assertEqual(before, self.session.load())
+        self.assertIn('usage', result)
+
     def test_diff_side_and_range_validation(self):
         context = self.session.git
         self.assertEqual(context.anchor({"path": "source.txt", "side": "LEFT", "line": 2})["line"], 2)

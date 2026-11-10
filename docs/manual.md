@@ -1369,3 +1369,17 @@ or issue requirements retain their existing guards. A later invocation reassesse
 against the current base. Acceptance templates and schemas are captured with the
 process's validator so editing the toolkit during a long run cannot change that
 validator's expected output format halfway through execution.
+
+### Explain a review finding
+
+Press `E` on a finding, or `C-c C-l` while editing, to request an explanation using
+the review's configured processing model. The command is also in the review and
+editing help menus. It explains the claim, evidence, uncertainty and intended
+action from saved review evidence and the reviewed snapshot. Missing evidence is
+identified; this is not a new investigation or automatic rewrite.
+
+The explanation opens in a separate read-only buffer; `q` returns to the original
+position. Unsaved wording is captured for the request, and editing can continue.
+The response refers to that captured wording. Existing progress/log handling and
+cancellation apply; the editing help menu includes cancellation. Each invocation
+is a separate model call included in usage reporting.

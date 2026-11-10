@@ -17,8 +17,8 @@ def dispatch(request):
         return owner_dispatch(request)
     if operation == "capabilities":
         from .owner import COMMANDS
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration"],
+                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "elaborate", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":
@@ -62,6 +62,9 @@ def dispatch(request):
         return {"files": session.git.files(), "diffs": [session.git.diff(f["path"]) for f in session.git.files()]}
     if operation == "file":
         return session.git.source(request.get("path"), request.get("side", "RIGHT"), request.get("commit"))
+    if operation == 'elaborate':
+        from .elaboration import explain
+        return explain(session, request)
     if operation == "adapt":
         with locked(session.lock):
             state = session.load()

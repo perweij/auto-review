@@ -90,6 +90,7 @@ A different automatic operation makes the saved log current again.")
     (define-key map (kbd "C-c C-k") #'magit-auto-review-cancel-edit)
     (define-key map (kbd "C-c C-r") #'magit-auto-review-recover-edit)
     (define-key map (kbd "C-c C-e") #'magit-auto-review-return-to-edit)
+    (define-key map (kbd "C-c C-l") #'magit-auto-review-elaborate)
     (define-key map (kbd "C-c ?") #'magit-auto-review-edit-menu)
     map))
 

@@ -1043,3 +1043,12 @@ reuse that verification for commits, completion, or publication. Final review us
 Integration repairs preserve these contracts. Legacy reports without cases remain
 readable; an active legacy task may acquire cases without changing its repair
 allowance. `case_contract_version: 1` identifies tasks with established case evidence.
+
+### Finding elaboration
+
+`elaborate` accepts `session`, `generation`, `revision`, `comment`, and optional
+`body` containing captured unsaved wording. It returns Markdown in `body`, the
+source generation/comment/revision, `captured_wording`, `snapshot`, and `usage`.
+It supports saved historical generations, checks the supplied draft revision,
+and never modifies draft or publication state. The explicit processing-model call
+uses existing operation progress and cancellation. Capability: `finding-elaboration`.
