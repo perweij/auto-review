@@ -184,7 +184,7 @@ def invoke(session, state, batch, role, context):
     if before["tree"] != batch["checkpoint"]["tree"]:
         raise ApiError("worktree_changed", "Source changed between provider steps; inspect and adopt it before continuing.")
     owner_git.trust(session, state, before["tree"])
-    identity = owner_git.admin(session, state)
+    identity = owner_git.admin(session, state, batch.get("git_admin"))
     if batch.get("git_admin", identity) != identity or batch.get("integrity_failure"):
         raise ApiError("integrity_failed", "Protected Git state changed; inspect and explicitly adopt before continuing.")
     choice = batch["settings"]["review" if role == "review" else "fix"]
@@ -280,7 +280,7 @@ def invoke(session, state, batch, role, context):
         after = owner_git.checkpoint(session, state, role + " after")
         record["after"] = after
         batch["checkpoint"] = after
-        if owner_git.admin(session, state) != identity or (role != "fix" and before["tree"] != after["tree"]):
+        if owner_git.admin(session, state, batch.get("git_admin")) != identity or (role != "fix" and before["tree"] != after["tree"]):
             raise ApiError("integrity_failed", "Provider changed protected owner state; inspect the retained worktree.")
         from .structured import response
         value = response(choice, result, directory)

@@ -89,24 +89,27 @@ def configure_push(session, state):
                 and configured["remote"] in matches
                 and all(session.repo.git("config", "--get", f"branch.{state['branch']}.{key}", check=False).stdout.strip() == value
                         for key, value in expected.items())):
-            before = admin(session, state)
+            before = {b["id"]: admin(session, state, b.get("git_admin")) for b in state["batches"]}
             session.repo.git("config", "--unset-all", f"branch.{state['branch']}.pushRemote")
-            after = admin(session, state)
             for batch in state["batches"]:
-                if batch.get("git_admin") == before:
-                    batch["git_admin"] = after
+                if batch.get("git_admin") == before[batch["id"]]:
+                    batch["git_admin"] = admin(session, state, batch["git_admin"])
         configured["method"] = "upstream"
     session.save(state)
 
 
-def admin(session, state):
+def admin(session, state, expected=None):
     """Semantic index state avoids false alarms from Git's stat-cache refresh."""
+    legacy = expected is not None and len(expected) == 64 and all(c in "0123456789abcdef" for c in expected)
+    if expected is not None and not legacy and not expected.startswith("v2:"):
+        raise ApiError("integrity_failed", "Unknown Git identity version; inspect and adopt before continuing.")
     worktree = state["worktree"]
     values = [session.repo.git("rev-parse", "HEAD", cwd=worktree).stdout,
               session.repo.git("symbolic-ref", "HEAD", cwd=worktree).stdout,
               session.repo.git("ls-files", "--stage", "-z", cwd=worktree).stdout]
     for path in (session.repo.common / "config", Path(worktree) / ".git"):
-        values.append(hash_file(path) if path.exists() else None)
+        values.append((hash_file(path) if path.exists() else None) if legacy or path.name != "config"
+                      else configuration(session, state, path, descriptions=True))
     hooks = session.repo.common / "hooks"
     if hooks.exists():
         values.extend((str(p.relative_to(hooks)), os.readlink(p) if p.is_symlink() else hash_file(p))
@@ -114,7 +117,67 @@ def admin(session, state):
     gitdir = Path(session.repo.git("rev-parse", "--absolute-git-dir", cwd=worktree).stdout.strip())
     config = gitdir / "config.worktree"
     values.append(hash_file(config) if config.exists() else None)
-    return digest(values)
+    if not legacy:
+        values.append(configuration(session, state, config, descriptions=False))
+    return digest(values) if legacy else "v2:" + digest(values)
+
+
+def configuration(session, state, path, *, descriptions):
+    """Ordered Git records, with one narrow shared-config metadata exemption."""
+    if not path.exists():
+        return None
+    result = session.repo.git("config", "--file", str(path), "--includes", "--null",
+                              "--list", "--show-origin", cwd=state["worktree"], check=False)
+    if result.returncode or "\ufffd" in result.stdout:
+        raise ApiError("integrity_failed", "Cannot read protected Git configuration.")
+    fields = result.stdout.split("\0")
+    if fields.pop() != "" or len(fields) % 2:
+        raise ApiError("integrity_failed", "Cannot parse protected Git configuration.")
+    records = list(zip(fields[::2], fields[1::2]))
+    metadata = state.get("metadata", {})
+    protected = {state.get("branch"), metadata.get("headRefName"), metadata.get("baseRefName"),
+                 state.get("push_target", {}).get("branch")}
+    known = all(isinstance(name, str) and name for name in protected)
+    # Resolve upstream names from the effective configuration, including worktree
+    # overrides. This only makes the exemption narrower; global settings are not
+    # otherwise added to the protected identity.
+    upstream_records = []
+    if descriptions and known:
+        effective = session.repo.git("config", "--null", "--list", "--includes",
+                                     cwd=state["worktree"], check=False)
+        if effective.returncode or "\ufffd" in effective.stdout:
+            raise ApiError("integrity_failed", "Cannot determine protected Git branches.")
+        upstream_records = effective.stdout.split("\0")[:-1]
+    changed = True
+    while changed:
+        changed = False
+        for record in upstream_records:
+            key, sep, value = record.partition("\n")
+            for branch in tuple(protected):
+                if branch and key == "branch." + branch + ".merge" and sep and value.startswith("refs/heads/"):
+                    upstream = value[len("refs/heads/"):]
+                    if upstream not in protected:
+                        protected.add(upstream)
+                        changed = True
+    kept, included = [], {}
+    for origin, record in records:
+        if not origin.startswith("file:"):
+            raise ApiError("integrity_failed", "Unexpected Git configuration origin.")
+        source = Path(origin[5:])
+        if not source.is_absolute():
+            source = Path(state["worktree"]) / source
+        shared = source.resolve() == path.resolve()
+        key = record.partition("\n")[0]
+        if (descriptions and known and shared and key.startswith("branch.")
+                and key.endswith(".description") and key[7:-12] not in protected):
+            continue
+        kept.append((origin, record))
+        if not shared:
+            try:
+                included[str(source)] = hash_file(source)
+            except OSError as exc:
+                raise ApiError("integrity_failed", "Cannot read included Git configuration.") from exc
+    return [kept, sorted(included.items())]
 
 
 def checkpoint(session, state, label):

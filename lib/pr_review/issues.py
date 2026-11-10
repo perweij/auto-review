@@ -894,7 +894,7 @@ class Workflow:
             current = owner_git.checkpoint(owner, data, 'stopped review resume')
             if current['tree'] != batch['checkpoint']['tree']:
                 raise ApiError('worktree_changed', 'Inspect and adopt the retained changes before continuing.')
-            if batch.get('integrity_failure') or owner_git.admin(owner, data) != batch['git_admin']:
+            if batch.get('integrity_failure') or owner_git.admin(owner, data, batch.get("git_admin")) != batch['git_admin']:
                 raise ApiError('integrity_failed', 'Protected Git state changed; inspect before continuing.')
             owner_git.trust(owner, data, current['tree'], approval=self.request.get('trusted_snapshot'))
             review_history.resume_guard(owner, data, batch, self.request)

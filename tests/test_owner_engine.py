@@ -89,6 +89,16 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         context = json.loads((self.workspace() / 'context/approved_issue_plan.json').read_text())
         self.assertEqual(['Both work together'], context['plan']['acceptance'])
 
+    def test_unrelated_description_reuses_completed_engine_results(self):
+        batch = self.f.start()['batches'][-1]
+        counts = self.counts()
+        calls = len(self.f.calls)
+        self.session.repo.git('config', 'branch.unrelated.description', 'Another task')
+        result = self.f.start(batch=batch['id'])
+        self.assertEqual('ready', result['batches'][-1]['status'])
+        self.assertEqual(counts, self.counts())
+        self.assertEqual(calls, len(self.f.calls))
+
     def test_non_blocking_observations_do_not_stop_an_owner_pass(self):
         self.verdict(findings=[finding('F1', blocking=False, source='new')])
         batch = self.f.start(auto_commit=True)['batches'][-1]

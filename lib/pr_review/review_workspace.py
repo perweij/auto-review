@@ -283,7 +283,7 @@ def verify_live(run, when, location=None):
         violation('The owner worktree no longer matches the reviewed candidate; inspect and adopt it before continuing.'
                   if when != 'after' else 'The review changed the live owner worktree; inspect the retained changes.',
                   code='worktree_changed')
-    identity = owner_git.admin(session, state)
+    identity = owner_git.admin(session, state, batch.get("git_admin"))
     if batch.get('git_admin', identity) != identity:
         violation('Protected Git state changed during review; inspect and explicitly adopt before continuing.')
     if when == 'before':

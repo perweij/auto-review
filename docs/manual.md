@@ -671,6 +671,18 @@ boundary. Instructions prohibit inspecting peer or workflow artifacts.
 | Security boundary | Enclosing container | Enclosing container |
 | Retained guards | Filtered environment, read-only instructions, tool denials, snapshot verification | Filtered environment, review instructions, tool denials, candidate and Git-state verification |
 
+Owner Git-state checks ignore descriptions of unrelated branches in the shared
+repository configuration. Descriptions for the Owner, PR head/base, push target
+and upstream branches remain protected, as do all other configuration keys,
+included files and worktree configuration. Comments and formatting in the shared
+configuration do not invalidate verification. No approval is needed for these
+harmless metadata edits.
+
+New batches use a versioned Git identity. Older batches retain their original
+whole-file checks: an unexplained configuration change still requires explicit
+adoption and reverification. Adoption establishes the new identity; simply opening
+or resuming an old batch does not upgrade its saved verification.
+
 Checkout mutations discard the result. Live-tree or Git-admin changes block
 acceptance and retain the work for inspection. These are integrity checks, not
 kernel prevention of writes. Failed workspace preparation stops the review rather

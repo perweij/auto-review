@@ -373,7 +373,7 @@ def execute(session, state, request):
                         batch = None
                     raise ApiError("stale_source", "HEAD changed; reconcile in Magit and start a new batch.")
                 workspace.unstaged_index(session, state)
-                identity = workspace.admin(session, state)
+                identity = workspace.admin(session, state, None if request.get("adopt") else batch.get("git_admin"))
                 if (batch.get("integrity_failure") or batch.get("git_admin", identity) != identity) and not request.get("adopt"):
                     raise ApiError("integrity_failed", "Protected state changed; inspect Git and source changes, then explicitly adopt and reverify.")
                 snapshot = workspace.checkpoint(session, state, "resume")

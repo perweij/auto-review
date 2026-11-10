@@ -1017,6 +1017,84 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual([role for role, _ in self.calls].count("fix"), 2)
         self.assertFalse(self.posts)
 
+    def test_unrelated_description_preserves_ready_verification(self):
+        self.fix()
+        batch = self.view["batches"][-1]
+        self.calls.clear()
+        for value in ("Notes", "Multiple\nlines", ""):
+            self.git("config", "branch.unrelated.description", value)
+            result = self.request("owner-fix", batch=batch["id"])
+            self.assertEqual(result["batches"][-1]["status"], "ready")
+        self.git("config", "--unset-all", "branch.unrelated.description")
+        self.request("owner-fix", batch=batch["id"])
+        self.assertTrue(all(role == "review" for role, _ in self.calls))
+        self.commit_fix()
+        self.assertTrue(self.request("owner-associate")["replies"])
+
+    def test_legacy_git_identity_requires_adoption_after_metadata_change(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        batch["git_admin"] = owner_git.admin(session, state, "0" * 64)
+        session.save(state)
+        self.calls.clear()
+        self.request("owner-fix", batch=batch["id"])
+        self.assertTrue(all(role == "review" for role, _ in self.calls))
+        self.git("config", "branch.unrelated.description", "Notes")
+        with self.assertRaises(ApiError) as caught:
+            self.request("owner-fix", batch=batch["id"])
+        self.assertEqual(caught.exception.code, "integrity_failed")
+        result = self.request("owner-fix", batch=batch["id"], adopt=True)
+        self.assertEqual(result["batches"][-1]["status"], "ready")
+        self.assertTrue(session.load()["batches"][-1]["git_admin"].startswith("v2:"))
+        self.assertTrue(self.calls)
+
+    def test_git_configuration_identity_policy(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        initial = owner_git.admin(session, state)
+        legacy = owner_git.admin(session, state, "0" * 64)
+        self.git("config", "branch.unrelated.description", "Notes")
+        self.assertEqual(initial, owner_git.admin(session, state))
+        self.assertNotEqual(legacy, owner_git.admin(session, state, legacy))
+        for key in ("branch.main.description", "branch.unrelated.remote", "custom.unknown",
+                    "core.hooksPath", "filter.example.clean", "remote.origin.pushurl"):
+            with self.subTest(key=key):
+                self.git("config", key, "changed")
+                self.assertNotEqual(initial, owner_git.admin(session, state))
+                self.git("config", "--unset-all", key)
+        included = self.root / "included.config"
+        included.write_text('[custom]\n value = first\n')
+        self.git("config", "include.path", str(included))
+        before = owner_git.admin(session, state)
+        included.write_text('[custom]\n value = second\n')
+        self.assertNotEqual(before, owner_git.admin(session, state))
+        self.git("config", "--unset-all", "include.path")
+        config = self.repo / ".git" / "config"
+        config.write_text(config.read_text() + "\n# harmless formatting\n")
+        self.assertEqual(initial, owner_git.admin(session, state))
+        self.git("config", "--add", "branch.unrelated.description", "second\nline")
+        self.assertEqual(initial, owner_git.admin(session, state))
+        self.git("config", "custom.values", "one")
+        before = owner_git.admin(session, state)
+        self.git("config", "--add", "custom.values", "two")
+        self.assertNotEqual(before, owner_git.admin(session, state))
+        gitdir = Path(self.git("rev-parse", "--absolute-git-dir", cwd=state["worktree"]))
+        before = owner_git.admin(session, state)
+        (gitdir / "config.worktree").write_text('[branch "unrelated"]\n description = protected\n')
+        self.assertNotEqual(before, owner_git.admin(session, state))
+        self.git("config", "extensions.worktreeConfig", "true")
+        (gitdir / "config.worktree").write_text(
+            '[branch "' + state['branch'] + '"]\n remote = .\n merge = refs/heads/local-upstream\n')
+        self.git("config", "branch.local-upstream.description", "first")
+        before = owner_git.admin(session, state)
+        self.git("config", "branch.local-upstream.description", "second")
+        self.assertNotEqual(before, owner_git.admin(session, state))
+        with self.assertRaises(ApiError):
+            owner_git.admin(session, state, "v99:unknown")
+
     def test_interrupted_partial_task_requires_explicit_adoption(self):
         original = self.model
         def model(*args):

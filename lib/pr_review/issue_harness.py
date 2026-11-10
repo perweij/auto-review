@@ -144,7 +144,7 @@ def invoke(session, state, batch, specification, feedback):
     if before['tree'] != batch['checkpoint']['tree']:
         raise ApiError('worktree_changed', 'Source changed between harness turns; inspect before continuing.')
     owner_git.trust(session, state, before['tree'])
-    admin = owner_git.admin(session, state)
+    admin = owner_git.admin(session, state, batch.get("git_admin"))
     if batch.get('integrity_failure') or batch.get('git_admin', admin) != admin:
         raise ApiError('integrity_failed', 'Protected Git state changed; inspect before continuing.')
     prompt = (Path(__file__).resolve().parents[2] / 'prompts' / 'issue-implement.txt').read_text()
@@ -212,7 +212,7 @@ def invoke(session, state, batch, specification, feedback):
         after = owner_git.checkpoint(session, state, 'harness after')
         record['after'] = after
         batch['checkpoint'] = after
-        if owner_git.admin(session, state) != admin:
+        if owner_git.admin(session, state, batch.get("git_admin")) != admin:
             batch['integrity_failure'] = str(directory)
             raise ApiError('integrity_failed', 'Harness changed protected source or Git state.')
         # The provider could write anywhere; the approved document must be what it was handed.
@@ -249,7 +249,7 @@ def invoke(session, state, batch, specification, feedback):
             try:
                 after = owner_git.checkpoint(session, state, 'interrupted harness')
                 record['after'] = after
-                if owner_git.admin(session, state) == admin:
+                if owner_git.admin(session, state, batch.get("git_admin")) == admin:
                     batch['checkpoint'] = after
                 else:
                     batch['integrity_failure'] = str(directory)
