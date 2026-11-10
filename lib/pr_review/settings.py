@@ -19,7 +19,7 @@ ECONOMICAL = {"reviewers": ["claude", "codex"], "processing_provider": "codex",
               "claude_effort": "high", "codex_effort": "high"}
 EXPENSIVE = {**ECONOMICAL, "claude_model": "fable", "codex_model": "gpt-6-astra"}
 PRESETS = {"economical": ECONOMICAL, "expensive": EXPENSIVE}
-CONFIG_KEYS = (*DEFAULTS, "version", "reviewer_slots", "processing")
+CONFIG_KEYS = (*DEFAULTS, "version", "reviewer_slots", "processing", "planning", "planning_review", "planning_synthesis")
 
 
 def from_manifest(manifest):
@@ -130,6 +130,9 @@ def validate(settings):
     for role in ("planning", "fix"):
         if role in settings:
             result[role] = choice(settings[role])
+    for role in ("planning_review", "planning_synthesis"):
+        if role in settings:
+            result[role] = choice(settings[role]) if settings[role] is not None else None
     return result
 
 

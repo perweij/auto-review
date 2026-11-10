@@ -62,6 +62,11 @@ def add_arguments(parser, *, issue=False):
     for role in ('processing', 'planning', 'fix') if issue else ('processing',):
         parser.add_argument('--' + role, dest='cli_' + role, default=argparse.SUPPRESS, metavar='NAME',
                             help=f'named configuration for {role}; shared references share model/effort')
+    if issue:
+        parser.add_argument('--planning-review', dest='cli_planning_review', default=argparse.SUPPRESS, metavar='NAME|none',
+                            help='independent planning critic (default: claude-2); none selects a single assessment')
+        parser.add_argument('--planning-synthesis', dest='cli_planning_synthesis', default=argparse.SUPPRESS, metavar='NAME|same',
+                            help='planning synthesis model; same follows the planner (default)')
     parser.add_argument('--synthesis-tests', choices=('focused', 'full'), default=argparse.SUPPRESS)
     group = parser.add_argument_group('named model choices',
         'Use --NAME-model and --NAME-effort for any positive numbered codex-N or claude-N. '
@@ -96,6 +101,8 @@ def defaults(*, issue=False, request=None):
         for role, name in (('planning', 'codex-3'), ('fix', 'codex-4')):
             result[role] = name
             result['model_configs'][name] = default_choice(name)
+        result.update(planning_review='claude-2', planning_synthesis=None)
+        result['model_configs']['claude-2'] = default_choice('claude-2')
         result.update(dict.fromkeys(LIMITS))
     else:
         result['suggested_changes'] = values['suggested_changes']
@@ -103,10 +110,13 @@ def defaults(*, issue=False, request=None):
 
 
 def references(value, *, issue=False):
-    return [*value['reviewers'], *(value[r] for r in ('processing', 'planning', 'fix') if issue or r == 'processing')]
+    extra = [value[r] for r in ('planning_review', 'planning_synthesis') if issue and value.get(r) is not None]
+    return [*extra, *value['reviewers'], *(value[r] for r in ('processing', 'planning', 'fix') if issue or r == 'processing')]
 
 
 def validate(value, *, issue=False, explicit=()):
+    if issue and isinstance(value, dict) and not {'planning_review', 'planning_synthesis'} & value.keys():
+        value = {**value, 'planning_review': None, 'planning_synthesis': None}
     required = set(defaults(issue=issue))
     if not isinstance(value, dict):
         raise ApiError('invalid_request', 'Settings file must be a complete JSON object.')
@@ -230,6 +240,16 @@ def resolve(request, saved=None, *, issue=False, owner=None, resources=None):
                 assign(value, 'fix', saved.get('fix', normalized['processing']))
             else:
                 value['suggested_changes'] = normalized['suggested_changes']
+    if issue and saved:
+        for role in ('planning_review', 'planning_synthesis'):
+            value.setdefault(role, None)
+            if role not in saved and not saved.get('_named', {}).get(role):
+                value[role] = None
+            elif role in saved:
+                if saved[role] is None:
+                    value[role] = None
+                else:
+                    assign(value, role, saved[role])
     if issue and owner:
         from .owner_state import effective_settings
         effective = effective_settings(owner)
@@ -252,6 +272,10 @@ def resolve(request, saved=None, *, issue=False, owner=None, resources=None):
     for role in ('reviewers', 'processing', 'planning', 'fix') if issue else ('reviewers', 'processing'):
         if 'cli_' + role in request:
             value[role] = request['cli_' + role]
+    if issue:
+        for role, sentinel in (('planning_review', 'none'), ('planning_synthesis', 'same')):
+            if 'cli_' + role in request:
+                value[role] = None if request['cli_' + role] == sentinel else request['cli_' + role]
     # New reviewer/processing names use the preset, just like the built-in names.
     # Planning/fix-only names retain independent defaults. Existing definitions
     # (including saved/file choices and intentional sharing) keep their values.
@@ -280,7 +304,7 @@ def resolve(request, saved=None, *, issue=False, owner=None, resources=None):
     for key in ('synthesis_tests', *LIMITS) if issue else ('synthesis_tests', 'suggested_changes'):
         if key in request:
             value[key] = request[key]
-    validate(value, issue=issue, explicit=explicit)
+    value = validate(value, issue=issue, explicit=explicit)
     active = set(references(value, issue=issue))
     value['model_configs'] = {n: c for n, c in value['model_configs'].items() if n in active}
     configs = value['model_configs']
@@ -291,12 +315,13 @@ def resolve(request, saved=None, *, issue=False, owner=None, resources=None):
     result['_named'] = value
     if issue:
         result.update({r: dict(configs[value[r]]) for r in ('planning', 'fix')})
+        result.update({r: dict(configs[value[r]]) if value[r] else None for r in ('planning_review', 'planning_synthesis')})
     return result
 
 
 def effective(configuration):
     """Ignore names and obsolete provider defaults for frozen-settings checks."""
-    return {k: configuration[k] for k in ('reviewer_slots', 'processing', 'planning', 'fix', 'synthesis_tests', 'suggested_changes') if k in configuration}
+    return {k: configuration[k] for k in ('reviewer_slots', 'processing', 'planning', 'fix', 'planning_review', 'planning_synthesis', 'synthesis_tests', 'suggested_changes') if k in configuration}
 
 
 def validate_models(configuration, catalogs=None, *, reviewers=True):
@@ -304,6 +329,8 @@ def validate_models(configuration, catalogs=None, *, reviewers=True):
     from . import models
     choices = [(slot['id'], slot) for slot in configuration['reviewer_slots']] if reviewers else []
     choices += [(role, configuration[role]) for role in ('processing', 'planning', 'fix') if role in configuration]
+    if configuration.get('planning_review'):
+        choices += [(r, configuration[r]) for r in ('planning_review', 'planning_synthesis') if configuration.get(r)]
     if catalogs is None:
         catalogs = {p: models.discover({'provider': p}) for p in sorted({c['provider'] for _, c in choices})}
     for role, choice in choices:
@@ -321,6 +348,8 @@ def summary(configuration, runtime, *, request=None, resources=None):
     followup = bool(request.get('followup_threads'))
     rows = [] if followup else [(f'reviewer-{i}', n) for i, n in enumerate(named['reviewers'], 1)]
     rows += [(r, named[r]) for r in ('processing', 'planning', 'fix') if r in named]
+    if named.get('planning_review'):
+        rows += [('planning-review', named['planning_review']), ('planning-synthesis', named.get('planning_synthesis') or named['planning'])]
     lines = ['Effective configuration:']
     for role, name in rows:
         c = configs[name]

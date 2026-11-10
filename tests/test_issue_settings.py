@@ -51,7 +51,7 @@ class ResumeSettingsTest(unittest.TestCase):
         self.assertEqual(10800, after['resources']['max_runtime'])
         self.assertEqual('applied', after['settings_transitions'][-1]['status'])
         self.assertEqual(1, len(data['batches'][0]['settings_transitions']))
-        self.assertEqual(old['configuration'], after['assessment_configuration'])
+        self.assertEqual(old['assessment_configuration'], after['assessment_configuration'])
 
     def test_provider_change_updates_effective_execution_and_quota_provider_scope(self):
         self.pause()
@@ -424,3 +424,70 @@ class ReviewSettingsTest(unittest.TestCase):
         self.assertEqual(1, t.counts()['synthesis'])
         self.assertEqual(1, len(t.turns))
         self.assertEqual('high', t.last()['attempts'][-1]['choice']['synthesis']['effort'])
+
+
+class PlanningBoundaryTest(unittest.TestCase):
+    setUp = ResumeSettingsTest.setUp
+    request = ResumeSettingsTest.request
+    state = ResumeSettingsTest.state
+    pause = ResumeSettingsTest.pause
+    def test_regeneration_uses_original_context_and_is_not_repeated(self):
+        self.assertEqual('approval', dispatch(self.request())['outcome'])
+        before = self.state()
+        self.assertEqual('approval', dispatch(self.request('--rerun-planning', 'review'))['outcome'])
+        after = self.state()
+        self.assertEqual(before['assessment_context'], after['assessment_context'])
+        self.assertEqual('complete', after['planning_rerun']['status'])
+        self.assertEqual(2, len(self.t.assessments))
+        self.assertEqual('approval', dispatch(self.request())['outcome'])
+        self.assertEqual(2, len(self.t.assessments))
+
+    def test_regeneration_refused_after_implementation_started(self):
+        self.pause()
+        result = dispatch(self.request('--rerun-planning', 'draft'))
+        self.assertEqual('invalid_request', result['error']['code'])
+        self.assertEqual(1, len(self.t.assessments))
+
+    def test_planning_runtime_is_cumulative_and_waiting_does_not_charge(self):
+        clock = [100.0]
+        # The fixture's existing planner supplies a valid plan; advance its clock.
+        original = self.t.assess
+        def timed(*args, **kwargs):
+            clock[0] += 7
+            return original(*args, **kwargs)
+        with patch('pr_review.issue_resources.time.monotonic', side_effect=lambda: clock[0]), patch('pr_review.issues.assess_issue', side_effect=timed):
+            self.assertEqual('approval', dispatch(self.request('--max-runtime', '1m'))['outcome'])
+            self.assertEqual(7, self.state()['resources']['active_seconds'])
+            clock[0] += 1000
+            self.assertEqual('approval', dispatch(self.request())['outcome'])
+            self.assertEqual(7, self.state()['resources']['active_seconds'])
+
+
+    def test_legacy_workflow_does_not_charge_planning(self):
+        flow = Workflow(self.request(), self.t.repo_object, self.t.f)
+        flow.state.pop('budget_scope', None)
+        flow.save()
+        self.assertEqual('approval', dispatch(self.request('--max-runtime', '1m'))['outcome'])
+        self.assertNotIn('resources', self.state())
+
+    def test_api_keeps_explicit_synthesis_and_uses_default_planner(self):
+        choice = {'provider': 'claude', 'model': 'opus', 'effort': 'medium'}
+        result = dispatch({**self.t.without_flags(), 'planning_synthesis': choice})
+        self.assertEqual('approval', result['outcome'])
+        config = self.state()['configuration']
+        self.assertEqual(choice, config['planning_synthesis'])
+        self.assertEqual('codex', config['planning']['provider'])
+        self.assertEqual('claude', config['planning_review']['provider'])
+
+    def test_interrupted_regeneration_intent_survives_plain_resume(self):
+        self.assertEqual('approval', dispatch(self.request())['outcome'])
+        with patch('pr_review.issues.assess_issue', side_effect=ApiError('model_failed', 'Interrupted')):
+            result = dispatch(self.request('--rerun-planning', 'review'))
+        self.assertEqual('model_failed', result['error']['code'])
+        pending = self.state()['planning_rerun']
+        self.assertEqual('pending', pending['status'])
+        self.assertEqual('approval', dispatch(self.request())['outcome'])
+        finished = self.state()['planning_rerun']
+        self.assertEqual(pending['id'], finished['id'])
+        self.assertEqual('complete', finished['status'])
+        self.assertEqual(2, len(self.t.assessments))

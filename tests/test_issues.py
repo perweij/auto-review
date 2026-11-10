@@ -1521,6 +1521,8 @@ class IssueIntegrationTest(unittest.TestCase):
         value = copy.deepcopy(state['configuration']['_named'])
         value['model_configs']['claude-22'] = value['model_configs'].pop('claude-2')
         value['fix'] = 'claude-22'
+        if value['planning_review'] == 'claude-2':
+            value['planning_review'] = 'claude-22'
         value['max_runtime'] = None
         path = self.root / 'named-settings.json'
         path.write_text(json.dumps(value))
@@ -1596,7 +1598,7 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assertNotIn('Effective configuration:', output.getvalue())
         self.assertIn('Effective configuration:', errors.getvalue())
         self.assertIn('fix: codex-4', errors.getvalue())
-        self.assertNotIn('claude /', errors.getvalue())
+        self.assertIn('planning-review: claude-2 = claude / opus / high', errors.getvalue())
 
     def test_named_resume_without_flags_preserves_sharing(self):
         from contextlib import redirect_stderr
@@ -2581,7 +2583,7 @@ class EffectiveQuotaScopeTest(unittest.TestCase):
         self.addCleanup(telemetry.stop)
 
     def request(self, *args):
-        return {**self.t.terminal_request(*args), 'issue': None, 'pr': 7}
+        return {**self.t.terminal_request('--planning-review', 'none', *args), 'issue': None, 'pr': 7}
 
     def api_request(self, **fields):
         return {**self.t.without_flags(), 'issue': None, 'pr': 7, 'yolo': True,

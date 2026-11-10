@@ -1,5 +1,6 @@
 """Issue coordination around a persistent implementation harness and guarded publication."""
 import copy
+from contextlib import nullcontext
 import json
 from pathlib import Path
 import re
@@ -92,6 +93,11 @@ def planning_identity(facts, state, feedback, configuration, *, legacy=False, co
     if legacy or configured:
         identity.append(configuration if legacy else configuration_identity(configuration))
     identity += [facts['base'], planning_policy_digest()]
+    if configuration.get('planning_review'):
+        from .planning_review import policy_digest
+        identity.append(policy_digest())
+    if state.get('planning_rerun'):
+        identity.append(state['planning_rerun']['id'])
     if state.get('reassessment_generation'):
         identity.append(state['reassessment_generation'])
     return digest(identity)
@@ -158,7 +164,7 @@ class Workflow:
             self.state = {'kind': 'issue', 'format_version': 1, 'sequence': 0, 'id': uuid.uuid4().hex,
                           'issue': number, 'repository': repo.identity, 'git_common_dir': str(repo.common),
                           'viewer': facts['viewer'], 'phase': 'intake', 'actions': {}, 'allowed_heads': [],
-                          'title': facts['issue']['title'], 'created_at': now()}
+                          'title': facts['issue']['title'], 'created_at': now(), 'budget_scope': 'planning-and-execution'}
         if self.state.get('format_version') != 1 or self.state.get('git_common_dir') != str(repo.common):
             raise ApiError('invalid_session', 'Unsupported issue state or repository identity.')
         if self.state['viewer'].lower() != facts['viewer'].lower():
@@ -329,12 +335,34 @@ class Workflow:
                     self.save()
             context = {'issue': facts['issue'], 'comments': semantic_comments(facts['comments'], state), 'previous_plan': state.get('plan'),
                        'execution_blockers': state.get('execution_blockers', []), 'pr_feedback': feedback}
+            scope_identity = digest([input_digest(facts, state), feedback, facts['base']])
+            intent = state.get('planning_rerun')
+            if intent and intent.get('status') == 'pending':
+                if intent.get('scope') != scope_identity:
+                    intent['status'] = 'superseded'
+                elif state.get('assessment_scope') == scope_identity and state.get('assessment_context'):
+                    context = copy.deepcopy(state['assessment_context'])
             before = self.repo.git('rev-parse', 'HEAD', cwd=path).stdout.strip()
-            assessment = assess_issue(context, state['configuration'], self.path / 'assessments', path,
-                                      state.get('assessment'), self.request.get('trusted_snapshot'))
+            configuration = {**state['configuration']}
+            rerun = state.get('planning_rerun')
+            if rerun and rerun['status'] == 'pending':
+                configuration['_planning_rerun'] = rerun
+            choices = [configuration.get('planning') or configuration.get('processing') or
+                       {'provider': configuration.get('processing_provider', 'claude')}]
+            if configuration.get('planning_review'):
+                choices += [configuration['planning_review'], configuration.get('planning_synthesis') or choices[0]]
+            scope = (issue_resources.execution(state, self.save, self.request,
+                       provider_scope=sorted({c['provider'] for c in choices}))
+                     if state.get('budget_scope') == 'planning-and-execution' else nullcontext())
+            with scope:
+                assessment = assess_issue(context, configuration, self.path / 'assessments', path,
+                                          state.get('assessment'), self.request.get('trusted_snapshot'))
+            if rerun and rerun['status'] == 'pending':
+                rerun['status'] = 'complete'
             self.clean(path, before)
             state.pop('base_movement', None)
-            state.update(assessment=assessment, assessment_configuration=copy.deepcopy(state['configuration']),
+            state.update(assessment=assessment, assessment_context=copy.deepcopy(context), assessment_scope=scope_identity,
+                         assessment_configuration=copy.deepcopy(state['configuration']),
                          input_digest=current, assessed_base=facts['base'])
             self.save()
         assessment = state['assessment']
@@ -690,6 +718,8 @@ class Workflow:
         cli_settings.summary(self.state['configuration'], self.terminal_runtime,
                              request=self.request, resources=self.state.get('resources'))
 
+        emit('progress', message='Runtime scope: ' + ('active planning and execution' if self.state.get('budget_scope') == 'planning-and-execution' else 'execution only (saved legacy workflow)'))
+
     def prepare_terminal_models(self):
         """Validate deferred choices before the next assessment or execution turn."""
         if getattr(self, 'terminal_models_pending', False):
@@ -734,7 +764,7 @@ class Workflow:
             self.state.setdefault('assessment_configuration', copy.deepcopy(previous))
             def rows(config, owner):
                 result = {s['id']: s for s in config.get('reviewer_slots', [])}
-                result.update({r: config[r] for r in ('processing', 'planning', 'fix') if r in config})
+                result.update({r: config[r] for r in ('processing', 'planning', 'fix', 'planning_review', 'planning_synthesis') if r in config})
                 if owner:
                     result['fix'] = owner['fix']
                 return result
@@ -800,7 +830,8 @@ class Workflow:
         return updates
 
     def cached_outcome(self, configuration, state):
-        if self.request.get('rerun_review') or state.get('review_rerun', {}).get('status') == 'pending':
+        if (self.request.get('rerun_review') or state.get('review_rerun', {}).get('status') == 'pending'
+                or state.get('planning_rerun', {}).get('status') == 'pending'):
             return None
         if state.get('phase') == 'complete' and state.get('finished_input') == digest([input_digest(self.facts, state), self.feedback_digest(), configuration_identity(configuration)]):
             return 'complete'
@@ -894,6 +925,10 @@ class Workflow:
             if saved_configuration:
                 configuration.update(settings.validate(settings.from_manifest({'configuration': saved_configuration})))
             settings.apply_overrides(configuration, self.request, fresh=not saved_configuration)
+            if not saved_configuration:
+                configuration.setdefault('planning', {'provider': 'codex', 'model': settings.DEFAULTS['codex_model'], 'effort': settings.DEFAULTS['codex_effort']})
+                configuration.setdefault('planning_review', {'provider': 'claude', 'model': settings.DEFAULTS['claude_model'], 'effort': settings.DEFAULTS['claude_effort']})
+                configuration.setdefault('planning_synthesis', None)
             configuration = settings.validate(configuration)
             desired = state.get('owner_settings')
             if self.request.get('settings_file'):
@@ -902,6 +937,24 @@ class Workflow:
             state['configuration'] = configuration
             if self.request.get('settings_file'):
                 state['owner_settings'] = owner_state.validate_settings(read_json(self.request['settings_file']))
+        from .planning_review import controls as planning_controls
+        requested = planning_controls(self.request)
+        if requested:
+            if not configuration.get('planning_review'):
+                raise ApiError('invalid_request', 'Planning regeneration requires reviewed planning mode.')
+            if state.get('owner'):
+                owner = owner_state.OwnerSession({'session': state['owner']})
+                with locked(owner.execution_lock):
+                    if owner.load().get('batches'):
+                        raise ApiError('invalid_request', 'Planning regeneration must precede implementation; use normal requirements-driven reassessment.')
+            previous = state.get('planning_rerun', {})
+            if previous.get('status') != 'pending' or set(previous['stages']) != set(requested):
+                if previous:
+                    if previous.get('status') == 'pending':
+                        previous['status'] = 'superseded'
+                    state.setdefault('planning_rerun_history', []).append(previous)
+                state['planning_rerun'] = {'id': uuid.uuid4().hex, 'stages': requested, 'status': 'pending',
+                    'scope': digest([input_digest(self.facts, state), self.feedback_context() if state.get('pr') else [], self.facts['base']])}
         self.save()
         previous_phase = state.get('phase')
         state['phase'] = 'intake'

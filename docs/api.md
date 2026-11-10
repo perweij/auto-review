@@ -1052,3 +1052,20 @@ source generation/comment/revision, `captured_wording`, `snapshot`, and `usage`.
 It supports saved historical generations, checks the supplied draft revision,
 and never modifies draft or publication state. The explicit processing-model call
 uses existing operation progress and cancellation. Capability: `finding-elaboration`.
+
+### Reviewed planning roles and regeneration
+
+`issue-run` accepts nullable `planning_review` and `planning_synthesis` model
+choices using the same provider/model/effort objects as `planning`. New workflows
+default to reviewed planning; old saved configurations retain single assessment.
+A null review choice disables critique/synthesis; a null synthesis choice follows
+planning. Named CLI settings express these fields as configuration names or null.
+
+`rerun_planning` is a list of `draft`, `review`, and/or `synthesis`; it is separate
+from `rerun_review` and is accepted only before implementation batches exist.
+Regeneration intent and per-stage outputs persist across interruptions. Final
+assessments include `review_dispositions`, `planning_artifacts`, and
+`planning_choices` recording actual stage provenance. `issue-read` exposes the
+workflow's saved `budget_scope`, assessment context, and regeneration intent.
+New workflows use `planning-and-execution`; missing scope means legacy
+execution-only limits. Changed model choices preserve valid completed evidence.

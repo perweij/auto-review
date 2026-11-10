@@ -228,3 +228,19 @@ remain supported by `pr-review owner ... settings --settings-file`, but are not
 the new terminal file format. Interactive Owner's focused task-check `review`
 role is outside the issue CLI schema and does not activate a provider for issue
 execution. See the [manual](manual.md#issue-fixing) for workflow details.
+
+## Draft, review and synthesize an issue plan
+
+```sh
+fix-issue -i 42 --max-runtime 2h
+fix-issue -i 42 --planning-review claude-2 --claude-2-effort medium
+fix-issue -i 42 --rerun-planning review
+```
+
+The first command uses Sol/high for drafting and synthesis and Opus/high for
+critique. The second changes future critique calls while preserving completed
+work. The third explicitly regenerates critique and synthesis before implementation
+has started. Use `--planning-review none` for a single assessment, or
+`--planning-synthesis NAME` for an explicit synthesis model. New jobs count
+planning and execution against the same runtime allowance; approval waits do not
+consume it. Resume preserves the original scope of older jobs.

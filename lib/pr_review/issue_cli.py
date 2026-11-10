@@ -23,6 +23,8 @@ def parser():
     approval.add_argument('--approve', type=int, metavar='REV', help='record approval of this exact published plan revision')
     result.add_argument('--max-repair-cycles', type=int, default=argparse.SUPPRESS, help='positive repair-cycle allowance; new batches default to 3')
     result.add_argument('--retry-review-adjudication', action='store_true', help='retry only the saved unresolved adjudication once')
+    result.add_argument('--rerun-planning', action='append', choices=('draft', 'review', 'synthesis'), default=argparse.SUPPRESS,
+                        help='regenerate a planning stage and its dependents before implementation; repeat for multiple stages')
     result.add_argument('--rerun-review', action='append', choices=('reviewer-1', 'reviewer-2', 'synthesis'),
                         default=argparse.SUPPRESS, help='explicitly regenerate this saved review stage before committing; repeat for multiple stages')
     result.add_argument('--adopt', action='store_true', help='adopt inspected partial Owner workspace changes and reverify')
@@ -30,8 +32,8 @@ def parser():
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
     recovery.add_argument('--retry-absent', metavar='ACTION', help='confirm after inspection that this uncertain action was not sent; allow a later retry')
     result.add_argument('--min-weekly-quota-remaining', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; stop at this remaining account weekly percentage')
-    result.add_argument('--max-weekly-quota-use', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; maximum observed weekly percentage-point increase during execution')
-    result.add_argument('--max-runtime', type=lambda v: None if v == 'none' else v, default=argparse.SUPPRESS, help='cumulative active execution allowance, e.g. 30m or 2h; none disables')
+    result.add_argument('--max-weekly-quota-use', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; maximum observed weekly percentage-point increase during active work')
+    result.add_argument('--max-runtime', type=lambda v: None if v == 'none' else v, default=argparse.SUPPRESS, help='cumulative active planning and execution for new jobs; saved jobs retain their scope; e.g. 30m or 2h, none disables')
     result.add_argument('--json', action='store_true')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     presets = result.add_mutually_exclusive_group()

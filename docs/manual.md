@@ -1103,7 +1103,9 @@ Issue CLI roles share the named configuration namespace. `--planning NAME`
 selects issue assessment and subsequent planning turns; `--fix NAME` selects the
 implementation harness; `--reviewers` and `--processing` select acceptance review.
 Defaults use separate `codex-3` and `codex-4` Sol/high configurations for planning
-and implementation, independent of reviewer/processing presets.
+and implementation, independent of reviewer/processing presets. New workflows
+review the draft with `claude-2` Opus/high, then have the planner synthesize the
+final assessment. `--planning-review none` selects a single assessment.
 
 ```sh
 fix-issue -i 42 \
@@ -1115,8 +1117,9 @@ fix-issue -i 42 \
 ```
 
 Here planning, processing, and the first reviewer share Sol/high; implementation
-uses Terra/medium. Fully Claude-only operation requires assigning all four role
-types to Claude names. Unused interactive Owner task-check settings do not activate
+uses Terra/medium. Fully Claude-only operation requires assigning planning,
+implementation, acceptance review and processing to Claude names; planning review
+already defaults to Claude and planning synthesis follows the planner. Unused interactive Owner task-check settings do not activate
 providers. Attached Owner settings are resolved before planning begins.
 
 `--settings-file` accepts the complete named issue format described above, not
@@ -1290,16 +1293,17 @@ and the exact implementation session. Recorded interrupted changes can resume;
 unrecorded external edits still require explicit inspection/adoption. A process
 exit is not a routine implementation checkpoint or a scheduling requirement.
 
-`--max-runtime 30m` (or `2h`, `90s`) limits cumulative active time after approval,
-including provider calls, checks and automatic recovery. Invocation gaps and
-approval waits do not consume it. Saved limits remain in effect unless explicitly
+`--max-runtime 30m` (or `2h`, `90s`) limits cumulative active planning and execution time for new workflows,
+including provider calls, checks and automatic recovery. Saved legacy workflows
+retain execution-only accounting. Invocation gaps and approval waits do not
+consume the allowance. Saved limits remain in effect unless explicitly
 replaced; increasing `--max-runtime` increases the total allowance, not just the
 next invocation. Runtime expiry cancels owned subprocesses and returns
 `resource_limit`; interrupted work is unverified.
 
 `--min-weekly-quota-remaining 20` preserves an observed 20% weekly reserve.
 `--max-weekly-quota-use 5` stops after an observed five-percentage-point increase
-during active execution. Both may be used together and apply independently to
+during active work in the workflow’s budget scope. Both may be used together and apply independently to
 provider allowance pools. Observations may include simultaneous account activity.
 Resuming does not replenish consumed allowance. Reset/telemetry gaps are reported
 as unknown, never zero; configured runtime provides the fallback. A requested
@@ -1383,3 +1387,33 @@ position. Unsaved wording is captured for the request, and editing can continue.
 The response refers to that captured wording. Existing progress/log handling and
 cancellation apply; the editing help menu includes cancellation. Each invocation
 is a separate model call included in usage reporting.
+
+### Reviewed issue planning
+
+New issue workflows draft a plan with `codex-3` (Sol/high), critique it with
+`claude-2` (Opus/high), and return to the planning model for synthesis. The final
+assessment is the only result published for approval. Technical review points
+are reconciled automatically; consequential unresolved product choices remain
+questions for the user. Critiques and their dispositions are retained locally.
+
+`--planning NAME` selects the planner. `--planning-review NAME` selects the
+independent critic; `--planning-review none` uses one assessment call instead.
+`--planning-synthesis NAME` overrides synthesis; `--planning-synthesis same`
+follows the planning choice. These roles use the existing named configuration
+namespace and are independent of code-review roles unless explicitly shared.
+Generated complete JSON files include `planning_review` and `planning_synthesis`;
+null means single assessment and follow the planner, respectively. Old complete
+files with both fields absent retain single-assessment behavior.
+
+Completed stages retain their original attribution when model settings change.
+Before implementation starts, repeat `--rerun-planning draft|review|synthesis`
+to regenerate selected stages. Draft regeneration also regenerates review and
+synthesis; review regeneration also regenerates synthesis. Ordinary resume
+continues saved work without duplicating a regeneration request. Requirements
+or source changes cause normal reassessment instead of reusing stale evidence.
+
+For new workflows, `--max-runtime` accumulates active planning and execution,
+excluding approval waits. Saved workflows retain their execution-only scope;
+existing consumption is never reset. Startup summaries identify the scope.
+The existing quota guards and runtime fallback still apply; accounting reports
+each planning stage separately, including failed calls and correction attempts.

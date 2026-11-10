@@ -26,6 +26,10 @@ def planning_policy_digest():
 
 def assess_issue(context, configuration, directory, cwd, previous_assessment=None, trusted_snapshot=None):
     """No writes to source; cache ownership and publication belong to the caller."""
+    if configuration.get('planning_review'):
+        from .planning_review import assess
+        return assess(context, configuration, directory, cwd, previous_assessment, trusted_snapshot,
+                      rerun=configuration.get('_planning_rerun'))
     from .settings import validate
     choice = configuration.get('planning') or validate(configuration)['processing']
     before = configuration_snapshot(cwd)

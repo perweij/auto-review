@@ -100,8 +100,8 @@ def validate(value):
     return value
 
 
-def arguments(choice, directory, schema, conversation):
-    args = owner_providers.argv(choice, Runtime.environment(), 'fix', directory, schema)
+def arguments(choice, directory, schema, conversation, *, role='fix'):
+    args = owner_providers.argv(choice, Runtime.environment(), role, directory, schema)
     if choice['provider'] == 'codex':
         args.remove('--ephemeral')
         if conversation.get('session_id'):

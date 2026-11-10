@@ -821,7 +821,7 @@ class NamedTerminalSettingsTest(unittest.TestCase):
         from pr_review import cli_settings
         for provider in ('claude', 'codex'):
             result = self.resolve('--reviewers', provider + '-1', '--processing', provider + '-2',
-                                  '--planning', provider + '-3', '--fix', provider + '-4', issue=True)
+                                  '--planning', provider + '-3', '--planning-review', provider + '-3', '--fix', provider + '-4', issue=True)
             def catalog(request):
                 return {'provider': provider, 'models': [{'value': settings.DEFAULTS[provider + '_model'], 'efforts': ['high']}]}
             with patch('pr_review.models.discover', side_effect=catalog) as discover:

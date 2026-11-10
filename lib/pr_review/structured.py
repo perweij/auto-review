@@ -3,7 +3,7 @@ import json
 from .common import ApiError, read_json
 
 
-def response(choice, result, directory):
+def response(choice, result, directory, *, invalid_code='model_failed'):
     if result.returncode:
         raise ApiError('model_failed', f'Provider failed; inspect {directory}.')
     if choice['provider'] == 'codex':
@@ -18,7 +18,7 @@ def response(choice, result, directory):
         try:
             value = event.get('structured_output') or json.loads(event.get('result', ''))
         except ValueError as exc:
-            raise ApiError('model_failed', 'Provider returned invalid structured output.') from exc
+            raise ApiError(invalid_code, 'Provider returned invalid structured output.') from exc
     if not isinstance(value, dict):
-        raise ApiError('model_failed', 'Provider returned no structured object.')
+        raise ApiError(invalid_code, 'Provider returned no structured object.')
     return value
