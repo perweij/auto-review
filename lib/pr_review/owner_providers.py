@@ -70,7 +70,7 @@ def preflight(session, state, *, issue_harness=False):
             catalogs[provider] = discover({"provider": provider})
         model = next((m for m in catalogs[provider]["models"] if m["value"] == choice["model"]), None)
         if not model or choice["effort"] not in model["efforts"]:
-            where = "R f" if group == "fix" else "R r" if group == "review" else "the Owner settings"
+            where = "R (Owner settings)"
             raise ApiError("unsupported_model", f"Unsupported owner {label} settings: {provider} / {choice['model']} ({choice['effort']}). Choose a supported model and effort in {where}, then resume with r.")
     config = reviewer_settings.final_review_configuration(final)
     independent = review_engine.requires_independent(config, {})

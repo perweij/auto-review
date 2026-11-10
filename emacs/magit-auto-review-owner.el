@@ -8,6 +8,7 @@
 (require 'magit-auto-review)
 (require 'magit-commit)
 (require 'transient)
+(declare-function magit-auto-review-owner-settings-open "magit-auto-review-owner-settings" ())
 
 (defface magit-auto-review-owner-heading
   '((t :inherit magit-section-heading :weight bold))
@@ -1090,7 +1091,7 @@ the wording of a saved batch's frozen settings."
 (defun magit-auto-review-owner--settings-payload (settings)
   "Return a copy of SETTINGS that `json-serialize' encodes without loss.
 Decoded arrays are lists, which would serialize as objects.  The final-review
-reviewer slots must be a vector so R f and R r keep final_review intact."
+reviewer slots must be a vector so settings saves keep final_review intact."
   (let* ((copy (copy-tree settings))
          (final (alist-get 'final_review copy)))
     (when final
@@ -1099,33 +1100,18 @@ reviewer slots must be a vector so R f and R r keep final_review intact."
       (setf (alist-get 'final_review copy) final))
     copy))
 
-(defun magit-auto-review-owner-configure (role)
-  "Choose provider, model, and effort for ROLE using fresh metadata."
-  (let ((provider (completing-read (concat (if (equal role "review") "Task-check" (capitalize role)) " provider: ")
-                                   '("claude" "codex") nil t)))
-    (magit-auto-review-owner--start
-     `((command . "models") (provider . ,provider))
-     (lambda (catalog)
-       (let* ((models (alist-get 'models catalog))
-              (model (completing-read "Model: " (mapcar (lambda (m) (alist-get 'value m)) models) nil t))
-              (info (cl-find model models :key (lambda (m) (alist-get 'value m)) :test #'equal))
-              (effort (completing-read "Effort: " (alist-get 'efforts info) nil t))
-              ;; Saved settings, not the effective view: a legacy session stays without final_review.
-              (settings (copy-tree (alist-get 'settings magit-auto-review-owner--view))))
-         (setf (alist-get (intern role) settings) `((provider . ,provider) (model . ,model) (effort . ,effort)))
-         (magit-auto-review-owner--mutate
-          "settings" `(settings . ,(magit-auto-review-owner--settings-payload settings))))))))
-(defun magit-auto-review-owner-configure-fix () "Configure fix provider settings." (interactive) (magit-auto-review-owner-configure "fix"))
-(defun magit-auto-review-owner-configure-review () "Configure task-check settings." (interactive) (magit-auto-review-owner-configure "review"))
+(defun magit-auto-review-owner-setup ()
+  "Edit all Owner settings locally, then Save or Cancel."
+  (interactive)
+  (require 'magit-auto-review-owner-settings)
+  (magit-auto-review-owner-settings-open))
 
-(transient-define-prefix magit-auto-review-owner-setup ()
-  "Configure owner providers without invoking inference."
-  [["Provider settings"
-    ("f" "Fix provider/model/effort" magit-auto-review-owner-configure-fix)
-    ("r" "Task-check provider/model/effort" magit-auto-review-owner-configure-review)]
-   ["Recovery"
-    ("T" "Trust and resume inspected agent configuration" magit-auto-review-owner-confirm-trust)
-    ("q" "Close" transient-quit-one)]])
+(defun magit-auto-review-owner-configure (role)
+  "Open unified configuration, focused on ROLE."
+  (magit-auto-review-owner-setup)
+  (magit-auto-review--choice-open (intern (concat role "_provider"))))
+(defun magit-auto-review-owner-configure-fix () "Configure fix settings." (interactive) (magit-auto-review-owner-configure "fix"))
+(defun magit-auto-review-owner-configure-review () "Configure task-check settings." (interactive) (magit-auto-review-owner-configure "review"))
 
 (defun magit-auto-review-owner--menu-actions ()
   "Return actions applicable to the selected feedback, fix, or reply."

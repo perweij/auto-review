@@ -1080,3 +1080,12 @@ retryable failures, and accepted command versions separately from publication
 `actions`; these records do not contribute to requirements identity.
 New attention-bearing comments deterministically mention the saved initiator.
 Legacy publication intents retain their original formatting and receipts.
+
+### Owner settings compare-and-save
+
+The `owner-mutate` settings operation accepts optional `expected_settings`, using
+the same complete settings object as `settings`. Under the existing execution
+lock, a mismatch with current settings raises `settings_changed` without mutation.
+The existing revision check also applies. Callers omitting the precondition keep
+existing behavior. The Emacs settings screen supplies its opening snapshot;
+failed saves preserve its local draft. This does not alter frozen batch settings.

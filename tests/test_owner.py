@@ -486,6 +486,15 @@ class OwnerTest(unittest.TestCase):
         self.assertFalse(items["review:9"]["actionable"])
         self.assertEqual(items["review:9"]["comments"][0]["display_body"], "")
 
+    def test_settings_compare_and_save_rejects_stale_drafts(self):
+        before = self.request("owner-read")["settings"]
+        changed = copy.deepcopy(before)
+        changed["fix"]["effort"] = "medium"
+        self.request("owner-mutate", operation="settings", settings=changed, expected_settings=before)
+        with self.assertRaisesRegex(ApiError, "changed while editing"):
+            self.request("owner-mutate", operation="settings", settings=before, expected_settings=before)
+        self.assertEqual(changed, self.request("owner-read")["settings"])
+
     def test_failed_preflight_can_resume_with_corrected_settings(self):
         with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")):
             with self.assertRaises(ApiError):

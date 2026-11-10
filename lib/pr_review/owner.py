@@ -89,6 +89,8 @@ def dispatch(request):
 def mutate(session, state, request):
     action = request.get("operation")
     if action == "settings":
+        if "expected_settings" in request and validate_settings(request["expected_settings"]) != state["settings"]:
+            raise ApiError("settings_changed", "Owner settings changed while editing; reopen configuration before saving.")
         state["settings"] = validate_settings(request.get("settings"))
     elif action in ("acknowledge", "defer", "restore", "handled"):
         for item in session.items(state, request.get("items")):

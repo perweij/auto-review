@@ -1430,3 +1430,15 @@ blocker notices mention the saved initiator. Routine updates do not. Signals are
 produced when the workflow next runs; there is no background listener. Reaction
 failures are recorded and retried on a later run without blocking execution.
 Existing published and pending comments retain their exact bodies and receipts.
+
+### Editing all Owner settings in Emacs
+
+Owner `R` opens a local draft for implementation, task checks, one or two final
+reviewers, and final synthesis. Select values from installed provider metadata;
+`S` saves the whole draft and `q` cancels. Opening or saving never runs inference.
+Final synthesis has its own testing policy; task checks remain focused.
+Legacy implicit final-review choices remain implicit unless a final-review
+control is edited. Started interactive batches retain their original settings;
+`b` copies selected saved batch settings into the draft for restoration. Concurrent
+settings edits cause a clear save rejection rather than silently overwriting them.
+See the Emacs reference for selection keys and metadata recovery.

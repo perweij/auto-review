@@ -24,6 +24,9 @@ When nil, a sole reviewer is used, or Codex for a pair."
   "Default Codex effort for new reviews; validated against model metadata."
   :type 'string :group 'magit-auto-review)
 
+(defvar-local magit-auto-review--choice-adapter nil
+  "Optional workflow callbacks for shared metadata and selection controls.")
+
 (defvar-local magit-auto-review--setup-settings nil)
 (defvar-local magit-auto-review--setup-catalogs nil)
 (defvar-local magit-auto-review--setup-status nil)
@@ -54,7 +57,9 @@ When nil, a sole reviewer is used, or Codex for a pair."
   "Clean up metadata when all Transient menus have closed."
   (when (buffer-live-p magit-auto-review--setup-owner)
     (with-current-buffer magit-auto-review--setup-owner
-      (magit-auto-review--setup-stop)))
+      (magit-auto-review--setup-stop)
+      (when-let ((cleanup (plist-get magit-auto-review--choice-adapter :exit)))
+        (funcall cleanup))))
   (setq magit-auto-review--setup-owner nil))
 (add-hook 'transient-post-exit-hook #'magit-auto-review--setup-exited)
 
@@ -63,7 +68,8 @@ When nil, a sole reviewer is used, or Codex for a pair."
   (when (and transient--prefix
              (eq (current-buffer) magit-auto-review--setup-owner)
              (memq (oref transient--prefix command)
-                   '(magit-auto-review-setup-menu magit-auto-review--choice-menu)))
+                   (list 'magit-auto-review-setup-menu 'magit-auto-review--choice-menu
+                         (plist-get magit-auto-review--choice-adapter :menu))))
     (transient--refresh-transient)))
 
 (defun magit-auto-review-refresh-choices ()
@@ -113,6 +119,7 @@ When nil, a sole reviewer is used, or Codex for a pair."
   (when (process-live-p magit-auto-review--process)
     (user-error "A review operation is already running; use L or K"))
   (magit-auto-review--setup-exited)
+  (setq magit-auto-review--choice-adapter nil)
   (let ((resolved
          (magit-auto-review--call
           (append
@@ -142,23 +149,27 @@ When nil, a sole reviewer is used, or Codex for a pair."
               (vconcat (alist-get 'reviewers settings))))))
   (add-hook 'kill-buffer-hook #'magit-auto-review--setup-stop nil t)
   (magit-auto-review-refresh-choices)
-  (transient-setup 'magit-auto-review-setup-menu))
+  (transient-setup (or (plist-get magit-auto-review--choice-adapter :menu) 'magit-auto-review-setup-menu)))
 
 (defun magit-auto-review--setup-providers ()
   "Return providers used by reviewer slots and processing."
-  (delete-dups (append (mapcar (lambda (slot) (alist-get 'provider slot))
-                               (append (alist-get 'reviewer_slots magit-auto-review--setup-settings) nil))
-                       (list (alist-get 'provider (alist-get 'processing magit-auto-review--setup-settings))))))
+  (if-let ((callback (plist-get magit-auto-review--choice-adapter :providers)))
+      (funcall callback)
+    (delete-dups (append (mapcar (lambda (slot) (alist-get 'provider slot))
+                                 (append (alist-get 'reviewer_slots magit-auto-review--setup-settings) nil))
+                         (list (alist-get 'provider (alist-get 'processing magit-auto-review--setup-settings)))))))
 
 (defun magit-auto-review--choice-target (field)
   "Return the role object and property named by FIELD."
-  (let ((name (symbol-name field)))
-    (cond ((string-match "\\`reviewer_\\([12]\\)_\\(provider\\|model\\|effort\\)\\'" name)
-           (cons (nth (1- (string-to-number (match-string 1 name)))
-                      (append (alist-get 'reviewer_slots magit-auto-review--setup-settings) nil))
-                 (intern (match-string 2 name))))
-          ((string-match "\\`processing_\\(provider\\|model\\|effort\\)\\'" name)
-           (cons (alist-get 'processing magit-auto-review--setup-settings) (intern (match-string 1 name)))))))
+  (if-let ((callback (plist-get magit-auto-review--choice-adapter :target)))
+      (funcall callback field)
+    (let ((name (symbol-name field)))
+      (cond ((string-match "\\`reviewer_\\([12]\\)_\\(provider\\|model\\|effort\\)\\'" name)
+             (cons (nth (1- (string-to-number (match-string 1 name)))
+                        (append (alist-get 'reviewer_slots magit-auto-review--setup-settings) nil))
+                   (intern (match-string 2 name))))
+            ((string-match "\\`processing_\\(provider\\|model\\|effort\\)\\'" name)
+             (cons (alist-get 'processing magit-auto-review--setup-settings) (intern (match-string 1 name))))))))
 
 (defun magit-auto-review--field-value (field)
   "Return FIELD's current value."
@@ -190,21 +201,23 @@ When nil, a sole reviewer is used, or Codex for a pair."
 
 (defun magit-auto-review--set-choice (field value)
   "Set FIELD to VALUE, updating canonical roles."
-  (let* ((target (magit-auto-review--choice-target field))
-         (role (car-safe target)) (property (cdr-safe target)))
-    (if (not target)
-        (setf (alist-get field magit-auto-review--setup-settings) value)
-      (cl-pushnew field magit-auto-review--setup-roles-edited)
-      (when (and (eq property 'provider) (not (equal value (alist-get 'provider role))))
-        (setf (alist-get 'model role) (alist-get (intern (concat value "_model")) magit-auto-review--setup-settings)
-              (alist-get 'effort role) (alist-get (intern (concat value "_effort")) magit-auto-review--setup-settings)))
-      (setf (alist-get property role) value)
-      (when (string-prefix-p "processing_" (symbol-name field))
-        (setq magit-auto-review--setup-provisional-processing nil))
-      (when (and (eq field 'reviewer_1_provider) (eq property 'provider))
-        (magit-auto-review--adjust-provisional-processing))
-      (magit-auto-review--sync-roles)
-      (when (eq property 'provider) (magit-auto-review-refresh-choices)))))
+  (if-let ((callback (plist-get magit-auto-review--choice-adapter :set)))
+      (funcall callback field value)
+    (let* ((target (magit-auto-review--choice-target field))
+           (role (car-safe target)) (property (cdr-safe target)))
+      (if (not target)
+          (setf (alist-get field magit-auto-review--setup-settings) value)
+        (cl-pushnew field magit-auto-review--setup-roles-edited)
+        (when (and (eq property 'provider) (not (equal value (alist-get 'provider role))))
+          (setf (alist-get 'model role) (alist-get (intern (concat value "_model")) magit-auto-review--setup-settings)
+                (alist-get 'effort role) (alist-get (intern (concat value "_effort")) magit-auto-review--setup-settings)))
+        (setf (alist-get property role) value)
+        (when (string-prefix-p "processing_" (symbol-name field))
+          (setq magit-auto-review--setup-provisional-processing nil))
+        (when (and (eq field 'reviewer_1_provider) (eq property 'provider))
+          (magit-auto-review--adjust-provisional-processing))
+        (magit-auto-review--sync-roles)
+        (when (eq property 'provider) (magit-auto-review-refresh-choices))))))
 
 (defun magit-auto-review--sync-roles ()
   "Synchronize compatibility fields without making them explicit overrides."
@@ -267,7 +280,7 @@ When nil, a sole reviewer is used, or Codex for a pair."
          (role (car-safe target)) (property (cdr-safe target))
          (provider (alist-get 'provider role)))
     (cond ((eq property 'provider) '(("claude" . "Claude") ("codex" . "Codex")))
-          ((eq field 'synthesis_tests) '(("focused" . "Focused checks") ("full" . "Permit one full-suite attempt")))
+          ((or (eq field 'synthesis_tests) (eq property 'synthesis_tests)) '(("focused" . "Focused checks") ("full" . "Permit one full-suite attempt")))
           ((eq property 'model)
            (mapcar (lambda (m) (cons (alist-get 'value m) (format "%s (%s)" (alist-get 'label m) (alist-get 'value m))))
                    (alist-get 'models (alist-get (intern provider) magit-auto-review--setup-catalogs))))
@@ -293,13 +306,13 @@ When nil, a sole reviewer is used, or Codex for a pair."
                       (concat (if (equal selected (car choice)) "● " "  ") (cdr choice))
                       (lambda () (interactive)
                         (magit-auto-review--set-choice field (car choice))
-                        (transient-setup 'magit-auto-review-setup-menu))
+                        (transient-setup (or (plist-get magit-auto-review--choice-adapter :menu) 'magit-auto-review-setup-menu)))
                       :transient t)) page)
       (when (> offset 0)
         '(("p" "Previous page" (lambda () (interactive) (cl-decf magit-auto-review--setup-page)) :transient t)))
       (when (< (+ offset 20) (length choices))
         '(("n" "Next page" (lambda () (interactive) (cl-incf magit-auto-review--setup-page)) :transient t)))
-      '(("q" "Back" (lambda () (interactive) (transient-setup 'magit-auto-review-setup-menu)) :transient t))))))
+      '(("q" "Back" (lambda () (interactive) (transient-setup (or (plist-get magit-auto-review--choice-adapter :menu) 'magit-auto-review-setup-menu))) :transient t))))))
 
 (transient-define-prefix magit-auto-review--choice-menu ()
   "Select one listed value; no free-text input."

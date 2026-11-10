@@ -96,7 +96,7 @@ Publication receipt markers are hidden from feedback text. A review containing
 only a marker remains in history and is not counted as a fixable comment.
 
 If a fix stops before any model work because its model or effort is unsupported,
-choose valid settings with `R f` (fix) and `R r` (task checks), then select the paused fix and press
+choose valid settings with `R` and save with `S`, then select the paused fix and press
 `r`. The same batch resumes with the corrected settings. Once model work has
 started, resume requires the batch's original settings, shown under
 **Verification and task details**. `T` trusts inspected repository agent
@@ -125,7 +125,7 @@ Owner headings use separate customizable faces:
 | `g` / `G` | Reload and check local fix commits / explicitly fetch GitHub |
 | `f` | Plan, fix, and review the item, group, or selected sibling headings |
 | `V` | Verify selected concerns without a fixer invocation |
-| `R f` / `R r` | Choose fix / task-check provider, model, and effort. Both keep the saved `final_review` intact |
+| `R` | Edit all Owner settings locally; `S` saves, `q` cancels |
 | `i` / `h` | Acknowledge inspected feedback/context / finish feedback or a verified fix locally |
 | `k` / `U` | Defer / restore feedback locally |
 | `r` / `A` | Resume the selected batch / explicitly adopt manual changes and reverify |
@@ -180,14 +180,28 @@ choice. Existing Owner roles remain independent. Model/effort choices come from 
 provider metadata. Owner verification uses focused checks.
 
 The Owner header lists **Fix**, **Task check** (`review`: the focused per-task checks
-that `R r` edits), and the **Final review** reviewer slots and synthesis of the shared
+in the settings screen), and the **Final review** reviewer slots and synthesis of the shared
 review engine. The header shows the effective configuration, so a saved session without
 `final_review` displays the single reviewer that will actually run (its task-check
 choice, which is also its synthesis). A fix's **Verification and task details** show that
-batch's frozen settings the same way. Emacs does not yet edit `final_review`; `R f` and
-`R r` send the saved settings back unchanged, so `final_review` round-trips intact, and a
-session without one stays without one. Set it with `pr-review owner PR settings
---settings-file FILE` or the `fix-issue` reviewer flags.
+batch's frozen settings the same way.
+
+`R` opens one settings screen. The role prefixes are `f` (implementation), `r`
+(task check), `1`/`2` (final reviewers), and `s` (final synthesis); follow a prefix
+with `p`, `m`, or `e` for provider, model, or effort. `x` adds/removes reviewer 2;
+`t` selects final-synthesis testing policy. `g` refreshes model metadata.
+`S` saves all edits together; `q` or dismissal discards them. No configuration
+action starts inference. Metadata failures and unsupported values remain visible.
+
+A legacy session keeps its implicit final review when only implementation or
+task checks are edited. Editing a final-review control makes those settings
+explicit. Synthesis never automatically follows changes to explicit reviewers.
+Started interactive batches retain frozen settings. `b` copies the selected
+batch's original settings into the draft (or the sole unfinished batch when
+none is selected); it does not save or resume. A save failure retains edits.
+If settings changed elsewhere while the screen was open, saving refuses to
+overwrite them: reopen the screen and reapply the intended changes.
+
 
 After a pause, inspect the saved patch with `d`, current partial changes with
 `C-u d`, and the full worktree/index with `m`. `A` accepts inspected edits for
