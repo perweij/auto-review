@@ -359,12 +359,23 @@ must enter the normal issue-plan context before a meaningful live retest.
 
 ## Issue #10 follow-up: Emacs processing defaults and independent selection
 
-Status: recorded, not implemented. This belongs to provider independence in
+Status: implemented. Current setup code and ERT coverage distinguish untouched
+defaults from explicit processing choices and preserve independent processing
+through manual and automatic submission. See
+[the setup adapter](../../emacs/magit-auto-review-setup.el) and
+`auto-review/single-mode-preserves-deliberate-processor`,
+`auto-review/explicit-default-processor-is-serialized`, and
+`auto-review/slot-submission-preserves-processor` in
+[the regression tests](../../emacs/tests/magit-auto-review-tests.el).
+The findings and required follow-up below are retained as historical context,
+not descriptions of current behavior or outstanding work.
+
+This belongs to provider independence in
 `bin/pr-review` and its Emacs frontend. `bin/fix-issue` is CLI-only: this finding
 is not evidence that Emacs supplied configuration to the dogfood failure.
 Trace that failure's actual CLI request and saved state separately.
 
-Confirmed in [the setup adapter](../../emacs/magit-auto-review-setup.el):
+Originally confirmed in the setup adapter:
 
 - `magit-auto-review-processing-provider` defaults to `"codex"`; its docstring
   currently limits its meaning to reviews with both providers enabled.
@@ -377,7 +388,7 @@ Confirmed in [the setup adapter](../../emacs/magit-auto-review-setup.el):
   with issue #10's independently selectable processing role. It is a submit-time
   rewrite, not a reviewer-toggle behavior.
 
-Required follow-up:
+Original required follow-up (now implemented):
 
 1. Define and document how an untouched frontend default differs from an explicit
    processing choice. Check customization, setup-menu selections and saved-session

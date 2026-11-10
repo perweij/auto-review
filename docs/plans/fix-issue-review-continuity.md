@@ -1,8 +1,11 @@
 # Bound fix-issue repair loops and preserve review decisions
 
-Status: implemented on `fix-issue-review-continuity`; pending parent review and merge.
+Status: implemented and committed to main at `1ecd6ab`.
 Base: evidence handoff merged to main at `fb3edae`.
-Do not modify or restart historical issue #15 as part of this work. Model changes on resume are a separate follow-up, issue #37.
+Do not modify or restart historical issue #15 as part of this work. The separate
+model-settings follow-up, issue #37, is now implemented at `a2864b1`; see
+[settings resume](issue-settings-resume.md). The implementation handoff and
+validation log below describe the original scope and historical state.
 
 Related: [recorded test-evidence handoff](fix-issue-test-evidence-handoff.md).
 Evidence collection and validation are a separate improvement. Review history

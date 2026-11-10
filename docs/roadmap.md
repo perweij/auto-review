@@ -1,8 +1,58 @@
 # Roadmap
 
-These items describe outstanding work, not available features or release dates.
+The priority list describes outstanding work, not available features or release
+dates. Recently completed work is listed separately for tracking reconciliation.
 Current usage is documented in the [manual](manual.md) and
 [Emacs reference](../emacs/README.md).
+
+## Priority order (2026-11-10)
+
+The next task is #17. This order favors clear interaction and completing existing
+workflows before introducing additional automation or forge support.
+
+| Priority | Work | Tracking and scope |
+| --- | --- | --- |
+| 1 | Command acknowledgment and human-attention signals | [#17](https://github.com/perweij/auto-review/issues/17): acknowledge recognized commands, explain rejected approvals, and mention the initiator when action is needed; no new configuration. |
+| 2 | Complete Owner configuration UI | [#14](https://github.com/perweij/auto-review/issues/14): add editing controls for final-review slots and synthesis, which are already displayed. Shared-engine prerequisite #27 is complete. |
+| 3 | Avoid unrelated Git configuration invalidating verification | [#33](https://github.com/perweij/auto-review/issues/33): narrowly tolerate proven-irrelevant metadata while retaining conservative integrity checks. |
+| 4 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
+| 5 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
+| 6 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
+| 7 | Forge abstraction and GitLab pilot | [#19–#25](https://github.com/perweij/auto-review/issues/19): start with #19, then #20; the read-only #25 pilot can precede the remaining write-path extractions. Promote this work if GitLab becomes an immediate requirement. |
+| 8 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
+
+The forge series consists of identity/authentication (#19), review context (#20),
+review publication (#21), Owner remote operations (#22), issue eligibility facts
+(#23), issue remote writes (#24), and the read-only GitLab pilot (#25).
+
+## Completed work and tracking reconciliation
+
+The following implementations are on remote `main` as of 2026-11-10:
+
+- Accounting improvements: cumulative provider/role usage (`d989f82`) and
+  unreliable-token diagnostics (`9a2f9cc`).
+- [#37](https://github.com/perweij/auto-review/issues/37): change execution
+  settings at stopped boundaries without discarding approved requirements or
+  valid completed work (`a2864b1`).
+- [#38](https://github.com/perweij/auto-review/issues/38): elaborate on the
+  selected Emacs finding, including unsaved editor wording (`b8b3a6d`).
+- [#29](https://github.com/perweij/auto-review/issues/29): planner draft,
+  independent critique, and planner synthesis with durable stage reuse and
+  accounting (`7d5968f`).
+
+These three feature issues were closed as completed on 2026-11-10, with links to
+their implementation commits. The remaining 11 open issues are covered above.
+All existing PRs were already closed when checked.
+
+GitHub bookkeeping is reconciled: #14 and #19–#25 now reference completed #27 /
+PR #28 instead of deleted #13; the forge series acknowledges completed #15 /
+PR #36. Issue #17 no longer claims that no issue has been created. Issue #18's
+example uses named Codex options (`--codex-1-effort` and `--codex-2-effort`) and
+documents the current saved runtime-scope contract.
+
+Files under `docs/plans/` and `docs/evaluations/` retain development history.
+Historical instructions and deferred work in those records do not override the
+current implementation or this priority list.
 
 ## Proactive repository reviews
 
