@@ -144,27 +144,35 @@ def fingerprint(item, viewer=None):
 
 def feedback_fingerprint(item, state, viewer):
     """Exclude only unchanged, confirmed replies published by this owner session."""
-    receipts = {r["receipt"]["id"]: r["receipt"] for r in state["replies"]
-                if r.get("status") == "published" and r.get("source") == item["key"]
-                and r.get("receipt", {}).get("id")
-                and r.get("target", {}).get("kind") == "reply"
-                and r["target"].get("root_id") == item.get("root_id")}
+    from .forge import adapter, restore
+    publication = adapter(restore(state).forge).publication
+    receipts = {}
+    for reply in state['replies']:
+        if (reply.get('status') != 'published' or reply.get('source') != item['key']
+                or not reply.get('receipt') or reply.get('target', {}).get('kind') != 'reply'
+                or reply['target'].get('root_id') != item.get('root_id')):
+            continue
+        for evidence in [reply.get('evidence') or publication.owner_receipt(reply['receipt']),
+                         *reply.get('historical_evidence', [])]:
+            receipts[evidence['id']] = evidence
     def own_receipt(comment):
         receipt = receipts.get(comment.get("id"), {})
         return (item.get("kind") == "thread" and comment.get("id") != item.get("root_id")
                 and comment.get("author", "").lower() == viewer.lower()
-                and receipt.get("user", {}).get("login", "").lower() == viewer.lower()
+                and receipt.get("author", "").lower() == viewer.lower()
                 and comment.get("body") == receipt.get("body"))
     return fingerprint({**item, "comments": [c for c in item.get("comments", []) if not own_receipt(c)]})
 
 
 def reconcile_resolved_feedback(state, items):
     """Finish resolved, verified GitHub fixes; reopen them when evidence changes."""
+    from .conversations import pending
     latest = {key: batch for batch in state["batches"] for key in batch["items"]}
     for item in items:
         batch = latest.get(item["key"], {})
         proof = None
         if (item.get("kind") == "thread" and item.get("is_resolved") and not item.get("missing")
+                and not any(intent["item"] == item["key"] for intent in pending(state))
                 and batch.get("status") == "ready"
                 and not batch.get("integrity_failure")
                 and not batch.get("commit_execution", {}).get("inspection_required")
@@ -301,7 +309,6 @@ class OwnerSession:
 def refresh(session, state):
     """Fetch first, then atomically replace local context; failure retains cache."""
     from .discussion import fetch
-    from .pulls import github_json
     repo = session.repo
     from .forge_context import legacy_metadata
     change, account = repo.forge.owner_context(repo)
@@ -380,6 +387,8 @@ def refresh(session, state):
             key not in current or current[key].get("missing")
             or current[key]["fingerprint"] != batch["fingerprints"].get(key)
             for key in active_feedback_keys(batch))
+    from .conversations import reconcile
+    reconcile(state, items)
     reconcile_resolved_feedback(state, items)
     push_target = {"repository": target, "branch": branch}
     previous_target = state.get("push_target", {})

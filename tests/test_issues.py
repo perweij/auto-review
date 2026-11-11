@@ -462,7 +462,7 @@ class ReplyObligationTest(unittest.TestCase):
             raise ApiError('network', 'Reply was not stored; response lost')
 
         with patch.object(Writes, 'push', autospec=True, side_effect=t.simulate_push), \
-                patch('pr_review.owner_publication.gh', side_effect=lose_response):
+                patch('pr_review.publication.gh', side_effect=lose_response):
             self.assertEqual('uncertain', dispatch(request)['outcome'])
             for _ in range(3):
                 result = dispatch(request)
@@ -475,12 +475,14 @@ class ReplyObligationTest(unittest.TestCase):
                 self.assertFalse(any(k.startswith('ready:') for k in Workflow(request, t.repo_object, t.f).state['actions']))
             self.assertEqual(1, len(attempts))
         self.assertFalse(t.posts)
-        # Explicit staging/publication resolves the reply, while the absent
-        # attempt remains in the journal as historical evidence.
+        # Explicit staging/publication resolves the reply using the same operation
+        # identity, so delayed receipts cannot be mistaken for a new attempt.
         t.request('owner-mutate', operation='stage', reply=data['replies'][0]['id'])
         prepared = t.request('owner-prepare')
         t.request('owner-publish', token=prepared['token'])
-        self.assertEqual('unsent', owner.load()['actions'][0]['status'])
+        self.assertEqual('published', owner.load()['actions'][0]['status'])
+        self.assertEqual(1, len(owner.load()['actions']))
+        self.assertEqual(data['actions'][0]['id'], owner.load()['actions'][0]['id'])
         self.assertEqual('published', owner.load()['replies'][0]['status'])
         with patch.object(Writes, 'push', autospec=True, side_effect=t.simulate_push):
             self.assertEqual('ready', dispatch(request)['outcome'])

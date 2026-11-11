@@ -127,7 +127,7 @@ class WorkflowTest(unittest.TestCase):
                     if scenario == "body": changed[0]["comments"][0]["body"] += " Edited"
                     else: changed[0]["can_resolve"] = False
                     self.remote(changed)
-                with patch.object(publication, "repository_operation"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql") as mutation:
+                with patch.object(publication, "repository_operation"), patch("pr_review.forge.GitHub.account", return_value={"forge":"github","host":"github.com","username":"reviewer","id":None}), patch("pr_review.forge_github_conversations.GitHubConversations.set_state") as mutation:
                     result = dispatch(request)
                 self.assertFalse(result["changed"])
                 mutation.assert_not_called()
@@ -139,7 +139,7 @@ class WorkflowTest(unittest.TestCase):
             self.threads[0]["is_resolved"] = True
             self.remote(self.threads)
             raise ApiError("network", "Lost response")
-        with patch.object(publication, "repository_operation"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql", side_effect=mutate) as mutation:
+        with patch.object(publication, "repository_operation"), patch("pr_review.forge.GitHub.account", return_value={"forge":"github","host":"github.com","username":"reviewer","id":None}), patch("pr_review.forge_github_conversations.GitHubConversations.set_state", side_effect=mutate) as mutation:
             result = dispatch(self.request_state())
             self.assertTrue(result["changed"])
             self.assertFalse(result["uncertain"])
@@ -149,14 +149,34 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(mutation.call_count, 1)
 
     def test_unconfirmed_mutation_is_not_retried(self):
-        with patch.object(publication, "repository_operation"), patch.object(workflow, "command", return_value=SimpleNamespace(stdout="reviewer")), patch.object(workflow, "graphql", side_effect=ApiError("network", "Lost response")) as mutation:
+        with patch.object(publication, "repository_operation"), patch("pr_review.forge.GitHub.account", return_value={"forge":"github","host":"github.com","username":"reviewer","id":None}), patch("pr_review.forge_github_conversations.GitHubConversations.set_state", side_effect=ApiError("network", "Lost response")) as mutation:
             result = dispatch(self.request_state())
         self.assertTrue(result["uncertain"])
         self.assertFalse(result["changed"])
         self.assertEqual(mutation.call_count, 1)
 
+    def test_pre_send_failure_is_not_reported_as_a_sent_action(self):
+        with patch.object(publication, "repository_operation"), patch("pr_review.forge.GitHub.account", return_value={"forge": "github", "host": "github.com", "username": "reviewer", "id": None}), patch("pr_review.conversations.change", side_effect=ApiError("unsupported_operation", "Unavailable")):
+            with self.assertRaises(ApiError) as caught:
+                dispatch(self.request_state())
+        self.assertEqual(caught.exception.code, "unsupported_operation")
+
+    def test_cancelled_thread_action_keeps_intent_until_refresh(self):
+        def cancelled(*args):
+            self.threads[0]['is_resolved'] = True
+            self.remote(self.threads)
+            raise ApiError('cancelled', 'Stopped')
+        with patch.object(publication, "repository_operation"), patch("pr_review.forge.GitHub.account", return_value={"forge": "github", "host": "github.com", "username": "reviewer", "id": None}), patch("pr_review.forge_github_conversations.GitHubConversations.set_state", side_effect=cancelled) as mutation:
+            with self.assertRaises(ApiError) as caught:
+                dispatch(self.request_state())
+        self.assertEqual(caught.exception.code, 'cancelled')
+        mutation.assert_called_once()
+        self.assertEqual(self.f.session.load()['thread_intent']['status'], 'ambiguous')
+        self.refresh()
+        self.assertNotIn('thread_intent', self.f.session.load())
+
     def test_account_change_does_not_mutate(self):
-        with patch.object(workflow, "command", return_value=SimpleNamespace(stdout="someone-else")), patch.object(workflow, "graphql") as mutation:
+        with patch("pr_review.forge.GitHub.account", return_value={"forge":"github","host":"github.com","username":"someone-else","id":None}), patch("pr_review.forge_github_conversations.GitHubConversations.set_state") as mutation:
             with self.assertRaisesRegex(ApiError, "account changed"):
                 dispatch(self.request_state())
         mutation.assert_not_called()

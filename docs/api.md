@@ -1106,3 +1106,29 @@ publication placements/verdicts fail before a write; no downgrade is performed.
 The private draft journal adds versioned per-operation records to new logical
 actions, retaining partial receipts and treating older actions as single operations.
 Owner helper compatibility remains in place pending its separate extraction.
+
+
+Owner reply preparation also freezes forge-owned operations before confirmation.
+Unchanged previews and explicit retries reuse the operation identity and receipt
+marker. Saved previews without operations require fresh confirmation; existing
+reply drafts and sent-action journals remain recoverable. Recovery looks up the
+original operation without sending it again. Duplicate matches, malformed lookup
+results, and missing previously confirmed receipts block retry. A late receipt for
+older wording is retained as history and does not certify the edited draft. Already-published replies retain their current receipt and
+status when a different earlier receipt appears; that receipt is retained as
+history with an inspection notice. Account validation precedes recovery, and
+receipts are recorded before refreshing discussion fingerprints.
+Normalized receipt evidence accompanies the retained raw `receipt` field. Retried
+operations retain an attempt count and remain eligible for duplicate lookup after
+success. Owner recovery shares one comment listing per resource across its scan.
+
+Owner and reviewer thread actions share single-attempt mutation handling. A durable
+`thread_intent` is written before sending; fresh discussion read-back establishes
+success, including after a lost mutation response. Cancellation or failed read-back
+retains the intent. Refresh can reconcile it without another write. An explicit
+request for the already-observed state retires opposite pending intent without a
+write; ordinary refresh does not discard it. Pending intent
+prevents Owner automatic completion for that thread; confirmed resolution and
+reopening continue to use the existing `github_completion` rules. GitHub GraphQL
+encoding, reply endpoints, markers and commit URLs belong to the adapter. GitLab
+remains read-only; these changes do not enable GitLab Owner workflows.

@@ -36,6 +36,8 @@ def refresh(session, state):
     state["checked"] = {"at": now(), "head": pr.get("headRefOid"), "pr": pr}
     affected = workflow.affected_drafts(state["discussion"], discussion, state["comments"]) if old_hash != new_hash else []
     state["discussion"], state["discussion_hash"] = discussion, new_hash
+    from .conversations import reconcile
+    reconcile(state, discussion["items"])
     if old_hash != new_hash:
         for comment in state["comments"]:
             if comment["id"] in affected:

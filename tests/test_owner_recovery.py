@@ -167,7 +167,7 @@ class RecoveryTest(unittest.TestCase):
         def uncertain(*args, **kwargs):
             self.t.publish(*args, **kwargs)
             raise ApiError('offline', 'Lost reply response')
-        with patch('pr_review.owner_publication.gh', side_effect=uncertain), self.assertRaises(ApiError):
+        with patch('pr_review.publication.gh', side_effect=uncertain), self.assertRaises(ApiError):
             self.t.request('owner-publish', token=preview['token'])
         self.t.git('commit', '--amend', '-m', 'Amended fix', cwd=view['worktree'])
         amended = self.t.git('rev-parse', 'HEAD', cwd=view['worktree'])
@@ -193,7 +193,7 @@ class RecoveryTest(unittest.TestCase):
             receipt = self.t.publish(*args, **kwargs)
             self.t.metadata['state'] = 'CLOSED'
             return receipt
-        with patch('pr_review.owner_publication.gh', side_effect=publish):
+        with patch('pr_review.publication.gh', side_effect=publish):
             with self.assertRaises(ApiError) as caught:
                 self.t.request('owner-publish', token=preview['token'])
         self.assertEqual(caught.exception.code, 'closed_pr')
@@ -230,7 +230,7 @@ class RecoveryTest(unittest.TestCase):
             comment.update(id=receipt['id'], author='author', body=receipt['body'])
             self.t.feedback[0]['comments'].append(comment)
             return receipt
-        with patch('pr_review.owner_publication.gh', side_effect=publish):
+        with patch('pr_review.publication.gh', side_effect=publish):
             self.t.request('owner-publish', token=preview['token'])
         self.assertEqual(len(self.t.posts), 2)
         self.assertFalse(self.t.request('owner-refresh')['batches'][-1]['discussion_stale'])

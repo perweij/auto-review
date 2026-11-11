@@ -111,6 +111,22 @@ class GitHubPublication:
         if verdict != 'COMMENT' and change['author'].lower() == viewer.lower():
             raise ApiError('operation_failed', 'GitHub does not allow self-approval or self-request-changes')
 
+    def prepare_owner_reply(self, session, reply, viewer, identity):
+        from .common import digest
+        marker = f"<!-- pr-owner session={digest(str(session.path))[:24]} action={identity} -->"
+        return dict(version=1, id=identity, reply=reply['id'], kind=reply['target']['kind'],
+                    target=copy.deepcopy(reply['target']), viewer=viewer, marker=marker,
+                    payload={'body': with_marker(reply['body'], marker)}, body=reply['body'], status='draft')
+
+    def owner_body(self, operation):
+        body = operation['payload']['body']
+        suffix = '\n\n' + operation['marker']
+        return body[:-len(suffix)] if body.endswith(suffix) else body
+
+    def owner_receipt(self, receipt):
+        return dict(id=receipt.get('id'), author=(receipt.get('user') or {}).get('login', ''),
+                    body=receipt.get('body'), url=receipt.get('html_url'))
+
     def render(self, comment):
         return render_comment(comment)
 
@@ -137,17 +153,31 @@ class GitHubPublication:
         if operation.get('version', 1) != 1:
             raise ApiError('unsupported_operation', 'Unsupported saved publication operation version.')
         from .publication import gh as transport
-        endpoint = f"comments/{operation['target']['root_id']}/replies" if operation.get('kind') == 'reply' else 'reviews'
-        return transport(session, endpoint, operation['payload'])
+        endpoint = f"comments/{operation['target']['root_id']}/replies" if operation.get('kind') == 'reply' else 'comments' if operation.get('kind') == 'timeline' else 'reviews'
+        return transport(session, endpoint, operation['payload'], **({'resource': 'issues'} if operation.get('kind') == 'timeline' else {}))
 
     def matches(self, session, operation, receipt):
         return valid_receipt(session, operation, receipt)
 
-    def lookup(self, session, operation):
+    def lookup_owner(self, session, operations):
+        """Share one complete listing per resource across the Owner journal."""
+        from .publication import gh as transport
+        listings = {}
+        result = {}
+        for operation in operations:
+            resource = 'issues' if operation['kind'] == 'timeline' else 'pulls'
+            if resource not in listings:
+                listings[resource] = transport(session, 'comments', pages=True,
+                                               **({'resource': 'issues'} if resource == 'issues' else {}))
+            result[operation['id']] = self.lookup(session, operation, values=listings[resource])
+        return result
+
+    def lookup(self, session, operation, *, values=None):
         if operation.get('version', 1) != 1:
             raise ApiError('unsupported_operation', 'Unsupported saved publication operation version.')
         from .publication import gh as transport
-        values = transport(session, 'comments' if operation.get('kind') == 'reply' else 'reviews', pages=True)
+        if values is None:
+            values = transport(session, 'comments' if operation.get('kind') in ('reply', 'timeline') else 'reviews', pages=True, **({'resource': 'issues'} if operation.get('kind') == 'timeline' else {}))
         if any(not isinstance(v, dict) or type(v.get('id')) is not int or
                not isinstance(v.get('user'), dict) or not isinstance(v['user'].get('login'), str) or
                not isinstance(v.get('body'), str) for v in values):

@@ -39,6 +39,14 @@ class Project:
 
 class GitHub:
     @property
+    def conversations(self):
+        from .forge_github_conversations import GitHubConversations
+        return GitHubConversations()
+
+    def commit_url(self, repository, commit):
+        return f'https://{repository}/commit/{commit}'
+
+    @property
     def publication(self):
         from .forge_github_publication import GitHubPublication
         return GitHubPublication()

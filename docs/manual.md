@@ -1598,3 +1598,15 @@ it. This limitation matters for future multi-operation forge adapters. GitHub st
 prepares one remote operation per logical action. A process interruption after all
 operation receipts are saved may temporarily leave the parent marked `failed`;
 recovery completes its bookkeeping without resending anything.
+
+
+Owner reply publication preserves the exact prepared wording and destination. If
+publication is interrupted, recover first: recovery reads remote receipts and does
+not resend replies. Retrying unchanged wording reuses its original receipt marker.
+If an older reply appears after you edited its draft, its receipt is retained and
+the edited draft is left for inspection.
+
+Resolve and reopen actions send once and then refresh the discussion to confirm
+the result. After cancellation or an uncertain response, refresh to check the
+current state. Refresh never retries the mutation. A pending thread action cannot
+supply automatic completion proof until its requested state is observed.
