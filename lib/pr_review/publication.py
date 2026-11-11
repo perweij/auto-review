@@ -183,6 +183,8 @@ def mark_published(session, state, action, receipt):
 
 
 def recover(session, state):
+    from .forge import restore, require
+    require(restore(session.manifest).forge, "publication")
     for batch in state["batches"]:
         for action in batch["actions"]:
             if action["status"] not in ("submitting", "ambiguous", "failed"):
@@ -205,6 +207,8 @@ def recover(session, state):
 
 
 def prepare(session, state):
+    from .forge import restore, require
+    require(restore(session.manifest).forge, "publication")
     recover(session, state)
     affected = refresh(session, state)
     try:
@@ -265,6 +269,8 @@ def prepare(session, state):
 
 
 def publish(session, state, request):
+    from .forge import restore, require
+    require(restore(session.manifest).forge, "publication")
     batch = state.get("prepared")
     if not batch or request.get("confirmation") != digest(batch):
         raise ApiError("confirmation_expired", "The staged batch changed; prepare and confirm it again.")

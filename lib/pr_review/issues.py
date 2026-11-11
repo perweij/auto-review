@@ -28,7 +28,7 @@ def resolve(request):
         if len(names) != 1:
             raise ApiError('invalid_request', 'Choose a repository with -R.')
         identity = names.pop()
-    return Repository.resolve(request.get('pr') or request.get('issue'), repository_name(identity), cwd)
+    return Repository.resolve(request.get('pr') or request.get('issue'), repository_name(identity), cwd, request.get("forge"))
 
 
 def semantic_comment(comment):
@@ -157,14 +157,20 @@ class Workflow:
     def __init__(self, request, repo, facts):
         self.request, self.repo = request, repo
         number = facts['issue']['number']
-        self.path = state_root() / 'issues-v1' / digest([repo.identity, str(repo.common)])[:32] / f'issue-{number}'
+        self.path = state_root() / 'issues-v1' / digest([repo.project.storage_key, str(repo.common)])[:32] / f'issue-{number}'
         self.file = self.path / 'session.json'
         self.state = read_json(self.file)
         if not self.state:
             self.state = {'kind': 'issue', 'format_version': 1, 'sequence': 0, 'id': uuid.uuid4().hex,
-                          'issue': number, 'repository': repo.identity, 'git_common_dir': str(repo.common),
-                          'viewer': facts['viewer'], 'phase': 'intake', 'actions': {}, 'allowed_heads': [],
+                          'issue': number, 'repository': repo.identity, 'forge_project': repo.project.saved(), 'git_common_dir': str(repo.common),
+                          'forge_account': facts.get('forge_account'), 'viewer': facts['viewer'], 'phase': 'intake', 'actions': {}, 'allowed_heads': [],
                           'title': facts['issue']['title'], 'created_at': now(), 'budget_scope': 'planning-and-execution'}
+        from .forge import restore, check_account
+        if facts.get('forge_account'):
+            check_account(self.state.get('forge_account'), facts['forge_account'], self.state['viewer'])
+        elif (self.state.get('forge_account') or {}).get('id'):
+            raise ApiError('account_changed', 'Stable account identity is unavailable.')
+        restore(self.state, request.get('forge'))
         if self.state.get('format_version') != 1 or self.state.get('git_common_dir') != str(repo.common):
             raise ApiError('invalid_session', 'Unsupported issue state or repository identity.')
         if self.state['viewer'].lower() != facts['viewer'].lower():
@@ -182,8 +188,8 @@ class Workflow:
         self.state['next_action'] = next_action
         self.save()
         return {'outcome': outcome, 'exit_code': code, 'phase': self.state['phase'],
-                'issue_url': f'https://{self.repo.identity}/issues/{self.state["issue"]}',
-                'pr_url': f'https://{self.repo.identity}/pull/{self.state["pr"]}' if self.state.get('pr') else None,
+                'issue_url': self.repo.forge.url(self.repo.project, self.state['issue'], 'issue'),
+                'pr_url': self.repo.forge.url(self.repo.project, self.state['pr']) if self.state.get('pr') else None,
                 'session': str(self.path), 'worktree': self.state.get('worktree'), 'next_action': next_action,
                 # Keep the checked facts/snapshot intact, but report the current
                 # action rather than the action saved before this invocation.
@@ -1084,7 +1090,7 @@ class Workflow:
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)
             self.writes.draft(False)
-            self.writes.comment('Implementation and independent harness review passed. PR: ' + f'https://{self.repo.identity}/pull/{state["pr"]}', 'ready:' + state['remote_head'])
+            self.writes.comment('Implementation and independent harness review passed. PR: ' + self.repo.forge.url(self.repo.project, state['pr']), 'ready:' + state['remote_head'])
             data = owner.load()
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)

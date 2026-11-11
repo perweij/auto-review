@@ -789,12 +789,15 @@ class AutomationTest(unittest.TestCase):
         store.trust = lambda *_: None
         store.context = lambda *_: None
         store.session = lambda: Session({'session': str(store.root)})
-        repo = SimpleNamespace(lock=self.session.pr_lock, cwd=self.f.repo, pr=7,
+        from pr_review.forge import adapter
+        repo = SimpleNamespace(forge=adapter(), project=adapter().project('github.com/org/repo'),
+                               lock=self.session.pr_lock, cwd=self.f.repo, pr=7,
                                identity='github.com/org/repo', name='org/repo', host='github.com', remote='origin',
                                url=self.session.manifest['url'], pages=lambda *_: [], git=lambda *_: None,
                                metadata=lambda: {'baseRefName': 'main', 'isDraft': False})
         with patch.object(reviews.Repository, 'resolve', return_value=repo), \
                 patch.object(reviews, 'locate', return_value=(store.root, self.f.repo)), \
+                patch('pr_review.forge.GitHub.account', return_value={'forge': 'github', 'host': 'github.com', 'username': 'reviewer', 'id': None}), \
                 patch.object(reviews, 'capabilities', return_value={}), \
                 patch.object(reviews, 'requires_independent', return_value=False), \
                 patch.object(reviews, 'command', return_value=SimpleNamespace(returncode=0, stdout='reviewer')), \

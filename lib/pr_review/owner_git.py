@@ -18,7 +18,7 @@ from .storage import hash_file
 def fetch_head(session, state):
     ref = "refs/pr-owner/" + digest([session.repo.identity, session.repo.pr])[:24] + "/remote"
     session.repo.git("fetch", "--no-tags", "--no-write-fetch-head", "--refmap=", session.repo.remote,
-                     f"+refs/pull/{session.repo.pr}/head:{ref}")
+                     f"+{session.repo.forge.head_ref(session.repo.pr)}:{ref}")
     head = session.repo.git("rev-parse", ref).stdout.strip()
     if head != state["metadata"]["headRefOid"]:
         raise ApiError("stale_source", "PR head changed during fetch; refresh and retry.")

@@ -75,7 +75,7 @@ def local_repository(request):
         if len(candidates) != 1:
             raise ApiError("invalid_request", "Choose a repository from this checkout's remotes.")
         identity = candidates.pop()
-    return Repository.resolve(target, identity, cwd)
+    return Repository.resolve(target, identity, cwd, request.get("forge"))
 
 
 def open_session(request):
@@ -84,12 +84,12 @@ def open_session(request):
                  if line.startswith("worktree ")]
     if any(root().is_relative_to(path) for path in worktrees):
         raise ApiError("invalid_session", "Artifacts must be outside repository worktrees; set XDG_STATE_HOME.")
-    path = root() / digest([str(repo.common), repo.identity])[:32] / f"pr-{repo.pr}"
+    path = root() / digest([str(repo.common), repo.project.storage_key])[:32] / f"pr-{repo.pr}"
     with locked(path / ".state.lock"):
         if not (path / "session.json").exists():
             write_json(path / "session.json", {
                 "kind": "owner", "format_version": 1, "sequence": 0, "created_at": now(),
-                "repository": repo.identity, "pr": repo.pr, "url": repo.url,
+                "repository": repo.identity, "forge_project": repo.project.saved(), "pr": repo.pr, "url": repo.url,
                 "cwd": str(repo.cwd), "git_common_dir": str(repo.common),
                 "settings": default_settings(request), "checked_at": None, "viewer": None,
                 "feedback": [], "batches": [], "replies": [], "actions": [], "worktree": None})
@@ -240,7 +240,9 @@ class OwnerSession:
         self.lock = self.path / ".state.lock"
         self.file = self.path / "session.json"
         self.manifest = self.load()
-        self.repo = Repository.resolve(self.manifest["pr"], self.manifest["repository"], self.manifest["cwd"])
+        from .forge import restore
+        project = restore(self.manifest, request.get("forge"))
+        self.repo = Repository.resolve(self.manifest["pr"], self.manifest["repository"], self.manifest["cwd"], project.forge)
         if str(self.repo.common) != self.manifest["git_common_dir"]:
             raise ApiError("invalid_session", "Owner checkout identity changed.")
         self.execution_lock = self.repo.common / "pr-owner-locks" / (digest([self.repo.identity, self.repo.pr]) + ".lock")
@@ -314,7 +316,12 @@ def refresh(session, state):
     branch = require_text(head.get("ref"), "head branch")
     repo.git("check-ref-format", "refs/heads/" + branch)
     viewer_data = github_json(repo.identity, "user", repo.cwd)
-    viewer = require_text(viewer_data.get("login"), "GitHub account")
+    from .forge import check_account
+    account = repo.forge.account_from(repo.project, viewer_data)
+    check_account(state.get("forge_account"), account, state.get("viewer"))
+    if state.get("viewer") is None:
+        state["forge_account"] = account
+    viewer = account["username"]
     if state.get("viewer") and state["viewer"].lower() != viewer.lower():
         raise ApiError("account_changed", "GitHub account changed; return to the owner session's original account.")
     discussion, raw_discussion = fetch(repo)

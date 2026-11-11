@@ -145,7 +145,7 @@ class Review(Store):
             branch = pr['baseRefName']
             source = 'refs/heads/' + branch if pr['state'] == 'OPEN' else pr['baseRefOid']
             self.repo.git('fetch', '--no-tags', '--refmap=', '--no-write-fetch-head', self.repo.remote,
-                          f'+refs/pull/{self.repo.pr}/head:{self.repo.head_ref}', f'+{source}:{self.repo.base_ref}')
+                          f'+{self.repo.forge.head_ref(self.repo.pr)}:{self.repo.head_ref}', f'+{source}:{self.repo.base_ref}')
             pr = self.repo.metadata()
             head = self.repo.git('rev-parse', self.repo.head_ref).stdout.strip()
             base = self.repo.git('rev-parse', self.repo.base_ref).stdout.strip()
@@ -247,18 +247,18 @@ class Review(Store):
         return Session({'session': str(self.root), 'generation': generation(self.path, self.manifest)})
 
 
-def capabilities(enabled, processing, runtime, cwd, *, independent_providers=None):
+def capabilities(enabled, processing, runtime, cwd, *, independent_providers=None, forge=None):
     independent_providers = enabled if independent_providers is None else independent_providers
-    required = ['git', 'gh', *enabled]
+    from .forge import adapter
+    selected_forge = adapter(forge)
+    required = ['git', selected_forge.executable, *enabled]
     for tool in required:
         if shutil.which(tool) is None:
             raise ApiError('missing_dependency', f'Missing required executable: {tool}')
     versions = {tool: command([tool, '--version'], cwd=cwd, timeout=90).stdout.strip().splitlines()[0] for tool in required}
     versions.setdefault('codex', 'disabled')
     versions.setdefault('claude', 'disabled')
-    checks = [(['gh', 'api', '--help'], ['--hostname', '--paginate', '--slurp', '--method', '--field', '--raw-field']),
-              (['gh', 'pr', 'view', '--help'], ['--json', '--comments', '--repo']),
-              (['gh', 'auth', 'status', '--help'], ['--hostname']),
+    checks = selected_forge.cli_checks() + [
               (['git', 'worktree', '-h'], ['--detach']),
               (['git', 'fetch', '-h'], ['--refmap', 'write-fetch-head', '--no-tags'])]
     if 'codex' in enabled:
@@ -290,7 +290,10 @@ def required_providers(configuration, kind):
 def execute(request, *, confirm_trust=None):
     """Return the selected generation after releasing all backend locks."""
     from . import pipeline
-    repo = Repository.resolve(request['pr'], request.get('repository'), request.get('cwd'))
+    from .forge import require, request_forge
+    request = {**request, 'forge': request_forge(request)}
+    require(request.get('forge'), 'review')
+    repo = Repository.resolve(request['pr'], request.get('repository'), request.get('cwd'), request.get('forge'))
     runtime = providers.Runtime.environment()
     threads = request.get('followup_threads', [])
     if not isinstance(threads, list) or any(not isinstance(k, str) or not k.startswith('thread:') or len(k) <= 7 for k in threads) or len(threads) != len(set(threads)):
@@ -316,13 +319,13 @@ def execute(request, *, confirm_trust=None):
         independent_providers = (configuration['reviewers'] if kind != 'followup' and
                                  requires_independent(configuration, saved_manifest) else [])
         tools = capabilities(enabled, configuration['processing_provider'], runtime, repo.cwd,
-                             independent_providers=independent_providers)
+                             independent_providers=independent_providers, forge=repo.project.forge)
         if request.get('_cli_config'):
             from .cli_settings import summary, validate_models
             validate_models(configuration, request.get('catalogs'), reviewers=kind != 'followup')
             summary(configuration, runtime, request=request)
         say(f'PR Review: #{repo.pr}; Repository: {repo.identity}; Remote: {repo.remote}')
-        checks = [(['gh', 'auth', 'status', '--hostname', repo.host], f'GitHub authentication failed for {repo.host}')]
+        checks = [(repo.forge.auth_check(repo.project), f'GitHub authentication failed for {repo.host}')]
         if 'codex' in enabled:
             checks.append((['codex', 'login', 'status'], 'Codex authentication failed; run codex login'))
         if 'claude' in enabled:
@@ -331,18 +334,24 @@ def execute(request, *, confirm_trust=None):
             if command(argv, cwd=repo.cwd, check=False, timeout=runtime.auth_timeout).returncode:
                 raise ApiError('authentication_failed', error)
         pr = repo.metadata()
-        viewer = command(['gh', 'api', '--hostname', repo.host, 'user', '--jq', '.login'], cwd=repo.cwd).stdout.strip()
+        account = repo.forge.account(repo.project, repo.cwd)
+        viewer = account['username']
         if not viewer:
             raise ApiError('authentication_failed', 'GitHub viewer login missing')
         permission = command(['gh', 'repo', 'view', repo.identity, '--json', 'viewerPermission', '--jq', '.viewerPermission'], cwd=repo.cwd, check=False).stdout.strip() or 'unknown'
         say(f'Warning: Read access is checked; review-publication permission is unverified (repository permission: {permission}).')
         issues = repo.pages(f'repos/{repo.name}/issues/{repo.pr}/comments')
         reviews = repo.pages(f'repos/{repo.name}/pulls/{repo.pr}/reviews')
-        repo.git('ls-remote', '--exit-code', repo.remote, f'refs/pull/{repo.pr}/head')
+        repo.git('ls-remote', '--exit-code', repo.remote, repo.forge.head_ref(repo.pr))
         repo.git('ls-remote', '--exit-code', repo.remote, 'refs/heads/' + pr['baseRefName'])
         if pr['isDraft']:
             say('Warning: PR is a draft')
         run = Review(repo, root, worktree, configuration, runtime, tools, viewer, permission)
+        from .forge import check_account
+        check_account(run.manifest.get("forge_account"), account, run.manifest.get("viewer"))
+        if not root:
+            run.manifest["forge_account"] = account
+            run.save()
         with usage.operation(run.root, legacy=root is not None):
             try:
                 run.configure(kind, threads)

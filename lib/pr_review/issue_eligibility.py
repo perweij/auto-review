@@ -58,13 +58,14 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
     repo = repository_context
     try:
         get = lambda path: github_json(repo.identity, path, repo.cwd)
-        viewer = get('user')['login']
+        account = repo.forge.account_from(repo.project, get('user'))
+        viewer = account['username']
         info = get('repos/' + repo.name)
         issue_number = target.get('issue')
         if not issue_number:
             refs = connection(repo, int(target['pr']), issue=False)
             if len(refs) != 1 or refs[0]['repository']['nameWithOwner'].lower() != repo.name:
-                return {'complete': True, 'repository': repo.identity, 'viewer': viewer,
+                return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'forge_account': account,
                         'link_error': 'issue_link_missing' if not refs else 'issue_link_ambiguous'}
             issue_number = refs[0]['number']
         issue = get(f'repos/{repo.name}/issues/{issue_number}')
@@ -77,11 +78,11 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
             raise ApiError('facts_incomplete', 'Issue identity mismatch.')
         linked = connection(repo, issue_number)
         if any(r['repository']['nameWithOwner'].lower() != repo.name for r in linked):
-            return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue,
+            return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'forge_account': account, 'issue': issue,
                     'pull_references': linked, 'link_error': 'foreign_pr_unsupported'}
         pulls = [get(f'repos/{repo.name}/pulls/{r["number"]}') for r in linked]
         if target.get('pr') and int(target['pr']) not in [p['number'] for p in pulls]:
-            return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue,
+            return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'forge_account': account, 'issue': issue,
                     'pull_references': linked, 'link_error': 'issue_link_missing'}
         active = [p for p in pulls if p['state'] == 'open']
         pr = next((p for p in pulls if p['number'] == target.get('pr')), None) if target.get('pr') else (active[0] if len(active) == 1 else None)
@@ -93,7 +94,7 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
         head, untouched = None, True
         if pr:
             repo.git('fetch', '--no-tags', '--no-write-fetch-head', '--refmap=', repo.remote,
-                     f'+refs/pull/{pr["number"]}/head:{namespace}/head')
+                     f'+{repo.forge.head_ref(pr["number"])}:{namespace}/head')
             head = repo.git('rev-parse', namespace + '/head').stdout.strip()
             if head != pr['head']['sha']:
                 raise ApiError('facts_incomplete', 'PR changed during fetch.')
@@ -103,7 +104,7 @@ def collect_eligibility_facts(target, repository_context, prefetched=None):
                 if len(parents) != 1 or repo.git('rev-parse', sha + '^{tree}').stdout != repo.git('rev-parse', parents[0] + '^{tree}').stdout:
                     untouched = False
                     break
-        return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'issue': issue, 'pr': pr,
+        return {'complete': True, 'repository': repo.identity, 'viewer': viewer, 'forge_account': account, 'issue': issue, 'pr': pr,
                 'pulls': pulls, 'pull_references': linked,
                 'base_branch': base_branch, 'base': base, 'head': head, 'untouched': untouched,
                 'permission': info.get('permissions', {}).get('push'),

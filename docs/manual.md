@@ -1466,3 +1466,24 @@ creating directories or starting work. Existing `m` and `C-u m` behavior is unch
 CLI review and fix progress prints `Checkout: /absolute/path` when the checkout
 is available, including on resume. This is separate from the session/artifact
 directory. JSON result output remains unchanged.
+
+### Forge selection and compatibility
+
+Review, Owner and fix-issue commands accept `--forge github`. GitHub remains the
+only installed forge implementation and the default, including enterprise hosts.
+Unknown selections fail before starting work. Existing repository selectors,
+GitHub URLs and saved session locations remain supported; this option does not
+provide GitLab support yet.
+
+New sessions record forge, host and full project path separately, and retain the
+existing repository and viewer fields for compatibility. Legacy sessions are
+interpreted as GitHub without rewriting historical receipts or publication text.
+New authenticated work retains a stable account ID when available, in addition
+to the existing username check. A changed or unavailable previously recorded ID
+blocks continuation rather than downgrading to a username-only check.
+
+The internal forge interface owns identity, account lookup, URLs, fetch refs,
+CLI/authentication requirements and basic operation capabilities. Local Git and
+workflow decisions remain shared. Issue #20 will normalize review context and
+establish cross-adapter read contracts; #25 will test those contracts with a
+read-only GitLab.com adapter. Publication encoding and recovery remain #21.

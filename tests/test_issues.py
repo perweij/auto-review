@@ -28,6 +28,12 @@ def facts():
             'pr': None, 'pulls': [], 'comments': [], 'base_branch': 'main', 'base': 'base', 'head': None, 'untouched': True}
 
 
+def forge_repository(**values):
+    from pr_review.forge import adapter
+    forge = adapter()
+    return SimpleNamespace(**values, forge=forge, project=forge.project(values['identity']))
+
+
 class EligibilityTest(unittest.TestCase):
     def test_issue_assessment_uses_independent_processor(self):
         from pr_review.issue_planning import assess_issue
@@ -122,7 +128,7 @@ class CommentInputTest(unittest.TestCase):
     def test_imported_answers_are_stable_and_keep_edited_publications(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            repo = SimpleNamespace(identity='github.com/org/repo', cwd=root, common=root)
+            repo = forge_repository(identity='github.com/org/repo', cwd=root, common=root)
             f = {**facts(), 'comments': [self.comment]}
             with patch('pr_review.issues.state_root', return_value=root):
                 flow = Workflow({'pr': 7}, repo, f)
@@ -194,7 +200,7 @@ class ExecutionCompleteTest(unittest.TestCase):
 
 class EligibilityRelationshipTest(unittest.TestCase):
     def setUp(self):
-        self.repo = SimpleNamespace(identity='github.com/org/repo', name='org/repo', cwd=Path('.'),
+        self.repo = forge_repository(identity='github.com/org/repo', name='org/repo', cwd=Path('.'),
                                     remote='origin', git=Mock(side_effect=self.git))
         self.pulls = {7: {'number': 7, 'state': 'open', 'assignees': [],
                           'head': {'sha': 'head', 'repo': {'full_name': 'org/repo'}},
@@ -282,7 +288,7 @@ class ReadinessCacheTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        repo = SimpleNamespace(identity='github.com/org/repo', common=root, cwd=root,
+        repo = forge_repository(identity='github.com/org/repo', common=root, cwd=root,
                                git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}
         owner = SimpleNamespace(execution_lock=root / 'owner.lock', repo=SimpleNamespace(lock=root / 'repo.lock', git=repo.git),
@@ -553,7 +559,7 @@ class QuestionPublicationRecoveryTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.repo = SimpleNamespace(identity='github.com/org/repo', name='org/repo',
+        self.repo = forge_repository(identity='github.com/org/repo', name='org/repo',
                                     common=self.root, cwd=self.root,
                                     git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}
@@ -761,7 +767,7 @@ class TerminalRecoveryTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.repo = SimpleNamespace(identity='github.com/org/repo', name='org/repo',
+        self.repo = forge_repository(identity='github.com/org/repo', name='org/repo',
                                     common=self.root, cwd=self.root,
                                     git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}

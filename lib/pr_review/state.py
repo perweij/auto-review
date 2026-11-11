@@ -62,11 +62,13 @@ class Session:
                 raise ApiError("missing_generation", "This saved generation is unavailable; refresh history.")
             self.path = candidates[0]
         self.manifest = read_json(self.path / "manifest.json", {})
+        from .forge import restore
+        project = restore(self.manifest, request.get("forge"))
         self.id = generation(self.path, self.manifest)
         self.git = GitContext(self.manifest)
         self.file = self.path / "publication/drafts.json"
         self.lock = self.path / "publication/.drafts.lock"
-        self.pr_lock = Path(self.manifest["git_common_dir"]) / "pr-review-locks" / f'{self.manifest["pr"]}.lock'
+        self.pr_lock = Path(self.manifest["git_common_dir"]) / "pr-review-locks" / f'{project.resource_key("change", self.manifest["pr"])}.lock'
 
     def pointer(self, name):
         p = self.root / name

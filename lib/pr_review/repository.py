@@ -14,14 +14,8 @@ def fail(message):
 
 
 def repository_name(value):
-    parts = value.split("/")
-    if len(parts) == 2:
-        parts.insert(0, "github.com")
-    if (len(parts) != 3 or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", parts[0])
-            or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", p) or p in (".", "..")
-                   or p.startswith("-") for p in parts[1:])):
-        fail("Repository must be [HOST/]OWNER/REPO")
-    return "/".join(parts).lower()
+    from .forge import adapter
+    return adapter().project(value).repository
 
 
 def normalize_remote(value):
@@ -38,6 +32,17 @@ class Repository:
     identity: str
     pr: int
     remote: str
+    forge_kind: str = "github"
+
+    @property
+    def project(self):
+        from .forge import adapter
+        return adapter(self.forge_kind).project(self.identity)
+
+    @property
+    def forge(self):
+        from .forge import adapter
+        return adapter(self.project.forge)
 
     @property
     def host(self):
@@ -49,42 +54,39 @@ class Repository:
 
     @property
     def url(self):
-        return f"https://{self.identity}/pull/{self.pr}"
+        return self.forge.url(self.project, self.pr)
 
     @property
     def head_ref(self):
-        return f"refs/pr-review/{self.pr}/head"
+        return f"refs/pr-review/{self.project.resource_key('change', self.pr)}/head"
 
     @property
     def base_ref(self):
-        return f"refs/pr-review/{self.pr}/base"
+        return f"refs/pr-review/{self.project.resource_key('change', self.pr)}/base"
 
     @property
     def lock(self):
-        return self.common / "pr-review-locks" / f"{self.pr}.lock"
+        return self.common / "pr-review-locks" / f"{self.project.resource_key('change', self.pr)}.lock"
 
     def git(self, *args, check=True, cwd=None):
         return git(args, cwd=cwd or self.cwd, check=check)
 
     @classmethod
-    def resolve(cls, target, repository=None, cwd=None):
+    def resolve(cls, target, repository=None, cwd=None, forge=None):
+        from .forge import adapter
+        adapter(forge)
         cwd = Path(cwd or Path.cwd()).resolve()
-        target = str(target)
-        match = re.fullmatch(r"https://([A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?", target)
-        implied = match[1].lower() if match else None
-        pr = match[2] if match else target
-        if not re.fullmatch(r"[1-9][0-9]*", pr):
-            fail("Expected a positive PR number or an https://HOST/OWNER/REPO/pull/NUMBER URL")
+        implied_project, pr = adapter(forge).target(target)
+        implied = implied_project.repository if implied_project else None
         if repository:
-            identity = repository_name(repository)
+            identity = adapter(forge).project(repository).repository
             if implied and implied != identity:
                 fail("PR URL conflicts with --repo")
         elif implied:
-            identity = repository_name(implied)
+            identity = implied_project.repository
         else:
             try:
-                result = command(["gh", "repo", "view", "--json", "nameWithOwner,url"], cwd=cwd)
-                identity = repository_name(normalize_remote(json.loads(result.stdout)["url"]))
+                identity = adapter(forge).discover(cwd).repository
             except (ApiError, ValueError, KeyError) as exc:
                 if isinstance(exc, ApiError) and exc.code == "cancelled":
                     raise
@@ -97,13 +99,15 @@ class Repository:
                 matches.append(remote)
         if len(matches) != 1:
             fail(f"Expected exactly one remote for {identity}; found {len(matches)}. Check remotes and --repo.")
-        return cls(cwd, common, identity, int(pr), matches[0])
+        return cls(cwd, common, identity, int(pr), matches[0], forge or "github")
 
     @classmethod
     def from_manifest(cls, manifest):
         result = git(["--git-dir", manifest["git_common_dir"], "worktree", "list", "--porcelain"])
         cwd = result.stdout.splitlines()[0].removeprefix("worktree ")
-        return cls.resolve(manifest["pr"], manifest["repository"], cwd)
+        from .forge import restore
+        project = restore(manifest)
+        return cls.resolve(manifest["pr"], manifest["repository"], cwd, project.forge)
 
     def metadata(self, destination=None):
         fields = "number,title,body,url,state,isDraft,baseRefName,baseRefOid,headRefName,headRefOid,isCrossRepository,author"
@@ -171,7 +175,10 @@ class Repository:
     def validate_publication(self, directory, verdict="COMMENT"):
         directory = Path(directory)
         manifest = read_json(directory / "manifest.json")
-        viewer = command(["gh", "api", "--hostname", self.host, "user", "--jq", ".login"], cwd=self.cwd).stdout.strip()
+        from .forge import check_account
+        account = self.forge.account(self.project, self.cwd)
+        check_account(manifest.get("forge_account"), account, manifest["viewer"])
+        viewer = account["username"]
         if viewer.lower() != manifest["viewer"].lower():
             fail("GitHub account changed since this review; start a new review with that account")
         self.verify(manifest, directory)
@@ -184,7 +191,7 @@ class Repository:
             fail("PR is no longer open; publication blocked")
         if verdict != "COMMENT" and pr["author"]["login"].lower() == viewer.lower():
             fail("GitHub does not allow self-approval or self-request-changes")
-        ref = f"refs/pr-review/{self.pr}/publication-base"
+        ref = f"refs/pr-review/{self.project.resource_key('change', self.pr)}/publication-base"
         self.git("fetch", "--no-tags", "--refmap=", "--no-write-fetch-head", self.remote,
                  f"+refs/heads/{pr['baseRefName']}:{ref}")
         base = self.git("rev-parse", ref).stdout.strip()

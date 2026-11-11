@@ -7,17 +7,17 @@ from .state import discover
 
 
 def repository_name(value):
+    from .forge import adapter
+    from .repository import normalize_remote
     if not isinstance(value, str):
         return None
-    value = re.sub(r"^(?:https?://|ssh://(?:[^/@]+@)?)", "", value)
-    value = re.sub(r"^[^/@]+@([^:]+):", r"\1/", value).rstrip("/")
-    if value.endswith(".git"):
-        value = value[:-4]
-    parts = value.split("/")
-    if (len(parts) == 3 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", parts[0])
-            and all(re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", p) for p in parts[1:])):
-        return value.lower()
-    return None
+    candidate = normalize_remote(value) if '://' in value or '@' in value else value.rstrip('/').removesuffix('.git')
+    if len(candidate.split('/')) != 3:
+        return None
+    try:
+        return adapter().project(candidate).repository
+    except ApiError:
+        return None
 
 
 def github_json(repository, endpoint, cwd, *, pages=False):

@@ -82,7 +82,7 @@ if [[ $tool == gh ]]; then
             exec python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mock-gh-json.py" "$endpoint"
         fi
         case $endpoint in
-            user) echo "${MOCK_VIEWER:-reviewer}" ;;
+            user) if [[ $* == *--jq* ]]; then echo "${MOCK_VIEWER:-reviewer}"; else jq -nc --arg login "${MOCK_VIEWER:-reviewer}" '{login:$login,id:123}'; fi ;;
             graphql)
                 if [[ $* == *latestOpinionatedReviews* ]]; then
                     if [[ -f $FIXTURE/review-status.json ]]; then cat "$FIXTURE/review-status.json"

@@ -8,7 +8,13 @@ from . import operations, publication, settings, models, workflow, pulls
 
 
 def dispatch(request):
+    from .forge import request_forge, require
+    forge = request_forge(request)
     operation = request.get("command")
+    capability = ("issues" if operation in ("issue-run", "issue-recover") else
+                  "owner" if operation in ("owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
+                  "publication" if operation in ("publish", "prepare", "resolve", "automatic-review") else "review")
+    require(forge, capability)
     if operation == "checkout":
         from .checkouts import lookup
         return lookup(request)
