@@ -1487,3 +1487,35 @@ CLI/authentication requirements and basic operation capabilities. Local Git and
 workflow decisions remain shared. Issue #20 will normalize review context and
 establish cross-adapter read contracts; #25 will test those contracts with a
 read-only GitLab.com adapter. Publication encoding and recovery remain #21.
+
+### Forge review context
+
+New or rebuilt review context uses `context/review-context.json` with normalized
+change, conversation and CI facts. Model-facing text is rendered locally from
+those facts; it does not depend on human-readable `gh pr view` output. Native
+responses are retained separately under `diagnostics/`.
+
+A completed, valid legacy context is reused unchanged on resume. Rebuilding
+context adopts `normalized-review-v1` and invalidates dependent results through
+the existing content fingerprints. Saved discussion keys and GitHub comment IDs
+retain their previous representation, preserving edits and receipt matching.
+
+Missing optional CI or review status is explicitly unavailable. Required
+metadata and complete discussion failures still block their dependent phases;
+partial local reports are retained. Unknown conversation permissions do not
+authorize an operation. Local snapshot checks and publication policy are unchanged.
+
+Adapters provide change details, discovery, initial model context, complete
+conversations and review status. Code anchors and native position data are
+separate from conversation freshness identities. The read-contract fixtures
+include opaque IDs and nested projects for the forthcoming GitLab pilot; this
+change does not enable GitLab transport or writes.
+
+Normalized Owner `change` facts are authoritative; `metadata` remains a compatibility
+projection for older clients and the pending write-path extractions. New writers
+must update the canonical facts and derive that projection together. Reading an
+old session without `change` translates only the needed facts in memory.
+Malformed initial comment bodies are reported as unavailable context with a warning,
+so local review reports can still be retained; complete discussion matching and
+publication continue to require a validated snapshot. A cancelled review-status
+refresh clears the previous status rather than leaving an old approval visible.

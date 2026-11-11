@@ -110,53 +110,13 @@ class Repository:
         return cls.resolve(manifest["pr"], manifest["repository"], cwd, project.forge)
 
     def metadata(self, destination=None):
-        fields = "number,title,body,url,state,isDraft,baseRefName,baseRefOid,headRefName,headRefOid,isCrossRepository,author"
-        try:
-            value = json.loads(command(["gh", "pr", "view", str(self.pr), "-R", self.identity,
-                                        "--json", fields], cwd=self.cwd).stdout)
-        except (ApiError, ValueError) as exc:
-            if isinstance(exc, ApiError) and exc.code == "cancelled":
-                raise
-            fail("Repository or PR inaccessible")
-        if (not isinstance(value, dict) or str(value.get("number")) != str(self.pr)
-                or str(value.get("url", "")).lower().rstrip("/") != self.url
-                or any(not re.fullmatch(r"[0-9a-f]{40,64}", str(value.get(k, "")))
-                       for k in ("headRefOid", "baseRefOid"))
-                or not isinstance(value.get("baseRefName"), str) or not value["baseRefName"]
-                or not isinstance(value.get("author"), dict) or not isinstance(value["author"].get("login"), str)
-                or value.get("state") not in ("OPEN", "CLOSED", "MERGED")):
-            fail("PR metadata identity or snapshot is invalid")
-        self.git("check-ref-format", "refs/heads/" + value["baseRefName"])
-        if destination:
-            write_json(destination, value)
-        return value
+        return self.forge.metadata(self, destination)
 
     def pages(self, endpoint, kind="array"):
-        result = command(["gh", "api", "--hostname", self.host, "--paginate", "--slurp", endpoint], cwd=self.cwd)
-        try:
-            pages = json.loads(result.stdout)
-            if not isinstance(pages, list):
-                raise ValueError()
-            if kind == "actions":
-                pages = [p["workflow_runs"] for p in pages]
-            if any(not isinstance(p, list) for p in pages):
-                raise ValueError()
-            return [item for page in pages for item in page]
-        except (ValueError, KeyError, TypeError) as exc:
-            raise ApiError("invalid_response", "Incomplete GitHub pages") from exc
+        return self.forge.pages(self, endpoint, kind)
 
     def graphql(self, query, **variables):
-        # Keep the existing gh query/field convention and authentication setup.
-        args = ["gh", "api", "--hostname", self.host, "graphql", "-f", "query=" + query]
-        for name, value in variables.items():
-            args += ["-F" if type(value) is int else "-f", f"{name}={value}"]
-        try:
-            value = json.loads(command(args, cwd=self.cwd).stdout)
-            if not isinstance(value, dict) or value.get("errors"):
-                raise ValueError()
-            return value["data"]
-        except (ValueError, KeyError) as exc:
-            raise ApiError("invalid_response", "Incomplete GraphQL response") from exc
+        return self.forge.graphql(self, query, **variables)
 
     def verify(self, manifest, directory=None):
         snapshot = manifest["snapshot"]

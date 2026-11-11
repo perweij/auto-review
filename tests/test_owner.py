@@ -1017,6 +1017,21 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual([role for role, _ in self.calls].count("fix"), 2)
         self.assertFalse(self.posts)
 
+    def test_refresh_of_legacy_metadata_preserves_verified_batch(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        state.pop("change")
+        saved_batch = copy.deepcopy(state["batches"][-1])
+        session.save(state)
+        self.request("owner-read")
+        self.assertNotIn("change", session.load())
+        self.request("owner-refresh")
+        refreshed = session.load()
+        self.assertEqual(refreshed["change"]["target"]["head"], refreshed["metadata"]["baseRefOid"])
+        for key in ("verified_base", "status", "git_admin", "checkpoint"):
+            self.assertEqual(saved_batch.get(key), refreshed["batches"][-1].get(key))
+
     def test_unrelated_description_preserves_ready_verification(self):
         self.fix()
         batch = self.view["batches"][-1]

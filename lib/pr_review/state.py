@@ -290,6 +290,9 @@ class Session:
 
     def verdicts(self, state):
         pr = (state.get("checked") or {}).get("pr", read_json(self.path / "context/pr.json", {}))
+        if not pr and self.manifest.get('change'):
+            from .forge_context import legacy_metadata
+            pr = legacy_metadata(self.manifest['change'])
         own = str(pr.get("author", {}).get("login", "")).lower() == str(self.manifest.get("viewer", "?")).lower()
         return [{"value": v, "available": v == "COMMENT" or not own,
                  "reason": "You are the PR author; GitHub permits Comment only. Inline discussions are still supported."

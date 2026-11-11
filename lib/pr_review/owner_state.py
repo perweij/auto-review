@@ -124,7 +124,8 @@ def toolkit(request):
         elif 'toolkit' in request:
             raise ApiError('invalid_request', 'Choose a repository before saving its toolkit preference.', repositories=sorted(names))
     if identity:
-        identity = repository_name(identity)
+        from .forge import adapter
+        identity = adapter(request.get("forge")).project(identity).repository
     path = state_root() / "toolkits" / (digest([common, identity]) + ".json")
     with locked(path.with_suffix(".lock")):
         if "toolkit" in request:
@@ -302,22 +303,14 @@ def refresh(session, state):
     from .discussion import fetch
     from .pulls import github_json
     repo = session.repo
-    metadata = repo.metadata()
-    raw = github_json(repo.identity, f"repos/{repo.name}/pulls/{repo.pr}", repo.cwd)
-    if raw.get("number") != repo.pr or (raw.get("html_url") or "").lower() != repo.url:
-        raise ApiError("invalid_response", "GitHub returned a different owner PR.")
-    head = raw.get("head") or {}
-    if head.get("sha") != metadata["headRefOid"]:
-        raise ApiError("stale_source", "PR changed during refresh; retry.")
-    head_repo = head.get("repo") or {}
-    target = normalize_remote(head_repo.get("html_url", ""))
-    if target:
-        target = repository_name(target)
-    branch = require_text(head.get("ref"), "head branch")
-    repo.git("check-ref-format", "refs/heads/" + branch)
-    viewer_data = github_json(repo.identity, "user", repo.cwd)
+    from .forge_context import legacy_metadata
+    change, account = repo.forge.owner_context(repo)
+    metadata = legacy_metadata(change)
+    source = change['source']['project']
+    target = source['host'] + '/' + source['path'] if source else ''
+    branch = require_text(change['source'].get('branch'), 'head branch')
+    repo.git('check-ref-format', 'refs/heads/' + branch)
     from .forge import check_account
-    account = repo.forge.account_from(repo.project, viewer_data)
     check_account(state.get("forge_account"), account, state.get("viewer"))
     if state.get("viewer") is None:
         state["forge_account"] = account
@@ -325,7 +318,7 @@ def refresh(session, state):
     if state.get("viewer") and state["viewer"].lower() != viewer.lower():
         raise ApiError("account_changed", "GitHub account changed; return to the owner session's original account.")
     discussion, raw_discussion = fetch(repo)
-    anchors = {c["id"]: c for c in raw_discussion["inline"]}
+    anchors = repo.forge.anchors(raw_discussion)
     previous = {i["key"]: i for i in state["feedback"]}
     latest = {}
     for item in discussion["items"]:
@@ -392,7 +385,7 @@ def refresh(session, state):
     previous_target = state.get("push_target", {})
     if all(previous_target.get(k) == v for k, v in push_target.items()) and "remotes" in previous_target:
         push_target["remotes"] = previous_target["remotes"]
-    state.update(feedback=items, metadata=metadata, viewer=viewer, checked_at=now(), push_target=push_target)
+    state.update(feedback=items, metadata=metadata, change=change, viewer=viewer, checked_at=now(), push_target=push_target)
     snapshot = session.path / "context" / (digest([metadata, discussion]) + ".json")
     write_json(snapshot, {"metadata": metadata, "discussion": discussion, "checked_at": state["checked_at"]})
     state["context"] = str(snapshot)

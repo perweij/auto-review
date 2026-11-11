@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import tempfile
 
+from . import forge_context
+
 from . import usage
 from .common import ApiError, command, locked, now, read_json
 from . import cache, providers, review_engine, settings, validation
@@ -142,28 +144,28 @@ class Review(Store):
         if self.manifest.get('snapshot_update'):
             self.finish_snapshot_update()
         for attempt in range(2):
-            branch = pr['baseRefName']
-            source = 'refs/heads/' + branch if pr['state'] == 'OPEN' else pr['baseRefOid']
+            branch = pr['target']['branch']
+            source = 'refs/heads/' + branch if pr['state'] == 'open' else pr['target']['head']
             self.repo.git('fetch', '--no-tags', '--refmap=', '--no-write-fetch-head', self.repo.remote,
                           f'+{self.repo.forge.head_ref(self.repo.pr)}:{self.repo.head_ref}', f'+{source}:{self.repo.base_ref}')
-            pr = self.repo.metadata()
+            pr = forge_context.read_change(self.repo)
             head = self.repo.git('rev-parse', self.repo.head_ref).stdout.strip()
             base = self.repo.git('rev-parse', self.repo.base_ref).stdout.strip()
             # PR metadata can retain an older baseRefOid after the base branch
             # advances.  Open reviews use the live branch, so validate it via
             # Git too; closed reviews deliberately use the recorded commit.
-            expected_base = pr['baseRefOid']
-            if pr['state'] == 'OPEN':
-                ref = 'refs/heads/' + pr['baseRefName']
+            expected_base = pr['target']['head']
+            if pr['state'] == 'open':
+                ref = 'refs/heads/' + pr['target']['branch']
                 refs = self.repo.git('ls-remote', '--refs', self.repo.remote, ref).stdout.splitlines()
                 expected_base = next((line.split()[0] for line in refs
                                       if len(line.split()) == 2 and line.split()[1] == ref), None)
-            if head == pr['headRefOid'] and base == expected_base and branch == pr['baseRefName']:
+            if head == pr['source']['head'] and base == expected_base and branch == pr['target']['branch']:
                 break
             say(f'Warning: PR refs changed during setup (attempt {attempt+1}); refreshing snapshot; '
                 f'fetched head={head}, base={base}, base_branch={branch}; '
-                f'metadata head={pr["headRefOid"]}, base={pr["baseRefOid"]}, '
-                f'base_branch={pr["baseRefName"]}, state={pr["state"]}; expected_base={expected_base}')
+                f'metadata head={pr["source"]["head"]}, base={pr["target"]["head"]}, '
+                f'base_branch={pr["target"]["branch"]}, state={pr["state"]}; expected_base={expected_base}')
         else:
             raise ApiError('snapshot_changed', 'Could not establish a consistent snapshot after retry')
         snapshot = dict(head=head, base=base, merge_base=self.repo.git('merge-base', head, base).stdout.strip(), base_branch=branch)
@@ -202,44 +204,30 @@ class Review(Store):
         folder = self.path / 'context'
         if self.manifest['phases'].get('context', {}).get('status') == 'completed' and cache.context_hash(folder) == self.manifest['phases']['context'].get('output_hash'):
             return
-        for name, value in (('pr', pr), ('pr-discussion', issues), ('pr-reviews', reviews)):
-            write_json(folder / (name + '.json'), value)
-        for name, endpoint, kind in [('pr-inline-comments', f'pulls/{self.repo.pr}/comments', 'array'),
-                                     ('ci-actions-runs', f'actions/runs?head_sha={pr["headRefOid"]}', 'actions'),
-                                     ('ci-statuses', f'commits/{pr["headRefOid"]}/statuses', 'array')]:
-            try:
-                value = self.repo.pages(f'repos/{self.repo.name}/{endpoint}', kind)
-            except ApiError as exc:
-                if isinstance(exc, Cancelled):
-                    raise
-                value = None
-                warning = f'{name} unavailable; context is incomplete.'
-                self.manifest['warnings'] = sorted(set(self.manifest['warnings'] + [warning]))
-                say('Warning: ' + warning)
-            write_json(folder / (name + '.json'), value)
-        rendered = command(['gh', 'pr', 'view', str(self.repo.pr), '-R', self.repo.identity, '--comments'], cwd=self.repo.cwd, check=False)
-        if rendered.returncode == 0:
-            atomic_bytes(folder / 'pr-comments.txt', rendered.stdout.encode())
-        else:
-            self.manifest['warnings'].append('Rendered PR comments unavailable; see structured discussion.')
-        atomic_bytes(folder / 'pr-view.txt', f"# {pr['title']}\n\n{pr['body']}\n\n{pr['url']}\n".encode())
+        from .forge_context import FORMAT
+        change = pr
+        context, diagnostics = forge_context.read_context(self.repo, change, issues, reviews)
+        write_json(self.path / 'diagnostics/forge-context.json', diagnostics)
+        # Rebuilding context retires its old files; cached legacy context returned above.
+        for name in ('pr.json', 'pr-discussion.json', 'pr-reviews.json', 'pr-inline-comments.json',
+                     'ci-actions-runs.json', 'ci-statuses.json', 'pr-comments.txt'):
+            (folder / name).unlink(missing_ok=True)
+        write_json(folder / 'review-context.json', context)
+        self.manifest['context_format'] = FORMAT
+        self.manifest['change'] = change
+        self.manifest['warnings'] = sorted(set(self.manifest['warnings'] + context['warnings']))
+        for warning in context['warnings']:
+            say('Warning: ' + warning)
+        atomic_bytes(folder / 'pr-view.txt', f"# {change['title']}\n\n{change['body']}\n\n{change['url']}\n".encode())
         snapshot = self.manifest['snapshot']
         for name, args in [('pr.diff', ['--no-ext-diff', '--no-textconv']), ('diffstat.txt', ['--stat']), ('files.zlist', ['--name-only', '-z'])]:
             atomic_bytes(folder / name, self.repo.git('diff', *args, snapshot['merge_base'], snapshot['head'], '--', cwd=self.worktree).stdout.encode())
         self.manifest['phases']['context'] = dict(status='completed', exit_status=0, output_hash=cache.context_hash(folder))
         self.save()
         say(f'Discussion: {len(issues)}; reviews: {len(reviews)}')
-        counts = dict(passed=0, failed=0, pending=0)
-        for item in read_json(folder / 'ci-actions-runs.json') or []:
-            key = 'pending' if item.get('status') != 'completed' else 'passed' if item.get('conclusion') in ('success', 'neutral', 'skipped') else 'failed'
-            counts[key] += 1
-        latest = {}
-        for item in sorted(read_json(folder / 'ci-statuses.json') or [], key=lambda i: i.get('created_at', '')):
-            latest[item.get('context')] = item
-        for item in latest.values():
-            counts[{'success': 'passed', 'pending': 'pending'}.get(item.get('state'), 'failed')] += 1
-        say(f"CI: {counts['passed']} passed, {counts['failed']} failed, {counts['pending']} pending." if sum(counts.values()) else 'CI: no Actions runs or statuses found (unavailable sources are reported separately).')
-        say('CI coverage excludes check runs from third-party GitHub Apps.')
+        counts = {state: sum(c['state'] == state for c in context['ci']['checks']) for state in ('passed', 'failed', 'pending')}
+        say(f"CI: {counts['passed']} passed, {counts['failed']} failed, {counts['pending']} pending.")
+        say('CI coverage: ' + context['ci']['coverage'])
         say((folder / 'diffstat.txt').read_text())
 
     def session(self):
@@ -333,18 +321,17 @@ def execute(request, *, confirm_trust=None):
         for argv, error in checks:
             if command(argv, cwd=repo.cwd, check=False, timeout=runtime.auth_timeout).returncode:
                 raise ApiError('authentication_failed', error)
-        pr = repo.metadata()
+        pr = forge_context.read_change(repo)
         account = repo.forge.account(repo.project, repo.cwd)
         viewer = account['username']
         if not viewer:
             raise ApiError('authentication_failed', 'GitHub viewer login missing')
-        permission = command(['gh', 'repo', 'view', repo.identity, '--json', 'viewerPermission', '--jq', '.viewerPermission'], cwd=repo.cwd, check=False).stdout.strip() or 'unknown'
+        permission = repo.forge.permission(repo) or 'unknown'
         say(f'Warning: Read access is checked; review-publication permission is unverified (repository permission: {permission}).')
-        issues = repo.pages(f'repos/{repo.name}/issues/{repo.pr}/comments')
-        reviews = repo.pages(f'repos/{repo.name}/pulls/{repo.pr}/reviews')
+        issues, reviews = repo.forge.initial_discussion(repo)
         repo.git('ls-remote', '--exit-code', repo.remote, repo.forge.head_ref(repo.pr))
-        repo.git('ls-remote', '--exit-code', repo.remote, 'refs/heads/' + pr['baseRefName'])
-        if pr['isDraft']:
+        repo.git('ls-remote', '--exit-code', repo.remote, 'refs/heads/' + pr['target']['branch'])
+        if pr['draft']:
             say('Warning: PR is a draft')
         run = Review(repo, root, worktree, configuration, runtime, tools, viewer, permission)
         from .forge import check_account

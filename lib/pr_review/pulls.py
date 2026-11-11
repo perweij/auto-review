@@ -6,16 +6,17 @@ from .common import ApiError, atomic_json, command, digest, git, now, read_json,
 from .state import discover
 
 
-def repository_name(value):
+def repository_name(value, forge=None):
     from .forge import adapter
     from .repository import normalize_remote
     if not isinstance(value, str):
         return None
-    candidate = normalize_remote(value) if '://' in value or '@' in value else value.rstrip('/').removesuffix('.git')
-    if len(candidate.split('/')) != 3:
+    candidate = re.sub(r'^(?:https?://|ssh://(?:[^/@]+@)?)', '', value)
+    candidate = re.sub(r'^[^/@]+@([^:]+):', r'\1/', candidate).rstrip('/').removesuffix('.git')
+    if len(candidate.split('/')) < 3:
         return None
     try:
-        return adapter().project(candidate).repository
+        return adapter(forge).project(candidate).repository
     except ApiError:
         return None
 
@@ -31,18 +32,8 @@ def github_json(repository, endpoint, cwd, *, pages=False):
 
 
 def normalize(pull, repository):
-    if not isinstance(pull, dict):
-        raise ApiError("invalid_response", "GitHub returned an invalid pull request.")
-    number = pull.get("number")
-    url = f"https://{repository}/pull/{number}"
-    if (type(number) is not int or number < 1 or not isinstance(pull.get("html_url"), str)
-            or pull["html_url"].lower() != url
-            or pull.get("state") not in ("open", "closed") or not isinstance(pull.get("title"), str)):
-        raise ApiError("invalid_response", "GitHub pull request identity or state is invalid.")
-    return {"pr": number, "repository": repository, "url": pull["html_url"], "title": pull["title"],
-            "state": "MERGED" if pull.get("merged_at") else pull["state"].upper(),
-            "draft": bool(pull.get("draft")),
-            "head_branch": pull["head"].get("ref") if isinstance(pull.get("head"), dict) else None}
+    from .forge_github import normalize_pull as github_normalize
+    return github_normalize(pull, repository)
 
 
 def list_pulls(request):
@@ -55,13 +46,13 @@ def list_pulls(request):
     repositories = {s["repository"] for s in sessions + owner_sessions}
     for line in remotes.stdout.splitlines():
         fields = line.split(None, 1)
-        name = repository_name(fields[1]) if len(fields) == 2 else None
+        name = repository_name(fields[1], request.get("forge")) if len(fields) == 2 else None
         if name:
             repositories.add(name)
     repositories = sorted(repositories)
     repository = request.get("repository")
     if repository:
-        repository = repository_name(repository)
+        repository = repository_name(repository, request.get("forge"))
         if repository not in repositories:
             raise ApiError("invalid_request", "Choose a repository from this checkout's remotes or saved reviews.")
     elif len(repositories) == 1:
@@ -70,26 +61,18 @@ def list_pulls(request):
         if request.get("refresh"):
             raise ApiError("invalid_request", "Choose a repository before refreshing pull requests.", repositories=repositories)
         return {"repositories": repositories, "repository": None, "checked_at": None, "pull_requests": []}
-    selected_toolkit = toolkit({"cwd": cwd, "repository": repository})["toolkit"]
+    selected_toolkit = toolkit({"cwd": cwd, "repository": repository, "forge": request.get("forge")})["toolkit"]
     sessions = [s for s in (owner_sessions if selected_toolkit == "owner" else sessions) if s["repository"] == repository]
-    cache_file = state_root() / "repositories" / (digest([common, repository]) + ".json")
+    from .forge import adapter
+    project = adapter(request.get("forge")).project(repository)
+    cache_file = state_root() / "repositories" / (digest([common, project.storage_key]) + ".json")
     cache = read_json(cache_file, {})
     if request.get("refresh"):
-        endpoint = "repos/" + repository.split("/", 1)[1] + "/pulls"
-        pages = github_json(repository, endpoint + "?state=open&per_page=100", cwd, pages=True)
-        if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
-            raise ApiError("invalid_response", "GitHub returned incomplete pull request pages.")
-        pulls = {}
-        for page in pages:
-            for raw in page:
-                pull = normalize(raw, repository)
-                pulls[pull["pr"]] = pull
-        # Keep saved closed/merged reviews accessible without listing all closed PRs.
-        for number in sorted({s["pr"] for s in sessions} - pulls.keys()):
-            pull = normalize(github_json(repository, f"{endpoint}/{number}", cwd), repository)
-            if pull["pr"] != number:
-                raise ApiError("invalid_response", "GitHub returned a different saved pull request.")
-            pulls[number] = pull
+        from .forge import adapter
+        forge = adapter(request.get('forge'))
+        pulls = {pull['pr']: pull for pull in forge.list_changes(repository, cwd)}
+        for number in sorted({s['pr'] for s in sessions} - pulls.keys()):
+            pulls[number] = forge.listed_change(repository, number, cwd)
         cache = {"checked_at": now(), "pull_requests": list(pulls.values())}
         atomic_json(cache_file, cache)  # A failed refresh never replaces the previous list.
     pulls = {p["pr"]: dict(p) for p in cache.get("pull_requests", [])}

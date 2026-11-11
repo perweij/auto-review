@@ -797,6 +797,8 @@ class AutomationTest(unittest.TestCase):
                                metadata=lambda: {'baseRefName': 'main', 'isDraft': False})
         with patch.object(reviews.Repository, 'resolve', return_value=repo), \
                 patch.object(reviews, 'locate', return_value=(store.root, self.f.repo)), \
+                patch('pr_review.forge.GitHub.permission', return_value='WRITE'), \
+                patch('pr_review.forge_context.read_change', return_value={'target': {'branch': 'main'}, 'draft': False}), \
                 patch('pr_review.forge.GitHub.account', return_value={'forge': 'github', 'host': 'github.com', 'username': 'reviewer', 'id': None}), \
                 patch.object(reviews, 'capabilities', return_value={}), \
                 patch.object(reviews, 'requires_independent', return_value=False), \

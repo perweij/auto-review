@@ -3,6 +3,8 @@ import copy
 import uuid
 from contextlib import nullcontext
 
+from .forge_context import owner_change
+
 from .common import ApiError, locked, require_text
 from .owner_state import OwnerSession, open_session, discover, toolkit, refresh, validate_settings
 from . import owner_git, owner_fixes, owner_publication, owner_commit, owner_completion
@@ -128,7 +130,7 @@ def mutate(session, state, request):
             elif action == "stage":
                 if not state.get("metadata"):
                     raise ApiError("refresh_required", "Refresh GitHub before staging replies.")
-                owner_publication.blockers(session, state, reply, state["metadata"]["headRefOid"], allow_unpushed=True)
+                owner_publication.blockers(session, state, reply, owner_change(state)['source']['head'], allow_unpushed=True)
                 reply["status"] = "staged"
             else:
                 reply["status"] = "unstaged"

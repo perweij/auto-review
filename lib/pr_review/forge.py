@@ -41,6 +41,63 @@ class GitHub:
     capabilities = frozenset(('review', 'publication', 'owner', 'issues'))
     executable = 'gh'
 
+    def change_from_legacy(self, value, project):
+        from .forge_github import change_from
+        return change_from(value, project)
+
+    def change(self, repository):
+        return self.change_from_legacy(repository.metadata(), repository.project)
+
+    def permission(self, repository):
+        result = command(['gh', 'repo', 'view', repository.identity, '--json', 'viewerPermission',
+                          '--jq', '.viewerPermission'], cwd=repository.cwd, check=False)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def review_context(self, repository, change, issues, reviews):
+        from .forge_github import review_context
+        return review_context(repository, change, issues, reviews)
+
+    def initial_discussion(self, repository):
+        return (repository.pages(f'repos/{repository.name}/issues/{repository.pr}/comments'),
+                repository.pages(f'repos/{repository.name}/pulls/{repository.pr}/reviews'))
+
+    def owner_context(self, repository):
+        from .forge_github import owner_context
+        return owner_context(repository)
+
+    def list_changes(self, repository, cwd):
+        from .forge_github import list_changes
+        return list_changes(repository, cwd)
+
+    def listed_change(self, repository, number, cwd):
+        from .forge_github import listed_change
+        return listed_change(repository, number, cwd)
+
+    def anchors(self, diagnostics):
+        return {c['id']: {'diff_hunk': c.get('diff_hunk', ''),
+                         'position': {key: c.get(key) for key in ('commit_id', 'original_commit_id', 'path', 'line', 'original_line', 'side', 'start_line', 'start_side')}}
+                for c in diagnostics.get('inline', [])}
+
+    def metadata(self, repository, destination=None):
+        from .forge_github import metadata
+        return metadata(repository, destination)
+
+    def pages(self, repository, endpoint, kind="array"):
+        from .forge_github import pages
+        return pages(repository, endpoint, kind)
+
+    def graphql(self, repository, query, **variables):
+        from .forge_github import graphql
+        return graphql(repository, query, **variables)
+
+    def discussion(self, repository):
+        from .forge_github import fetch
+        return fetch(repository)
+
+    def review_status(self, repository):
+        from .forge_github import review_status
+        return review_status(repository)
+
     def project(self, repository):
         parts = repository.split('/')
         if len(parts) == 2:
@@ -70,7 +127,7 @@ class GitHub:
 
     def cli_checks(self):
         return [(['gh', 'api', '--help'], ['--hostname', '--paginate', '--slurp', '--method', '--field', '--raw-field']),
-                (['gh', 'pr', 'view', '--help'], ['--json', '--comments', '--repo']),
+                (['gh', 'pr', 'view', '--help'], ['--json', '--repo']),
                 (['gh', 'auth', 'status', '--help'], ['--hostname'])]
 
     def auth_check(self, project):
