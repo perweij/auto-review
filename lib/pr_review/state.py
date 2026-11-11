@@ -25,7 +25,7 @@ def discover(request):
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"],
                  cwd=request.get("cwd", ".")).stdout.strip()
     sessions = []
-    for file in state_root().glob("*/*/*/*/manifest.json"):
+    for file in list(state_root().glob("*/*/*/*/manifest.json")) + list(state_root().glob("gitlab/*/*/manifest.json")):
         try:
             m = read_json(file, {})
         except ApiError:
@@ -289,6 +289,9 @@ class Session:
         return dict(displayed=describe(self.path), pending=describe(pending) if pending else None)
 
     def verdicts(self, state):
+        from .forge import adapter, restore
+        if 'publication' not in adapter(restore(self.manifest).forge).capabilities:
+            return []
         pr = (state.get("checked") or {}).get("pr", read_json(self.path / "context/pr.json", {}))
         if not pr and self.manifest.get('change'):
             from .forge_context import legacy_metadata

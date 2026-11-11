@@ -36,7 +36,7 @@ class ForgeTest(unittest.TestCase):
         with self.assertRaises(ApiError):
             restore(state)
         with self.assertRaises(ApiError):
-            adapter('gitlab')
+            adapter('unknown')
 
     def test_accounts_are_host_scoped_and_cannot_lose_stable_identity(self):
         account = {'forge': 'github', 'host': 'github.com', 'username': 'User', 'id': '123'}
@@ -65,9 +65,9 @@ class ForgeTest(unittest.TestCase):
         from contextlib import redirect_stderr
         from io import StringIO
         with patch('pr_review.cli_settings.prepare', side_effect=AssertionError('Prepared settings')), redirect_stderr(StringIO()):
-            self.assertEqual(1, cli.main(['7', '--forge', 'gitlab']))
-            self.assertEqual(1, issue_cli.main(['--issue', '7', '--forge', 'gitlab']))
-            self.assertEqual(1, owner_cli.main(['7', 'open', '--forge', 'gitlab']))
+            self.assertEqual(1, cli.main(['7', '--forge', 'unknown']))
+            self.assertEqual(1, issue_cli.main(['--issue', '7', '--forge', 'unknown']))
+            self.assertEqual(1, owner_cli.main(['7', 'open', '--forge', 'unknown']))
 
     def test_saved_selection_precedes_default_and_conflicts_are_rejected(self):
         import tempfile

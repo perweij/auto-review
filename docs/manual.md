@@ -1473,7 +1473,7 @@ Review, Owner and fix-issue commands accept `--forge github`. GitHub remains the
 only installed forge implementation and the default, including enterprise hosts.
 Unknown selections fail before starting work. Existing repository selectors,
 GitHub URLs and saved session locations remain supported; this option does not
-provide GitLab support yet.
+provide GitLab writes; the read-only GitLab.com pilot is described below.
 
 New sessions record forge, host and full project path separately, and retain the
 existing repository and viewer fields for compatibility. Legacy sessions are
@@ -1485,7 +1485,7 @@ blocks continuation rather than downgrading to a username-only check.
 The internal forge interface owns identity, account lookup, URLs, fetch refs,
 CLI/authentication requirements and basic operation capabilities. Local Git and
 workflow decisions remain shared. Issue #20 will normalize review context and
-establish cross-adapter read contracts; #25 will test those contracts with a
+establish cross-adapter read contracts; #25 exercises those contracts with a
 read-only GitLab.com adapter. Publication encoding and recovery remain #21.
 
 ### Forge review context
@@ -1509,7 +1509,7 @@ Adapters provide change details, discovery, initial model context, complete
 conversations and review status. Code anchors and native position data are
 separate from conversation freshness identities. The read-contract fixtures
 include opaque IDs and nested projects for the forthcoming GitLab pilot; this
-change does not enable GitLab transport or writes.
+contract does not enable GitLab writes.
 
 Normalized Owner `change` facts are authoritative; `metadata` remains a compatibility
 projection for older clients and the pending write-path extractions. New writers
@@ -1519,3 +1519,42 @@ Malformed initial comment bodies are reported as unavailable context with a warn
 so local review reports can still be retained; complete discussion matching and
 publication continue to require a validated snapshot. A cancelled review-status
 refresh clears the previous status rather than leaving an old approval visible.
+
+### GitLab.com local review pilot
+
+From a checkout with exactly one remote matching the target project:
+
+```sh
+bin/pr-review --forge gitlab https://gitlab.com/group/subgroup/project/-/merge_requests/7
+bin/pr-review --forge gitlab --repo gitlab.com/group/subgroup/project 7
+```
+
+Authenticate `glab` first. GitLab execution requires `git`, `glab`, and the selected
+model CLIs; it does not invoke `gh`. The target project can contain an MR from a
+fork. Deleted or inaccessible source projects produce a warning while the retained
+target MR ref remains reviewable. GitLab project identity is case-folded for remote
+matching and storage; renamed/transferred projects must use their current path. The checkout path is logged; local reports, synthesis, discussion matching,
+history and resume use the shared engine. `--resume SESSION` restores the saved
+forge. The CLI automatically ends after the local review without opening the
+publication menu. `--no-publish` is accepted but unnecessary.
+
+Only GitLab.com is supported. Remote publication (including auto-publication),
+Owner operations, issue fixing, focused follow-up, repository MR listing, monitor
+integration and full Emacs integration are outside this pilot. Explicit unsupported
+operations fail before remote writes. GitLab approvals are not GitHub verdicts;
+review status is reported unavailable. CI covers MR pipelines matching the reviewed
+source SHA, not every job, child pipeline or external check. Missing pipelines or
+unknown statuses never imply success.
+
+Paginated discussions retain note and opaque discussion identities,
+system-note markers and resolution state. Native diff positions and MR
+base/start/head diff references are retained in diagnostics/context respectively;
+the verified local merge base remains a separate snapshot fact. A diff discussion
+is marked outdated when its recorded head differs from the currently read MR head.
+Failed initial discussion reads produce warnings; failed complete matching pauses
+completion while keeping the generated reports.
+
+Models receive filtered environments and the existing no-publication instructions;
+Claude tool restrictions also deny `glab`. Independent reviewers use isolated homes.
+These execution policies are not a new security sandbox; the existing documented
+outer-container trust boundary still applies.

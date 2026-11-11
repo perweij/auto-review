@@ -11,10 +11,10 @@ from . import cli_settings
 
 
 def parser():
-    result = cli_settings.Parser(prog='pr-review', description='Review a GitHub PR with optional publication. For incoming feedback and fixes, use pr-review owner --help.',
+    result = cli_settings.Parser(prog='pr-review', description='Review a GitHub PR or generate a local GitLab.com MR review. For incoming feedback and fixes, use pr-review owner --help.',
         epilog='Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan), PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET (optional USD), PR_REVIEW_AUTH_TIMEOUT (default 60), PR_REVIEW_CODEX_PROBE_MODEL, XDG_STATE_HOME, VISUAL/EDITOR.')
-    result.add_argument('pr', nargs='?', help='positive PR number or https://HOST/OWNER/REPO/pull/NUMBER')
-    result.add_argument('--forge', default=None, help='forge implementation (default: github)')
+    result.add_argument('pr', nargs='?', help='positive PR/MR number or canonical change URL')
+    result.add_argument('--forge', default=None, help='github (default) or gitlab (GitLab.com local review only)')
     result.add_argument('-R', '--repo', dest='repository')
     result.add_argument('--no-publish', action='store_true', help='generate and retain reviews without opening the publication menu')
     result.add_argument('--auto-publish', action='store_true', help='analyse and publish COMMENT feedback without prompts; stop the whole batch if any finding needs attention')
@@ -120,7 +120,7 @@ def main(argv=None):
                 print(str(exc))
                 terminal(exc.details['session'])
                 return 0
-            if interactive and not request['no_publish']:
+            if interactive and not request['no_publish'] and 'publication' in adapter(request.get('forge')).capabilities:
                 from .terminal import terminal
                 terminal(str(session.root))
         return 0

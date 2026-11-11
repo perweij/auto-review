@@ -1089,3 +1089,12 @@ lock, a mismatch with current settings raises `settings_changed` without mutatio
 The existing revision check also applies. Callers omitting the precondition keep
 existing behavior. The Emacs settings screen supplies its opening snapshot;
 failed saves preserve its local draft. This does not alter frozen batch settings.
+
+### GitLab.com pilot
+
+`run` accepts `forge: "gitlab"` with `pr` containing an MR IID or canonical
+GitLab.com MR URL and the existing repository/cwd fields. The compatibility name
+`pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
+checkout lookup and artifacts retain the existing protocol format. This adapter
+supports local review only: publication, conversation mutation, Owner and issue
+workflows are rejected. GitLab approval state is not converted into review verdicts.

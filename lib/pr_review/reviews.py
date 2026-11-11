@@ -281,6 +281,8 @@ def execute(request, *, confirm_trust=None):
     from .forge import require, request_forge
     request = {**request, 'forge': request_forge(request)}
     require(request.get('forge'), 'review')
+    if request['forge'] == 'gitlab' and request.get('followup_threads'):
+        raise ApiError('unsupported_operation', 'Focused follow-up is not supported by the GitLab pilot.')
     repo = Repository.resolve(request['pr'], request.get('repository'), request.get('cwd'), request.get('forge'))
     runtime = providers.Runtime.environment()
     threads = request.get('followup_threads', [])
@@ -313,7 +315,7 @@ def execute(request, *, confirm_trust=None):
             validate_models(configuration, request.get('catalogs'), reviewers=kind != 'followup')
             summary(configuration, runtime, request=request)
         say(f'PR Review: #{repo.pr}; Repository: {repo.identity}; Remote: {repo.remote}')
-        checks = [(repo.forge.auth_check(repo.project), f'GitHub authentication failed for {repo.host}')]
+        checks = [(repo.forge.auth_check(repo.project), f'{repo.project.forge} authentication failed for {repo.host}')]
         if 'codex' in enabled:
             checks.append((['codex', 'login', 'status'], 'Codex authentication failed; run codex login'))
         if 'claude' in enabled:
@@ -327,7 +329,10 @@ def execute(request, *, confirm_trust=None):
         if not viewer:
             raise ApiError('authentication_failed', 'GitHub viewer login missing')
         permission = repo.forge.permission(repo) or 'unknown'
-        say(f'Warning: Read access is checked; review-publication permission is unverified (repository permission: {permission}).')
+        if 'publication' in repo.forge.capabilities:
+            say(f'Warning: Read access is checked; review-publication permission is unverified (repository permission: {permission}).')
+        else:
+            say('GitLab pilot: local review only; remote publication is unsupported.')
         issues, reviews = repo.forge.initial_discussion(repo)
         repo.git('ls-remote', '--exit-code', repo.remote, repo.forge.head_ref(repo.pr))
         repo.git('ls-remote', '--exit-code', repo.remote, 'refs/heads/' + pr['target']['branch'])

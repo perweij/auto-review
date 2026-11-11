@@ -95,7 +95,8 @@ class Repository:
         matches = []
         for remote in git(["remote"], cwd=cwd).stdout.splitlines():
             urls = git(["config", "--get-all", f"remote.{remote}.url"], cwd=cwd, check=False).stdout.splitlines()
-            if any(normalize_remote(url) == identity for url in urls):
+            from .pulls import repository_name as remote_identity
+            if any(remote_identity(url, forge) == identity for url in urls):
                 matches.append(remote)
         if len(matches) != 1:
             fail(f"Expected exactly one remote for {identity}; found {len(matches)}. Check remotes and --repo.")

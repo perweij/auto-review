@@ -103,3 +103,11 @@ A missing Guix executable or failed build is a failure, never a skipped pass.
 Local Python/Emacs checks do not establish that a Guix closure builds. Run the
 installed-package check on a suitable Guix host before treating the packaging
 as validated; publishing the source alone does not perform that check.
+
+The GitLab.com pilot additionally uses caller-installed `glab`. Source installations
+only need the CLI for the selected forge. The Guix backend recipe accepts an
+optional `#:gitlab-cli` package argument to pin and privately expose `glab`; when
+omitted, the inherited PATH supplies it. This avoids imposing an unverified package
+name on existing Guix channels. Authentication remains caller-managed. No Python
+package dependencies are added. GitLab token variables are filtered from model
+environments just like GitHub credentials.

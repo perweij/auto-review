@@ -1,4 +1,4 @@
-"""Internal forge identity and capabilities; GitHub is the sole production adapter."""
+"""Forge identity and capabilities for GitHub and the read-only GitLab pilot."""
 from dataclasses import asdict, dataclass
 import json
 import re
@@ -149,7 +149,9 @@ class GitHub:
                 'id': str(value['id']) if value.get('id') is not None else None}
 
 
-ADAPTERS = {"github": GitHub()}
+from .forge_gitlab import GitLab
+
+ADAPTERS = {"github": GitHub(), "gitlab": GitLab()}
 
 
 def adapter(kind=None):
