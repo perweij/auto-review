@@ -51,6 +51,8 @@ def prepare(session, state):
         session.save(state)
     validate(session, state)
     configure_push(session, state)
+    from .checkouts import announce
+    announce(state["worktree"], session.path, "owner")
     return head
 
 

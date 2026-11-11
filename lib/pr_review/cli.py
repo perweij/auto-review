@@ -73,7 +73,12 @@ def main(argv=None):
     if request.get('synthesis_tests', 'focused') not in ('focused', 'full'):
         parser().error('--synthesis-tests must be focused or full')
     interactive = sys.stdin.isatty()
+    announced_checkouts = set()
     def progress(kind, **fields):
+        if fields.get("checkout"):
+            if fields["checkout"] in announced_checkouts:
+                return
+            announced_checkouts.add(fields["checkout"])
         if kind == 'progress':
             print(fields['message'], file=sys.stderr if request['auto_publish'] else sys.stdout, flush=True)
     def trust(_paths):

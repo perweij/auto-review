@@ -57,7 +57,12 @@ def main(argv=None):
         parser().error('An issue or PR target is required unless --generate-json-config is used.')
     if any(args.get(k) is not None and args[k] < 1 for k in ('issue', 'pr', 'approve', 'max_repair_cycles')):
         parser().error('Issue, PR, revision and repair allowance must be positive integers.')
+    announced_checkouts = set()
     def progress(kind, **fields):
+        if fields.get("checkout"):
+            if fields["checkout"] in announced_checkouts:
+                return
+            announced_checkouts.add(fields["checkout"])
         if kind == 'progress':
             print(fields['message'], file=sys.stderr, flush=True)
     try:

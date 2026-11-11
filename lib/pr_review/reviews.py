@@ -346,10 +346,14 @@ def execute(request, *, confirm_trust=None):
         with usage.operation(run.root, legacy=root is not None):
             try:
                 run.configure(kind, threads)
+                from .checkouts import announce
+                from .state import generation
+                announce(run.worktree, run.root, "review", generation(run.path, run.manifest))
                 with tempfile.TemporaryDirectory(prefix='pr-review-') as scratch:
                     run.scratch = Path(scratch)
                     run.authenticate_live(enabled)
                     pr = run.snapshot(pr)
+                    announce(run.worktree, run.root, "review", generation(run.path, run.manifest))
                     run.trust(request.get('trusted_snapshot'), confirm_trust)
                     run.context(pr, issues, reviews)
                     if kind == 'followup':
@@ -382,7 +386,7 @@ def execute(request, *, confirm_trust=None):
                 raise
             finally:
                 report = run.path / ('reviews/followup.json' if kind == 'followup' else 'reviews/synthesis.md')
-                say(f'\nPR:        {repo.url}\nWorktree:  {worktree}\nArtifacts: {run.path}\nReview:    {report}\nStatus:    {run.manifest["status"]}')
+                say(f'\nPR:        {repo.url}\nArtifacts: {run.path}\nReview:    {report}\nStatus:    {run.manifest["status"]}')
                 if run.pending:
                     say(f'Previous review: {run.current} (replacement not installed)\nResume session: {run.root}')
     return run.session()

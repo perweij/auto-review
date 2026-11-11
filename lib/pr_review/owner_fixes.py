@@ -316,6 +316,8 @@ def execute(session, state, request):
             raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
     with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "kind": "owner-fix"}), \
             usage.operation(usage.owner_root(session, state), legacy=bool(state.get("batches"))):
+        from .checkouts import announce
+        announce(state.get("worktree"), session.path, "owner")
         batch = None
         completing = False
         preserve_ready = False

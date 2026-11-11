@@ -1194,3 +1194,14 @@
        (dolist (callback callbacks) (funcall callback '((models . nil))))
        (should-not magit-auto-review-owner-settings--draft)
        (should-not magit-auto-review--setup-token)))))
+
+(ert-deftest owner/open-checkout-shares-key-and-uses-live-session ()
+  (should (eq (lookup-key magit-auto-review-owner-mode-map (kbd "w")) #'magit-auto-review-owner-open-checkout))
+  (with-temp-buffer
+    (setq magit-auto-review-owner--view '((session . "/owner")))
+    (cl-letf (((symbol-function 'magit-auto-review--open-checkout)
+               (lambda (toolkit session &optional generation)
+                 (should (equal toolkit "owner"))
+                 (should (equal session "/owner"))
+                 (should-not generation))))
+      (magit-auto-review-owner-open-checkout))))

@@ -45,7 +45,12 @@ def main(argv):
     args = vars(parser.parse_args(argv))
     if args["action"] == "read" and args.get("pr") in actions:
         args["action"], args["pr"] = args["pr"], None
+    announced_checkouts = set()
     def progress(kind, **fields):
+        if fields.get("checkout"):
+            if fields["checkout"] in announced_checkouts:
+                return
+            announced_checkouts.add(fields["checkout"])
         if kind == "progress":
             print(fields["message"], file=sys.stderr, flush=True)
         elif kind == "started":

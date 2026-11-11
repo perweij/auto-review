@@ -44,7 +44,7 @@
 (defvar magit-auto-review-owner-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map magit-section-mode-map)
-    (dolist (binding '(("g" . magit-auto-review-owner-refresh)
+    (dolist (binding '(("w" . magit-auto-review-owner-open-checkout) ("g" . magit-auto-review-owner-refresh)
                        ("G" . magit-auto-review-owner-fetch)
                        ("f" . magit-auto-review-owner-fix)
                        ("V" . magit-auto-review-owner-verify)
@@ -913,6 +913,12 @@ With AUTOMATIC, also commit and stage replies."
                                 (or (alist-get 'branch target) "unknown branch")))
                       (if matches "P u (upstream)" "configure this upstream before pushing"))))))
 
+(defun magit-auto-review-owner-open-checkout ()
+  "Open the live Owner checkout in Dired without preparing a commit."
+  (interactive)
+  (magit-auto-review--open-checkout
+   "owner" (alist-get 'session magit-auto-review-owner--view)))
+
 (defun magit-auto-review-owner-magit (&optional inspect)
   "Stage the selected logical fix or the batch's next commit in native Magit.
 With prefix INSPECT, open status only.  Existing commit messages are retained."
@@ -1209,6 +1215,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
   [:class transient-column :setup-children magit-auto-review-owner--context-help]
   [["Selected item" :class transient-column :setup-children magit-auto-review-owner--context-actions]
    ["Navigation"
+    ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
     ("+" "All commands…" magit-auto-review-owner-all-menu)
     ("q" "Close" transient-quit-one)]])
@@ -1241,6 +1248,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
     ("P" "Preview/publish staged" magit-auto-review-owner-publish)
     ("O" "Recover uncertain publication" magit-auto-review-owner-recover)]
    ["Navigation"
+    ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
     ("G" "Fetch GitHub" magit-auto-review-owner-fetch)
     ("M" "Select toolkit" magit-auto-review-select-toolkit)

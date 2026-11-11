@@ -264,6 +264,9 @@ class Store:
             if (self.repo.git('rev-parse', 'HEAD', cwd=directory).stdout.strip() != head
                     or self.repo.git('rev-parse', '--path-format=absolute', '--git-common-dir', cwd=directory).stdout.strip() != str(self.repo.common)):
                 raise ApiError('integrity_failed', 'Archived or updated worktree identity mismatch')
+        archived = read_json(archive / "manifest.json")
+        archived["worktree"] = str(saved)
+        write_json(archive / "manifest.json", archived)
         self.reset_directories(DIRECTORIES)
         self.manifest.setdefault('snapshot_history', []).append(dict(archive=str(archive), worktree=str(saved), snapshot=journal['from']))
         self.manifest.update(previous_review=dict(archive=str(archive), worktree=str(saved)), snapshot=journal['to'], run_id=journal['run_id'],

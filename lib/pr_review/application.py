@@ -9,6 +9,9 @@ from . import operations, publication, settings, models, workflow, pulls
 
 def dispatch(request):
     operation = request.get("command")
+    if operation == "checkout":
+        from .checkouts import lookup
+        return lookup(request)
     if operation in ("issue-run", "issue-read", "issue-eligibility", "issue-recover"):
         from .issues import dispatch as issue_dispatch
         return issue_dispatch(request)
@@ -17,8 +20,8 @@ def dispatch(request):
         return owner_dispatch(request)
     if operation == "capabilities":
         from .owner import COMMANDS
-        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration"],
-                "commands": ["discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "elaborate", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
+        return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration", "checkout"],
+                "commands": ["checkout", "discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "elaborate", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":

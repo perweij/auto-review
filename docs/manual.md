@@ -1454,3 +1454,15 @@ control is edited. Started interactive batches retain their original settings;
 `b` copies selected saved batch settings into the draft for restoration. Concurrent
 settings edits cause a clear save rejection rather than silently overwriting them.
 See the Emacs reference for selection keys and metadata recovery.
+
+### Open the checkout
+
+Press `w` (Open checkout) in either the reviewer or Owner toolkit to open Dired
+at the checkout root. Reviewer history stays pinned to its retained checkout;
+Owner opens the live worktree containing the fixes. The action works during a
+run and after completion. Missing checkouts produce a short explanation without
+creating directories or starting work. Existing `m` and `C-u m` behavior is unchanged.
+
+CLI review and fix progress prints `Checkout: /absolute/path` when the checkout
+is available, including on resume. This is separate from the session/artifact
+directory. JSON result output remains unchanged.

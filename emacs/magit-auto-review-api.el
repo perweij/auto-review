@@ -9,6 +9,17 @@
 (require 'json)
 (require 'subr-x)
 
+(defun magit-auto-review--open-checkout (toolkit session &optional generation)
+  "Open TOOLKIT's SESSION checkout, optionally pinned to GENERATION."
+  (unless session (user-error "Checkout has not been created yet"))
+  (let* ((result (magit-auto-review--call
+                  `((command . "checkout") (toolkit . ,toolkit)
+                    (session . ,session) (generation . ,generation))))
+         (path (alist-get 'path result)))
+    (unless (and (eq (alist-get 'available result) t) path (file-directory-p path))
+      (user-error "%s" (or (alist-get 'message result) "Checkout is unavailable")))
+    (dired path)))
+
 (defgroup magit-auto-review nil
   "Inspect and publish automated reviews using Magit sections."
   :group 'magit)

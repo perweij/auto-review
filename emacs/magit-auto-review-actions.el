@@ -14,6 +14,15 @@
 
 (declare-function magit-auto-review-owner-show-import "magit-auto-review-owner" (result directory))
 
+(defvar-local magit-auto-review--checkout-event nil)
+
+(defun magit-auto-review-open-checkout ()
+  "Open the displayed review's retained checkout in Dired."
+  (interactive)
+  (magit-auto-review--open-checkout
+   "review" (or magit-auto-review--session (alist-get 'session magit-auto-review--checkout-event))
+   (or magit-auto-review--generation (alist-get 'generation magit-auto-review--checkout-event))))
+
 (defun magit-auto-review-send-to-owner ()
   "Send saved comments at point or selected headings to Owner for fixing."
   (interactive)
@@ -41,6 +50,7 @@
         (magit-auto-review--async
          request
          (lambda (event)
+           (when (alist-get 'checkout event) (setq magit-auto-review--checkout-event event))
            (when (alist-get 'operation_id event) (setq magit-auto-review--operation (alist-get 'operation_id event)))
            (setq magit-auto-review--progress (or (alist-get 'message event) "Running"))
            (with-current-buffer (get-buffer-create "*Auto-review progress*")
@@ -775,6 +785,7 @@
     ("c" "New comment…" magit-auto-review-new-comment :if magit-auto-review--mutable-p)
     ("f" "New follow-up draft" magit-auto-review-follow-up :if (lambda () (and (magit-auto-review--mutable-p) (magit-auto-review--status-p "published"))))]
    ["Context and history"
+    ("w" "Open checkout" magit-auto-review-open-checkout)
     ("E" "Elaborate finding (model)" magit-auto-review-elaborate)
     ("C" "Conversations and follow-up" magit-auto-review-conversations :if (lambda () magit-auto-review--review))
     ("RET" "Reviewed file" magit-auto-review-visit :if magit-auto-review--code-context-p)
@@ -800,7 +811,7 @@
     ("T" "Confirm agent configuration" magit-auto-review-trust-config)
     ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])
 
-(dolist (binding '(("E" . magit-auto-review-elaborate) ("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
+(dolist (binding '(("w" . magit-auto-review-open-checkout) ("E" . magit-auto-review-elaborate) ("a" . magit-auto-review-placement) ("r" . magit-auto-review-restore)
                    ("S" . magit-auto-review-suggestion-menu)
                    ("o" . magit-auto-review-send-to-owner)
                    ("B" . magit-auto-review-pull-requests)

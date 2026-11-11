@@ -1128,6 +1128,8 @@ def dispatch(request):
             actions = flow.writes.recover(request.get('retry_absent'))
             return flow.result('recovered' if request.get('retry_absent') else 'inspected',
                                next_action='retry', actions=actions)
+        from .checkouts import announce
+        announce(flow.state.get('worktree'), flow.state.get('owner') or flow.path, 'owner')
         managed_pr = next((p for p in facts.get('pulls', []) if p['number'] == flow.state.get('pr')), None)
         if managed_pr and managed_pr.get('merged_at') and flow.state.get('managed'):
             flow.state['phase'] = 'complete'
