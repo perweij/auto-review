@@ -14,18 +14,12 @@ def normalize(issues, reviews, inline, threads):
     return github_normalize(issues, reviews, inline, threads)
 
 
-def external(discussion, actions):
+def external(discussion, actions, adapter=None):
     replies, reviews = set(), set()
-    for action in actions:
-        if action.get("status") != "published":
-            continue
-        receipt = action.get("result") or {}
-        if action.get("kind") == "reply":
-            replies.add(receipt.get("id"))
-            reviews.add(receipt.get("pull_request_review_id"))
-        else:
-            reviews.add(receipt.get("id"))
-        replies.update(c.get("id") for c in action.get("comment_results", {}).values())
+    from .receipts import evidence
+    for value in evidence(actions, adapter):
+        replies.update(value['comment_ids'])
+        reviews.update(value['review_ids'])
     result = copy.deepcopy(discussion)
     items = []
     for item in result["items"]:
@@ -59,7 +53,7 @@ def collect(repository, directory):
         write_json(snapshot / "discussion.json", discussion)
         from .receipts import actions as saved_actions
         actions = saved_actions(directory)
-        write_json(snapshot / "external.json", external(discussion, actions), sort_keys=True)
+        write_json(snapshot / "external.json", external(discussion, actions, getattr(repository.forge, "publication", None)), sort_keys=True)
         manifest["discussion"] = {"complete": True, "hash": hash_file(snapshot / "external.json"),
                                   "path": str(snapshot / "discussion.json"), "fetched_at": now()}
         write_json(directory / "manifest.json", manifest)

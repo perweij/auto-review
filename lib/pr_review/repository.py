@@ -145,16 +145,17 @@ class Repository:
         self.verify(manifest, directory)
         if manifest.get("integrity_failed"):
             fail("Earlier worktree integrity failure blocks publication; start a fresh run")
-        pr = self.metadata(directory / "publication/pr-latest.json")
-        if pr["headRefOid"] != manifest["snapshot"]["head"]:
+        from .forge_context import read_change, legacy_metadata
+        pr = read_change(self)
+        write_json(directory / 'publication/pr-latest.json', legacy_metadata(pr))
+        if pr["source"]["head"] != manifest["snapshot"]["head"]:
             fail(f"PR head changed; publication blocked. Rerun pr-review {self.pr} to update this saved review.")
-        if pr["state"] != "OPEN":
+        if pr["state"] != "open":
             fail("PR is no longer open; publication blocked")
-        if verdict != "COMMENT" and pr["author"]["login"].lower() == viewer.lower():
-            fail("GitHub does not allow self-approval or self-request-changes")
+        self.forge.publication.validate_verdict(pr, viewer, verdict)
         ref = f"refs/pr-review/{self.project.resource_key('change', self.pr)}/publication-base"
         self.git("fetch", "--no-tags", "--refmap=", "--no-write-fetch-head", self.remote,
-                 f"+refs/heads/{pr['baseRefName']}:{ref}")
+                 f"+refs/heads/{pr['target']['branch']}:{ref}")
         base = self.git("rev-parse", ref).stdout.strip()
         merge = self.git("merge-base", manifest["snapshot"]["head"], base).stdout.strip()
         if merge != manifest["snapshot"]["merge_base"]:

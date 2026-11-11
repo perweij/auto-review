@@ -1098,3 +1098,11 @@ GitLab.com MR URL and the existing repository/cwd fields. The compatibility name
 checkout lookup and artifacts retain the existing protocol format. This adapter
 supports local review only: publication, conversation mutation, Owner and issue
 workflows are rejected. GitLab approval state is not converted into review verdicts.
+
+Reviewer publication now delegates rendering, payload preparation and receipt
+interpretation to the forge adapter. Protocol 1 `prepare`, `publish`, `resolve`,
+confirmation tokens, receipt URLs and exit semantics are unchanged. Unsupported
+publication placements/verdicts fail before a write; no downgrade is performed.
+The private draft journal adds versioned per-operation records to new logical
+actions, retaining partial receipts and treating older actions as single operations.
+Owner helper compatibility remains in place pending its separate extraction.

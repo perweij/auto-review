@@ -1558,3 +1558,43 @@ Models receive filtered environments and the existing no-publication instruction
 Claude tool restrictions also deny `glab`. Independent reviewers use isolated homes.
 These execution policies are not a new security sandbox; the existing documented
 outer-container trust boundary still applies.
+
+### Publication adapter and recovery
+
+Reviewer publication keeps approval, freshness checks, durable intent and retry
+policy in the shared workflow. The forge adapter renders preview text and prepares
+remote operations, submits each operation once, and interprets receipt evidence.
+GitHub retains its existing comment/suggestion text, tracking markers and verdicts.
+GitLab still has no publication capability.
+
+New logical actions contain versioned operation records. Each operation is saved
+before sending; its returned receipt is saved before supplemental inline-receipt
+lookups. A logical action completes only when all operations and required receipts
+are verified. Confirmed operations within an incomplete action are retained and
+excluded from subsequent sends. Their own discussion activity is recognized during
+freshness checks. Missing or duplicate receipts never authorize a repost.
+
+Old action ledgers and saved batches remain readable as single-operation GitHub
+intents. Recovery uses their original markers and payloads; importing them does not
+stage new work. A timeout remains uncertain until inspected/recovered. The existing
+explicitly confirmed retry path remains available after an absence lookup; adapters
+never retry writes internally. Prepared payloads and destinations are frozen into
+the confirmation token, so edits require preparation and approval again.
+
+Partially published multi-operation actions must resume with unchanged wording and
+destinations. Inspection, acknowledgment and staging remain available after recovery;
+editing is blocked until completion. Resumed operations update the original journal
+action, with the new approval recording its action ID rather than copying confirmed
+operations into a replacement action. `published_actions` continues to count logical
+actions; known partial remote effects are represented by the manifest publication `partial`
+status. The resumable logical action itself uses `failed`.
+Publication validation writes a compatibility projection to `pr-latest.json`; native
+GitHub-only metadata fields are not part of that shared validation artifact.
+
+This extraction adds no abandonment operation. If an unfinished multi-operation
+action cannot be restaged without changing its content or destination, publication
+remains blocked for manual reconciliation; unrelated new submissions cannot bypass
+it. This limitation matters for future multi-operation forge adapters. GitHub still
+prepares one remote operation per logical action. A process interruption after all
+operation receipts are saved may temporarily leave the parent marked `failed`;
+recovery completes its bookkeeping without resending anything.

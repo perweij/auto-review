@@ -38,6 +38,11 @@ class Project:
 
 
 class GitHub:
+    @property
+    def publication(self):
+        from .forge_github_publication import GitHubPublication
+        return GitHubPublication()
+
     capabilities = frozenset(('review', 'publication', 'owner', 'issues'))
     executable = 'gh'
 

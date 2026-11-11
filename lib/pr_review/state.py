@@ -236,7 +236,8 @@ class Session:
                 c['suggestion_preview']['batch_verification'] = (
                     batch if not batch or identity(self, c) in batch.get('members', []) else
                     dict(status='not_verified', evidence='This suggestion version was not included in the saved combined verification.'))
-            c['publication_body'] = render(c)
+            from .publication import render_comment
+            c['publication_body'] = render_comment(self, c)
             # Display metadata does not affect the draft revision, staging,
             # prepared publication, or any saved human wording.
             c.update(comment_assessment(c, assessments))
@@ -300,7 +301,8 @@ class Session:
         return [{"value": v, "available": v == "COMMENT" or not own,
                  "reason": "You are the PR author; GitHub permits Comment only. Inline discussions are still supported."
                  if own and v != "COMMENT" else ""}
-                for v in ("COMMENT", "REQUEST_CHANGES", "APPROVE")]
+                for v in ("COMMENT", "REQUEST_CHANGES", "APPROVE")
+                if v in adapter(restore(self.manifest).forge).publication.verdicts]
 
     def comment_context(self, comment, state):
         placement = comment.get("placement", {})

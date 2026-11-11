@@ -1,9 +1,8 @@
 """Exact-draft publication with durable intent and per-comment recovery receipts."""
 import copy
-import json
 import uuid
 
-from .common import ApiError, atomic_json, command, digest, git, now, read_json
+from .common import ApiError, atomic_json, digest, git, now, read_json
 from . import workflow
 
 
@@ -23,25 +22,8 @@ def repository_operation(session, operation, verdict="COMMENT"):
 
 
 def gh(session, endpoint, payload=None, *, pages=False, resource="pulls"):
-    host, repo = session.manifest["repository"].split("/", 1)
-    args = ["gh", "api", "--hostname", host]
-    if pages:
-        args += ["--paginate", "--slurp"]
-    if payload is not None:
-        args += ["-X", "POST", "--input", "-"]
-    if resource not in ("pulls", "issues"):
-        raise ApiError("invalid_request", "Invalid GitHub comment resource.")
-    result = command([*args, f"repos/{repo}/{resource}/{session.manifest['pr']}/{endpoint}"],
-                     input_text=json.dumps(payload) if payload is not None else None)
-    try:
-        value = json.loads(result.stdout)
-        if pages:
-            if not isinstance(value, list) or any(not isinstance(p, list) for p in value):
-                raise ValueError("Invalid pagination")
-            value = [item for page in value for item in page]
-        return value
-    except ValueError as exc:
-        raise ApiError("invalid_response", "GitHub returned incomplete publication data; resolve before retrying.") from exc
+    from .forge_github_publication import gh as github_gh
+    return github_gh(session, endpoint, payload, pages=pages, resource=resource)
 
 
 def refresh(session, state):
@@ -65,110 +47,57 @@ def refresh(session, state):
 
 
 def marker(session, identity):
-    return f"<!-- pr-review generation={session.id} head={session.git.head} action={identity} -->"
+    from .forge_github_publication import marker as github_marker
+    return github_marker(session, identity)
 
 
 def with_marker(body, value):
-    return body + "\n\n" + value
+    from .forge_github_publication import with_marker as github_with_marker
+    return github_with_marker(body, value)
 
 
 def make_actions(session, state):
-    from .suggestions import render
-    selected = [c for c in state["comments"] if c["status"] == "staged"]
-    actions = []
-    review = [c for c in selected if c["placement"]["kind"] in ("inline", "review")]
-    overall = [c for c in review if c["placement"]["kind"] == "review"]
-    if len(overall) > 1:
-        raise ApiError("multiple_assessments", "Stage one overall assessment per review; inline comments remain separate.")
-    for c in selected:
-        if c["placement"]["kind"] != "reply":
-            continue
-        identity = "api-" + uuid.uuid4().hex
-        actions.append({"id": identity, "kind": "reply", "status": "draft", "comment_ids": [c["id"]],
-                        "finding_ids": c["finding_ids"], "target": copy.deepcopy(c["placement"]), "event": "COMMENT",
-                        "marker": marker(session, identity), "viewer": session.manifest["viewer"],
-                        "payload": {"body": with_marker(c["body"], marker(session, identity))}})
-    # Staged comments use COMMENT unless the user explicitly chose a verdict.
-    # Sending a verdict on its own also requires an explicit user choice.
-    if review or (state.get("verdict_requested") and not state["verdict_submitted"]):
-        identity = "api-" + uuid.uuid4().hex
-        comment_markers = {c["id"]: marker(session, identity + "/" + c["id"]) for c in review}
-        payload = {"commit_id": session.git.head,
-                   "event": state["verdict"] if state.get("verdict_requested") and not state["verdict_submitted"] else "COMMENT",
-                   "body": with_marker(overall[0]["body"] if overall else "", marker(session, identity))}
-        inline = []
-        for c in review:
-            if c["placement"]["kind"] != "inline":
-                continue
-            a = session.git.anchor(c["placement"])
-            value = {"path": a["path"], "line": a["line"], "side": a["side"],
-                     "body": with_marker(render(c), comment_markers[c["id"]])}
-            if a["start_line"] != a["line"]:
-                value.update(start_line=a["start_line"], start_side=a["side"])
-            inline.append(value)
-        if inline:
-            payload["comments"] = inline
-        actions.append({"id": identity, "kind": "review", "status": "draft", "comment_ids": [c["id"] for c in review],
-                        "finding_ids": [f for c in review for f in c["finding_ids"]], "target": None,
-                        "event": payload["event"], "marker": marker(session, identity), "comment_markers": comment_markers,
-                        "viewer": session.manifest["viewer"], "payload": payload})
-    return actions
+    selected = copy.deepcopy([c for c in state['comments'] if c['status'] == 'staged'])
+    adapter = publication_adapter(session)
+    if sum(c['placement']['kind'] == 'review' for c in selected) > 1:
+        raise ApiError('multiple_assessments', 'Stage one overall assessment per review.')
+    for comment in selected:
+        if comment.get('suggestion') and not adapter.suggestions:
+            raise ApiError('unsupported_operation', 'This forge does not support code suggestions.')
+        if comment['placement']['kind'] not in adapter.placements:
+            raise ApiError('unsupported_operation', 'Unsupported publication placement.')
+        if comment['placement']['kind'] == 'inline':
+            comment['placement'] = session.git.anchor(comment['placement'])
+    intent = {key: state[key] for key in ('verdict', 'verdict_submitted')}
+    intent.update(comments=selected, verdict_requested=state.get('verdict_requested', False))
+    return adapter.prepare(session, intent)
 
 
 def persist_action(session, state, action):
     # The draft ledger owns both intent and receipts. Legacy actions.json is
     # retained unchanged as an import source, never a competing writable state.
     session.save(state)
-    ledger = [a for batch in state['batches'] for a in batch['actions']]
-    statuses = {a['id']: a['status'] for a in ledger}
+    from .receipts import has_confirmed
+    ledger = {a['id']: a for batch in state['batches'] for a in batch['actions']}.values()
     manifest = read_json(session.path / "manifest.json")
-    count = sum(a.get("status") == "published" for a in ledger)
-    remaining = any(status in ("draft", "failed", "submitting", "ambiguous") for status in statuses.values())
-    manifest["publication"] = {"published_actions": count,
-                               "status": "partial" if count and remaining else "published" if count else "not_published"}
+    count = sum(a['status'] == 'published' for a in ledger)
+    remaining = any(a['status'] in ('draft', 'failed', 'submitting', 'ambiguous') for a in ledger)
+    confirmed = any(has_confirmed(a) for a in ledger)
+    manifest['publication'] = {'published_actions': count,
+                               'status': 'partial' if confirmed and remaining else 'published' if count else 'not_published'}
     atomic_json(session.path / "manifest.json", manifest)
 
 
 def valid_receipt(session, action, value):
-    if (not isinstance(value, dict) or type(value.get("id")) is not int
-            or not isinstance(value.get('user'), dict)
-            or not isinstance(value['user'].get('login'), str)
-            or not isinstance(value.get('body'), str)):
-        return False
-    if str((value.get("user") or {}).get("login", "")).lower() != str(action["viewer"]).lower():
-        return False
-    if action["marker"] not in (value.get("body") or ""):
-        return False
-    if action["kind"] == "timeline":
-        url = value.get("html_url")
-        expected = f"https://{session.manifest['repository']}/pull/{session.manifest['pr']}#issuecomment-{value['id']}"
-        return isinstance(url, str) and url.lower() == expected.lower()
-    if action["kind"] == "reply":
-        return value.get("in_reply_to_id") == action["target"]["root_id"]
-    expected = {"COMMENT": "COMMENTED", "REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED"}[action["event"]]
-    return value.get("commit_id") == session.git.head and value.get("state", "").upper() == expected
+    from .forge_github_publication import valid_receipt as github_valid_receipt
+    return github_valid_receipt(session, action, value)
 
 
-def mark_published(session, state, action, receipt):
+def mark_published(session, state, action, receipt, comment_results=None):
     action["result"] = receipt
-    comment_results = {}
-    if action["kind"] == "review" and action["payload"].get("comments"):
-        values = gh(session, f"reviews/{receipt['id']}/comments", pages=True)
-        if any(not isinstance(v, dict) or not isinstance(v.get('user'), dict)
-               or not isinstance(v.get('body'), str) for v in values):
-            raise ApiError('incomplete_receipts', 'Review submitted; inline comment receipts are incomplete. Resolve before retrying.')
-        for identity, tracking in action.get("comment_markers", {}).items():
-            value = next((v for v in values if tracking in (v.get("body") or "") and
-                          v.get("pull_request_review_id") == receipt["id"] and
-                          str((v.get("user") or {}).get("login", "")).lower() == str(action["viewer"]).lower()), None)
-            if value:
-                comment_results[identity] = value
-        expected = [c["id"] for c in state["comments"] if c["id"] in action["comment_ids"] and c["placement"]["kind"] == "inline"]
-        if any(i not in comment_results for i in expected):
-            # Parent review exists. Keep intent ambiguous and never repost it;
-            # the next recovery fetches its comment receipts again.
-            persist_action(session, state, action)
-            raise ApiError("incomplete_receipts", "Review submitted; waiting for its inline comment receipts. Resolve before retrying.")
+    persist_action(session, state, action)
+    if comment_results is None:
+        comment_results = publication_adapter(session).comments(session, action, receipt, state)
     action.update(status="published", comment_results=comment_results)
     for c in state["comments"]:
         if c["id"] in action["comment_ids"]:
@@ -189,21 +118,25 @@ def recover(session, state):
         for action in batch["actions"]:
             if action["status"] not in ("submitting", "ambiguous", "failed"):
                 continue
-            values = gh(session, "comments" if action["kind"] == "reply" else "reviews", pages=True)
-            if any(not isinstance(v, dict) or type(v.get('id')) is not int or
-                   not isinstance(v.get('user'), dict) or not isinstance(v['user'].get('login'), str) or
-                   not isinstance(v.get('body'), str) for v in values):
-                raise ApiError('invalid_response', 'Malformed publication lookup; refusing to risk a duplicate')
-            matches = [v for v in values if valid_receipt(session, action, v)]
-            if len(matches) > 1:
-                raise ApiError("duplicate_receipts", "Multiple posts match this action; inspect GitHub before continuing.")
-            if matches:
-                mark_published(session, state, action, matches[0])
-            elif action.get("result"):
-                raise ApiError("incomplete_receipts", "A review was submitted but cannot currently be verified; no retry sent.")
-            else:
-                action["status"] = "superseded" if action.get("legacy") else "failed"
-                persist_action(session, state, action)
+            for operation in action.get('operations', [action]):
+                if operation['status'] == 'published':
+                    continue
+                if operation['status'] == 'draft' and operation is not action:
+                    continue
+                matches = publication_adapter(session).lookup(session, operation)
+                if len(matches) > 1:
+                    raise ApiError('duplicate_receipts', 'Multiple posts match this operation; inspect before continuing.')
+                if matches:
+                    verify_operation(session, state, action, operation, matches[0])
+                elif operation.get('result'):
+                    raise ApiError('incomplete_receipts', 'Submitted operation cannot currently be verified; no retry sent.')
+                else:
+                    operation['status'] = 'superseded' if action.get('legacy') else 'failed'
+                    action['status'] = operation['status']
+                    persist_action(session, state, action)
+            settle_action(action)
+            persist_action(session, state, action)
+            complete_action(session, state, action)
 
 
 def prepare(session, state):
@@ -244,18 +177,20 @@ def prepare(session, state):
             if previous["status"] != "failed" or any(previous.get(k) != action.get(k) for k in
                                                        ("kind", "target", "event", "comment_ids")):
                 continue
-            def without_markers(payload):
-                import re
-                return re.sub(r"<!-- pr-review [^>]+ -->", "", json.dumps(payload, sort_keys=True))
-            if without_markers(previous["payload"]) == without_markers(action["payload"]):
+            if publication_adapter(session).retry_equivalent(previous, action):
                 actions[index] = copy.deepcopy(previous)
                 actions[index]["status"] = "draft"
                 break
+    from .receipts import has_confirmed
+    for previous in (a for b in state['batches'] for a in b['actions']):
+        if previous['status'] != 'published' and has_confirmed(previous):
+            if not any(a['id'] == previous['id'] for a in actions):
+                return {'ready': False, 'reason': f"Partially published action {previous['id']} (comments: {', '.join(previous['comment_ids'])}) must resume with unchanged text, destinations and verdict. Inspect, acknowledge and restage those comments.", 'review': session.view(state)}
     batch = {"id": uuid.uuid4().hex, "actions": actions, "created_at": now(),
              "review_status": workflow.status_fingerprint(session)}
     state["prepared"] = batch
     session.save(state)
-    counts = {"inline": sum(len(a["payload"].get("comments", [])) for a in actions),
+    counts = {"inline": sum(c["status"] == "staged" and c["placement"]["kind"] == "inline" for c in state["comments"]),
               "replies": sum(a["kind"] == "reply" for a in actions),
               "overall": sum(c["status"] == "staged" and c["placement"]["kind"] == "review" for c in state["comments"])}
     warnings = ([f"{state['blocking_findings']} retained blocking findings remain."]
@@ -292,17 +227,29 @@ def publish(session, state, request):
     if any(session.blockers(c, state) for c in state['comments'] if c['status'] == 'staged'):
         return {'complete': False, 'reason': 'Draft or suggestion verification changed; inspect and prepare again.',
                 'review': session.view(state)}
-    for previous in (a for b in state["batches"] for a in b["actions"]):
-        if previous["status"] in ("draft", "failed"):
-            previous["status"] = "superseded"
-    state["batches"].append(batch)
+    from .receipts import has_confirmed
+    previous_actions = [a for b in state['batches'] for a in b['actions']]
+    resumed = set()
+    for index, action in enumerate(batch['actions']):
+        original = next((a for a in previous_actions if a['id'] == action['id'] and has_confirmed(a)), None)
+        if original is not None:
+            batch['actions'][index] = original
+            resumed.add(original['id'])
+    for previous in previous_actions:
+        if previous['status'] in ('draft', 'failed') and not has_confirmed(previous):
+            previous['status'] = 'superseded'
+            for operation in previous.get('operations', []):
+                if operation['status'] in ('draft', 'failed'):
+                    operation['status'] = 'superseded'
+    state['batches'].append({**batch, 'actions': [a for a in batch['actions'] if a['id'] not in resumed],
+                             'resumed_actions': sorted(resumed)})
     session.save(state)
     for action in batch["actions"]:
         # Recheck between network writes. Confirmed own receipts are filtered by
         # the shared discussion collector, including implicit review wrappers.
         if refresh(session, state):
             return {"complete": False, "reason": "Discussion changed; unsent comments need inspection.", "review": session.view(state)}
-        if not any(a["status"] == "published" and a["kind"] == "review" for a in batch["actions"]) and batch.get("review_status") != workflow.status_fingerprint(session):
+        if not any(op["status"] == "published" and op["kind"] == "review" for a in batch["actions"] for op in a.get("operations", [a])) and batch.get("review_status") != workflow.status_fingerprint(session):
             return {"complete": False, "reason": "GitHub review status changed; prepare the remaining publication again.",
                     "review": session.view(state)}
         repository_operation(session, "validate", action["event"])
@@ -310,18 +257,76 @@ def publish(session, state, request):
         if any(suggestion_blockers(session, c, state) for c in state['comments'] if c['id'] in action['comment_ids']):
             return {'complete': False, 'reason': 'Suggestion verification changed; inspect the unsent comments.',
                     'review': session.view(state)}
-        action["status"] = "submitting"
-        persist_action(session, state, action)
-        try:
-            endpoint = f"comments/{action['target']['root_id']}/replies" if action["kind"] == "reply" else "reviews"
-            receipt = gh(session, endpoint, action["payload"])
-            if not valid_receipt(session, action, receipt):
-                raise ApiError("invalid_response", "Submission response could not be verified.")
-            mark_published(session, state, action, receipt)
-        except ApiError as exc:
-            action["status"] = "ambiguous"
+        sent_here = False
+        for operation in action.get('operations', [action]):
+            if operation['status'] == 'published':
+                continue
+            if sent_here:
+                if refresh(session, state):
+                    return {'complete': False, 'reason': 'Discussion changed; inspect remaining operations.', 'review': session.view(state)}
+                own_verdict = any(op['status'] == 'published' and op['kind'] == 'review' for a in batch['actions'] for op in a.get('operations', [a]))
+                if not own_verdict and batch.get('review_status') != workflow.status_fingerprint(session):
+                    return {'complete': False, 'reason': 'Review status changed; prepare remaining operations again.', 'review': session.view(state)}
+                repository_operation(session, 'validate', action['event'])
+            operation['status'] = action['status'] = 'submitting'
             persist_action(session, state, action)
-            if exc.code == "cancelled":
-                raise
-            return {"complete": False, "reason": str(exc), "needs_recovery": True, "review": session.view(state)}
+            try:
+                receipt = publication_adapter(session).submit(session, operation)
+                if not publication_adapter(session).matches(session, operation, receipt):
+                    raise ApiError('invalid_response', 'Submission response could not be verified.')
+                verify_operation(session, state, action, operation, receipt)
+                sent_here = True
+            except ApiError as exc:
+                operation['status'] = action['status'] = 'ambiguous'
+                persist_action(session, state, action)
+                if exc.code == 'cancelled':
+                    raise
+                return {'complete': False, 'reason': str(exc), 'needs_recovery': True, 'review': session.view(state)}
+        complete_action(session, state, action)
     return {"complete": True, "review": session.view(state)}
+
+
+def publication_adapter(session):
+    from .forge import adapter, restore, require
+    project = restore(session.manifest)
+    require(project.forge, 'publication')
+    return adapter(project.forge).publication
+
+
+def verify_operation(session, state, action, operation, receipt):
+    operation['result'] = receipt
+    operation['receipt_verified'] = True
+    operation['evidence'] = publication_adapter(session).evidence(operation)
+    persist_action(session, state, action)
+    operation['comment_results'] = publication_adapter(session).comments(session, operation, receipt, state)
+    for identity in operation.get('comment_ids', []):
+        operation['comment_results'].setdefault(identity, receipt)
+    operation['status'] = 'published'
+    operation['evidence'] = publication_adapter(session).evidence(operation)
+    settle_action(action)
+    persist_action(session, state, action)
+
+
+def complete_action(session, state, action):
+    operations = action.get('operations', [action])
+    if all(op['status'] == 'published' for op in operations):
+        comments = {key: value for op in operations for key, value in op.get('comment_results', {}).items()}
+        verdict = next((op for op in operations if op.get('kind') == 'review' and op.get('event') == action.get('event')), operations[-1])
+        mark_published(session, state, action, verdict['result'], comments)
+
+
+def render_comment(session, comment):
+    from .forge import adapter, restore
+    forge = adapter(restore(session.manifest).forge)
+    if 'publication' in forge.capabilities:
+        return forge.publication.render(comment)
+    from .suggestions import render
+    return render(comment)
+
+
+def settle_action(action):
+    if 'operations' not in action:
+        return
+    statuses = {op['status'] for op in action['operations']}
+    # Keep all-published actions eligible for final comment/verdict bookkeeping.
+    action['status'] = 'ambiguous' if statuses & {'submitting', 'ambiguous'} else 'failed'
