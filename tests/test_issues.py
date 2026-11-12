@@ -207,9 +207,9 @@ class EligibilityRelationshipTest(unittest.TestCase):
                           'base': {'ref': 'main'}}}
         self.linked = []
         for target, kwargs in [
-                ('pr_review.issue_eligibility.github_json', {'side_effect': self.github}),
-                ('pr_review.issue_eligibility.connection', {'side_effect': self.connection}),
-                ('pr_review.issue_eligibility.command', {'side_effect': AssertionError('Unexpected command')})]:
+                ('pr_review.forge_github_issues.github_json', {'side_effect': self.github}),
+                ('pr_review.forge_github_issues.connection', {'side_effect': self.connection}),
+                ('pr_review.forge_github_issues.command', {'side_effect': AssertionError('Unexpected command')})]:
             p = patch(target, **kwargs)
             mocked = p.start()
             self.addCleanup(p.stop)
@@ -2343,10 +2343,10 @@ class CollectorTest(unittest.TestCase):
             if endpoint == 'repos/org/repo':
                 return {'default_branch': 'main', 'permissions': {'push': True}}
             return copy.deepcopy(self.pull if '/pulls/' in endpoint else self.issue)
-        p = patch('pr_review.issue_eligibility.github_json', side_effect=github)
+        p = patch('pr_review.forge_github_issues.github_json', side_effect=github)
         p.start()
         self.addCleanup(p.stop)
-        p = patch('pr_review.issue_eligibility.connection', return_value=[{'number': 7, 'repository': {'nameWithOwner': 'org/repo'}}])
+        p = patch('pr_review.forge_github_issues.connection', return_value=[{'number': 7, 'repository': {'nameWithOwner': 'org/repo'}}])
         p.start()
         self.addCleanup(p.stop)
 

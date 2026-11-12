@@ -11,9 +11,10 @@ from .common import ApiError, atomic_json, command, digest, git, locked, now, re
 from .repository import Repository, normalize_remote, repository_name
 from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness
 from .owner_completion import execution_complete
-from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
+from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy
 from .issue_planning import assess_issue, planning_policy_digest
 from . import issue_resources, specification, review_history, issue_settings
+from .forge_github_issues import pages
 from .issue_writes import Writes, comment_marker
 from .events import emit
 

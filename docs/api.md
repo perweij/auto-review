@@ -1132,3 +1132,12 @@ prevents Owner automatic completion for that thread; confirmed resolution and
 reopening continue to use the existing `github_completion` rules. GitHub GraphQL
 encoding, reply endpoints, markers and commit URLs belong to the adapter. GitLab
 remains read-only; these changes do not enable GitLab Owner workflows.
+
+Issue eligibility reads now use the forge issue adapter. Shared policy consumes
+normalized assignment, change-state and branch facts; Git snapshot verification
+remains shared. Explicit closing links are required, and incomplete relationships,
+permissions or assignments cannot establish eligibility, even with `force`.
+The existing issue/PR/comment representations and snapshot hashes are retained for
+workflow compatibility. Conflicting normalized and compatibility snapshots are
+rejected as incomplete. Prefetched facts require no network or Git operations.
+GitLab issue workflows remain unsupported.

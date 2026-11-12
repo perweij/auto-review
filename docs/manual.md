@@ -1610,3 +1610,9 @@ Resolve and reopen actions send once and then refresh the discussion to confirm
 the result. After cancellation or an uncertain response, refresh to check the
 current state. Refresh never retries the mutation. A pending thread action cannot
 supply automatic completion proof until its requested state is observed.
+
+Issue eligibility still requires an open, described issue, repository push access,
+acceptable assignments, and unambiguous explicit closing relationships. Ordinary
+mentions do not establish those links. Unknown remote facts block eligibility;
+`--force` overrides known assignment conflicts only. This adapter refactor does
+not change saved plans, approvals, human edits, or GitLab issue support.

@@ -3,7 +3,7 @@ import copy
 import json
 import re
 from .common import ApiError, command, digest, now
-from .issue_eligibility import pages
+from .forge_github_issues import pages
 from .repository import normalize_remote
 
 
