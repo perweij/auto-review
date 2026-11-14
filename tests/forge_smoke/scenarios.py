@@ -225,17 +225,9 @@ def publication_recovery(run, forge):
     body = 'Smoke lost-response recovery ' + run.directory.name
     def request(command, **fields):
         return run.api(dict(command=command, generation=view['generation'], revision=view['revision'], **ctx, **fields), forge.cwd)
-    result = request('mutate', operation='create', body=body, placement={'kind': 'review'})
-    view = result['review']
-    identity = result['changed'][0]
-    view = request('mutate', operation='stage', comment=identity)['review']
-    preview = request('prepare')
-    if not preview['ready']:
-        raise Failure('Recovery fixture not ready')
-    view = preview['review']
     config = run.directory / 'fault.json'
     number = run.data['fixtures']['github']['number']
-    atomic_json(config, dict(executable=shutil.which('gh'), method='POST', endpoint='repos/%s/pulls/%s/reviews' % (forge.repo, number), mode='after'))
+    spec = dict(method='POST', endpoint='repos/%s/pulls/%s/reviews' % (forge.repo, number), mode='after')
     wrapper = run.directory / 'fault-bin'
     wrapper.mkdir(exist_ok=True)
     executable = wrapper / 'gh'
@@ -245,16 +237,44 @@ def publication_recovery(run, forge):
             raise Failure('Conflicting fault wrapper: ' + str(executable))
     else:
         executable.symlink_to(target)
-    old_path = run.env['PATH']
-    run.env.update(PATH=str(wrapper)+os.pathsep+old_path, SMOKE_FAULT_FILE=str(config))
-    try:
+    if not config.exists():
+        atomic_json(config, dict(executable=shutil.which('gh'), **spec))
+    evidence = json.loads(config.read_text())
+    if any(evidence.get(key) != value for key, value in spec.items()):
+        raise Failure('Conflicting publication fault configuration: ' + str(config))
+
+    # The public draft ledger persists this identity and its action across an
+    # interruption, including one between creation and staging. Reconcile that
+    # action before deciding whether any publication is still needed.
+    matches = [c for c in view['comments'] if c['body'] == body and c['placement']['kind'] == 'review']
+    if len(matches) > 1:
+        raise Failure('Recovery fixture has duplicate drafts')
+    if matches:
+        identity = matches[0]['id']
+        view = request('resolve')['review']
+    else:
+        if evidence.get('used'):
+            raise Failure('Faulted publication has no retained draft')
+        result = request('mutate', operation='create', body=body, placement={'kind': 'review'})
+        view = result['review']
+        identity = result['changed'][0]
+    comment = next(c for c in view['comments'] if c['id'] == identity)
+    if comment['status'] != 'published' and not evidence.get('used'):
+        view = request('mutate', operation='stage', comment=identity)['review']
+        preview = request('prepare')
+        if not preview['ready']:
+            raise Failure('Recovery fixture not ready')
+        view = preview['review']
+        old_env = dict(run.env)
+        run.env.update(PATH=str(wrapper)+os.pathsep+run.env['PATH'], SMOKE_FAULT_FILE=str(config))
         try:
-            request('publish', confirmation=preview['confirmation'])
-        except Failure:
-            pass  # Both explicit uncertainty and partial-result responses are valid.
-    finally:
-        run.env['PATH'] = old_path
-        run.env.pop('SMOKE_FAULT_FILE', None)
+            try:
+                request('publish', confirmation=preview['confirmation'])
+            except Failure:
+                pass  # Both explicit uncertainty and partial-result responses are valid.
+        finally:
+            run.env.clear()
+            run.env.update(old_env)
     evidence = json.loads(config.read_text())
     if not evidence.get('used') or evidence.get('forwarded_exit') != 0 or not evidence.get('response_bytes'):
         raise Failure('Fault did not hide an accepted remote write')

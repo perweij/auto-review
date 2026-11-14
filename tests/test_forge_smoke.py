@@ -128,8 +128,7 @@ class PublicationRecoveryTest(unittest.TestCase):
         self.original_env = dict(self.run.env)
         self.wrapper = self.run.directory / 'fault-bin/gh'
         self.target = self.run.root / 'tests/forge_smoke/fault.py'
-        self.view = dict(generation='generation', revision='revision', comments=[
-            dict(id='comment', status='published', receipt={'id': 42})])
+        self.view = dict(generation='generation', revision='revision', comments=[])
         self.interrupt = False
         self.run.api = Mock(side_effect=self.api)
         self.forge = SimpleNamespace(kind='github', cwd=self.run.directory, repo='example/test',
@@ -145,6 +144,11 @@ class PublicationRecoveryTest(unittest.TestCase):
         if command == 'read':
             return self.view
         if command == 'mutate':
+            if request['operation'] == 'create':
+                self.view['comments'].append(dict(id='comment', status='unstaged',
+                    body=request['body'], placement=request['placement']))
+            else:
+                self.view['comments'][0]['status'] = 'staged'
             return {'review': self.view, 'changed': ['comment']}
         if command == 'prepare':
             return dict(ready=True, review=self.view, confirmation='confirmation')
@@ -163,6 +167,9 @@ class PublicationRecoveryTest(unittest.TestCase):
             raise Failure('simulated lost response')
         if command == 'resolve':
             self.assertEqual(self.original_env, self.run.env)
+            config = self.run.directory / 'fault.json'
+            if config.exists() and json.loads(config.read_text()).get('used'):
+                self.view['comments'][0].update(status='published', receipt={'id': 42})
             return {'review': self.view}
         self.fail('Unexpected API request: ' + str(request))
 
@@ -174,6 +181,8 @@ class PublicationRecoveryTest(unittest.TestCase):
         self.forge.pages.assert_called_once_with('/pulls/7/reviews')
 
     def test_interrupted_scenario_reuses_retained_wrapper(self):
+        self.run.env['SMOKE_FAULT_FILE'] = '/previous/fault.json'
+        self.original_env = dict(self.run.env)
         self.interrupt = True
         with self.assertRaises(KeyboardInterrupt):
             self.scenario(self.run, self.forge)
@@ -187,6 +196,109 @@ class PublicationRecoveryTest(unittest.TestCase):
         self.assertEqual(self.original_env, self.run.env)
         self.assertEqual('resolve', self.run.api.call_args.args[0]['command'])
         self.forge.pages.assert_called_once_with('/pulls/7/reviews')
+
+    def test_incomplete_used_fault_evidence_never_rearms_publication(self):
+        self.interrupt = True
+        with self.assertRaises(KeyboardInterrupt):
+            self.scenario(self.run, self.forge)
+        config = self.run.directory / 'fault.json'
+        evidence = json.loads(config.read_text())
+        evidence['used'] = True
+        config.write_text(json.dumps(evidence))
+        retained = config.read_bytes()
+        self.run.api.reset_mock()
+        with self.assertRaisesRegex(Failure, 'Fault did not hide an accepted remote write'):
+            self.scenario(self.run, self.forge)
+        self.assertNotIn('publish', [call.args[0]['command'] for call in self.run.api.call_args_list])
+        self.assertEqual(retained, config.read_bytes())
+        self.assertEqual(self.original_env, self.run.env)
+
+    def test_conflicting_fault_configuration_is_preserved(self):
+        config = self.run.directory / 'fault.json'
+        config.write_text(json.dumps(dict(method='POST', endpoint='other', mode='after')))
+        retained = config.read_bytes()
+        with self.assertRaisesRegex(Failure, 'Conflicting publication fault configuration'):
+            self.scenario(self.run, self.forge)
+        self.assertNotIn('publish', [call.args[0]['command'] for call in self.run.api.call_args_list])
+        self.assertEqual(retained, config.read_bytes())
+        self.assertEqual(self.original_env, self.run.env)
+
+    def test_accepted_publication_resumes_persisted_state_without_another_post(self):
+        self.assert_persisted_retry('accepted')
+
+    def test_reconciliation_interruption_resumes_without_another_post(self):
+        self.assert_persisted_retry('resolve')
+
+    def test_remote_verification_failure_resumes_without_another_post(self):
+        self.assert_persisted_retry('verification')
+
+    def assert_persisted_retry(self, interruption):
+        from test_api import ApiTest
+        from pr_review.api import dispatch
+        from pr_review import publication
+        fixture = ApiTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        github, posts = fixture.fake_github(ambiguous_review=True)
+        interrupted = False
+
+        def remote(session, endpoint, payload=None, **options):
+            nonlocal interrupted
+            if payload is None:
+                return github(session, endpoint, **options)
+            try:
+                return github(session, endpoint, payload, **options)
+            finally:
+                config = Path(self.run.env['SMOKE_FAULT_FILE'])
+                evidence = json.loads(config.read_text())
+                evidence.update(used=True, forwarded_exit=0, response_bytes=10)
+                config.write_text(json.dumps(evidence))
+                if interruption == 'accepted' and not interrupted:
+                    interrupted = True
+                    raise KeyboardInterrupt()
+
+        def api(request, cwd):
+            nonlocal interrupted
+            result = dispatch({'protocol': 1, **request})
+            if request['command'] == interruption and not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt()
+            return result
+
+        def reviews(endpoint):
+            nonlocal interrupted
+            if interruption == 'verification' and not interrupted:
+                interrupted = True
+                raise Failure('Remote verification unavailable')
+            return github(fixture.session, 'reviews')
+
+        self.run.api = api
+        self.forge.cwd = fixture.repo
+        self.forge.pages = reviews
+        with patch.object(publication, 'repository_operation'), \
+                patch.object(publication, 'gh', side_effect=remote):
+            with self.assertRaises(Failure if interruption == 'verification' else KeyboardInterrupt):
+                self.scenario(self.run, self.forge)
+            self.assertEqual(1, len(posts))
+            status = 'submitting' if interruption == 'accepted' else 'published'
+            self.assertEqual(status, fixture.session.load()['batches'][0]['actions'][0]['status'])
+            self.assertEqual(self.original_env, self.run.env)
+            retained = self.wrapper.lstat()
+            evidence = (self.run.directory / 'fault.json').read_bytes()
+            self.scenario(self.run, self.forge)
+            self.assertEqual(1, len(posts))
+            self.assertEqual(retained.st_ino, self.wrapper.lstat().st_ino)
+            self.assertEqual(evidence, (self.run.directory / 'fault.json').read_bytes())
+            self.assertEqual(self.original_env, self.run.env)
+            state = fixture.session.load()
+            comments = [c for c in state['comments'] if c['body'].startswith('Smoke lost-response recovery ')]
+            self.assertEqual(1, len(comments))
+            self.assertEqual('published', comments[0]['status'])
+            self.assertTrue(comments[0]['receipt'])
+            self.assertEqual(1, len(state['batches']))
+            # A later retry after reconciliation must also remain a read/recovery operation.
+            self.scenario(self.run, self.forge)
+            self.assertEqual(1, len(posts))
 
     def test_conflicting_wrapper_is_preserved_before_publication(self):
         self.wrapper.parent.mkdir()
