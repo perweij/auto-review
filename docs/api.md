@@ -1141,3 +1141,14 @@ The existing issue/PR/comment representations and snapshot hashes are retained f
 workflow compatibility. Conflicting normalized and compatibility snapshots are
 rejected as incomplete. Prefetched facts require no network or Git operations.
 GitLab issue workflows remain unsupported.
+
+Issue publication uses forge-owned, versioned prepared operations stored inside
+existing action records. GitHub retains existing markers, raw receipts, action
+keys and exact approved wording; legacy records remain readable and recoverable.
+The shared controller retains journal state, account/eligibility guards and
+explicit retry decisions. Failed receipt lookup after submission leaves the
+intent uncertain; it cannot be treated as a rejected send. Draft transitions are
+confirmed by fresh state reads, including after a lost response. An already
+satisfied transition completes its saved journal entry without another mutation.
+Core write capabilities are checked before a mutating workflow; acknowledgments
+remain optional and nonblocking. Assignment policy and GitLab support are unchanged.

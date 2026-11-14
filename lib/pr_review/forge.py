@@ -39,6 +39,11 @@ class Project:
 
 class GitHub:
     @property
+    def issue_writes(self):
+        from .forge_github_issue_writes import GitHubIssueWrites
+        return GitHubIssueWrites()
+
+    @property
     def issues(self):
         from .forge_github_issues import GitHubIssues
         return GitHubIssues()

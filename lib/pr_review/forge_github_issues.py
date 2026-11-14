@@ -78,7 +78,7 @@ class GitHubIssues:
     def comments(self, repo, number):
         values = pages(repo, f'repos/{repo.name}/issues/{number}/comments')
         if any(not isinstance(c, dict) or type(c.get('id')) is not int
-               or not isinstance(c.get('user'), dict) or not isinstance(c['user'].get('login'), str)
+               or c.get('user') is not None and (not isinstance(c['user'], dict) or not isinstance(c['user'].get('login'), str))
                or not isinstance(c.get('body'), str) for c in values):
             raise ApiError('facts_incomplete', 'Incomplete issue comments.')
         if len({c['id'] for c in values}) != len(values):

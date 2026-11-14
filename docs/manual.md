@@ -1616,3 +1616,9 @@ acceptable assignments, and unambiguous explicit closing relationships. Ordinary
 mentions do not establish those links. Unknown remote facts block eligibility;
 `--force` overrides known assignment conflicts only. This adapter refactor does
 not change saved plans, approvals, human edits, or GitLab issue support.
+
+Issue publication recovery retains the exact saved comments and draft-creation
+intent. A failed read-back does not authorize another send; use the existing write
+inspection and retry-absent controls. Draft/ready transitions read back their
+current state and reconcile interrupted actions without repeating a transition
+that is already satisfied. Account changes during a run block subsequent writes.
