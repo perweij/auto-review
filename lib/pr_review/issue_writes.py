@@ -1,70 +1,62 @@
-"""Journaled GitHub operations. Models never receive these capabilities."""
+"""Shared journaled issue operations. Models never receive these capabilities."""
 import copy
-import json
-import re
-from .common import ApiError, command, digest, now
-from .issue_eligibility import pages
+from .common import ApiError, command, now
+from .forge_github_issue_writes import comment_marker
 from .repository import normalize_remote
 
 
-def comment_marker(workflow, key):
-    return f'<!-- fix-issue workflow={workflow} action={digest(key)[:24]} -->'
-
-
 class Writes:
-    def __init__(self, repo, state, save, guard):
+    def __init__(self, repo, state, save, guard, account_check=lambda: None):
         self.repo, self.state, self.save, self.guard = repo, state, save, guard
+        self.account_check = account_check
+
+    @property
+    def adapter(self):
+        from .forge import adapter, restore
+        forge = self.repo.forge if hasattr(self.repo, 'forge') else adapter(restore({'repository': self.repo.identity}).forge)
+        if not hasattr(forge, 'issue_writes'):
+            raise ApiError('unsupported_operation', 'Issue writes are unsupported by this forge.')
+        return forge.issue_writes
+
+    def ensure_supported(self):
+        if not {'comment', 'create', 'draft'} <= self.adapter.capabilities:
+            raise ApiError('unsupported_operation', 'Required issue write capabilities are unavailable.')
 
     def api(self, endpoint, payload, method='POST', *, timeout=None):
-        return json.loads(command(['gh', 'api', '--hostname', self.repo.host, '-X', method, endpoint, '--input', '-'],
-                                 cwd=self.repo.cwd, input_text=json.dumps(payload), timeout=timeout).stdout)
+        return self.adapter.api(self, endpoint, payload, method=method, timeout=timeout)
 
     def comment_text(self, body, key):
-        return body + '\n\n' + comment_marker(self.state["id"], key)
+        return self.adapter.comment_text(self, body, key)
 
-    def readback(self, key, action):
-        """Inspect one saved intent without sending or changing its journal."""
-        receipt = action.get('receipt', {})
-        if key == 'create-pr':
-            marker = '<!-- fix-issue workflow=' + self.state['id'] + ' -->'
-            candidates = pages(self.repo, f'repos/{self.repo.name}/pulls?state=all&head='
-                               + self.repo.name.split('/')[0] + ':' + self.state['remote_branch'])
-            found = [p for p in candidates if marker in (p.get('body') or '')
-                     and p['base']['ref'] == self.state['base_branch']
-                     and p['head']['ref'] == self.state['remote_branch']
-                     and (p['head'].get('repo') or {}).get('full_name', '').lower() == self.repo.name
-                     and p['user']['login'].lower() == self.state['viewer'].lower()
-                     and p.get('body') == action.get('payload', {}).get('body', p.get('body'))]
-        elif 'body' in action:
-            text = self.comment_text(action['body'], key)
-            marker = text.rsplit('\n\n', 1)[1]
-            comments = pages(self.repo, f'repos/{self.repo.name}/issues/{self.state["issue"]}/comments')
-            candidates = [c for c in comments if marker in (c.get('body') or '') or c.get('id') == receipt.get('id')]
-            found = [c for c in candidates if c.get('body') == text
-                     and c.get('user', {}).get('login', '').lower() == self.state['viewer'].lower()]
-        else:
-            raise ApiError('invalid_request', 'Only comment and PR-creation intents support this recovery operation.')
-        if len(found) == len(candidates) == 1 and (not receipt or found[0].get('id') == receipt.get('id')):
-            outcome = 'accepted'
-        elif candidates or receipt or action['status'] == 'complete':
-            outcome = 'ambiguous' if len(candidates) > 1 else 'changed'
-        else:
-            outcome = 'absent'
-        return {'outcome': outcome, 'candidates': candidates, 'matches': found}
+    def readback(self, key, action, *, account_checked=False):
+        try:
+            if not account_checked:
+                self.account_check()
+            return self.adapter.readback(self, key, action)
+        except (ApiError, ValueError, TypeError, KeyError) as exc:
+            if getattr(exc, 'code', None) in ('cancelled', 'account_changed', 'invalid_request', 'resource_limit', 'integrity_failed'):
+                raise
+            if action['status'] == 'pending':
+                raise
+            raise ApiError('uncertain', 'Cannot establish complete publication read-back; no retry sent.', exit_code=5) from exc
 
     def confirm(self, key, action, observation):
         found = observation['matches'][0]
-        action.update(status='complete', receipt=found)
+        action.update(status='complete', receipt=found, evidence=self.adapter.evidence(found))
         if key == 'create-pr':
-            self.state.update(pr=found['number'], managed=True)
+            self.state.update(pr=self.adapter.change_number(found), managed=True)
         self.save()
         return found
 
     def reconcile(self):
         """Recover uncertain accepted writes before deriving semantic input."""
+        account_checked = False
         for key, action in self.state.get('actions', {}).items():
             if action['status'] in ('pending', 'submitting') and ('body' in action or key == 'create-pr'):
-                observation = self.readback(key, action)
+                if not account_checked:
+                    self.account_check()
+                    account_checked = True
+                observation = self.readback(key, action, account_checked=True)
                 if observation['outcome'] == 'absent' and action['status'] == 'pending':
                     continue
                 if observation['outcome'] != 'accepted':
@@ -80,8 +72,10 @@ class Writes:
         selected = {retry_absent: actions[retry_absent]} if retry_absent is not None else {
             k: a for k, a in actions.items() if 'body' in a or k == 'create-pr'}
         inspected = {}
+        if selected:
+            self.account_check()
         for key, action in selected.items():
-            observation = self.readback(key, action)
+            observation = self.readback(key, action, account_checked=True)
             if retry_absent is not None:
                 if observation['outcome'] == 'accepted':
                     self.confirm(key, action, observation)
@@ -114,8 +108,11 @@ class Writes:
         action = self.state.setdefault('actions', {}).setdefault(key, {'status': 'pending', 'body': body, 'source_body': source_body, 'approval': approval})
         if action['body'] != body:
             raise ApiError('action_changed', 'Saved publication content changed.')
-        text = self.comment_text(body, key)
-        endpoint = f'repos/{self.repo.name}/issues/{self.state["issue"]}/comments'
+        expected = self.adapter.prepare_comment(self, body, key)
+        if action.get('operation', expected) != expected:
+            raise ApiError('action_changed', 'Saved comment operation differs from the current destination or wording.')
+        if action['status'] == 'pending':
+            action.setdefault('operation', expected)
         self.save()
         observation = self.readback(key, action)
         if observation['outcome'] == 'accepted':
@@ -123,17 +120,21 @@ class Writes:
         if action['status'] in ('submitting', 'complete') or observation['outcome'] != 'absent':
             raise ApiError('uncertain', 'Comment outcome is uncertain or its receipt was edited/deleted; inspect GitHub.', exit_code=5)
         self.guard()
+        self.account_check()
+        self.adapter.validate(self, action['operation'])
         action['status'] = 'submitting'
         self.save()
         try:
-            self.api(endpoint, {'body': text})
-            observation = self.readback(key, action)
+            self.adapter.submit(self, action['operation'])
         except ApiError as exc:
-            if re.search(r'HTTP (401|403|404|422)\b', str(exc)):
+            if exc.code in ('cancelled', 'resource_limit', 'integrity_failed', 'account_changed'):
+                raise
+            if exc.code == 'publication_rejected':
                 action['status'] = 'pending'
                 self.save()
                 raise ApiError('publication_rejected', str(exc)) from exc
             raise ApiError('uncertain', 'Cannot confirm issue comment; retry to reconcile.', exit_code=5) from exc
+        observation = self.readback(key, action)
         if observation['outcome'] != 'accepted':
             raise ApiError('uncertain', 'Comment not confirmed by read-back.', exit_code=5)
         return self.confirm(key, action, observation)
@@ -160,6 +161,7 @@ class Writes:
         if observed != expected:
             raise ApiError('unexpected_head', 'Remote branch changed; no push performed.')
         self.guard()
+        self.account_check()
         action['status'] = 'submitting'
         self.save()
         # Normal Git push honors pre-push hooks. No implicit remote/ref mapping.
@@ -175,75 +177,71 @@ class Writes:
         raise ApiError('push_failed', result.stderr or 'Push was rejected; inspect hooks and branch rules.')
 
     def plan_comment_url(self):
-        key = 'plan:' + str(self.state['plan']['revision'])
-        action = self.state.get('actions', {}).get(key, {})
-        receipt = action.get('receipt', {})
-        comment_id = receipt.get('id')
-        if (action.get('status') != 'complete' or type(comment_id) is not int or comment_id <= 0
-                or 'body' not in action or receipt.get('body') != self.comment_text(action['body'], key)
-                or receipt.get('user', {}).get('login', '').lower() != self.state['viewer'].lower()):
-            raise ApiError('facts_incomplete', 'A confirmed current plan comment is required before PR creation.')
-        # Build from trusted repository identity and a numeric receipt, never a
-        # model-written URL or prose that could add closing directives.
-        return f'https://{self.repo.identity}/issues/{self.state["issue"]}#issuecomment-{comment_id}'
+        return self.adapter.plan_comment_url(self)
 
     def create_pr(self):
         key = 'create-pr'
-        marker = '<!-- fix-issue workflow=' + self.state['id'] + ' -->'
         action = self.state.setdefault('actions', {}).setdefault(key, {'status': 'pending'})
-        endpoint = f'repos/{self.repo.name}/pulls'
         self.save()
         observation = self.readback(key, action)
         if observation['outcome'] != 'accepted':
             if action['status'] in ('submitting', 'complete') or observation['outcome'] != 'absent':
                 raise ApiError('uncertain', 'PR creation outcome is uncertain; inspect GitHub before retrying.', exit_code=5)
-            body = f'Closes #{self.state["issue"]}\n\nPlan: {self.plan_comment_url()}\n\n{marker}'
             self.guard()
-            if 'payload' in action and action['payload']['body'] != body:
-                # Only an absent, pending intent may change. Keep uncertain and
-                # accepted payloads intact for exact read-back reconciliation.
-                action.setdefault('history', []).append({'decision': 'link_plan', 'at': now(),
-                    'previous_payload': copy.deepcopy(action['payload'])})
-                action['payload']['body'] = body
-            action.setdefault('payload', {'title': self.state['title'], 'head': self.state['remote_branch'],
-                                         'base': self.state['base_branch'], 'body': body, 'draft': True})
+            self.account_check()
+            operation = self.adapter.prepare_creation(self, action)
+            if action.get('payload') and action['payload'] != operation['payload']:
+                action.setdefault('history', []).append({'decision': 'link_plan', 'at': now(), 'previous_payload': copy.deepcopy(action['payload'])})
+            action.update(operation=operation, payload=copy.deepcopy(operation['payload']))
+            self.adapter.validate(self, action['operation'])
             action['status'] = 'submitting'
             self.save()
             try:
-                self.api(endpoint, action['payload'])
-                observation = self.readback(key, action)
+                self.adapter.submit(self, action['operation'])
             except ApiError as exc:
-                if re.search(r'HTTP (401|403|404|422)\b', str(exc)):
+                if exc.code in ('cancelled', 'resource_limit', 'integrity_failed', 'account_changed'):
+                    raise
+                if exc.code == 'publication_rejected':
                     action['status'] = 'pending'
                     self.save()
                     raise ApiError('bootstrap_rejected', 'GitHub rejected draft PR creation: ' + str(exc)) from exc
                 raise ApiError('uncertain', 'Cannot confirm PR creation; retry to reconcile.', exit_code=5) from exc
+            observation = self.readback(key, action)
         if observation['outcome'] != 'accepted':
             raise ApiError('uncertain', 'PR creation did not produce one confirmed PR.', exit_code=5)
         return self.confirm(key, action, observation)
 
+    def confirm_draft(self, desired):
+        for key, action in self.state.get('actions', {}).items():
+            if key.startswith('draft:') and action.get('status') == 'submitting':
+                action['status'] = 'complete' if key.startswith('draft:' + str(desired) + ':') else 'superseded'
+        self.save()
+
     def draft(self, desired):
         self.guard()
-        data = self.api(f'graphql', {'query': 'query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){id isDraft state}}}',
-                                    'variables': {'owner': self.repo.name.split('/')[0], 'name': self.repo.name.split('/')[1], 'n': self.state['pr']}})
-        try:
-            pr = data['data']['repository']['pullRequest']
-            if data.get('errors') or pr['state'] != 'OPEN':
-                raise ValueError()
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ApiError('facts_incomplete', 'Cannot verify draft status.') from exc
-        if pr['isDraft'] == desired:
-            return
+        self.account_check()
+        observed = self.adapter.draft_state(self)
         key = 'draft:' + str(desired) + ':' + self.state['remote_head']
-        self.state.setdefault('actions', {})[key] = {'status': 'submitting'}
+        if observed['draft'] is desired:
+            self.confirm_draft(desired)
+            return
+        previous = self.state.setdefault('actions', {}).get(key)
+        action = {'status': 'submitting', 'desired': desired, 'history': copy.deepcopy(previous.get('history', [])) if previous else []}
+        if previous:
+            action['history'].append({k: v for k, v in previous.items() if k != 'history'})
+        self.state['actions'][key] = action
         self.save()
-        verb = 'convertPullRequestToDraft' if desired else 'markPullRequestReadyForReview'
-        query = 'mutation($id:ID!){' + verb + '(input:{pullRequestId:$id}){pullRequest{isDraft}}}'
         try:
-            result = self.api('graphql', {'query': query, 'variables': {'id': pr['id']}})
-            if result.get('errors') or result['data'][verb]['pullRequest']['isDraft'] != desired:
-                raise ValueError()
-        except (ApiError, KeyError, TypeError, ValueError) as exc:
+            self.adapter.set_draft(self, observed['id'], desired)
+        except (ApiError, ValueError, TypeError, KeyError) as exc:
+            if getattr(exc, 'code', None) in ('cancelled', 'resource_limit', 'integrity_failed', 'account_changed'):
+                raise
+        try:
+            confirmed = self.adapter.draft_state(self)['draft'] is desired
+        except (ApiError, ValueError, TypeError, KeyError) as exc:
+            if getattr(exc, 'code', None) in ('cancelled', 'resource_limit', 'integrity_failed', 'account_changed'):
+                raise
             raise ApiError('uncertain', 'Draft transition not confirmed; retry to read back.', exit_code=5) from exc
-        self.state['actions'][key]['status'] = 'complete'
-        self.save()
+        if not confirmed:
+            raise ApiError('uncertain', 'Draft transition not confirmed; retry to read back.', exit_code=5)
+        self.confirm_draft(desired)

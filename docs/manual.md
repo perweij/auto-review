@@ -1466,3 +1466,159 @@ creating directories or starting work. Existing `m` and `C-u m` behavior is unch
 CLI review and fix progress prints `Checkout: /absolute/path` when the checkout
 is available, including on resume. This is separate from the session/artifact
 directory. JSON result output remains unchanged.
+
+### Forge selection and compatibility
+
+Review, Owner and fix-issue commands accept `--forge github`. GitHub remains the
+only installed forge implementation and the default, including enterprise hosts.
+Unknown selections fail before starting work. Existing repository selectors,
+GitHub URLs and saved session locations remain supported; this option does not
+provide GitLab writes; the read-only GitLab.com pilot is described below.
+
+New sessions record forge, host and full project path separately, and retain the
+existing repository and viewer fields for compatibility. Legacy sessions are
+interpreted as GitHub without rewriting historical receipts or publication text.
+New authenticated work retains a stable account ID when available, in addition
+to the existing username check. A changed or unavailable previously recorded ID
+blocks continuation rather than downgrading to a username-only check.
+
+The internal forge interface owns identity, account lookup, URLs, fetch refs,
+CLI/authentication requirements and basic operation capabilities. Local Git and
+workflow decisions remain shared. Issue #20 will normalize review context and
+establish cross-adapter read contracts; #25 exercises those contracts with a
+read-only GitLab.com adapter. Publication encoding and recovery remain #21.
+
+### Forge review context
+
+New or rebuilt review context uses `context/review-context.json` with normalized
+change, conversation and CI facts. Model-facing text is rendered locally from
+those facts; it does not depend on human-readable `gh pr view` output. Native
+responses are retained separately under `diagnostics/`.
+
+A completed, valid legacy context is reused unchanged on resume. Rebuilding
+context adopts `normalized-review-v1` and invalidates dependent results through
+the existing content fingerprints. Saved discussion keys and GitHub comment IDs
+retain their previous representation, preserving edits and receipt matching.
+
+Missing optional CI or review status is explicitly unavailable. Required
+metadata and complete discussion failures still block their dependent phases;
+partial local reports are retained. Unknown conversation permissions do not
+authorize an operation. Local snapshot checks and publication policy are unchanged.
+
+Adapters provide change details, discovery, initial model context, complete
+conversations and review status. Code anchors and native position data are
+separate from conversation freshness identities. The read-contract fixtures
+include opaque IDs and nested projects for the forthcoming GitLab pilot; this
+contract does not enable GitLab writes.
+
+Normalized Owner `change` facts are authoritative; `metadata` remains a compatibility
+projection for older clients and the pending write-path extractions. New writers
+must update the canonical facts and derive that projection together. Reading an
+old session without `change` translates only the needed facts in memory.
+Malformed initial comment bodies are reported as unavailable context with a warning,
+so local review reports can still be retained; complete discussion matching and
+publication continue to require a validated snapshot. A cancelled review-status
+refresh clears the previous status rather than leaving an old approval visible.
+
+### GitLab.com local review pilot
+
+From a checkout with exactly one remote matching the target project:
+
+```sh
+bin/pr-review --forge gitlab https://gitlab.com/group/subgroup/project/-/merge_requests/7
+bin/pr-review --forge gitlab --repo gitlab.com/group/subgroup/project 7
+```
+
+Authenticate `glab` first. GitLab execution requires `git`, `glab`, and the selected
+model CLIs; it does not invoke `gh`. The target project can contain an MR from a
+fork. Deleted or inaccessible source projects produce a warning while the retained
+target MR ref remains reviewable. GitLab project identity is case-folded for remote
+matching and storage; renamed/transferred projects must use their current path. The checkout path is logged; local reports, synthesis, discussion matching,
+history and resume use the shared engine. `--resume SESSION` restores the saved
+forge. The CLI automatically ends after the local review without opening the
+publication menu. `--no-publish` is accepted but unnecessary.
+
+Only GitLab.com is supported. Remote publication (including auto-publication),
+Owner operations, issue fixing, focused follow-up, repository MR listing, monitor
+integration and full Emacs integration are outside this pilot. Explicit unsupported
+operations fail before remote writes. GitLab approvals are not GitHub verdicts;
+review status is reported unavailable. CI covers MR pipelines matching the reviewed
+source SHA, not every job, child pipeline or external check. Missing pipelines or
+unknown statuses never imply success.
+
+Paginated discussions retain note and opaque discussion identities,
+system-note markers and resolution state. Native diff positions and MR
+base/start/head diff references are retained in diagnostics/context respectively;
+the verified local merge base remains a separate snapshot fact. A diff discussion
+is marked outdated when its recorded head differs from the currently read MR head.
+Failed initial discussion reads produce warnings; failed complete matching pauses
+completion while keeping the generated reports.
+
+Models receive filtered environments and the existing no-publication instructions;
+Claude tool restrictions also deny `glab`. Independent reviewers use isolated homes.
+These execution policies are not a new security sandbox; the existing documented
+outer-container trust boundary still applies.
+
+### Publication adapter and recovery
+
+Reviewer publication keeps approval, freshness checks, durable intent and retry
+policy in the shared workflow. The forge adapter renders preview text and prepares
+remote operations, submits each operation once, and interprets receipt evidence.
+GitHub retains its existing comment/suggestion text, tracking markers and verdicts.
+GitLab still has no publication capability.
+
+New logical actions contain versioned operation records. Each operation is saved
+before sending; its returned receipt is saved before supplemental inline-receipt
+lookups. A logical action completes only when all operations and required receipts
+are verified. Confirmed operations within an incomplete action are retained and
+excluded from subsequent sends. Their own discussion activity is recognized during
+freshness checks. Missing or duplicate receipts never authorize a repost.
+
+Old action ledgers and saved batches remain readable as single-operation GitHub
+intents. Recovery uses their original markers and payloads; importing them does not
+stage new work. A timeout remains uncertain until inspected/recovered. The existing
+explicitly confirmed retry path remains available after an absence lookup; adapters
+never retry writes internally. Prepared payloads and destinations are frozen into
+the confirmation token, so edits require preparation and approval again.
+
+Partially published multi-operation actions must resume with unchanged wording and
+destinations. Inspection, acknowledgment and staging remain available after recovery;
+editing is blocked until completion. Resumed operations update the original journal
+action, with the new approval recording its action ID rather than copying confirmed
+operations into a replacement action. `published_actions` continues to count logical
+actions; known partial remote effects are represented by the manifest publication `partial`
+status. The resumable logical action itself uses `failed`.
+Publication validation writes a compatibility projection to `pr-latest.json`; native
+GitHub-only metadata fields are not part of that shared validation artifact.
+
+This extraction adds no abandonment operation. If an unfinished multi-operation
+action cannot be restaged without changing its content or destination, publication
+remains blocked for manual reconciliation; unrelated new submissions cannot bypass
+it. This limitation matters for future multi-operation forge adapters. GitHub still
+prepares one remote operation per logical action. A process interruption after all
+operation receipts are saved may temporarily leave the parent marked `failed`;
+recovery completes its bookkeeping without resending anything.
+
+
+Owner reply publication preserves the exact prepared wording and destination. If
+publication is interrupted, recover first: recovery reads remote receipts and does
+not resend replies. Retrying unchanged wording reuses its original receipt marker.
+If an older reply appears after you edited its draft, its receipt is retained and
+the edited draft is left for inspection.
+
+Resolve and reopen actions send once and then refresh the discussion to confirm
+the result. After cancellation or an uncertain response, refresh to check the
+current state. Refresh never retries the mutation. A pending thread action cannot
+supply automatic completion proof until its requested state is observed.
+
+Issue eligibility still requires an open, described issue, repository push access,
+acceptable assignments, and unambiguous explicit closing relationships. Ordinary
+mentions do not establish those links. Unknown remote facts block eligibility;
+`--force` overrides known assignment conflicts only. This adapter refactor does
+not change saved plans, approvals, human edits, or GitLab issue support.
+
+Issue publication recovery retains the exact saved comments and draft-creation
+intent. A failed read-back does not authorize another send; use the existing write
+inspection and retry-absent controls. Draft/ready transitions read back their
+current state and reconcile interrupted actions without repeating a transition
+that is already satisfied. Account changes during a run block subsequent writes.

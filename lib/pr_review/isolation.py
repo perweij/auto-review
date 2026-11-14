@@ -194,7 +194,7 @@ class IndependentWorkspace:
                 dest.mkdir(parents=True, exist_ok=True, mode=0o700)
                 shutil.copytree(source, dest, dirs_exist_ok=True)
 
-    def wrap(self, argv, env):
+    def wrap(self, argv, env, *, provider_home=None):
         safe_path = _safe_path(env.get('PATH', ''))
         env = {key: value for key, value in env.items() if key.upper() not in {
             'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
@@ -202,10 +202,13 @@ class IndependentWorkspace:
             'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES', 'GIT_CONFIG_SYSTEM', 'GIT_EXTERNAL_DIFF',
             'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS'}
             and not key.upper().startswith(('GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_'))}
-        env = dict(env, HOME=str(self.home), TMPDIR=str(self.root / 'tmp'),
-                   CODEX_HOME=str(self.home / '.codex'), CLAUDE_CONFIG_DIR=str(self.home / '.claude'),
-                   XDG_CACHE_HOME=str(self.home / '.cache'), XDG_CONFIG_HOME=str(self.home / '.config'),
-                   XDG_STATE_HOME=str(self.home / '.local/state'), XDG_RUNTIME_DIR=str(self.root / 'runtime'),
+        # Persistent conversations keep provider-owned indexes at their original
+        # absolute paths; source checkouts and runtime files remain disposable.
+        home = Path(provider_home) if provider_home is not None else self.home
+        env = dict(env, HOME=str(home), TMPDIR=str(self.root / 'tmp'),
+                   CODEX_HOME=str(home / '.codex'), CLAUDE_CONFIG_DIR=str(home / '.claude'),
+                   XDG_CACHE_HOME=str(home / '.cache'), XDG_CONFIG_HOME=str(home / '.config'),
+                   XDG_STATE_HOME=str(home / '.local/state'), XDG_RUNTIME_DIR=str(self.root / 'runtime'),
                    GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', PATH=safe_path)
         output = str(self.inputs.output / f'reviews/{self.stage}.md.tmp')
         command = [_executable(argv[0], safe_path), *argv[1:]]

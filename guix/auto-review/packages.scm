@@ -10,7 +10,7 @@
   #:export (make-auto-review-backend
             make-emacs-magit-auto-review))
 
-(define* (make-auto-review-backend source #:key (version "0.1.0"))
+(define* (make-auto-review-backend source #:key (version "0.1.0") (gitlab-cli #f))
   "Build the backend from SOURCE using the caller's Guix dependency graph."
   (let ((python (specification->package "python"))
         (git (specification->package "git"))
@@ -82,7 +82,8 @@
                  (string-append
                   "import sys\nimport os\n"
                   "os.environ['PATH'] = '"
-                  #$git "/bin:" #$github-cli "/bin:" #$openssh
+                  #$git "/bin:" #$github-cli "/bin:"
+                  #$(if gitlab-cli (file-append gitlab-cli "/bin:") "") #$openssh
                   "/bin:' + os.environ.get('PATH', '')\n"
                   "os.environ.setdefault('SSL_CERT_DIR', '"
                   #$certs "/etc/ssl/certs')\n"
@@ -96,7 +97,8 @@
              '("pr-review" "fix-issue")))))
       ;; These are private runtime inputs, not extra commands in the user's
       ;; profile.  Host model CLIs, credentials, signing and editor stay inherited.
-      (inputs (list python git github-cli openssh certs))
+      (inputs (append (list python git github-cli openssh certs)
+                      (if gitlab-cli (list gitlab-cli) '())))
       (home-page "https://github.com/perweij/auto-review")
       (synopsis "Local GitHub review orchestration and versioned frontend API")
       (description

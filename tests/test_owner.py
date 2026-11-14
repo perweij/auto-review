@@ -67,7 +67,7 @@ class OwnerTest(unittest.TestCase):
             ("pr_review.owner_providers.preflight", lambda session, state, **kwargs: None),
             ("pr_review.owner_providers.invoke", self.model),
             ("pr_review.acceptance.review_owner", engine_stub.owner_review),
-            ("pr_review.owner_publication.gh", self.publish),
+            ("pr_review.publication.gh", self.publish),
         ):
             p = patch(target, side_effect=side_effect)
             p.start()
@@ -1017,6 +1017,21 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual([role for role, _ in self.calls].count("fix"), 2)
         self.assertFalse(self.posts)
 
+    def test_refresh_of_legacy_metadata_preserves_verified_batch(self):
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        state.pop("change")
+        saved_batch = copy.deepcopy(state["batches"][-1])
+        session.save(state)
+        self.request("owner-read")
+        self.assertNotIn("change", session.load())
+        self.request("owner-refresh")
+        refreshed = session.load()
+        self.assertEqual(refreshed["change"]["target"]["head"], refreshed["metadata"]["baseRefOid"])
+        for key in ("verified_base", "status", "git_admin", "checkpoint"):
+            self.assertEqual(saved_batch.get(key), refreshed["batches"][-1].get(key))
+
     def test_unrelated_description_preserves_ready_verification(self):
         self.fix()
         batch = self.view["batches"][-1]
@@ -1326,7 +1341,7 @@ class OwnerTest(unittest.TestCase):
         def ambiguous(*args, **kwargs):
             self.publish(*args, **kwargs)
             raise ApiError("network", "Lost response")
-        with patch("pr_review.owner_publication.gh", side_effect=ambiguous):
+        with patch("pr_review.publication.gh", side_effect=ambiguous):
             with self.assertRaises(ApiError):
                 self.request("owner-publish", token=prepared["token"])
         view = self.request("owner-recover")
@@ -1388,7 +1403,7 @@ class OwnerTest(unittest.TestCase):
             if self.posts:
                 raise ApiError("network", "Failed before second send")
             return self.publish(*args, **kwargs)
-        with patch("pr_review.owner_publication.gh", side_effect=partial), self.assertRaises(ApiError):
+        with patch("pr_review.publication.gh", side_effect=partial), self.assertRaises(ApiError):
             self.request("owner-publish", token=prepared["token"])
         view = self.request("owner-recover")
         self.assertEqual([r["status"] for r in view["replies"]], ["published", "unstaged"])
@@ -1417,7 +1432,7 @@ class OwnerTest(unittest.TestCase):
             self.git("update-ref", "refs/pull/7/head", self.head)
             self.metadata["headRefOid"] = self.head
             return receipt
-        with patch("pr_review.owner_publication.gh", side_effect=publish_then_change), self.assertRaises(ApiError) as caught:
+        with patch("pr_review.publication.gh", side_effect=publish_then_change), self.assertRaises(ApiError) as caught:
             self.request("owner-publish", token=prepared["token"])
         self.assertEqual(caught.exception.code, "stale_confirmation")
         self.assertEqual(len(self.posts), 1)
@@ -2091,7 +2106,7 @@ class OwnerTest(unittest.TestCase):
         def resolve(*args, **kwargs):
             self.feedback[0]["is_resolved"] = True
             raise ApiError("network", "Response lost")
-        with patch.object(Repository, "graphql", side_effect=resolve) as call:
+        with patch("pr_review.forge_github_conversations.GitHubConversations.set_state", side_effect=resolve) as call:
             view = self.request("owner-thread-state", item="thread:T1", resolved=True)
         self.assertEqual(call.call_count, 1)
         self.assertTrue(view["feedback"][0]["is_resolved"])

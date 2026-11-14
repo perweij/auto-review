@@ -184,8 +184,11 @@ class AutomaticRun:
     def finish(self, outcome, reason, state=None, **fields):
         receipts = []
         if state:
-            receipts = [c.get('receipt', {}).get('html_url') for c in state['comments'] if c.get('receipt')]
-            receipts += [a['result'].get('html_url') for a in actions(state) if a.get('result')]
+            from .receipts import urls
+            from .forge import adapter, restore
+            forge = adapter(restore(self.store.manifest).forge)
+            if 'publication' in forge.capabilities:
+                receipts = urls(actions(state), state['comments'], forge.publication)
         if self.root:
             from . import usage
             self.record['usage'] = usage.summary(self.root)
@@ -211,7 +214,7 @@ class AutomaticRun:
         if any(a['status'] in ('submitting', 'ambiguous') for a in remaining):
             outcome = 'uncertain'
             reason = 'Automatic review interrupted during publication; submission is uncertain. Inspect publication recovery in Emacs before retrying.'
-        elif remaining and (any(a['status'] == 'published' for a in actions(state))
+        elif remaining and (any(op['status'] == 'published' for a in actions(state) for op in a.get('operations', [a]))
                             or any(c.get('receipt') for c in state['comments'])):
             outcome = 'partial'
             reason = 'Automatic review interrupted after confirmed publication; finish the unsent remainder in Emacs.'
@@ -233,7 +236,7 @@ class AutomaticRun:
         if any(a['status'] in ('submitting', 'ambiguous') for a in remaining):
             return self.finish('uncertain', reason, state)
         if remaining:
-            return self.finish('partial' if any(a['status'] == 'published' for a in actions(state))
+            return self.finish('partial' if any(op['status'] == 'published' for a in actions(state) for op in a.get('operations', [a]))
                                else 'needs_attention', reason, state)
         return None
 

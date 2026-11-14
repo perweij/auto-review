@@ -8,7 +8,15 @@ from . import operations, publication, settings, models, workflow, pulls
 
 
 def dispatch(request):
+    from .forge import request_forge, require
+    forge = request_forge(request)
     operation = request.get("command")
+    capability = ("issues" if operation in ("issue-run", "issue-recover") else
+                  "owner" if operation in ("owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
+                  "publication" if operation in ("publish", "prepare", "resolve", "automatic-review") else "review")
+    if forge == 'gitlab' and (str(operation).startswith(('owner-', 'issue-')) or operation in ('toolkit', 'thread-state', 'followup', 'pull-requests')):
+        raise ApiError('unsupported_operation', 'This operation is not supported by the GitLab review pilot.')
+    require(forge, capability)
     if operation == "checkout":
         from .checkouts import lookup
         return lookup(request)
@@ -18,6 +26,9 @@ def dispatch(request):
     if isinstance(operation, str) and (operation.startswith("owner-") or operation == "toolkit"):
         from .owner import dispatch as owner_dispatch
         return owner_dispatch(request)
+    if operation == "capabilities" and forge == 'gitlab':
+        return {"protocol": PROTOCOL, "features": ["generations", "drafts", "history", "operations", "usage-reporting", "checkout"],
+                "commands": ["capabilities", "checkout", "settings", "models", "read", "history", "diff", "file", "run", "cancel"]}
     if operation == "capabilities":
         from .owner import COMMANDS
         return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration", "checkout"],

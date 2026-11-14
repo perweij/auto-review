@@ -23,6 +23,8 @@ def render_synthesis(run):
                     context_directory=str(path / 'context'), codex_review=str(path / 'reviews/codex.md'), claude_review=str(path / 'reviews/claude-independent.md'),
                     context_files=['pr.json', 'pr-discussion.json', 'pr-reviews.json', 'pr-inline-comments.json', 'ci-actions-runs.json', 'ci-statuses.json', 'pr.diff', 'diffstat.txt'],
                     warnings=run.manifest['warnings'], reviewers=run.settings['reviewers'])
+    if run.manifest.get('context_format') == 'normalized-review-v1':
+        metadata['context_files'] = ['review-context.json', 'pr.diff', 'diffstat.txt']
     if reports:
         metadata.pop('codex_review')
         metadata.pop('claude_review')

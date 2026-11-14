@@ -116,8 +116,9 @@ def run(request):
     from .publication import checkout
     from .settings import resolve
     from .models import validate_selection
-    if not request.get('session') and not re.fullmatch(r'[1-9][0-9]*|https://[A-Za-z0-9._/-]+/pull/[1-9][0-9]*/?', str(request.get('pr', ''))):
-        raise ApiError('invalid_request', 'A positive PR number or GitHub PR URL is required.')
+    from .forge import adapter, request_forge
+    if not request.get('session'):
+        adapter(request_forge(request)).target(request.get('pr', ''))
     configuration = resolve(request)['settings']
     if 'catalogs' in request:
         validate_selection(configuration, request['catalogs'], reviewers=not bool(request.get('followup_threads')))

@@ -9,10 +9,14 @@ from pr_review.issue_writes import Writes
 class SignalsTest(unittest.TestCase):
     def flow(self):
         comment = {'id': 1, 'body': '/fix-issue approve 1', 'user': {'login': 'alice'}, 'created_at': '2026-01-01'}
+        from pr_review.forge_github_issue_writes import GitHubIssueWrites
+        writes = Mock()
+        writes.adapter = GitHubIssueWrites()
+        writes.repo = SimpleNamespace(name='a/b')
         return SimpleNamespace(state={'viewer': 'alice', 'actions': {}, 'phase': 'waiting', 'waiting': 'approval',
                                      'plan': {'revision': 2, 'published_at': '2026-02-01'}},
                                facts={'comments': [comment]}, repo=SimpleNamespace(name='a/b'),
-                               writes=Mock(), save=Mock())
+                               writes=writes, save=Mock())
 
     def test_acknowledgment_retries_then_retains_receipt(self):
         f = self.flow()

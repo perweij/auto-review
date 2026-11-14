@@ -1,9 +1,9 @@
-"""Owner reply drafts and commit provenance using shared GitHub receipts."""
+"""Owner reply drafts and commit provenance using forge-owned operations and receipts."""
 import copy
 import uuid
 
 from .common import ApiError, digest, now, require_text
-from .publication import gh, valid_receipt, with_marker
+from .publication import publication_adapter
 from .owner_state import refresh
 from . import owner_git as workspace, owner_commit_plan, owner_contracts
 
@@ -61,7 +61,7 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
             if not automatic and not repository:
                 raise ApiError("missing_head_repository", reason)
             continue
-        body = "Fixed in " + ", ".join(f"[{sha[:12]}](https://{repository}/commit/{sha})" for sha in association["commits"]) + "."
+        body = "Fixed in " + ", ".join(f"[{sha[:12]}]({session.repo.forge.commit_url(repository, sha)})" for sha in association["commits"]) + "."
         if item["kind"] != "thread":
             body = f"In response to [this feedback]({item['comments'][0]['url']}):\n\n" + body
         if existing:
@@ -198,6 +198,7 @@ def blockers(session, state, reply, remote, allow_unpushed=False):
 
 def prepare(session, state):
     selected_ids = {r["id"] for r in state["replies"] if r["status"] == "staged"}
+    recover(session, state, statuses=('unsent',), clear_prepared=False, refresh_context=False)
     refresh(session, state)
     remote = workspace.fetch_head(session, state)
     invalidate(session, state, remote)
@@ -213,34 +214,55 @@ def prepare(session, state):
         blockers(session, state, reply, remote)
         if reply["status"] != "staged":
             raise ApiError("stale_reply", "A selected reply changed; inspect and stage it again. Nothing was omitted from the preview.")
-    payload = {"head": remote, "viewer": state["viewer"], "replies": copy.deepcopy(selected)}
+    previous = state.get('prepared', {})
+    operations = []
+    for reply in selected:
+        old = next((op for op in previous.get('operations', []) if op['reply'] == reply['id'] and op.get('body') == reply['body'] and op['target'] == reply['target'] and op['viewer'] == state['viewer']), None)
+        if old is None:
+            old = next((op for op in reversed(state['actions']) if op['status'] == 'unsent' and op['reply'] == reply['id'] and op.get('body') == reply['body'] and op['target'] == reply['target'] and op['viewer'] == state['viewer']), None)
+        if old is not None:
+            old = {**old, 'status': 'draft'}
+        operations.append(copy.deepcopy(old) if old else publication_adapter(session).prepare_owner_reply(session, reply, state['viewer'], uuid.uuid4().hex))
+    payload = {"operations": operations, "head": remote, "viewer": state["viewer"], "replies": copy.deepcopy(selected)}
     token = digest(payload)
     state["prepared"] = {"token": token, **payload}
     session.save(state)
     return {"owner": session.view(state), "token": token, "replies": selected}
 
 
-def recover(session, state):
-    for action in state["actions"]:
-        if action["status"] not in ("submitting", "ambiguous"):
-            continue
-        resource = "issues" if action["kind"] == "timeline" else "pulls"
-        values = gh(session, "comments", pages=True, resource=resource)
-        if any(not isinstance(v, dict) or type(v.get("id")) is not int or not isinstance(v.get("body"), str)
-               or not isinstance(v.get("user"), dict) or not isinstance(v["user"].get("login"), str) for v in values):
-            raise ApiError("invalid_response", "Incomplete receipt lookup; refusing a duplicate reply.")
-        matches = [v for v in values if valid_receipt(session, action, v)]
+def recover(session, state, *, statuses=('submitting', 'ambiguous'), clear_prepared=True, refresh_context=True):
+    from .forge import check_account
+    _, account = session.repo.forge.owner_context(session.repo)
+    check_account(state.get('forge_account'), account, state.get('viewer'))
+    actions = [a for a in state['actions'] if a['status'] in statuses
+               or (a['status'] == 'published' and a.get('attempt_count', 1) > 1)]
+    results = publication_adapter(session).lookup_owner(session, actions)
+    for action in actions:
+        matches = results[action['id']]
         if len(matches) > 1:
+            reply = next(r for r in state['replies'] if r['id'] == action['reply'])
+            reply['needs_attention'] = 'Multiple remote receipts match this reply; inspect the duplicate replies.'
+            session.save(state)
             raise ApiError("ambiguous_receipt", "Multiple matching receipts; inspect GitHub before retrying.")
+        if action.get('receipt') and not matches:
+            raise ApiError('ambiguous_receipt', 'A previously confirmed receipt is missing; inspect the remote reply before retrying.')
         if matches:
+            action.setdefault('body', publication_adapter(session).owner_body(action))
+            action['evidence'] = publication_adapter(session).owner_receipt(matches[0])
+            reply = next(r for r in state['replies'] if r['id'] == action['reply'])
+            if reply.get('receipt') and not reply.get('evidence'):
+                reply['evidence'] = publication_adapter(session).owner_receipt(reply['receipt'])
             finish(state, action, matches[0])
-        else:
+        elif action["status"] != "unsent":
             action["status"] = "unsent"
             for reply in state["replies"]:
                 if reply["id"] == action["reply"] and reply["status"] != "published":
                     reply["status"] = "unstaged"
         session.save(state)
-    state.pop("prepared", None)
+    if refresh_context:
+        refresh(session, state)
+    if clear_prepared:
+        state.pop("prepared", None)
     session.save(state)
     return session.view(state)
 
@@ -248,7 +270,20 @@ def recover(session, state):
 def finish(state, action, receipt):
     action.update(status="published", receipt=receipt)
     reply = next(r for r in state["replies"] if r["id"] == action["reply"])
-    reply.update(status="published", receipt=receipt)
+    if reply['status'] == 'published':
+        if (reply.get('evidence') or {}).get('id') != (action.get('evidence') or {}).get('id'):
+            reply.setdefault('historical_receipts', []).append(receipt)
+            if action.get('evidence'):
+                reply.setdefault('historical_evidence', []).append(action['evidence'])
+            reply['needs_attention'] = 'An additional earlier reply was recovered; inspect the duplicate remote replies.'
+        return
+    if action.get('body', reply['body']) != reply['body'] or action['target'] != reply['target']:
+        reply.update(status='unstaged', needs_attention='An earlier reply was recovered; inspect its receipt before publishing edited wording.')
+        reply.setdefault('historical_receipts', []).append(receipt)
+        if action.get('evidence'):
+            reply.setdefault('historical_evidence', []).append(action['evidence'])
+    else:
+        reply.update(status="published", receipt=receipt, evidence=action.get('evidence'))
 
 
 def publish(session, state, request):
@@ -271,19 +306,25 @@ def publish(session, state, request):
         if remote != prepared["head"]:
             raise ApiError("stale_confirmation", "PR head changed during publication; prepare the remaining replies again.")
         blockers(session, state, reply, remote)
-        identity = uuid.uuid4().hex
-        marker = f"<!-- pr-owner session={digest(str(session.path))[:24]} action={identity} -->"
-        action = {"id": identity, "reply": reply["id"], "kind": reply["target"]["kind"],
-                  "target": reply["target"], "viewer": state["viewer"], "marker": marker,
-                  "payload": {"body": with_marker(reply["body"], marker)}, "status": "submitting"}
-        state["actions"].append(action)
+        action = copy.deepcopy(next(op for op in prepared['operations'] if op['reply'] == reply['id']))
+        action['status'] = 'submitting'
+        previous = next((a for a in state['actions'] if a['id'] == action['id']), None)
+        if previous is not None:
+            action['attempt_count'] = previous.get('attempt_count', 1) + 1
+            previous.update(action)
+            action = previous
+        else:
+            action["attempt_count"] = 1
+            state["actions"].append(action)
         state.pop("prepared", None)
         session.save(state)
         try:
-            endpoint = f"comments/{reply['target']['root_id']}/replies" if action["kind"] == "reply" else "comments"
-            receipt = gh(session, endpoint, action["payload"], resource="issues" if action["kind"] == "timeline" else "pulls")
-            if not valid_receipt(session, action, receipt):
-                raise ApiError("uncertain_publication", "Reply response could not be verified; recover before retrying.")
+            receipt = publication_adapter(session).submit(session, action)
+            if not publication_adapter(session).matches(session, action, receipt):
+                raise ApiError('uncertain_publication', 'Reply response could not be verified; recover before retrying.')
+            action['receipt'] = receipt
+            action['evidence'] = publication_adapter(session).owner_receipt(receipt)
+            session.save(state)
             finish(state, action, receipt)
         except BaseException:
             action["status"] = "ambiguous"
@@ -291,3 +332,8 @@ def publish(session, state, request):
             raise
         session.save(state)
     return session.view(state)
+
+
+def valid_receipt(session, action, value):
+    """Compatibility for historical Owner callers."""
+    return publication_adapter(session).matches(session, action, value)

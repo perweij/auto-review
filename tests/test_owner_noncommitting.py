@@ -102,6 +102,7 @@ class NoncommittingTest(unittest.TestCase):
         state = copy.deepcopy(original)
         state['sequence'] = session.load()['sequence']
         state['metadata']['baseRefOid'] = 'new-base'
+        state['change']['target']['head'] = 'new-base'
         session.save(state)
         self.assertEqual([self.keys[0]], self.handoff(self.review, ['p1'], automatic=True)['items'])
 

@@ -10,6 +10,8 @@ import json
 import uuid
 from pathlib import Path
 
+from .forge_context import owner_change
+
 from . import usage
 from .common import ApiError, digest, now
 from .events import emit
@@ -505,7 +507,7 @@ def execute(session, state, batch, remote):
         batch.update(status='ready', review=proof, review_tree=tree, final_tree=tree,
                      completed_at=now(), verified_items=batch['items'],
                      verified_fingerprints={i['key']: i['fingerprint'] for i in session.items(state, batch['items'])},
-                     verified_base=state['metadata']['baseRefOid'])
+                     verified_base=owner_change(state)['target']['head'])
         owner_commit_plan.update(session, batch, batch['baseline'])
         session.save(state)
         return owner_auto_commit.execute(session, state, batch, remote) if batch.get('auto_commit') else session.view(state)

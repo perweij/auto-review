@@ -28,3 +28,14 @@ test:
 
 test-api:
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+# Opt-in: real remote fixtures. smoke also runs economical models (uses quota).
+.PHONY: smoke smoke-fast smoke-extended
+smoke:
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/smoke-forges.py --suite all
+
+smoke-fast:
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/smoke-forges.py --suite smoke
+
+smoke-extended:
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/smoke-forges.py --suite extended

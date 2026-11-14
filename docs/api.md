@@ -1089,3 +1089,66 @@ lock, a mismatch with current settings raises `settings_changed` without mutatio
 The existing revision check also applies. Callers omitting the precondition keep
 existing behavior. The Emacs settings screen supplies its opening snapshot;
 failed saves preserve its local draft. This does not alter frozen batch settings.
+
+### GitLab.com pilot
+
+`run` accepts `forge: "gitlab"` with `pr` containing an MR IID or canonical
+GitLab.com MR URL and the existing repository/cwd fields. The compatibility name
+`pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
+checkout lookup and artifacts retain the existing protocol format. This adapter
+supports local review only: publication, conversation mutation, Owner and issue
+workflows are rejected. GitLab approval state is not converted into review verdicts.
+
+Reviewer publication now delegates rendering, payload preparation and receipt
+interpretation to the forge adapter. Protocol 1 `prepare`, `publish`, `resolve`,
+confirmation tokens, receipt URLs and exit semantics are unchanged. Unsupported
+publication placements/verdicts fail before a write; no downgrade is performed.
+The private draft journal adds versioned per-operation records to new logical
+actions, retaining partial receipts and treating older actions as single operations.
+Owner helper compatibility remains in place pending its separate extraction.
+
+
+Owner reply preparation also freezes forge-owned operations before confirmation.
+Unchanged previews and explicit retries reuse the operation identity and receipt
+marker. Saved previews without operations require fresh confirmation; existing
+reply drafts and sent-action journals remain recoverable. Recovery looks up the
+original operation without sending it again. Duplicate matches, malformed lookup
+results, and missing previously confirmed receipts block retry. A late receipt for
+older wording is retained as history and does not certify the edited draft. Already-published replies retain their current receipt and
+status when a different earlier receipt appears; that receipt is retained as
+history with an inspection notice. Account validation precedes recovery, and
+receipts are recorded before refreshing discussion fingerprints.
+Normalized receipt evidence accompanies the retained raw `receipt` field. Retried
+operations retain an attempt count and remain eligible for duplicate lookup after
+success. Owner recovery shares one comment listing per resource across its scan.
+
+Owner and reviewer thread actions share single-attempt mutation handling. A durable
+`thread_intent` is written before sending; fresh discussion read-back establishes
+success, including after a lost mutation response. Cancellation or failed read-back
+retains the intent. Refresh can reconcile it without another write. An explicit
+request for the already-observed state retires opposite pending intent without a
+write; ordinary refresh does not discard it. Pending intent
+prevents Owner automatic completion for that thread; confirmed resolution and
+reopening continue to use the existing `github_completion` rules. GitHub GraphQL
+encoding, reply endpoints, markers and commit URLs belong to the adapter. GitLab
+remains read-only; these changes do not enable GitLab Owner workflows.
+
+Issue eligibility reads now use the forge issue adapter. Shared policy consumes
+normalized assignment, change-state and branch facts; Git snapshot verification
+remains shared. Explicit closing links are required, and incomplete relationships,
+permissions or assignments cannot establish eligibility, even with `force`.
+The existing issue/PR/comment representations and snapshot hashes are retained for
+workflow compatibility. Conflicting normalized and compatibility snapshots are
+rejected as incomplete. Prefetched facts require no network or Git operations.
+GitLab issue workflows remain unsupported.
+
+Issue publication uses forge-owned, versioned prepared operations stored inside
+existing action records. GitHub retains existing markers, raw receipts, action
+keys and exact approved wording; legacy records remain readable and recoverable.
+The shared controller retains journal state, account/eligibility guards and
+explicit retry decisions. Failed receipt lookup after submission leaves the
+intent uncertain; it cannot be treated as a rejected send. Draft transitions are
+confirmed by fresh state reads, including after a lost response. An already
+satisfied transition completes its saved journal entry without another mutation.
+Core write capabilities are checked before a mutating workflow; acknowledgments
+remain optional and nonblocking. Assignment policy and GitLab support are unchanged.
