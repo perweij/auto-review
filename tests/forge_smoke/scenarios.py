@@ -238,7 +238,13 @@ def publication_recovery(run, forge):
     atomic_json(config, dict(executable=shutil.which('gh'), method='POST', endpoint='repos/%s/pulls/%s/reviews' % (forge.repo, number), mode='after'))
     wrapper = run.directory / 'fault-bin'
     wrapper.mkdir(exist_ok=True)
-    (wrapper / 'gh').symlink_to(run.root / 'tests/forge_smoke/fault.py')
+    executable = wrapper / 'gh'
+    target = run.root / 'tests/forge_smoke/fault.py'
+    if executable.exists() or executable.is_symlink():
+        if not executable.is_symlink() or executable.resolve() != target.resolve():
+            raise Failure('Conflicting fault wrapper: ' + str(executable))
+    else:
+        executable.symlink_to(target)
     old_path = run.env['PATH']
     run.env.update(PATH=str(wrapper)+os.pathsep+old_path, SMOKE_FAULT_FILE=str(config))
     try:

@@ -1,7 +1,9 @@
 """Offline contracts for the opt-in forge smoke runner."""
 import json
 import io
-from unittest.mock import patch
+import os
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from pathlib import Path
 import subprocess
 import tempfile
@@ -112,6 +114,102 @@ class FaultContractTest(unittest.TestCase):
                 self.assertEqual(0, second.returncode)
                 self.assertEqual({'id': 42}, json.loads(second.stdout))
                 self.assertEqual('x' if mode == 'before' else 'xx', side_effect.read_text())
+
+
+class PublicationRecoveryTest(unittest.TestCase):
+    def setUp(self):
+        from forge_smoke.scenarios import publication_recovery
+        self.scenario = publication_recovery
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.run = SimpleNamespace(directory=Path(self.temp.name),
+            root=Path(__file__).resolve().parents[1], env={'PATH': '/native/bin'},
+            data={'fixtures': {'github': {'number': 7}}})
+        self.original_env = dict(self.run.env)
+        self.wrapper = self.run.directory / 'fault-bin/gh'
+        self.target = self.run.root / 'tests/forge_smoke/fault.py'
+        self.view = dict(generation='generation', revision='revision', comments=[
+            dict(id='comment', status='published', receipt={'id': 42})])
+        self.interrupt = False
+        self.run.api = Mock(side_effect=self.api)
+        self.forge = SimpleNamespace(kind='github', cwd=self.run.directory, repo='example/test',
+            pages=Mock(return_value=[{'body': 'Smoke lost-response recovery ' + self.run.directory.name}]))
+        native = patch('shutil.which', return_value='/unused/native-gh')
+        native.start()
+        self.addCleanup(native.stop)
+
+    def api(self, request, cwd):
+        command = request['command']
+        if command == 'discover':
+            return {'sessions': [{'session': 'session'}]}
+        if command == 'read':
+            return self.view
+        if command == 'mutate':
+            return {'review': self.view, 'changed': ['comment']}
+        if command == 'prepare':
+            return dict(ready=True, review=self.view, confirmation='confirmation')
+        if command == 'publish':
+            self.assertTrue(self.wrapper.is_symlink())
+            self.assertEqual(self.target, self.wrapper.resolve())
+            self.assertEqual(str(self.wrapper.parent) + os.pathsep + self.original_env['PATH'], self.run.env['PATH'])
+            config = Path(self.run.env['SMOKE_FAULT_FILE'])
+            evidence = json.loads(config.read_text())
+            self.assertEqual('repos/example/test/pulls/7/reviews', evidence['endpoint'])
+            self.assertEqual('after', evidence['mode'])
+            if self.interrupt:
+                raise KeyboardInterrupt()
+            evidence.update(used=True, forwarded_exit=0, response_bytes=10)
+            config.write_text(json.dumps(evidence))
+            raise Failure('simulated lost response')
+        if command == 'resolve':
+            self.assertEqual(self.original_env, self.run.env)
+            return {'review': self.view}
+        self.fail('Unexpected API request: ' + str(request))
+
+    def test_fresh_wrapper_reaches_reconciliation(self):
+        self.scenario(self.run, self.forge)
+        self.assertEqual(self.target, self.wrapper.readlink())
+        self.assertEqual(self.original_env, self.run.env)
+        self.assertEqual('resolve', self.run.api.call_args.args[0]['command'])
+        self.forge.pages.assert_called_once_with('/pulls/7/reviews')
+
+    def test_interrupted_scenario_reuses_retained_wrapper(self):
+        self.interrupt = True
+        with self.assertRaises(KeyboardInterrupt):
+            self.scenario(self.run, self.forge)
+        self.assertEqual(self.original_env, self.run.env)
+        self.assertTrue(self.wrapper.is_symlink())
+        self.forge.pages.assert_not_called()
+        retained = self.wrapper.lstat()
+        self.interrupt = False
+        self.scenario(self.run, self.forge)
+        self.assertEqual(retained.st_ino, self.wrapper.lstat().st_ino)
+        self.assertEqual(self.original_env, self.run.env)
+        self.assertEqual('resolve', self.run.api.call_args.args[0]['command'])
+        self.forge.pages.assert_called_once_with('/pulls/7/reviews')
+
+    def test_conflicting_wrapper_is_preserved_before_publication(self):
+        self.wrapper.parent.mkdir()
+        other = self.run.directory / 'other'
+        other.write_text('unrelated executable')
+        for kind in ('file', 'symlink', 'dangling-symlink'):
+            with self.subTest(kind=kind):
+                self.wrapper.unlink(missing_ok=True)
+                if kind == 'file':
+                    self.wrapper.write_text('existing entry')
+                else:
+                    self.wrapper.symlink_to(other if kind == 'symlink' else other.with_name('missing'))
+                retained = self.wrapper.lstat()
+                self.run.api.reset_mock()
+                with self.assertRaisesRegex(Failure, 'Conflicting fault wrapper'):
+                    self.scenario(self.run, self.forge)
+                self.assertEqual(retained, self.wrapper.lstat())
+                self.assertEqual(self.original_env, self.run.env)
+                self.assertNotIn('publish', [call.args[0]['command'] for call in self.run.api.call_args_list])
+                if kind == 'file':
+                    self.assertEqual('existing entry', self.wrapper.read_text())
+                else:
+                    self.assertEqual(other if kind == 'symlink' else other.with_name('missing'), self.wrapper.readlink())
 
 
 class CleanupContractTest(unittest.TestCase):
