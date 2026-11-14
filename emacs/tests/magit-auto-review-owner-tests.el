@@ -110,9 +110,9 @@
      (should (equal (oref (magit-current-section) value) "history"))
      (should (equal (alist-get 'status (car (alist-get 'batches magit-auto-review-owner--view))) "ready"))
      (let ((section (owner-test-goto 'owner-feedback "local:first")))
-       (should (equal (oref (oref section parent) value) "history")))
+       (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history")))
      (let ((section (owner-test-goto 'owner-batch "b1")))
-       (should (equal (oref (oref section parent) value) "history")))
+       (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history")))
      (should-error (magit-auto-review-owner-handled) :type 'user-error)
      (should-not (assoc "h" (magit-auto-review-owner--menu-actions))))))
 
@@ -303,7 +303,7 @@
      (should (string-match-p "Review verdict: COMMENTED" (buffer-string)))
      (should-not (string-match-p "<!-- pr-review" (buffer-string)))
      (let ((section (owner-test-goto 'owner-feedback "review:9")))
-       (should (equal (oref (oref section parent) value) "history"))))))
+       (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history"))))))
 
 (ert-deftest owner/faces-and-group-selection-distinguish-resolved-feedback ()
   (owner-test-buffer
@@ -402,7 +402,7 @@
      (magit-auto-review-owner--accept view)
      (should (string-match-p "Fixes (0)" (buffer-string)))
      (let ((section (owner-test-goto 'owner-batch "unused")))
-       (should (equal (oref (oref section parent) value) "history"))
+       (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history"))
        (should (looking-at "Superseded ·"))
        (should (eq (get-text-property (point) 'font-lock-face) 'magit-auto-review-owner-item)))
      (should (string-match-p "No resume is needed" (magit-auto-review-owner--next-step unused)))
@@ -478,7 +478,8 @@
    (should (equal (oref (magit-current-section) value) "history"))
    (should (string-match-p "Fixes (0)" (owner-test-visible-text)))
    (should (string-match-p "Committed 0123456789ab" (buffer-string)))
-   (should (equal (oref (oref (owner-test-goto 'owner-batch "b1") parent) value) "history"))))
+   (owner-test-goto 'owner-batch "b1")
+   (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history"))))
 
 (ert-deftest owner/refresh-while-running-keeps-the-read-only-snapshot-path ()
   (owner-test-buffer
@@ -575,7 +576,7 @@
 (ert-deftest owner/feedback-commit-target-and-hash-are-specific-to-its-logical-fix ()
   (owner-test-buffer
    (magit-auto-review-owner--accept (owner-test-commit-plan-view))
-   (should (string-match-p "local:first · Committed 0123456789ab" (buffer-string)))
+   (should (string-match-p "local:first · Fixed and verified · Committed 0123456789ab" (buffer-string)))
    (owner-test-goto 'owner-feedback "local:second")
    (let (request)
      (cl-letf (((symbol-function 'magit-auto-review--call)
@@ -1205,3 +1206,148 @@
                  (should (equal session "/owner"))
                  (should-not generation))))
       (magit-auto-review-owner-open-checkout))))
+
+(ert-deftest owner/artifact-result-renders-and-refreshes-with-valid-sections ()
+  (owner-test-buffer
+   (let* ((view (owner-test-completed-local-view))
+          (batch (car (alist-get 'batches view))))
+     (push '((role . "final_review") (status . "complete")
+             (path . "/review-engine/owner-final")
+             (result . "/review-engine/owner-final/reviews/synthesis.json"))
+           (alist-get 'attempts batch))
+     (magit-auto-review-owner--accept view)
+     (should (string-match-p "Report artifact: /review-engine/owner-final/reviews/synthesis.json"
+                             (buffer-string)))
+     (owner-test-goto 'owner-feedback "local:first")
+     (magit-section-post-command-hook)
+     (cl-letf (((symbol-function 'magit-auto-review--call) (lambda (_) view)))
+       (magit-auto-review-owner-refresh))
+     (should (equal (oref (magit-current-section) value) "local:first"))
+     (dolist (section (cons magit-root-section magit-auto-review-owner--sections))
+       (should (marker-position (oref section start)))
+       (should (marker-position (oref section end))))
+     (magit-section-post-command-hook))))
+
+(ert-deftest owner/finding-headings-distinguish-verified-and-unattempted-work ()
+  (owner-test-buffer
+   (magit-auto-review-owner--accept (owner-test-completed-local-view))
+   (owner-test-goto 'owner-feedback "local:first")
+   (should (string-match-p "Fixed and verified.*Linked 03db750c0b83"
+                           (thing-at-point 'line t)))
+   (owner-test-goto 'owner-feedback "local:second")
+   (should (string-match-p "Not run" (thing-at-point 'line t)))
+   (should (string-match-p "Latest fix: 1 of 3 feedback items" (owner-test-visible-text)))))
+
+(ert-deftest owner/unverified-task-outcome-is-not-shown-as-verified ()
+  (owner-test-buffer
+   (let* ((view (owner-test-completed-local-view))
+          (batch (car (alist-get 'batches view))))
+     (setf (alist-get 'status batch) "needs_attention"
+           (alist-get 'associations batch) nil)
+     (magit-auto-review-owner--accept view)
+     (owner-test-goto 'owner-feedback "local:first")
+     (should (string-match-p "Fix needs attention" (thing-at-point 'line t)))
+     (should-not (string-match-p "Fixed and verified" (thing-at-point 'line t))))))
+
+(ert-deftest owner/history-separates-fixes-findings-and-deferred-work ()
+  (owner-test-buffer
+   (let* ((view (copy-tree (owner-test-completed-local-view)))
+          (items (alist-get 'feedback view)))
+     (setf (alist-get 'triage (nth 0 items)) "handled"
+           (alist-get 'attention (nth 0 items)) :false
+           (alist-get 'triage (nth 1 items)) "deferred"
+           (alist-get 'attention (nth 1 items)) :false
+           (alist-get 'is_resolved (nth 2 items)) t
+           (alist-get 'attention (nth 2 items)) :false)
+     (magit-auto-review-owner--accept view)
+     (should-not (string-match-p "Deferred / History" (buffer-string)))
+     (magit-section-show (owner-test-goto 'owner-group "history"))
+     (let ((visible (owner-test-visible-text)))
+       (should (string-match-p "Completed fixes (1)" visible))
+       (should (string-match-p "Handled findings (1)" visible))
+       (should (string-match-p "Resolved findings (1)" visible))
+       (should (string-match-p "Deferred findings (1)" visible)))
+     (should (equal (oref (oref (owner-test-goto 'owner-batch "b1") parent) value) "completed"))
+     (should (equal (oref (oref (owner-test-goto 'owner-feedback "local:first") parent) value) "handled"))
+     (should (equal (oref (oref (owner-test-goto 'owner-feedback "thread:T1") parent) value) "resolved"))
+     (should (equal (oref (oref (owner-test-goto 'owner-feedback "local:second") parent) value) "deferred"))
+     (should (= 3 (cl-count 'owner-feedback magit-auto-review-owner--sections
+                           :key (lambda (section) (oref section type)))))
+     (owner-test-goto 'owner-group "deferred")
+     (should (equal (magit-auto-review-owner--selected 'owner-feedback) '("local:second")))
+     (let ((group (owner-test-goto 'owner-history-group "handled")))
+       (magit-section-hide group)
+       (magit-auto-review-owner--render)
+       (should (equal (oref (magit-current-section) value) "handled"))
+       (should (oref (owner-test-goto 'owner-history-group "handled") hidden)))
+     (magit-section-post-command-hook))))
+
+(defmacro owner-test-settings-keys (&rest body)
+  "Exercise the real Transient lifecycle with local metadata and saved state."
+  `(save-window-excursion
+     (owner-test-buffer
+      (switch-to-buffer (current-buffer))
+      (while transient--prefix (execute-kbd-macro "q"))
+      (cl-letf (((symbol-function 'magit-auto-review--call)
+                 (lambda (request)
+                   (should (equal (alist-get 'command request) "owner-read"))
+                   (copy-tree magit-auto-review-owner--view t)))
+                ((symbol-function 'magit-auto-review-refresh-choices)
+                 (lambda ()
+                   (interactive)
+                   (setq magit-auto-review--setup-status '((claude . ready) (codex . ready)))
+                   (dolist (role (magit-auto-review-owner-settings--roles))
+                     (let* ((provider (intern (alist-get 'provider role)))
+                            (catalog (alist-get provider magit-auto-review--setup-catalogs)))
+                       (push `((value . ,(alist-get 'model role)) (efforts . ("low" "medium" "high")))
+                             (alist-get 'models catalog))
+                       (setf (alist-get provider magit-auto-review--setup-catalogs) catalog))))))
+        (unwind-protect
+            (progn (execute-kbd-macro "R") ,@body)
+          (while transient--prefix (execute-kbd-macro "q"))
+          (magit-auto-review--setup-exited))))))
+
+(defun owner-test-settings-save-key ()
+  "Press Save and reject hook errors even when Emacs catches them."
+  (let ((original (symbol-function 'transient--emergency-exit)) emergency)
+    (cl-letf (((symbol-function 'transient--emergency-exit)
+               (lambda (&rest args) (setq emergency t) (apply original args))))
+      (execute-kbd-macro "S"))
+    (should-not emergency)))
+
+(ert-deftest owner/settings-keyboard-save-exits-before-discarding-draft ()
+  (owner-test-settings-keys
+   (let (saved)
+     ;; Use the effort selector as well as the real Save key.
+     (execute-kbd-macro (kbd "f e"))
+     (execute-kbd-macro "3")
+     (should (equal (alist-get 'effort (alist-get 'fix magit-auto-review-owner-settings--draft)) "high"))
+     (cl-letf (((symbol-function 'magit-auto-review-owner--mutate)
+                (lambda (_operation &rest fields) (setq saved fields))))
+       (owner-test-settings-save-key))
+     (should (equal (alist-get 'effort (alist-get 'fix (alist-get 'settings saved))) "high"))
+     (should-not transient--prefix)
+     (should-not (memq #'transient--post-command post-command-hook))
+     (should-not magit-auto-review-owner-settings--draft)
+     (should-not magit-auto-review--setup-owner))))
+
+(ert-deftest owner/settings-keyboard-no-change-save-exits-cleanly ()
+  (owner-test-settings-keys
+   (cl-letf (((symbol-function 'magit-auto-review-owner--mutate)
+              (lambda (&rest _) (ert-fail "Unchanged settings must not be saved"))))
+     (owner-test-settings-save-key))
+   (should-not transient--prefix)
+   (should-not magit-auto-review-owner-settings--draft)))
+
+(ert-deftest owner/settings-keyboard-save-failure-keeps-menu-and-draft ()
+  (owner-test-settings-keys
+   (magit-auto-review-owner-settings--set 'fix_effort "high")
+   (let ((baseline (copy-tree magit-auto-review-owner-settings--baseline)))
+     (cl-letf (((symbol-function 'magit-auto-review-owner--mutate)
+                (lambda (&rest _) (user-error "Settings changed elsewhere"))))
+       (should-error (execute-kbd-macro "S") :type 'user-error))
+     (should transient--prefix)
+     (should (equal baseline magit-auto-review-owner-settings--baseline))
+     (should (equal "high" (alist-get 'effort (alist-get 'fix magit-auto-review-owner-settings--draft))))
+     (execute-kbd-macro "q")
+     (should-not magit-auto-review-owner-settings--draft))))

@@ -542,12 +542,20 @@ exhausted repair budget: inspect/adopt manual corrections or replan unfinished w
 
 After committing, return to Owner and press `g`. An exact match to a verified
 fix automatically finishes its local findings and moves the completed fix under
-**Deferred / History**, showing **Committed HASH**. Group fixes list their included
+**History → Completed fixes**, showing **Committed HASH**. Handled findings
+appear separately under **History → Handled findings**; each subgroup counts its
+own entries. Postponed work stays under **Deferred findings**. Group fixes list their included
 feedback when expanded. For manual fixes, push and use `a` to associate commits
 and prepare replies. Automatic fixes already have their replies staged. `h` remains available for manual
 completion; arbitrary splits/rebases outside the recorded sequence require inspection. `U` and explicit re-import
 keep a finding queued until you finish it or make a new fix. `r` requires selecting
 one fix or its feedback; the Fixes header never resumes a group.
+The dashboard's **Latest fix** line shows how many feedback items were selected
+and the resulting verification/commit state. Each finding heading shows whether
+it was **Not run**, **Fixed and verified**, needs attention, or was verified without
+a code change. Commit hashes and local handled status remain separate. `C-u f`
+uses the same selection as `f`: on one finding it fixes only that finding; on the
+Attention needed heading it fixes the actionable items in that group.
 Fix results show their next step, with verification details and earlier attempts folded separately.
 `?` shows actions for the current selection; `+` opens the complete command list.
 

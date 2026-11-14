@@ -91,8 +91,17 @@
      "settings"
      `(settings . ,(magit-auto-review-owner--settings-payload magit-auto-review-owner-settings--draft))
      `(expected_settings . ,(magit-auto-review-owner--settings-payload magit-auto-review-owner-settings--baseline))))
-  (transient-quit-one)
-  (magit-auto-review--setup-exited))
+  ;; Save stays transient on failure.  On success, perform the normal exit
+  ;; transition now; the post-exit hook discards the draft after the menu closes.
+  ;; Calling `transient-quit-one' here does nothing: its behavior is implemented
+  ;; by Transient's pre-command hook, not by the command's function body.
+  (if (and transient--prefix
+           (eq (oref transient--prefix command) 'magit-auto-review-owner-settings-menu))
+      (progn
+        (transient--do-exit)
+        (setq transient--exitp t)
+        (transient--pre-exit))
+    (magit-auto-review--setup-exited)))
 
 (defun magit-auto-review-owner-settings--children (_)
   "Build all role controls using the shared selector."
