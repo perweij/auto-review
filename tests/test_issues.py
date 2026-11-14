@@ -1251,7 +1251,7 @@ class IssueIntegrationTest(unittest.TestCase):
         # The integration fixture mocks providers; metadata discovery must use
         # that same local catalog instead of launching an installed account CLI.
         def catalog(request):
-            names = ('opus', 'sonnet') if request['provider'] == 'claude' else ('gpt-6.1-sol', 'gpt-6.1-terra', 'planning-model')
+            names = ('opus', 'sonnet', 'haiku') if request['provider'] == 'claude' else ('gpt-6.1-sol', 'gpt-6.1-terra', 'planning-model')
             return {'provider': request['provider'], 'models': [{'value': n, 'efforts': ['low', 'medium', 'high']} for n in names]}
         metadata = patch('pr_review.models.discover', side_effect=catalog)
         metadata.start()
@@ -2771,7 +2771,7 @@ class CachedTerminalRecoveryTest(unittest.TestCase):
 
 
 class LegacyImplementationChoiceTest(unittest.TestCase):
-    def check_resume(self, provider, model, effort):
+    def check_resume(self, provider, model, effort, *flags):
         from contextlib import redirect_stderr
         t = BootstrapTest()
         self.addCleanup(t.doCleanups)
@@ -2802,7 +2802,7 @@ class LegacyImplementationChoiceTest(unittest.TestCase):
             self.assertIn(f'{provider} / {model} / {effort}', output.getvalue())
             return t.harness(session, state, batch, *args)
         with patch('pr_review.issue_harness.invoke', side_effect=implement), redirect_stderr(output):
-            result = dispatch(t.terminal_request('--approve', '1'))
+            result = dispatch(t.terminal_request('--approve', '1', *flags))
         self.assertEqual('ready', result['outcome'], result)
         self.assertEqual([choice], seen)
         self.assertEqual(1, len(t.assessments))
@@ -2818,6 +2818,97 @@ class LegacyImplementationChoiceTest(unittest.TestCase):
 
     def test_legacy_nondefault_codex_processing_remains_the_implementation_choice(self):
         self.check_resume('codex', 'gpt-6.1-terra', 'low')
+
+    def test_economical_resume_keeps_legacy_processing_derived_implementation(self):
+        self.check_resume('claude', 'sonnet', 'medium', '--economical')
+
+
+class EconomicalTerminalTest(unittest.TestCase):
+    def fixture(self, kind):
+        self.t = kind()
+        self.addCleanup(self.t.doCleanups)
+        self.t.setUp()
+
+    def invoke_json(self, *flags):
+        from contextlib import redirect_stderr
+        from pr_review.issue_cli import main
+        output, errors = StringIO(), StringIO()
+        def assess(*args):
+            self.assertIn('Effective configuration:', errors.getvalue())
+            return self.t.assess(*args)
+        with redirect_stdout(output), redirect_stderr(errors), \
+                patch('pr_review.issues.assess_issue', side_effect=assess), \
+                patch('pr_review.issue_cli.dispatch', side_effect=lambda request: dispatch({**request, 'cwd': str(self.t.repo)})):
+            code = main(['-i', '12', '--economical', '--json', *flags])
+        result = json.loads(output.getvalue())  # Reject extra stdout results/text.
+        self.assertEqual(2, code, result)
+        self.assertEqual('approval', result['outcome'])
+        self.assertNotIn('Effective configuration:', output.getvalue())
+        return self.t.assessments[-1][1], errors.getvalue()
+
+    def assert_summary(self, config, text):
+        named = config['_named']
+        for i, choice in enumerate(config['reviewer_slots'], 1):
+            self.assertIn(f"reviewer-{i}: {named['reviewers'][i-1]} = {choice['provider']} / {choice['model']} / {choice['effort']}", text)
+        for role in ('processing', 'planning', 'fix', 'planning_review', 'planning_synthesis'):
+            choice = config[role] or config['planning']
+            name = named[role] or named['planning']
+            self.assertIn(f"{role.replace('_', '-')}: {name} = {choice['provider']} / {choice['model']} / {choice['effort']}", text)
+
+    def test_fresh_defaults_summary_and_actual_implementation(self):
+        self.fixture(BootstrapTest)
+        config, errors = self.invoke_json()
+        terra = {'provider': 'codex', 'model': 'gpt-6.1-terra', 'effort': 'high'}
+        haiku = {'provider': 'claude', 'model': 'haiku', 'effort': 'high'}
+        self.assertEqual([{'id': 'reviewer-1', **haiku}, {'id': 'reviewer-2', **terra}], config['reviewer_slots'])
+        for role in ('processing', 'planning', 'fix'):
+            self.assertEqual(terra, config[role])
+        self.assertEqual(haiku, config['planning_review'])
+        self.assertIsNone(config['planning_synthesis'])
+        self.assert_summary(config, errors)
+        original = self.t.harness
+        def implement(session, state, batch, *args):
+            self.assertEqual(terra, batch['settings']['fix'])
+            self.assertEqual(config['reviewer_slots'], batch['settings']['final_review']['reviewer_slots'])
+            self.assertEqual(terra, batch['settings']['final_review']['synthesis'])
+            return original(session, state, batch, *args)
+        with patch('pr_review.issue_harness.invoke', side_effect=implement):
+            result = dispatch(self.t.terminal_request('--approve', '1'))
+        self.assertEqual('ready', result['outcome'], result)
+        self.assertEqual(1, len(self.t.assessments))
+
+    def test_existing_owner_precedence_and_overridden_json_summary(self):
+        self.fixture(IssueIntegrationTest)
+        owner = owner_state.OwnerSession({'session': self.t.path})
+        data = owner.load()
+        fix = {'provider': 'claude', 'model': 'sonnet', 'effort': 'medium'}
+        codex = {'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'low'}
+        final = {'reviewer_slots': [{'id': 'reviewer-1', **codex}, {'id': 'reviewer-2', **fix}],
+                 'synthesis': fix, 'synthesis_tests': 'full'}
+        data['settings'].update(fix=fix, final_review=final)
+        owner.save(data)
+        config, errors = self.invoke_json('--planning', 'codex-99', '--codex-99-effort', 'medium')
+        self.assertEqual(fix, config['fix'])
+        self.assertEqual(final['reviewer_slots'], config['reviewer_slots'])
+        self.assertEqual(final['synthesis'], config['processing'])
+        self.assertEqual('full', config['synthesis_tests'])
+        self.assertEqual({'provider': 'codex', 'model': 'gpt-6.1-terra', 'effort': 'medium'}, config['planning'])
+        self.assertEqual({'provider': 'claude', 'model': 'haiku', 'effort': 'high'}, config['planning_review'])
+        self.assertIsNone(config['planning_synthesis'])
+        self.assert_summary(config, errors)
+        self.assertEqual(data['settings'], owner.load()['settings'])
+
+    def test_nonterminal_economical_issue_behavior_stays_unchanged(self):
+        self.fixture(BootstrapTest)
+        result = dispatch({**self.t.without_flags(), 'economical': True})
+        self.assertEqual('approval', result['outcome'], result)
+        config = self.t.assessments[-1][1]
+        self.assertEqual(['haiku', 'gpt-6.1-terra'], [s['model'] for s in config['reviewer_slots']])
+        self.assertEqual('gpt-6.1-terra', config['processing']['model'])
+        self.assertEqual({'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, config['planning'])
+        self.assertEqual({'provider': 'claude', 'model': 'opus', 'effort': 'high'}, config['planning_review'])
+        self.assertIsNone(config['planning_synthesis'])
+        self.assertFalse({'fix', '_named'} & config.keys())
 
 
 class WaitingTerminalRecoveryTest(unittest.TestCase):

@@ -65,6 +65,23 @@ class PlanningReviewTest(unittest.TestCase):
         self.assess()
         self.assertEqual(3, len(self.calls))
 
+    def test_economical_stage_choices_and_inherited_synthesis(self):
+        self.config = cli_settings.resolve({'economical': True}, issue=True)
+        result = self.assess()
+        expected = {
+            'draft': {'provider': 'codex', 'model': 'gpt-6.1-terra', 'effort': 'high'},
+            'review': {'provider': 'claude', 'model': 'haiku', 'effort': 'high'},
+            'synthesis': {'provider': 'codex', 'model': 'gpt-6.1-terra', 'effort': 'high'}}
+        self.assertEqual(expected, result['planning_choices'])
+        for stage, args, kwargs in self.calls:
+            self.assertIn(expected[stage]['model'], args)
+            self.assertEqual(expected[stage]['model'], kwargs['usage_call']['model'])
+        self.assertIn('resume', self.calls[-1][1])
+        # A preset-only resume keeps both the choices and completed stage evidence.
+        self.config = cli_settings.resolve({'economical': True}, self.config, issue=True)
+        self.assertEqual(result, self.assess())
+        self.assertEqual(3, len(self.calls))
+
     def test_planner_session_paths_survive_workspace_cleanup_and_retry(self):
         # Model the observed provider contract: the session index contains an
         # absolute transcript path, which must still work on a later invocation.

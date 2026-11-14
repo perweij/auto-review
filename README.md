@@ -216,9 +216,15 @@ bin/fix-issue --generate-json-config /tmp/issue-settings.json
 
 Pass the appropriate file with `--settings-file PATH`. These templates contain
 built-in defaults, including issue planning, critique and synthesis roles.
-`--economical` alone changes review/processing defaults, not every issue role;
-see the [cookbook](docs/cookbook.md#defaults-presets-precedence-and-resume) for
-an economical configuration covering all roles and the rules for resume.
+For fresh terminal `fix-issue` workflows, `--economical` covers every default role:
+Haiku/high critique and Claude review, Terra/high planning, fixing, Codex review
+and processing, with planning synthesis following planning. Saved choices and
+imported Owner fixing/final-review settings take precedence, as do complete files
+and explicit flags; preset-only resume keeps existing choices. `--expensive`
+continues to cover reviewer/processing defaults, leaving independent issue roles
+at ordinary defaults. Nonterminal API `issue-run`, API `settings` and Emacs preset
+behavior are unchanged. See the [cookbook](docs/cookbook.md#defaults-presets-precedence-and-resume)
+for precedence and optional configuration sharing.
 
 ### Autonomous issue execution
 

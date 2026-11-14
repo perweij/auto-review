@@ -38,8 +38,10 @@ def parser():
     result.add_argument('--json', action='store_true')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     presets = result.add_mutually_exclusive_group()
-    presets.add_argument('--economical', action='store_true')
-    presets.add_argument('--expensive', action='store_true')
+    presets.add_argument('--economical', action='store_true',
+                         help='Haiku/high or Terra/high defaults for every terminal issue role and new name; saved/Owner settings, files and flags take precedence')
+    presets.add_argument('--expensive', action='store_true',
+                         help='Fable/high or Astra/high reviewer/processing defaults; independent issue-only roles keep ordinary defaults')
     cli_settings.add_arguments(result, issue=True)
     return result
 
