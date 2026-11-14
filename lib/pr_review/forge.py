@@ -202,7 +202,7 @@ def restore(state, explicit=None):
 
 def check_account(saved, current, username):
     if username and username.lower() != current['username'].lower():
-        raise ApiError('account_changed', 'GitHub account changed; resume with the original account.')
+        raise ApiError('account_changed', 'Authenticated forge account changed; resume with the original account.')
     if saved and (saved.get('forge') != current['forge'] or saved.get('host') != current['host']
                   or (saved.get('id') is not None and saved['id'] != current.get('id'))):
         raise ApiError('account_changed', 'Authenticated forge account changed.')

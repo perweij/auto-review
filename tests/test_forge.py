@@ -39,12 +39,26 @@ class ForgeTest(unittest.TestCase):
             adapter('unknown')
 
     def test_accounts_are_host_scoped_and_cannot_lose_stable_identity(self):
-        account = {'forge': 'github', 'host': 'github.com', 'username': 'User', 'id': '123'}
-        check_account(None, account, 'user')
-        check_account(account, dict(account), 'user')
-        for change in ({'host': 'enterprise.example'}, {'id': None}, {'id': '456'}, {'username': 'other'}):
-            with self.subTest(change=change), self.assertRaises(ApiError):
-                check_account(account, {**account, **change}, 'user')
+        for forge in ('github', 'gitlab'):
+            account = {'forge': forge, 'host': forge + '.com', 'username': 'User', 'id': '123'}
+            check_account(None, account, 'user')
+            check_account(account, dict(account), 'user')
+            other_forge = 'gitlab' if forge == 'github' else 'github'
+            for change in ({'host': 'enterprise.example'}, {'forge': other_forge},
+                           {'id': None}, {'id': '456'}, {'username': 'other'}):
+                with self.subTest(forge=forge, change=change), self.assertRaises(ApiError) as caught:
+                    check_account(account, {**account, **change}, 'user')
+                self.assertEqual('account_changed', caught.exception.code)
+
+    def test_username_mismatch_has_forge_neutral_resume_guidance(self):
+        for forge in ('github', 'gitlab'):
+            account = {'forge': forge, 'host': forge + '.com', 'username': 'other', 'id': '123'}
+            with self.subTest(forge=forge):
+                with self.assertRaises(ApiError) as caught:
+                    check_account(None, account, 'original')
+                self.assertEqual('account_changed', caught.exception.code)
+                self.assertEqual('Authenticated forge account changed; resume with the original account.',
+                                 str(caught.exception))
 
     def test_absent_capability_blocks_operation(self):
         with patch('pr_review.forge.GitHub.capabilities', frozenset(('review',))):
