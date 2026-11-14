@@ -2,8 +2,8 @@
 
 Run review and issue commands from a checkout of the target repository. Replace
 PR `123` and issue `42` with your numbers. Use `bin/pr-review` and `bin/fix-issue`
-for this checkout's version. Authenticate `gh` and the providers used by your
-active roles. Model names and efforts must be supported by your installed CLI
+for this checkout's version. Authenticate `gh` (or `glab` for GitLab reviews) and
+the providers used by your active roles. Model names and efforts must be supported by your installed CLI
 and account.
 
 ## Generate a complete configuration
@@ -27,11 +27,21 @@ fix-issue -i 42 --settings-file /tmp/issue-settings.json
 Files must be complete. Every referenced name needs a complete
 `{"provider", "model", "effort"}` triplet in `model_configs`. PR files require
 `reviewers`, `processing`, `synthesis_tests`, and `suggested_changes`. Issue files
-require `reviewers`, `processing`, `planning`, `fix`, `synthesis_tests`,
-`max_runtime`, `min_weekly_quota_remaining`, and `max_weekly_quota_use`; they exclude
+require `reviewers`, `processing`, `planning`, `planning_review`, `planning_synthesis`,
+`fix`, `synthesis_tests`, `max_runtime`, `min_weekly_quota_remaining`, and `max_weekly_quota_use`; they exclude
 `suggested_changes`. Disabled limits are JSON `null`. Missing fields, unknown
 fields, undefined references, duplicate reviewers, and name/provider mismatches
 are errors. Accompanying flags cannot repair an incomplete file.
+`planning_review: null` disables critique; `planning_synthesis: null` follows the
+planner. For compatibility, an older complete issue file omitting **both** fields
+selects the single-assessment workflow; omitting just one is an error.
+
+Generation includes every supported terminal JSON setting. It always writes
+built-in defaults, even alongside preset or model flags. Targets, forge selection,
+publication, approval, recovery actions and `--max-repair-cycles` remain CLI
+controls. Provider timeouts, permissions, budgets and probe settings remain
+[environment settings](manual.md#configuration); they are not JSON fields.
+Interactive Owner settings use a separate format.
 
 ## Two reviewers from the same provider
 
@@ -69,13 +79,15 @@ All roles reference the same namespace. To deliberately share a choice:
 fix-issue -i 42 \
   --reviewers codex-1,claude-1 \
   --planning codex-1 --processing codex-1 --fix codex-2 \
+  --planning-review claude-1 --planning-synthesis same \
   --codex-1-model gpt-6.1-sol --codex-1-effort high \
   --codex-2-model gpt-6.1-terra --codex-2-effort medium \
   --claude-1-model opus --claude-1-effort high
 ```
 
 Changing `codex-1` changes planning, processing, and the first reviewer. Changing
-`codex-2` changes implementation only. Planning assesses the issue and handles
+`codex-2` changes implementation only. `claude-1` shares critique and the second
+reviewer; planning synthesis follows `codex-1`. Planning assesses the issue and handles
 later planning turns. Processing synthesizes acceptance reviews. The implementation
 harness uses `fix`; the completed candidate goes through the shared review engine.
 There is no separate post-push PR review.
@@ -91,6 +103,8 @@ A complete file equivalent to those model flags is:
   },
   "reviewers": ["codex-1", "claude-1"],
   "planning": "codex-1",
+  "planning_review": "claude-1",
+  "planning_synthesis": null,
   "processing": "codex-1",
   "fix": "codex-2",
   "synthesis_tests": "focused",
@@ -101,8 +115,8 @@ A complete file equivalent to those model flags is:
 ```
 
 Every explicitly defined configuration must be used by a final role. A definition
-used only by planning, processing, or fix is valid. If a CLI role override makes a
-file definition unused, remove that definition from the file. Inactive built-in
+used only by planning, critique, synthesis, processing, or fix is valid. If a CLI
+role override makes a file definition unused, remove that definition from the file. Inactive built-in
 defaults are exempt and do not activate providers.
 
 ## Single-provider operation
@@ -118,7 +132,7 @@ Codex-only issue work with independent implementation:
 
 ```sh
 fix-issue -i 42 --reviewers codex-1 --processing codex-1 \
-  --planning codex-3 --fix codex-4 \
+  --planning codex-3 --planning-review codex-1 --planning-synthesis same --fix codex-4 \
   --codex-4-model gpt-6.1-terra --codex-4-effort medium
 ```
 
@@ -126,7 +140,8 @@ Fully Claude-only issue work requires every role to select Claude:
 
 ```sh
 fix-issue -i 42 --reviewers claude-1 --processing claude-1 \
-  --planning claude-2 --fix claude-3 --max-runtime 2h --json
+  --planning claude-2 --planning-review claude-4 --planning-synthesis same \
+  --fix claude-3 --max-runtime 2h --json
 ```
 
 A fresh single reviewer implicitly selects independent processing defaults for
@@ -144,15 +159,31 @@ before synthesis.
 | Second reviewer | `codex-1` | Codex / GPT-6.1 Sol / high |
 | Processing | `codex-2` | Codex / GPT-6.1 Sol / high |
 | Issue planning | `codex-3` | Codex / GPT-6.1 Sol / high |
+| Issue plan critique | `claude-2` | Claude / Opus / high |
+| Issue plan synthesis | `null` (same as planner) | Follows issue planning |
 | Issue implementation | `codex-4` | Codex / GPT-6.1 Sol / high |
 
-Default references are separate. `--economical` selects Haiku and Terra reviewers
-with Terra processing; `--expensive` selects Fable and Astra with Astra processing.
-Both use high effort and leave issue planning and implementation defaults unchanged.
+Default model configurations are separate; planning synthesis follows planning.
+`--economical` selects Haiku and Terra reviewers with Terra processing; `--expensive` selects Fable and Astra with Astra processing.
+Both use high effort and leave issue planning, critique and implementation defaults
+unchanged; planning synthesis follows planning.
 New reviewer or processing names also use the selected preset's provider defaults.
-Names used only for planning or implementation start from built-in provider defaults.
+Names used only for planning, critique, planning synthesis or implementation start
+from built-in provider defaults.
 An explicitly shared name keeps one choice for every referring role; saved and
 file-defined choices take precedence over presets.
+
+For economical choices across all issue roles on a new job, share the preset
+configurations explicitly:
+
+```sh
+fix-issue -i 42 --economical --planning codex-1 --fix codex-1 \
+  --planning-review claude-1 --planning-synthesis same
+```
+
+`--economical` alone does not change every issue role. On resume, saved choices
+still take precedence over the preset; use explicit model/effort overrides to
+change existing configurations.
 
 Precedence is **defaults → preset → saved settings → complete file → explicit
 CLI flags**, regardless of argument order. Omitted flags retain resolved values.
@@ -187,12 +218,16 @@ validation before that work begins.
 Legacy workflows keep their processing-derived implementation choice when imported,
 with separate names so later role overrides remain independent.
 
-Started implementation batches freeze effective model and review settings.
-Omitted overrides and equivalent choices resume the same batch, including an
-equivalent file with renamed configurations. Renaming configurations or changing
-runtime/quota limits preserves the approved plan and cumulative accounting.
-Forbidden changes fail with
-`settings_changed`, preserving saved settings and evidence.
+Stopped issue jobs accept model, effort and provider changes through the same
+named flags or complete settings file. Omitted choices keep saved values; changes
+apply to unfinished and future model calls without replacing the approved plan.
+Completed planning and valid review results keep their original attribution.
+A provider change starts a fresh implementation session with saved work and
+continuation context; same-provider changes continue the existing session.
+Runtime and quota consumption remain cumulative. Source, requirements, trust and
+evidence checks still apply. Use `--rerun-review` or `--rerun-planning` when you
+explicitly want to regenerate eligible completed stages. Interactive Owner's
+non-issue task batches retain their frozen-settings rules.
 
 ## Output and publication
 
@@ -214,6 +249,16 @@ one result. Omit `--no-publish` for the interactive publication menu, or use
 `--suggested-changes` to generate separately verified GitHub suggestions.
 Issue commands retain plan approval; `--yolo` skips approval for that invocation,
 but unanswered product questions still block.
+
+## GitLab local review
+
+```sh
+pr-review --forge gitlab https://gitlab.com/GROUP/PROJECT/-/merge_requests/123 --no-publish
+```
+
+Use an authenticated `glab` and the project's local checkout. The GitLab pilot
+supports local review and resume, but not publication, Owner operations or
+`fix-issue`. See the [pilot capability and evidence notes](gitlab-pilot.md).
 
 ## Compatibility
 

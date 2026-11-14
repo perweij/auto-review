@@ -94,8 +94,8 @@ Matching single-reviewer and processing triplets retain the direct optimization.
 `--economical` selects Haiku and Terra with Terra processing; `--expensive`
 selects Fable and Astra with Astra processing, all at high effort. These mutually
 exclusive presets also apply to newly introduced reviewer and processing names.
-New names used only for issue planning or implementation retain built-in provider
-defaults; explicitly shared names use the same choice in every referring role.
+New names used only for issue planning, critique, planning synthesis or
+implementation retain built-in provider defaults; explicitly shared names use the same choice in every referring role.
 Saved and file-defined choices take precedence over presets.
 
 Resolution is **defaults → preset → saved settings → complete file → explicit
@@ -124,9 +124,13 @@ fix-issue -i 42 --settings-file /tmp/issue-settings.json
 The PR file contains `model_configs` (named complete `{provider, model, effort}`
 triplets), `reviewers` (ordered names), `processing` (a name), `synthesis_tests`
 (`focused` or `full`), and `suggested_changes` (boolean). Issue files additionally
-require `planning`, `fix`, `max_runtime`, `min_weekly_quota_remaining`, and
-`max_weekly_quota_use`, and exclude `suggested_changes`. Disabled execution
-limits are JSON `null`; null model choices or role references are invalid.
+require `planning`, `planning_review`, `planning_synthesis`, `fix`, `max_runtime`,
+`min_weekly_quota_remaining`, and `max_weekly_quota_use`, and exclude
+`suggested_changes`. Disabled execution limits are JSON `null`.
+`planning_review: null` disables critique; `planning_synthesis: null` follows the
+planner. Other null model choices or role references are invalid. Legacy complete
+issue files omitting both planning-review fields retain single-assessment behavior;
+omitting just one is invalid.
 
 All applicable fields and referenced triplets are required. Missing values cannot
 be repaired by defaults, saved state, or flags. Unknown fields, malformed files,
@@ -135,7 +139,9 @@ Every explicit definition must be referenced by a final active role, including
 roles other than reviewers. If a CLI role override leaves a file definition unused,
 remove that definition; the error names it. Inactive built-in defaults are exempt.
 Targets, publication/approval actions, recovery, trust tokens, and environment
-runtime settings are invocation controls, not file fields.
+runtime settings are invocation controls, not file fields. `--max-repair-cycles`
+is also a CLI-only control; omission on resume preserves its saved allowance.
+Generation always writes built-in defaults, ignoring presets and model overrides.
 
 Provider-wide model/effort flags, positional `--reviewer-N-provider/model/effort`,
 provider-only reviewer lists, and direct role triplets such as
@@ -313,7 +319,8 @@ test PR before relying on unattended suggestions in a new deployment.
 ## Configuration
 
 Review flags are shown by `pr-review --help`; owner operations by
-`pr-review owner --help`. The following environment settings supplement those flags.
+`pr-review owner --help`; issue controls by `fix-issue --help`. The following
+environment settings supplement those flags and are not part of generated JSON.
 
 | Variable | Meaning |
 | --- | --- |

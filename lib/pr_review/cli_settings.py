@@ -43,6 +43,8 @@ def add_arguments(parser, *, issue=False):
     built_in = defaults(issue=issue)
     roles = [('reviewers', ','.join(built_in['reviewers']))]
     roles += [(r, built_in[r]) for r in ('processing', 'planning', 'fix') if r in built_in]
+    if issue:
+        roles += [('planning_review', built_in['planning_review']), ('planning_synthesis', 'same as planning')]
     example = ('fix-issue -i 42 --reviewers codex-1,claude-1 --planning codex-1 --processing codex-1 --fix codex-2'
                if issue else 'pr-review 123 --reviewers codex-1 --processing codex-1')
     parser.epilog = (parser.epilog or '') + '\nDefaults: ' + '; '.join(f'{r}={n}' for r, n in roles) + '. ' + \
@@ -72,7 +74,7 @@ def add_arguments(parser, *, issue=False):
         'Use --NAME-model and --NAME-effort for any positive numbered codex-N or claude-N. '
         'Every explicit definition must be referenced by a final role. Defaults are independent; '
         'precedence: defaults, preset, saved settings, complete file, explicit flags. '
-        'Resume retains saved/frozen choices; forbidden changes fail before model work.')
+        'Omitted choices retain saved settings; stopped issue jobs accept new choices for unfinished work.')
     for name in ('codex-1', 'claude-1'):
         for field in ('model', 'effort'):
             group.add_argument(f'--{name}-{field}', dest=f'named_{name}-{field}',

@@ -20,6 +20,13 @@ than opening manifests, Markdown artifacts, or publication ledgers. `session`
 is an opaque selector returned by discovery; `generation` and `revision` are
 opaque identities, not paths clients should interpret.
 
+The terminal `--settings-file` schema is separate from this protocol's model
+triplets and interactive Owner settings. Generate complete terminal templates with
+`pr-review --generate-json-config PATH` or `fix-issue --generate-json-config PATH`;
+see the [complete field contract](manual.md#complete-terminal-configuration-files)
+and [CLI recipes](cookbook.md). Do not send named terminal configuration files as
+API settings objects.
+
 ## Local read operations
 
 | Command | Additional request fields | Result |

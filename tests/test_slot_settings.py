@@ -735,11 +735,65 @@ class NamedTerminalSettingsTest(unittest.TestCase):
                 original = path.read_bytes()
                 value = json.loads(original)
                 self.assertEqual(cli_settings.defaults(issue=issue), value)
+                # Independent schema contract: comparing only with defaults() would
+                # miss a field accidentally removed from both generation and validation.
+                expected = {'model_configs', 'reviewers', 'processing', 'synthesis_tests'}
+                expected |= ({'planning', 'planning_review', 'planning_synthesis', 'fix',
+                              'max_runtime', 'min_weekly_quota_remaining', 'max_weekly_quota_use'}
+                             if issue else {'suggested_changes'})
+                self.assertEqual(expected, set(value))
+                if issue:
+                    self.assertEqual('claude-2', value['planning_review'])
+                    self.assertIsNone(value['planning_synthesis'])
+                    self.assertEqual({'provider', 'model', 'effort'},
+                                     set(value['model_configs'][value['planning_review']]))
                 generated = self.resolve('--settings-file', str(path), issue=issue)
                 self.assertEqual(self.resolve(issue=issue), generated)
+                preset_path = Path(directory) / 'preset.json'
+                self.assertEqual(0, entry(['--generate-json-config', str(preset_path),
+                                           '--economical', '--codex-1-effort', 'low']))
+                self.assertEqual(value, json.loads(preset_path.read_text()))
                 self.assertEqual(1, entry(['--generate-json-config', str(path)]))
                 self.assertEqual(original, path.read_bytes())
                 self.assertEqual(1, entry(['--generate-json-config', str(path / 'missing')]))
+
+    def test_cookbook_file_and_shared_flags_select_the_same_workflow(self):
+        import json
+        import re
+        import shlex
+        import tempfile
+        cookbook = (Path(__file__).resolve().parents[1] / 'docs/cookbook.md').read_text()
+        section = cookbook.split('## Shared choices and independent roles')[1].split('## ')[0]
+        command = re.search(r'```sh\n(.*?)\n```', section, re.S)[1]
+        arguments = shlex.split(command.replace('\\\n', ' '))[3:]
+        value = json.loads(re.search(r'```json\n(.*?)\n```', section, re.S)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'settings.json'
+            path.write_text(json.dumps(value))
+            actual = self.resolve('--settings-file', str(path), issue=True)
+        self.assertEqual(self.resolve(*arguments, issue=True), actual)
+        self.assertIsNotNone(actual['planning_review'])
+
+    def test_cookbook_single_provider_recipes_activate_only_that_provider(self):
+        import re
+        import shlex
+        cookbook = (Path(__file__).resolve().parents[1] / 'docs/cookbook.md').read_text()
+        section = cookbook.split('## Single-provider operation')[1].split('## ')[0]
+        commands = re.findall(r'```sh\n(.*?)\n```', section, re.S)
+        self.assertEqual(3, len(commands))
+        for command, provider in zip(commands, ('claude', 'codex', 'claude')):
+            args = shlex.split(command.replace('\\\n', ' '))
+            issue = args[0] == 'fix-issue'
+            result = self.resolve(*args[3 if issue else 2:], issue=issue)
+            self.assertEqual({provider}, {c['provider'] for c in result['_named']['model_configs'].values()})
+            if issue:
+                self.assertIsNotNone(result['planning_review'])
+
+    def test_issue_help_lists_planning_review_and_synthesis_defaults(self):
+        from pr_review.issue_cli import parser
+        help_text = ' '.join(parser().format_help().split())
+        self.assertIn('planning_review=claude-2', help_text)
+        self.assertIn('planning_synthesis=same as planning', help_text)
 
     def test_complete_validation_and_final_reference_validation(self):
         import copy

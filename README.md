@@ -207,6 +207,19 @@ Questions and revisioned plans remain on the issue. A draft PR is bootstrapped
 with an empty commit after approval; implementation runs in an isolated Owner
 worktree. Successful independent harness verification marks the PR ready after a guarded push.
 
+To create editable, complete terminal settings files:
+
+```sh
+bin/pr-review --generate-json-config /tmp/pr-settings.json
+bin/fix-issue --generate-json-config /tmp/issue-settings.json
+```
+
+Pass the appropriate file with `--settings-file PATH`. These templates contain
+built-in defaults, including issue planning, critique and synthesis roles.
+`--economical` alone changes review/processing defaults, not every issue role;
+see the [cookbook](docs/cookbook.md#defaults-presets-precedence-and-resume) for
+an economical configuration covering all roles and the rules for resume.
+
 ### Autonomous issue execution
 
 After approval, one implementation harness owns planning the code changes, coding,
