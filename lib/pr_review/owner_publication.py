@@ -244,6 +244,10 @@ def recover(session, state, *, statuses=('submitting', 'ambiguous'), clear_prepa
             reply['needs_attention'] = 'Multiple remote receipts match this reply; inspect the duplicate replies.'
             session.save(state)
             raise ApiError("ambiguous_receipt", "Multiple matching receipts; inspect GitHub before retrying.")
+        if action['status'] == 'published' and not matches:
+            # Remote deletion does not undo a completed send. Retain its journal
+            # and keep auditing for late duplicates without blocking other replies.
+            continue
         if action.get('receipt') and not matches:
             raise ApiError('ambiguous_receipt', 'A previously confirmed receipt is missing; inspect the remote reply before retrying.')
         if matches:

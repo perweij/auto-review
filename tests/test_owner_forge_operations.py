@@ -14,8 +14,8 @@ class OwnerOperationsTest(unittest.TestCase):
         self.addCleanup(self.t.doCleanups)
         self.t.setUp()
 
-    def prepare(self):
-        self.t.request('owner-mutate', operation='reply', item='thread:T1', body='Original')
+    def prepare(self, item='thread:T1'):
+        self.t.request('owner-mutate', operation='reply', item=item, body='Original')
         self.reply = self.t.view['replies'][-1]['id']
         self.t.request('owner-mutate', operation='stage', reply=self.reply)
         return self.t.request('owner-prepare')
@@ -42,8 +42,8 @@ class OwnerOperationsTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'stale_confirmation')
         self.assertFalse(self.t.posts)
 
-    def failed_send(self):
-        prepared = self.prepare()
+    def failed_send(self, item='thread:T1'):
+        prepared = self.prepare(item)
         with patch('pr_review.publication.gh', side_effect=ApiError('network', 'Offline')):
             with self.assertRaises(ApiError):
                 self.t.request('owner-publish', token=prepared['token'])
@@ -59,6 +59,56 @@ class OwnerOperationsTest(unittest.TestCase):
         self.assertEqual(len(state['actions']), 1)
         self.assertEqual(state['actions'][0]['marker'], action['marker'])
         self.assertEqual(len(self.t.posts), 1)
+
+    def test_missing_retried_thread_receipt_allows_unrelated_publication(self):
+        self.missing_retried_receipt('thread:T1', 'pulls', 'comments/101/replies')
+
+    def test_missing_retried_timeline_receipt_allows_unrelated_publication(self):
+        self.t.feedback.append(self.t.item('comment:501', 501, kind='comment'))
+        self.t.request('owner-refresh')
+        self.missing_retried_receipt('comment:501', 'issues', 'comments')
+
+    def missing_retried_receipt(self, item, resource, endpoint):
+        original = self.failed_send(item)
+        self.t.request('owner-mutate', operation='stage', reply=self.reply)
+        prepared = self.t.request('owner-prepare')
+        self.t.request('owner-publish', token=prepared['token'])
+        # Reload the journal after the successful retry, then lose the remote receipt.
+        state = self.session_state()[1]
+        action = copy.deepcopy(state['actions'][0])
+        reply = copy.deepcopy(state['replies'][0])
+        self.assertEqual(action['status'], 'published')
+        self.assertEqual(action['attempt_count'], 2)
+        self.assertEqual(action['id'], original['id'])
+        self.assertEqual(action['payload'], original['payload'])
+        self.assertTrue(action['receipt'])
+        self.assertTrue(action['evidence'])
+        self.assertEqual(self.t.posts[0][:2], (resource, endpoint))
+        self.t.receipts.clear()
+        self.t.request('owner-mutate', operation='reply', item='thread:T2', body='Unrelated')
+        unrelated = self.t.view['replies'][-1]['id']
+        self.t.request('owner-mutate', operation='stage', reply=unrelated)
+        first = self.t.request('owner-prepare')
+        second = self.t.request('owner-prepare')
+        self.assertEqual(first['token'], second['token'])
+        self.assertEqual([r['id'] for r in second['replies']], [unrelated])
+        self.t.request('owner-publish', token=second['token'])
+        self.t.request('owner-recover')
+        self.assertEqual(len(self.t.posts), 2)
+        self.assertEqual(self.t.posts[-1][:2], ('pulls', 'comments/102/replies'))
+        self.assertTrue(self.t.posts[-1][2]['body'].startswith('Unrelated\n\n'))
+        state = self.session_state()[1]
+        self.assertEqual(state['actions'][0], action)
+        self.assertEqual(state['replies'][0], reply)
+        self.assertEqual(state['replies'][1]['status'], 'published')
+        for operation in ('edit', 'stage'):
+            with self.subTest(operation=operation):
+                with self.assertRaises(ApiError) as caught:
+                    self.t.request('owner-mutate', operation=operation, reply=self.reply, body='Changed')
+                self.assertEqual(caught.exception.code, 'immutable_reply')
+        self.assertEqual(self.session_state()[1]['actions'][0], action)
+        self.assertEqual(self.session_state()[1]['replies'][0], reply)
+        self.assertEqual(len(self.t.posts), 2)
 
     def test_late_legacy_receipt_does_not_certify_edited_draft(self):
         action = self.failed_send()
@@ -78,14 +128,21 @@ class OwnerOperationsTest(unittest.TestCase):
         self.assertEqual(len(self.t.posts), 1)
 
     def test_known_receipt_absence_does_not_allow_retry(self):
-        action = self.failed_send()
-        session, state = self.session_state()
-        state['actions'][0].update(status='ambiguous', receipt={'id': 123})
-        session.save(state)
-        with self.assertRaises(ApiError) as caught:
-            self.t.request('owner-recover')
-        self.assertEqual(caught.exception.code, 'ambiguous_receipt')
-        self.assertEqual(self.session_state()[1]['actions'][0]['status'], 'ambiguous')
+        self.failed_send()
+        for status in ('ambiguous', 'submitting'):
+            with self.subTest(status=status):
+                session, state = self.session_state()
+                state['actions'][0].update(status=status, receipt={'id': 123})
+                session.save(state)
+                before = copy.deepcopy(state['actions'][0])
+                with self.assertRaises(ApiError) as caught:
+                    self.t.request('owner-recover')
+                self.assertEqual(caught.exception.code, 'ambiguous_receipt')
+                with self.assertRaises(ApiError) as caught:
+                    self.t.request('owner-prepare')
+                self.assertEqual(caught.exception.code, 'uncertain_publication')
+                self.assertEqual(self.session_state()[1]['actions'][0], before)
+                self.assertFalse(self.t.posts)
 
     def test_satisfied_thread_does_not_send(self):
         self.t.feedback[0]['is_resolved'] = True
@@ -220,6 +277,8 @@ class OwnerOperationsTest(unittest.TestCase):
         self.t.request('owner-publish', token=prepared['token'])
         session, state = self.session_state()
         self.assertEqual(state['actions'][0]['attempt_count'], 2)
+        before = copy.deepcopy(state['actions'][0])
+        reply_before = copy.deepcopy(state['replies'][0])
         self.t.publish(session, 'comments/101/replies', action['payload'])
         with self.assertRaises(ApiError) as caught:
             self.t.request('owner-recover')
@@ -227,6 +286,9 @@ class OwnerOperationsTest(unittest.TestCase):
         reply = self.session_state()[1]['replies'][0]
         self.assertEqual(reply['status'], 'published')
         self.assertIn('Multiple remote receipts', reply['needs_attention'])
+        self.assertEqual(self.session_state()[1]['actions'][0], before)
+        self.assertEqual(reply['receipt'], reply_before['receipt'])
+        self.assertEqual(reply['evidence'], reply_before['evidence'])
         self.assertEqual(len(self.t.posts), 2)
 
     def test_same_receipt_with_different_metadata_is_not_a_duplicate(self):
