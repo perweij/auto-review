@@ -40,6 +40,16 @@ class GitLabTest(unittest.TestCase):
             with patch.object(self.forge, 'get', return_value={**self.raw, **mutation}), self.assertRaises(ApiError):
                 self.forge.change(self.repo)
 
+    def test_dotted_source_namespace_from_qualified_mr_selector(self):
+        self.repo.project, self.repo.pr = self.forge.target(self.repo.url)
+        with patch.object(self.forge, 'get', side_effect=[self.raw, {'path_with_namespace': 'Alice.Dev/sub/Project'}]):
+            change = self.forge.change(self.repo)
+        source = change['source']['project']
+        self.assertEqual(dict(forge='gitlab', host='gitlab.com', path='alice.dev/sub/project'), source)
+        self.assertEqual(self.raw['diff_refs'], change['diff_refs'])
+        self.assertEqual(self.raw['sha'], change['source']['head'])
+        self.assertEqual(source, restore(dict(repository='gitlab.com/alice.dev/sub/project', forge_project=source)).saved())
+
     def test_pages_and_repeated_page(self):
         first = [{'id': i} for i in range(100)]
         with patch.object(self.forge, 'get', side_effect=[first, [{'id': 100}]]) as get:

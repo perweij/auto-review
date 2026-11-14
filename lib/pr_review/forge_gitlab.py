@@ -99,7 +99,7 @@ class GitLab:
             if raw['source_project_id'] is not None:
                 try:
                     source = self.get(repo, f"projects/{raw['source_project_id']}")
-                    source_project = self.project(source['path_with_namespace']).saved()
+                    source_project = self.project('gitlab.com/' + source['path_with_namespace']).saved()
                 except ApiError as exc:
                     if exc.code != 'command_failed' or not re.search(r'\b(?:403|404)\b', str(exc)):
                         raise
