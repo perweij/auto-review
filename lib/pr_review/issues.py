@@ -11,7 +11,7 @@ from .common import ApiError, atomic_json, command, digest, git, locked, now, re
 from .repository import Repository, normalize_remote, repository_name
 from . import settings, owner_state, owner_git, owner_fixes, owner_import, owner_publication, owner_completion, issue_harness
 from .owner_completion import execution_complete
-from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy, pages
+from .issue_eligibility import collect_eligibility_facts, evaluate_eligibility, EligibilityPolicy
 from .issue_planning import assess_issue, planning_policy_digest
 from . import issue_resources, specification, review_history, issue_settings
 from .issue_writes import Writes, comment_marker
@@ -28,33 +28,29 @@ def resolve(request):
         if len(names) != 1:
             raise ApiError('invalid_request', 'Choose a repository with -R.')
         identity = names.pop()
-    return Repository.resolve(request.get('pr') or request.get('issue'), repository_name(identity), cwd)
+    return Repository.resolve(request.get('pr') or request.get('issue'), repository_name(identity), cwd, request.get("forge"))
 
 
-def semantic_comment(comment):
-    """Keep discussion content and review anchors, excluding GitHub metadata."""
-    result = {'id': comment.get('id'), 'user': {'login': comment.get('user', {}).get('login', '')},
-              'body': comment.get('body') or ''}
-    for key in ('path', 'line', 'side', 'start_line', 'start_side', 'original_line', 'original_start_line',
-                'position', 'original_position', 'subject_type', 'commit_id', 'original_commit_id',
-                'in_reply_to_id', 'pull_request_review_id', 'diff_hunk', 'state'):
-        if key in comment:
-            result[key] = comment[key]
-    return result
+def issue_write_adapter(state=None):
+    from .forge import adapter, restore
+    return adapter(restore(state).forge if state and state.get('repository') else 'github').issue_writes
 
 
-def matches_receipt(comment, receipt):
-    return (comment.get('id') == receipt.get('id') and comment.get('body') == receipt.get('body')
-            and comment.get('user', {}).get('login', '').lower() == receipt.get('user', {}).get('login', '').lower())
+def semantic_comment(comment, state=None):
+    return issue_write_adapter(state).semantic_comment(comment)
+
+
+def matches_receipt(comment, receipt, state=None):
+    return issue_write_adapter(state).matches_receipt(comment, receipt)
 
 
 def approval_revision(comment, state):
     """Parse only the initiator's standalone command; acceptance also checks time."""
-    if comment.get('user', {}).get('login', '').lower() != state['viewer'].lower():
+    if issue_write_adapter(state).actor(comment).lower() != state['viewer'].lower():
         return None
     text = (comment.get('body') or '').strip()
     for action in state.get('actions', {}).values():
-        if action.get('approval') and action.get('receipt') and matches_receipt(comment, action['receipt']):
+        if action.get('approval') and action.get('receipt') and matches_receipt(comment, action['receipt'], state):
             text = action['body']
             break
     match = re.fullmatch(r'/fix-issue approve ([1-9][0-9]*)', text)
@@ -63,10 +59,10 @@ def approval_revision(comment, state):
 
 def semantic_comments(comments, state):
     # Only exact receipted publications and standalone approvals are excluded.
-    receipts = {a['receipt']['id']: a['receipt'] for a in state.get('actions', {}).values()
+    receipts = {issue_write_adapter(state).receipt_id(a['receipt']): a['receipt'] for a in state.get('actions', {}).values()
                 if a.get('receipt') and 'body' in a}
-    return [semantic_comment(c) for c in comments
-            if not (c.get('id') in receipts and matches_receipt(c, receipts[c['id']]))
+    return [semantic_comment(c, state) for c in comments
+            if not (c.get('id') in receipts and matches_receipt(c, receipts[c['id']], state))
             and approval_revision(c, state) is None]
 
 
@@ -157,14 +153,20 @@ class Workflow:
     def __init__(self, request, repo, facts):
         self.request, self.repo = request, repo
         number = facts['issue']['number']
-        self.path = state_root() / 'issues-v1' / digest([repo.identity, str(repo.common)])[:32] / f'issue-{number}'
+        self.path = state_root() / 'issues-v1' / digest([repo.project.storage_key, str(repo.common)])[:32] / f'issue-{number}'
         self.file = self.path / 'session.json'
         self.state = read_json(self.file)
         if not self.state:
             self.state = {'kind': 'issue', 'format_version': 1, 'sequence': 0, 'id': uuid.uuid4().hex,
-                          'issue': number, 'repository': repo.identity, 'git_common_dir': str(repo.common),
-                          'viewer': facts['viewer'], 'phase': 'intake', 'actions': {}, 'allowed_heads': [],
+                          'issue': number, 'repository': repo.identity, 'forge_project': repo.project.saved(), 'git_common_dir': str(repo.common),
+                          'forge_account': facts.get('forge_account'), 'viewer': facts['viewer'], 'phase': 'intake', 'actions': {}, 'allowed_heads': [],
                           'title': facts['issue']['title'], 'created_at': now(), 'budget_scope': 'planning-and-execution'}
+        from .forge import restore, check_account
+        if facts.get('forge_account'):
+            check_account(self.state.get('forge_account'), facts['forge_account'], self.state['viewer'])
+        elif (self.state.get('forge_account') or {}).get('id'):
+            raise ApiError('account_changed', 'Stable account identity is unavailable.')
+        restore(self.state, request.get('forge'))
         if self.state.get('format_version') != 1 or self.state.get('git_common_dir') != str(repo.common):
             raise ApiError('invalid_session', 'Unsupported issue state or repository identity.')
         if self.state['viewer'].lower() != facts['viewer'].lower():
@@ -172,7 +174,9 @@ class Workflow:
         if request.get('pr') and not self.state.get('pr'):
             self.state['pr'] = request['pr']
         self.facts = facts
-        self.writes = Writes(repo, self.state, self.save, self.guard)
+        self.writes = Writes(repo, self.state, self.save, self.guard, self.check_account)
+        if request.get("command") == "issue-run":
+            self.writes.ensure_supported()
 
     def save(self):
         self.state['sequence'] += 1
@@ -182,8 +186,8 @@ class Workflow:
         self.state['next_action'] = next_action
         self.save()
         return {'outcome': outcome, 'exit_code': code, 'phase': self.state['phase'],
-                'issue_url': f'https://{self.repo.identity}/issues/{self.state["issue"]}',
-                'pr_url': f'https://{self.repo.identity}/pull/{self.state["pr"]}' if self.state.get('pr') else None,
+                'issue_url': self.repo.forge.url(self.repo.project, self.state['issue'], 'issue'),
+                'pr_url': self.repo.forge.url(self.repo.project, self.state['pr']) if self.state.get('pr') else None,
                 'session': str(self.path), 'worktree': self.state.get('worktree'), 'next_action': next_action,
                 # Keep the checked facts/snapshot intact, but report the current
                 # action rather than the action saved before this invocation.
@@ -191,11 +195,22 @@ class Workflow:
                 'usage': usage.summary(self.path),
                 'execution': {'version': 1, 'engine': self.state.get('execution_engine'), 'resources': self.state.get('resources', {})}, **self.state.get('review_progress', {}), **extra}
 
+    def check_account(self):
+        from .forge import check_account
+        current = self.repo.forge.issues.account(self.repo)
+        check_account(self.state.get('forge_account'), current, self.state['viewer'])
+
     def guard(self):
         target = {'issue': self.state['issue']}
         if self.state.get('pr'):
             target['pr'] = self.state['pr']
         facts = collect_eligibility_facts(target, self.repo)
+        from .forge import check_account
+        if facts.get('forge_account'):
+            check_account(self.state.get('forge_account'), facts['forge_account'], self.state['viewer'])
+        elif facts.get('complete') and ((self.state.get('forge_account') or {}).get('id') is not None
+                or (facts.get('viewer') or '').lower() != self.state['viewer'].lower()):
+            raise ApiError('account_changed', 'Issue workflow account changed.')
         facts['workflow'] = self.state if self.file.exists() else None
         eligibility = evaluate_eligibility(facts, EligibilityPolicy(self.request.get('force', False)))
         self.eligibility = eligibility
@@ -464,9 +479,9 @@ class Workflow:
     def bootstrap(self):
         state = self.state
         if not state.get('remote_branch'):
-            pr = self.facts.get('pr')
+            pr = (self.facts.get('normalized') or self.repo.forge.issues.normalize(self.facts)).get('pr')
             state.update(base_branch=self.facts['base_branch'],
-                         remote_branch=pr['head']['ref'] if pr else f'fix-issue/{state["issue"]}-{state["id"][:10]}',
+                         remote_branch=pr['source_branch'] if pr else f'fix-issue/{state["issue"]}-{state["id"][:10]}',
                          remote_head=self.facts.get('head'))
             if pr:
                 state.update(pr=pr['number'], managed=True, allowed_heads=[self.facts['head']])
@@ -658,8 +673,7 @@ class Workflow:
         if not self.state.get('pr'):
             return None
         number = self.state['pr']
-        return [[semantic_comment(c) for c in pages(self.repo, f'repos/{self.repo.name}/{endpoint}')] for endpoint in
-                       (f'issues/{number}/comments', f'pulls/{number}/comments', f'pulls/{number}/reviews')]
+        return [[self.writes.adapter.semantic_comment(c) for c in group] for group in self.writes.adapter.feedback(self.repo, number)]
 
     def feedback_digest(self):
         return digest(self.feedback_context())
@@ -1084,7 +1098,7 @@ class Workflow:
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)
             self.writes.draft(False)
-            self.writes.comment('Implementation and independent harness review passed. PR: ' + f'https://{self.repo.identity}/pull/{state["pr"]}', 'ready:' + state['remote_head'])
+            self.writes.comment('Implementation and independent harness review passed. PR: ' + self.repo.forge.url(self.repo.project, state['pr']), 'ready:' + state['remote_head'])
             data = owner.load()
             self.check_reviewed_implementation(owner, data, reviewed_head)
             check_owner_publication(data)
@@ -1130,8 +1144,8 @@ def dispatch(request):
                                next_action='retry', actions=actions)
         from .checkouts import announce
         announce(flow.state.get('worktree'), flow.state.get('owner') or flow.path, 'owner')
-        managed_pr = next((p for p in facts.get('pulls', []) if p['number'] == flow.state.get('pr')), None)
-        if managed_pr and managed_pr.get('merged_at') and flow.state.get('managed'):
+        managed_pr = next((p for p in (facts.get('normalized') or repo.forge.issues.normalize(facts)).get('pulls', []) if p['number'] == flow.state.get('pr')), None)
+        if managed_pr and managed_pr.get('merged') and flow.state.get('managed'):
             flow.state['phase'] = 'complete'
             return flow.result('complete')
         try:

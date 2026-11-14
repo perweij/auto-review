@@ -8,25 +8,29 @@ def commands(flow):
     receipts = [a['receipt'] for a in flow.state.get('actions', {}).values() if a.get('receipt')]
     for comment in flow.facts['comments']:
         revision = approval_revision(comment, flow.state)
-        if revision and not any(matches_receipt(comment, r) for r in receipts):
+        if revision and not any(matches_receipt(comment, r, flow.state) for r in receipts):
             yield comment, revision
 
 
 def acknowledge(flow):
     ledger = flow.state.setdefault('command_signals', {})
+    account_checked = False
     for comment, revision in commands(flow):
         key = str(comment['id'])
         entry = ledger.setdefault(key, {})
         if entry.get('reaction'):
             continue
         try:
-            result = flow.writes.api(f'repos/{flow.repo.name}/issues/comments/{comment["id"]}/reactions', {'content': 'eyes'}, timeout=10)
-            if not isinstance(result, dict) or result.get('content') != 'eyes' or not result.get('id'):
-                raise ApiError('reaction_failed', 'Invalid reaction receipt.')
+            if 'acknowledge' not in flow.writes.adapter.capabilities:
+                continue
+            if not account_checked:
+                flow.writes.account_check()
+                account_checked = True
+            result = flow.writes.adapter.acknowledge(flow.writes, comment)
             entry['reaction'] = result
             entry.pop('error', None)
         except (ApiError, ValueError, TypeError) as exc:
-            if getattr(exc, 'code', None) in ('cancelled', 'resource_limit', 'integrity_failed'):
+            if getattr(exc, 'code', None) in ('cancelled', 'resource_limit', 'integrity_failed', 'account_changed'):
                 raise
             entry['error'] = str(exc)
             emit('progress', message='Could not acknowledge issue command; retrying on a later run: ' + str(exc))
@@ -42,7 +46,7 @@ def explain(flow):
         version = digest(comment.get('body', ''))
         accepted = entry.setdefault('accepted', [])
         receipt = state.get('approval', {}).get('receipt')
-        if version in accepted or receipt and matches_receipt(comment, receipt):
+        if version in accepted or receipt and matches_receipt(comment, receipt, state):
             if version not in accepted:
                 accepted.append(version)
                 flow.save()

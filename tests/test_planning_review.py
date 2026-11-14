@@ -42,7 +42,8 @@ class PlanningReviewTest(unittest.TestCase):
         if self.fail_stage == stage:
             raise ApiError('model_failed', 'Stopped')
         if stage == 'draft':
-            kwargs['on_line'](json.dumps({'type': 'thread.started', 'thread_id': 'planner-session'}))
+            kwargs['on_line']('stderr', json.dumps({'type': 'thread.started', 'thread_id': 'ignored-stderr'}))
+            kwargs['on_line']('stdout', json.dumps({'type': 'thread.started', 'thread_id': 'planner-session'}))
         value = {'summary': 'Checked', 'points': []} if stage == 'review' else copy.deepcopy(self.assessment)
         if stage == 'synthesis':
             value['review_dispositions'] = []
@@ -63,6 +64,59 @@ class PlanningReviewTest(unittest.TestCase):
         self.config['planning']['effort'] = 'medium'
         self.assess()
         self.assertEqual(3, len(self.calls))
+
+    def test_planner_session_paths_survive_workspace_cleanup_and_retry(self):
+        # Model the observed provider contract: the session index contains an
+        # absolute transcript path, which must still work on a later invocation.
+        self.config['planning_review'] = copy.deepcopy(self.config['planning'])
+        real = self.run_model
+        transcript_paths = []
+        checkouts = []
+        def persistent(args, **kwargs):
+            home = Path(kwargs['env']['CODEX_HOME'])
+            index = home / 'session-index.json'
+            stage = kwargs['stage']
+            if stage == 'planning-draft':
+                home.mkdir(parents=True, exist_ok=True)
+                transcript = home / 'sessions' / 'planner.jsonl'
+                transcript.parent.mkdir(exist_ok=True)
+                transcript.write_text('planner history\n')
+                index.write_text(json.dumps({'rollout_path': str(transcript)}))
+                transcript_paths.append(transcript)
+                checkouts.append(Path(kwargs['cwd']))
+            elif stage == 'planning-synthesis':
+                self.assertIn('resume', args)
+                transcript = Path(json.loads(index.read_text())['rollout_path'])
+                self.assertEqual('planner history\n', transcript.read_text())
+                self.assertEqual(transcript_paths[0], transcript)
+                self.assertFalse(checkouts[0].exists())
+            elif stage == 'planning-review':
+                self.assertFalse(index.exists(), 'Critic must not inherit planner storage')
+            return real(args, **kwargs)
+        with patch('pr_review.planning_review.run', side_effect=persistent):
+            self.fail_stage = 'review'
+            with self.assertRaises(ApiError):
+                self.assess()
+            self.fail_stage = None
+            self.assess()
+        self.assertTrue(transcript_paths[0].exists())
+
+    def test_legacy_storage_handoff_retains_completed_evidence(self):
+        self.fail_stage = 'review'
+        with self.assertRaises(ApiError):
+            self.assess()
+        journal = next((self.root / 'assessments').glob('*/stages.json'))
+        state = json.loads(journal.read_text())
+        old = state['conversations']['active']
+        state['conversations'][old].pop('storage')
+        journal.write_text(json.dumps(state))
+        self.fail_stage = None
+        self.assess()
+        self.assertEqual(['draft', 'review', 'review', 'synthesis'], [c[0] for c in self.calls])
+        self.assertNotIn('resume', self.calls[-1][1])
+        current = json.loads(journal.read_text())
+        self.assertNotEqual(old, current['conversations']['active'])
+        self.assertIn(old, current['conversations'])
 
     def test_partial_failure_and_regeneration_keep_upstream_work(self):
         self.fail_stage = 'review'

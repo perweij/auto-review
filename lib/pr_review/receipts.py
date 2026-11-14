@@ -28,3 +28,33 @@ def actions(directory, *, include_copied=False):
     if state and (include_copied or state.get('generation') == generation(directory, manifest)):
         return [a for batch in state.get('batches', []) for a in batch['actions']]
     return read_json(directory / 'publication/actions.json', [])
+
+
+def evidence(actions, adapter=None):
+    """Read normalized own-activity evidence, including partial logical actions."""
+    from .forge_github_publication import GitHubPublication
+    for action in actions:
+        for operation in action.get('operations', [action]):
+            if operation.get('status') == 'published' or operation.get('receipt_verified'):
+                if operation.get('evidence'):
+                    yield operation['evidence']
+                elif adapter is not None:
+                    yield adapter.evidence(operation)
+                elif 'version' not in operation:
+                    yield GitHubPublication().evidence(operation)
+                else:
+                    from .common import ApiError
+                    raise ApiError('incomplete_receipts', 'Missing normalized receipt evidence.')
+
+
+def urls(actions, comments, adapter):
+    values = [adapter.receipt_url(c['receipt']) for c in comments if c.get('receipt')]
+    for action in actions:
+        for operation in action.get('operations', [action]):
+            if operation.get('result'):
+                values.append(adapter.receipt_url(operation['result']))
+    return values
+
+
+def has_confirmed(action):
+    return any(op.get('status') == 'published' or op.get('receipt_verified') for op in action.get('operations', [action]))

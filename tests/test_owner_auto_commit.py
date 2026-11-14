@@ -124,7 +124,7 @@ class AutoCommitTest(unittest.TestCase):
                 self.fixture.feedback[0]["comments"].append({"id": receipt["id"], "author": "author", "body": payload["body"],
                                                           "url": receipt["html_url"], "created_at": "today", "updated_at": "today"})
             return receipt
-        with patch("pr_review.owner_publication.gh", side_effect=publish):
+        with patch("pr_review.publication.gh", side_effect=publish):
             published = self.request("owner-publish", token=preview["token"])
         self.assertEqual([r["status"] for r in published["replies"]], ["published", "published"])
 

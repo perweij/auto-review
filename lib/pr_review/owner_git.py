@@ -8,6 +8,8 @@ import stat
 import tempfile
 import uuid
 
+from .forge_context import owner_change
+
 from .common import ApiError, digest, now
 from .events import emit
 from .processes import run
@@ -18,9 +20,9 @@ from .storage import hash_file
 def fetch_head(session, state):
     ref = "refs/pr-owner/" + digest([session.repo.identity, session.repo.pr])[:24] + "/remote"
     session.repo.git("fetch", "--no-tags", "--no-write-fetch-head", "--refmap=", session.repo.remote,
-                     f"+refs/pull/{session.repo.pr}/head:{ref}")
+                     f"+{session.repo.forge.head_ref(session.repo.pr)}:{ref}")
     head = session.repo.git("rev-parse", ref).stdout.strip()
-    if head != state["metadata"]["headRefOid"]:
+    if head != owner_change(state)['source']['head']:
         raise ApiError("stale_source", "PR head changed during fetch; refresh and retry.")
     return head
 
@@ -378,11 +380,11 @@ def configuration_diff(before, after, paths):
 
 
 def trust(session, state, tree, approval=None):
-    base = session.repo.git("merge-base", state["metadata"]["baseRefOid"], state["metadata"]["headRefOid"], check=False)
+    base = session.repo.git("merge-base", owner_change(state)['target']['head'], owner_change(state)['source']['head'], check=False)
     # Fetch the recorded base object without moving a caller's tracking refs.
     if base.returncode:
-        session.repo.git("fetch", "--no-tags", "--no-write-fetch-head", "--refmap=", session.repo.remote, state["metadata"]["baseRefOid"])
-        base = session.repo.git("merge-base", state["metadata"]["baseRefOid"], state["metadata"]["headRefOid"])
+        session.repo.git("fetch", "--no-tags", "--no-write-fetch-head", "--refmap=", session.repo.remote, owner_change(state)['target']['head'])
+        base = session.repo.git("merge-base", owner_change(state)['target']['head'], owner_change(state)['source']['head'])
     changed = session.repo.git("diff", "--name-only", "--no-renames", "-z", base.stdout.strip(), tree, "--").stdout.split("\0")
     paths = sorted(p for p in changed if p and agent_configuration(p))
     configuration = configuration_snapshot(state["worktree"])

@@ -17,6 +17,7 @@ def main(argv):
     parser.add_argument("pr", nargs="?", help="PR number or URL (optional with --session)")
     parser.add_argument("action", nargs="?", default="read", choices=actions)
     parser.add_argument("--session")
+    parser.add_argument("--forge")
     parser.add_argument("-R", "--repo", dest="repository")
     parser.add_argument("--item", dest="items", action="append")
     parser.add_argument("--batch")
@@ -43,6 +44,12 @@ def main(argv):
     parser.add_argument("--generation", help="source reviewer generation for import")
     parser.add_argument("--revision", help="source reviewer revision for import")
     args = vars(parser.parse_args(argv))
+    from .forge import adapter
+    try:
+        adapter(args.get("forge"))
+    except ApiError as exc:
+        print("Error: " + str(exc), file=sys.stderr)
+        return 1
     if args["action"] == "read" and args.get("pr") in actions:
         args["action"], args["pr"] = args["pr"], None
     announced_checkouts = set()

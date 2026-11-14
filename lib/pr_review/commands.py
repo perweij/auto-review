@@ -18,9 +18,13 @@ def remember(comment, *, actor="manual"):
         ("body", "placement", "override", "status", "provenance", "suggestion", "suggestion_generation", "suggestion_original_placement")}})
 
 
-def mutable(comment, state):
+def mutable(comment, state, *, unchanged=False):
     if comment["status"] == "published":
         raise ApiError("published", "Published comments are read-only; create a follow-up.")
+    from .receipts import has_confirmed
+    if not unchanged and any(a['status'] != 'published' and has_confirmed(a) and comment['id'] in a['comment_ids']
+           for b in state['batches'] for a in b['actions']):
+        raise ApiError('partial_publication', 'Finish the partially published action unchanged before editing its comments.')
     if any(a["status"] in ("submitting", "ambiguous") and comment["id"] in a["comment_ids"]
            for b in state["batches"] for a in b["actions"]):
         raise ApiError("ambiguous_publication", "Resolve this comment's previous submission before editing it.")
@@ -72,10 +76,15 @@ def mutate(session, state, request, *, actor="manual"):
     operation = request.get("operation")
     changed, skipped = [], []
     if operation == "verdict":
+        from .receipts import has_confirmed
+        if any(a['status'] != 'published' and has_confirmed(a) for b in state.get('batches', []) for a in b['actions']):
+            raise ApiError('partial_publication', 'Finish the partially published action with its original verdict before choosing another verdict.')
         verdict = request.get("verdict")
         if verdict not in ("COMMENT", "REQUEST_CHANGES", "APPROVE"):
             raise ApiError("invalid_request", "Unknown verdict.")
-        reason = next(v for v in session.verdicts(state) if v["value"] == verdict)
+        reason = next((v for v in session.verdicts(state) if v["value"] == verdict), None)
+        if reason is None:
+            raise ApiError("verdict_unavailable", "This forge does not support the requested verdict.")
         if not reason["available"]:
             raise ApiError("verdict_unavailable", reason["reason"])
         if state["verdict_submitted"] and any(a["status"] not in ("published", "superseded") for b in state["batches"] for a in b["actions"]):
@@ -151,7 +160,7 @@ def mutate(session, state, request, *, actor="manual"):
             raise ApiError("invalid_request", "Specify distinct comment IDs.")
         for identity in ids:
             comment = comment_by_id(state, identity)
-            mutable(comment, state)
+            mutable(comment, state, unchanged=operation in ("stage", "unstage", "acknowledge"))
             if operation == "stage":
                 reasons = session.blockers(comment, state, bulk=request.get("bulk", False))
                 if comment["status"] == "suppressed":

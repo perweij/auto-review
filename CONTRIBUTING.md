@@ -42,6 +42,18 @@ package or its autoloads. The runner restores checkout load-path precedence and
 checks module and function origins in both processes. A preloaded foreign copy
 fails with `Auto-review test contamination` rather than silently testing mixed code.
 
+## Live functional smoke tests
+
+With authenticated `gh`/`glab` and the sibling temporary test repositories:
+
+- `make smoke`: scripted checks, then real economical model workflows (uses quota).
+- `make smoke-fast`: live forge checks with scripted models (no model quota).
+- `make smoke-extended`: additional recovery and Emacs checks with scripted models.
+
+These commands create remote test fixtures. Each run prints its report and cleanup
+command; fixtures are retained for inspection. See the
+[smoke test plan](docs/live-forge-smoke-tests.md#quick-use) for setup and current results.
+
 ## Architecture
 
 - `bin/pr-review` resolves its real path and loads the standard-library Python

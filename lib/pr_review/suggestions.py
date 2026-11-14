@@ -151,11 +151,8 @@ def blockers(session, comment, state, *, bulk=False):
 
 
 def render(comment):
-    suggestion = comment.get('suggestion')
-    if not suggestion:
-        return comment['body']
-    replacement = suggestion['replacement']
-    return comment['body'] + '\n\n```suggestion\n' + replacement + '```\n'
+    from .forge_github_publication import render_comment
+    return render_comment(comment)
 
 
 def preview(comment):

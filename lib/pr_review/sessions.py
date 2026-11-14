@@ -34,7 +34,7 @@ def locate(repo, resume=None):
         manifest = read_json(root / 'manifest.json', {})
         root = Path(manifest.get('session_directory', root)).resolve()
         return root, Path(read_json(selected(root) / 'manifest.json', {})['worktree'])
-    parent = state_root() / repo.identity
+    parent = state_root() / repo.project.storage_key
     matches = []
     existing = worktree.exists() or worktree.is_symlink()
     head = None
@@ -77,11 +77,11 @@ class Store:
         self.repo, self.worktree = repo, worktree
         self.resuming = root is not None
         if root is None:
-            parent = state_root() / repo.identity
+            parent = state_root() / repo.project.storage_key
             parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             root = Path(tempfile.mkdtemp(prefix=f'pr-{repo.pr}-', dir=parent))
             self.manifest = dict(format_version=2, repository=repo.identity, pr=repo.pr, url=repo.url,
-                git_common_dir=str(repo.common), worktree=str(worktree), run_id=root.name, created_at=now(),
+                forge_project=repo.project.saved(), git_common_dir=str(repo.common), worktree=str(worktree), run_id=root.name, created_at=now(),
                 status='running', phases={}, publication={'status': 'not_published'}, warnings=[], generated_files=[], removed_environment={}, draft_mutations_tracked=True)
             self.root = self.path = root
             self.reset_directories(DIRECTORIES)
@@ -89,6 +89,8 @@ class Store:
         else:
             self.root, self.path = root, selected(root)
             self.manifest = read_json(self.path / 'manifest.json', {})
+            from .forge import restore
+            restore(self.manifest)
             if self.manifest.get('format_version') != 2:
                 raise ApiError('invalid_session', 'Legacy run remains readable but cannot resume discussion-aware publication; start a new run after moving its worktree.')
             if (self.manifest.get('repository') != repo.identity or str(self.manifest.get('pr')) != str(repo.pr)
@@ -149,7 +151,7 @@ class Store:
         identity = hash_bytes(str(path).encode())[:24]
         for key, suffix in (('head', 'head'), ('merge_base', 'merge-base')):
             if snapshot.get(key):
-                self.repo.git('update-ref', f'refs/pr-review/{self.repo.pr}/history/{identity}/{suffix}', snapshot[key])
+                self.repo.git('update-ref', f"refs/pr-review/{self.repo.project.resource_key('change', self.repo.pr)}/history/{identity}/{suffix}", snapshot[key])
 
     def begin(self):
         if self.pending == self.path:

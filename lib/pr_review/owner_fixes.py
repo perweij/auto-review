@@ -3,6 +3,8 @@ import copy
 import re
 import uuid
 
+from .forge_context import owner_change
+
 from . import usage
 from .common import ApiError, digest, now
 from .events import emit
@@ -223,7 +225,7 @@ def final_review(session, state, batch):
         if successful(review):
             batch.update(status="ready", final_tree=batch["checkpoint"]["tree"], completed_at=now(),
                          verified_items=keys, verified_fingerprints={i["key"]: i["fingerprint"] for i in session.items(state, keys)},
-                         verified_base=state["metadata"]["baseRefOid"])
+                         verified_base=owner_change(state)['target']['head'])
             for task in batch["tasks"]:
                 if task.get("after") and task["after"]["tree"] != batch["final_tree"]:
                     task["verification_superseded"] = True
@@ -250,7 +252,7 @@ def final_review(session, state, batch):
 
 def check_fresh(session, state, batch):
     refresh(session, state)
-    if state["metadata"]["headRefOid"] != batch["remote_head"]:
+    if owner_change(state)['source']['head'] != batch["remote_head"]:
         raise ApiError("stale_source", "GitHub head changed during the batch; reconcile in Magit before continuing.")
     if batch.get("discussion_stale"):
         message = ("Selected feedback changed during execution; resume the issue to reassess it."
@@ -275,7 +277,7 @@ def plan_tasks(session, state, batch, keys):
     for number in range(3):
         # Re-fetch context before every call; a correction cannot bypass freshness.
         refresh(session, state)
-        if state["metadata"]["headRefOid"] != batch["remote_head"]:
+        if owner_change(state)['source']['head'] != batch["remote_head"]:
             raise ApiError("stale_source", "GitHub head changed during planning; reconcile before continuing.")
         if any(i["fingerprint"] != fingerprints[i["key"]] for i in session.items(state, keys)):
             raise ApiError("stale_discussion", "Selected feedback changed during planning; inspect and replan.")

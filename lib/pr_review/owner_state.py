@@ -75,7 +75,7 @@ def local_repository(request):
         if len(candidates) != 1:
             raise ApiError("invalid_request", "Choose a repository from this checkout's remotes.")
         identity = candidates.pop()
-    return Repository.resolve(target, identity, cwd)
+    return Repository.resolve(target, identity, cwd, request.get("forge"))
 
 
 def open_session(request):
@@ -84,12 +84,12 @@ def open_session(request):
                  if line.startswith("worktree ")]
     if any(root().is_relative_to(path) for path in worktrees):
         raise ApiError("invalid_session", "Artifacts must be outside repository worktrees; set XDG_STATE_HOME.")
-    path = root() / digest([str(repo.common), repo.identity])[:32] / f"pr-{repo.pr}"
+    path = root() / digest([str(repo.common), repo.project.storage_key])[:32] / f"pr-{repo.pr}"
     with locked(path / ".state.lock"):
         if not (path / "session.json").exists():
             write_json(path / "session.json", {
                 "kind": "owner", "format_version": 1, "sequence": 0, "created_at": now(),
-                "repository": repo.identity, "pr": repo.pr, "url": repo.url,
+                "repository": repo.identity, "forge_project": repo.project.saved(), "pr": repo.pr, "url": repo.url,
                 "cwd": str(repo.cwd), "git_common_dir": str(repo.common),
                 "settings": default_settings(request), "checked_at": None, "viewer": None,
                 "feedback": [], "batches": [], "replies": [], "actions": [], "worktree": None})
@@ -124,7 +124,8 @@ def toolkit(request):
         elif 'toolkit' in request:
             raise ApiError('invalid_request', 'Choose a repository before saving its toolkit preference.', repositories=sorted(names))
     if identity:
-        identity = repository_name(identity)
+        from .forge import adapter
+        identity = adapter(request.get("forge")).project(identity).repository
     path = state_root() / "toolkits" / (digest([common, identity]) + ".json")
     with locked(path.with_suffix(".lock")):
         if "toolkit" in request:
@@ -143,27 +144,35 @@ def fingerprint(item, viewer=None):
 
 def feedback_fingerprint(item, state, viewer):
     """Exclude only unchanged, confirmed replies published by this owner session."""
-    receipts = {r["receipt"]["id"]: r["receipt"] for r in state["replies"]
-                if r.get("status") == "published" and r.get("source") == item["key"]
-                and r.get("receipt", {}).get("id")
-                and r.get("target", {}).get("kind") == "reply"
-                and r["target"].get("root_id") == item.get("root_id")}
+    from .forge import adapter, restore
+    publication = adapter(restore(state).forge).publication
+    receipts = {}
+    for reply in state['replies']:
+        if (reply.get('status') != 'published' or reply.get('source') != item['key']
+                or not reply.get('receipt') or reply.get('target', {}).get('kind') != 'reply'
+                or reply['target'].get('root_id') != item.get('root_id')):
+            continue
+        for evidence in [reply.get('evidence') or publication.owner_receipt(reply['receipt']),
+                         *reply.get('historical_evidence', [])]:
+            receipts[evidence['id']] = evidence
     def own_receipt(comment):
         receipt = receipts.get(comment.get("id"), {})
         return (item.get("kind") == "thread" and comment.get("id") != item.get("root_id")
                 and comment.get("author", "").lower() == viewer.lower()
-                and receipt.get("user", {}).get("login", "").lower() == viewer.lower()
+                and receipt.get("author", "").lower() == viewer.lower()
                 and comment.get("body") == receipt.get("body"))
     return fingerprint({**item, "comments": [c for c in item.get("comments", []) if not own_receipt(c)]})
 
 
 def reconcile_resolved_feedback(state, items):
     """Finish resolved, verified GitHub fixes; reopen them when evidence changes."""
+    from .conversations import pending
     latest = {key: batch for batch in state["batches"] for key in batch["items"]}
     for item in items:
         batch = latest.get(item["key"], {})
         proof = None
         if (item.get("kind") == "thread" and item.get("is_resolved") and not item.get("missing")
+                and not any(intent["item"] == item["key"] for intent in pending(state))
                 and batch.get("status") == "ready"
                 and not batch.get("integrity_failure")
                 and not batch.get("commit_execution", {}).get("inspection_required")
@@ -240,7 +249,9 @@ class OwnerSession:
         self.lock = self.path / ".state.lock"
         self.file = self.path / "session.json"
         self.manifest = self.load()
-        self.repo = Repository.resolve(self.manifest["pr"], self.manifest["repository"], self.manifest["cwd"])
+        from .forge import restore
+        project = restore(self.manifest, request.get("forge"))
+        self.repo = Repository.resolve(self.manifest["pr"], self.manifest["repository"], self.manifest["cwd"], project.forge)
         if str(self.repo.common) != self.manifest["git_common_dir"]:
             raise ApiError("invalid_session", "Owner checkout identity changed.")
         self.execution_lock = self.repo.common / "pr-owner-locks" / (digest([self.repo.identity, self.repo.pr]) + ".lock")
@@ -298,27 +309,23 @@ class OwnerSession:
 def refresh(session, state):
     """Fetch first, then atomically replace local context; failure retains cache."""
     from .discussion import fetch
-    from .pulls import github_json
     repo = session.repo
-    metadata = repo.metadata()
-    raw = github_json(repo.identity, f"repos/{repo.name}/pulls/{repo.pr}", repo.cwd)
-    if raw.get("number") != repo.pr or (raw.get("html_url") or "").lower() != repo.url:
-        raise ApiError("invalid_response", "GitHub returned a different owner PR.")
-    head = raw.get("head") or {}
-    if head.get("sha") != metadata["headRefOid"]:
-        raise ApiError("stale_source", "PR changed during refresh; retry.")
-    head_repo = head.get("repo") or {}
-    target = normalize_remote(head_repo.get("html_url", ""))
-    if target:
-        target = repository_name(target)
-    branch = require_text(head.get("ref"), "head branch")
-    repo.git("check-ref-format", "refs/heads/" + branch)
-    viewer_data = github_json(repo.identity, "user", repo.cwd)
-    viewer = require_text(viewer_data.get("login"), "GitHub account")
+    from .forge_context import legacy_metadata
+    change, account = repo.forge.owner_context(repo)
+    metadata = legacy_metadata(change)
+    source = change['source']['project']
+    target = source['host'] + '/' + source['path'] if source else ''
+    branch = require_text(change['source'].get('branch'), 'head branch')
+    repo.git('check-ref-format', 'refs/heads/' + branch)
+    from .forge import check_account
+    check_account(state.get("forge_account"), account, state.get("viewer"))
+    if state.get("viewer") is None:
+        state["forge_account"] = account
+    viewer = account["username"]
     if state.get("viewer") and state["viewer"].lower() != viewer.lower():
         raise ApiError("account_changed", "GitHub account changed; return to the owner session's original account.")
     discussion, raw_discussion = fetch(repo)
-    anchors = {c["id"]: c for c in raw_discussion["inline"]}
+    anchors = repo.forge.anchors(raw_discussion)
     previous = {i["key"]: i for i in state["feedback"]}
     latest = {}
     for item in discussion["items"]:
@@ -380,12 +387,14 @@ def refresh(session, state):
             key not in current or current[key].get("missing")
             or current[key]["fingerprint"] != batch["fingerprints"].get(key)
             for key in active_feedback_keys(batch))
+    from .conversations import reconcile
+    reconcile(state, items)
     reconcile_resolved_feedback(state, items)
     push_target = {"repository": target, "branch": branch}
     previous_target = state.get("push_target", {})
     if all(previous_target.get(k) == v for k, v in push_target.items()) and "remotes" in previous_target:
         push_target["remotes"] = previous_target["remotes"]
-    state.update(feedback=items, metadata=metadata, viewer=viewer, checked_at=now(), push_target=push_target)
+    state.update(feedback=items, metadata=metadata, change=change, viewer=viewer, checked_at=now(), push_target=push_target)
     snapshot = session.path / "context" / (digest([metadata, discussion]) + ".json")
     write_json(snapshot, {"metadata": metadata, "discussion": discussion, "checked_at": state["checked_at"]})
     state["context"] = str(snapshot)

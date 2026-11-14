@@ -1,7 +1,8 @@
 """Owner application use cases shared by the terminal and protocol adapters."""
 import copy
-import uuid
 from contextlib import nullcontext
+
+from .forge_context import owner_change
 
 from .common import ApiError, locked, require_text
 from .owner_state import OwnerSession, open_session, discover, toolkit, refresh, validate_settings
@@ -128,7 +129,7 @@ def mutate(session, state, request):
             elif action == "stage":
                 if not state.get("metadata"):
                     raise ApiError("refresh_required", "Refresh GitHub before staging replies.")
-                owner_publication.blockers(session, state, reply, state["metadata"]["headRefOid"], allow_unpushed=True)
+                owner_publication.blockers(session, state, reply, owner_change(state)['source']['head'], allow_unpushed=True)
                 reply["status"] = "staged"
             else:
                 reply["status"] = "unstaged"
@@ -146,24 +147,24 @@ def thread_state(session, state, request):
         raise ApiError("invalid_request", "Choose a thread and resolution state.")
     refresh(session, state)
     fresh = session.items(state, [item["key"]])[0]
+    if fresh["is_resolved"] is desired:
+        from .conversations import accept_observed
+        from .owner_state import reconcile_resolved_feedback
+        accept_observed(state, fresh)
+        reconcile_resolved_feedback(state, state['feedback'])
+        session.save(state)
+        return session.view(state)
     if fresh["fingerprint"] != item["fingerprint"] or fresh["is_resolved"] != item["is_resolved"]:
         raise ApiError("stale_discussion", "Thread changed; inspect refreshed discussion and invoke again.")
     if not fresh.get("can_resolve" if desired else "can_unresolve"):
         raise ApiError("permission_denied", "GitHub does not permit this thread action.")
-    verb = "resolveReviewThread" if desired else "unresolveReviewThread"
-    query = f"mutation($id: ID!) {{ {verb}(input: {{threadId: $id}}) {{ thread {{ id isResolved }} }} }}"
-    state["thread_intent"] = {"item": item["key"], "resolved": desired, "id": uuid.uuid4().hex}
-    session.save(state)
-    try:
-        session.repo.graphql(query, id=item["key"].split(":", 1)[1])
-    except ApiError:
-        refresh(session, state)
-        if session.items(state, [item["key"]])[0]["is_resolved"] != desired:
-            raise ApiError("uncertain_thread_state", "Thread action was not confirmed; inspect GitHub before invoking again.")
-    else:
-        refresh(session, state)
-        if session.items(state, [item["key"]])[0]["is_resolved"] != desired:
-            raise ApiError("uncertain_thread_state", "Thread action has not been confirmed by read-back.")
-    state.pop("thread_intent", None)
+    from .conversations import change
+    from .owner_state import reconcile_resolved_feedback
+    confirmed, _ = change(session, state, fresh, desired, lambda: refresh(session, state),
+                          lambda: next((i for i in state['feedback'] if i['key'] == item['key']), None),
+                          on_pending=lambda: reconcile_resolved_feedback(state, state['feedback']))
+    if not confirmed:
+        raise ApiError('uncertain_thread_state', 'Thread action has not been confirmed by read-back; no retry sent.')
+    reconcile_resolved_feedback(state, state['feedback'])
     session.save(state)
     return session.view(state)

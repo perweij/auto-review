@@ -101,3 +101,11 @@ interactive work participates in the same recovery and publication rules.
   The declared license is GPL-3.0-or-later.
 
 Completed specifications and development logs remain available in Git history.
+
+### Forge series implementation sequence
+
+Use #19 → #20 → #25 → #21 → #22 → #23 → #24. The #19 foundation
+includes basic capability rejection and saved project/account identity; #20 owns
+normalized context and shared read-contract tests. Validate those boundaries
+with the read-only GitLab pilot before extending the write interfaces. Retain
+existing GitHub storage conventions and legacy receipt interpretation throughout.

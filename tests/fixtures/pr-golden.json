@@ -90,10 +90,11 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--",
           "/code-review high --max-findings default refs/pr-review/7/base"
         ],
-        "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+        "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
         "inputs": {
           "artifacts": {},
           "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -127,6 +128,7 @@
             "Bash(git restore:*)",
             "Bash(git stash:*)",
             "Bash(gh:*)",
+            "Bash(glab:*)",
             "--",
             "/code-review high --max-findings default refs/pr-review/7/base"
           ],
@@ -165,14 +167,14 @@
         "<run>/reviews/synthesis.codex.tmp",
         "-"
       ],
-      "fingerprint": "889cf54b4fda65b87e9eb8d8bc676c91b6139e1a69fab5438f8248a737f249f7",
+      "fingerprint": "628de44f9a766485a05f3ed44b9d028c4e6f9dfada163a0370a13504883db570",
       "inputs": {
         "artifacts": {
           "context": "583ed23af984d7d1b4b47300a7ee27bd56f9f87b29a16512837c849a91b7c33d",
           "prompt": "823fe22a1b602fc2e9a48e4a7f38969f8004d850e8944a03f5ca95fd66303af9",
           "reviewers": {
             "reviewer-1": {
-              "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+              "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
               "output": "b2439abfcb7a94f54a62dfe68ef6cbfd24f7481eee19edf1af59c6ee2415286c"
             }
           },
@@ -273,6 +275,7 @@
       "Bash(git restore:*)",
       "Bash(git stash:*)",
       "Bash(gh:*)",
+      "Bash(glab:*)",
       "--add-dir",
       "<run>/discussion",
       "--add-dir",
@@ -348,10 +351,11 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--",
           "/code-review high --max-findings default refs/pr-review/7/base"
         ],
-        "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+        "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
         "inputs": {
           "artifacts": {},
           "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -385,6 +389,7 @@
             "Bash(git restore:*)",
             "Bash(git stash:*)",
             "Bash(gh:*)",
+            "Bash(glab:*)",
             "--",
             "/code-review high --max-findings default refs/pr-review/7/base"
           ],
@@ -435,19 +440,20 @@
         "Bash(git restore:*)",
         "Bash(git stash:*)",
         "Bash(gh:*)",
+        "Bash(glab:*)",
         "--add-dir",
         "<run>/context",
         "--add-dir",
         "<run>/reviews"
       ],
-      "fingerprint": "697aa136f54f3c917ecf3c00b93b5f488fc94b6ef4e0fbfd24c84201ad67fd4e",
+      "fingerprint": "17a0bcd71a9f384010f8a7ca275039d42adf95e9b79ed5a488f06510e93b0c62",
       "inputs": {
         "artifacts": {
           "context": "583ed23af984d7d1b4b47300a7ee27bd56f9f87b29a16512837c849a91b7c33d",
           "prompt": "55970d14f4c3fca10623da6a15fc60f4fd2a5a6adeec786b8887973fad24a81b",
           "reviewers": {
             "reviewer-1": {
-              "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+              "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
               "output": "b2439abfcb7a94f54a62dfe68ef6cbfd24f7481eee19edf1af59c6ee2415286c"
             }
           },
@@ -485,6 +491,7 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--add-dir",
           "<run>/context",
           "--add-dir",
@@ -536,6 +543,7 @@
         "Bash(git restore:*)",
         "Bash(git stash:*)",
         "Bash(gh:*)",
+        "Bash(glab:*)",
         "--add-dir",
         "<run>/context",
         "--add-dir",
@@ -646,10 +654,11 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--",
           "/code-review high --max-findings default refs/pr-review/7/base"
         ],
-        "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+        "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
         "inputs": {
           "artifacts": {},
           "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -683,6 +692,7 @@
             "Bash(git restore:*)",
             "Bash(git stash:*)",
             "Bash(gh:*)",
+            "Bash(glab:*)",
             "--",
             "/code-review high --max-findings default refs/pr-review/7/base"
           ],
@@ -784,14 +794,14 @@
         "<run>/reviews/synthesis.codex.tmp",
         "-"
       ],
-      "fingerprint": "3eef55c54cce00481621cf9cb0b319cd09f0ce7ad7afa15ee354840f743a2d2d",
+      "fingerprint": "c5a7357c45bdf0688a23fb501250ca4b48b7129a60e114e553a96024ad656f3a",
       "inputs": {
         "artifacts": {
           "context": "583ed23af984d7d1b4b47300a7ee27bd56f9f87b29a16512837c849a91b7c33d",
           "prompt": "03ae6ca72a352852d331ac99b28d554641588d926c1eb05daeb5dfb7013eb0f4",
           "reviewers": {
             "reviewer-1": {
-              "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+              "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
               "output": "b2439abfcb7a94f54a62dfe68ef6cbfd24f7481eee19edf1af59c6ee2415286c"
             },
             "reviewer-2": {
@@ -861,6 +871,7 @@
       "Bash(git restore:*)",
       "Bash(git stash:*)",
       "Bash(gh:*)",
+      "Bash(glab:*)",
       "--add-dir",
       "<run>/discussion",
       "--add-dir",
@@ -944,10 +955,11 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--",
           "/code-review high --max-findings default refs/pr-review/7/base"
         ],
-        "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+        "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
         "inputs": {
           "artifacts": {},
           "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -981,6 +993,7 @@
             "Bash(git restore:*)",
             "Bash(git stash:*)",
             "Bash(gh:*)",
+            "Bash(glab:*)",
             "--",
             "/code-review high --max-findings default refs/pr-review/7/base"
           ],
@@ -1027,10 +1040,11 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--",
           "/code-review low --max-findings default refs/pr-review/7/base"
         ],
-        "fingerprint": "23ab642519bf27ed32b1e2fae0ed2ac0d30db74d251cdfe991a71e390b3ff9f4",
+        "fingerprint": "67c746e29b033d983095480190e499ec03d6d0f39699227a66b708362a3e580f",
         "inputs": {
           "artifacts": {},
           "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1064,6 +1078,7 @@
             "Bash(git restore:*)",
             "Bash(git stash:*)",
             "Bash(gh:*)",
+            "Bash(glab:*)",
             "--",
             "/code-review low --max-findings default refs/pr-review/7/base"
           ],
@@ -1114,23 +1129,24 @@
         "Bash(git restore:*)",
         "Bash(git stash:*)",
         "Bash(gh:*)",
+        "Bash(glab:*)",
         "--add-dir",
         "<run>/context",
         "--add-dir",
         "<run>/reviews"
       ],
-      "fingerprint": "1fa68291b319dfc52b773c1a3995c1c2bbe2c5c2139568aae71dda53e64c69c1",
+      "fingerprint": "ac2b23078abe00160986c3f35c93ddf06476c5172cda9da3003c941444603fc3",
       "inputs": {
         "artifacts": {
           "context": "583ed23af984d7d1b4b47300a7ee27bd56f9f87b29a16512837c849a91b7c33d",
           "prompt": "1d1dab7bc9ccbfe3919bf5f35386e58a7e916e1354c8bc5fcae04e5af1bb15bf",
           "reviewers": {
             "reviewer-1": {
-              "fingerprint": "eb548bc35477728f71f0512de5dfab71ea74c3c8ea9961ee6b971aea10713a8e",
+              "fingerprint": "3150d9bf3575d116eb589034c5bef5e8ca769b49fb95de1abd5cd1f5f863a75f",
               "output": "b2439abfcb7a94f54a62dfe68ef6cbfd24f7481eee19edf1af59c6ee2415286c"
             },
             "reviewer-2": {
-              "fingerprint": "23ab642519bf27ed32b1e2fae0ed2ac0d30db74d251cdfe991a71e390b3ff9f4",
+              "fingerprint": "67c746e29b033d983095480190e499ec03d6d0f39699227a66b708362a3e580f",
               "output": "88d6e88a25b1a030f98771530c31746fa25fd86e91a9bc08a64a733708439acc"
             }
           },
@@ -1168,6 +1184,7 @@
           "Bash(git restore:*)",
           "Bash(git stash:*)",
           "Bash(gh:*)",
+          "Bash(glab:*)",
           "--add-dir",
           "<run>/context",
           "--add-dir",

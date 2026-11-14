@@ -15,7 +15,9 @@ load helpers/fixture
     grep -q 'Codex' "$(run_directory)/reviews/reviewer-2.md"
     grep -q 'reviewer-2.md' "$FIXTURE/synthesis-stdin"
     grep -q 'reviewer-1.md' "$FIXTURE/synthesis-stdin"
-    grep -q 'pr-discussion.json' "$FIXTURE/synthesis-stdin"
+    grep -q 'review-context.json' "$FIXTURE/synthesis-stdin"
+    jq -e '.change.source.head != null and .timeline != null' "$(run_directory)/context/review-context.json"
+    jq -se 'all(.[]; (.tool != "gh") or (.args | index("--comments") | not))' "$FIXTURE/calls.jsonl"
     jq -se 'any(.[]; .tool == "claude" and (.args | index("/code-review high --max-findings default refs/pr-review/7/base")))' "$FIXTURE/calls.jsonl"
     jq -se 'any(.[]; .tool == "codex" and (.args | index("sandbox_mode=danger-full-access")) and (.args | index("--ephemeral")) and (.args | index("--strict-config")))' "$FIXTURE/calls.jsonl"
     jq -se 'all(.[] | select((.args | join(" ") | test("PR_REVIEW_AUTH_OK|--input-format stream-json")) | not);
@@ -189,9 +191,9 @@ load helpers/fixture
 @test "missing Actions and inline comments remain unavailable, not empty successes" {
     export MOCK_ACTIONS_FAIL=1 MOCK_INLINE_FAIL=1
     run_review; assert_success
-    [ "$(cat "$(run_directory)/context/ci-actions-runs.json")" = null ]
-    grep -q 'ci-actions-runs unavailable' "$(run_directory)/reviews/synthesis.md"
-    grep -q 'pr-inline-comments unavailable' "$(run_directory)/reviews/synthesis.md"
+    jq -e '.ci.complete == false and .inline == null' "$(run_directory)/context/review-context.json"
+    grep -q 'runs unavailable' "$(run_directory)/reviews/synthesis.md"
+    grep -q 'inline unavailable' "$(run_directory)/reviews/synthesis.md"
     run ! grep -E 'check-runs|"checks"' "$FIXTURE/calls.jsonl"
 }
 

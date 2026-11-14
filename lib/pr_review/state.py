@@ -25,7 +25,7 @@ def discover(request):
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"],
                  cwd=request.get("cwd", ".")).stdout.strip()
     sessions = []
-    for file in state_root().glob("*/*/*/*/manifest.json"):
+    for file in list(state_root().glob("*/*/*/*/manifest.json")) + list(state_root().glob("gitlab/*/*/manifest.json")):
         try:
             m = read_json(file, {})
         except ApiError:
@@ -62,11 +62,13 @@ class Session:
                 raise ApiError("missing_generation", "This saved generation is unavailable; refresh history.")
             self.path = candidates[0]
         self.manifest = read_json(self.path / "manifest.json", {})
+        from .forge import restore
+        project = restore(self.manifest, request.get("forge"))
         self.id = generation(self.path, self.manifest)
         self.git = GitContext(self.manifest)
         self.file = self.path / "publication/drafts.json"
         self.lock = self.path / "publication/.drafts.lock"
-        self.pr_lock = Path(self.manifest["git_common_dir"]) / "pr-review-locks" / f'{self.manifest["pr"]}.lock'
+        self.pr_lock = Path(self.manifest["git_common_dir"]) / "pr-review-locks" / f'{project.resource_key("change", self.manifest["pr"])}.lock'
 
     def pointer(self, name):
         p = self.root / name
@@ -234,7 +236,8 @@ class Session:
                 c['suggestion_preview']['batch_verification'] = (
                     batch if not batch or identity(self, c) in batch.get('members', []) else
                     dict(status='not_verified', evidence='This suggestion version was not included in the saved combined verification.'))
-            c['publication_body'] = render(c)
+            from .publication import render_comment
+            c['publication_body'] = render_comment(self, c)
             # Display metadata does not affect the draft revision, staging,
             # prepared publication, or any saved human wording.
             c.update(comment_assessment(c, assessments))
@@ -287,12 +290,19 @@ class Session:
         return dict(displayed=describe(self.path), pending=describe(pending) if pending else None)
 
     def verdicts(self, state):
+        from .forge import adapter, restore
+        if 'publication' not in adapter(restore(self.manifest).forge).capabilities:
+            return []
         pr = (state.get("checked") or {}).get("pr", read_json(self.path / "context/pr.json", {}))
+        if not pr and self.manifest.get('change'):
+            from .forge_context import legacy_metadata
+            pr = legacy_metadata(self.manifest['change'])
         own = str(pr.get("author", {}).get("login", "")).lower() == str(self.manifest.get("viewer", "?")).lower()
         return [{"value": v, "available": v == "COMMENT" or not own,
                  "reason": "You are the PR author; GitHub permits Comment only. Inline discussions are still supported."
                  if own and v != "COMMENT" else ""}
-                for v in ("COMMENT", "REQUEST_CHANGES", "APPROVE")]
+                for v in ("COMMENT", "REQUEST_CHANGES", "APPROVE")
+                if v in adapter(restore(self.manifest).forge).publication.verdicts]
 
     def comment_context(self, comment, state):
         placement = comment.get("placement", {})

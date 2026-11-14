@@ -16,6 +16,7 @@ def parser():
     target = result.add_mutually_exclusive_group(required=False)
     target.add_argument('-i', '--issue', type=int)
     target.add_argument('-p', '--pr', type=int)
+    result.add_argument('--forge', default=None, help='forge implementation (default: github)')
     result.add_argument('-R', '--repo', dest='repository')
     result.add_argument('-f', '--force', action='store_true', help='override issue/PR assignment checks only')
     approval = result.add_mutually_exclusive_group()
@@ -46,6 +47,12 @@ def parser():
 def main(argv=None):
     os.umask(0o077)
     args = vars(parser().parse_args(argv))
+    from .forge import adapter
+    try:
+        adapter(args.get("forge"))
+    except ApiError as exc:
+        print("Error: " + str(exc), file=sys.stderr)
+        return 1
     if args.get('generate_json_config') is not None:
         try:
             cli_settings.generate(args['generate_json_config'], issue=True)

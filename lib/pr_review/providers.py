@@ -9,7 +9,7 @@ from .common import ApiError, ROOT
 
 DENIED_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash(git push:*)", "Bash(git commit:*)",
                 "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)",
-                "Bash(git restore:*)", "Bash(git stash:*)", "Bash(gh:*)"]
+                "Bash(git restore:*)", "Bash(git stash:*)", "Bash(gh:*)", "Bash(glab:*)"]
 
 
 @dataclass

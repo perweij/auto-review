@@ -298,7 +298,7 @@ load helpers/fixture
     export MOCK_VIEWER=second-reviewer
     unset MOCK_POST
     tty_drafts 'resolve|p|q'; assert_success
-    [[ $output == *'GitHub account changed'* ]]
+    [[ $output == *'Authenticated forge account changed; resume with the original account.'* ]]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     draft_is '.batches[0].actions[0].viewer=="reviewer"'
 }

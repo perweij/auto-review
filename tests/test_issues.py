@@ -28,6 +28,12 @@ def facts():
             'pr': None, 'pulls': [], 'comments': [], 'base_branch': 'main', 'base': 'base', 'head': None, 'untouched': True}
 
 
+def forge_repository(**values):
+    from pr_review.forge import adapter
+    forge = adapter()
+    return SimpleNamespace(**values, forge=forge, project=forge.project(values['identity']))
+
+
 class EligibilityTest(unittest.TestCase):
     def test_issue_assessment_uses_independent_processor(self):
         from pr_review.issue_planning import assess_issue
@@ -122,7 +128,7 @@ class CommentInputTest(unittest.TestCase):
     def test_imported_answers_are_stable_and_keep_edited_publications(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            repo = SimpleNamespace(identity='github.com/org/repo', cwd=root, common=root)
+            repo = forge_repository(identity='github.com/org/repo', cwd=root, common=root)
             f = {**facts(), 'comments': [self.comment]}
             with patch('pr_review.issues.state_root', return_value=root):
                 flow = Workflow({'pr': 7}, repo, f)
@@ -194,16 +200,16 @@ class ExecutionCompleteTest(unittest.TestCase):
 
 class EligibilityRelationshipTest(unittest.TestCase):
     def setUp(self):
-        self.repo = SimpleNamespace(identity='github.com/org/repo', name='org/repo', cwd=Path('.'),
+        self.repo = forge_repository(identity='github.com/org/repo', name='org/repo', cwd=Path('.'),
                                     remote='origin', git=Mock(side_effect=self.git))
         self.pulls = {7: {'number': 7, 'state': 'open', 'assignees': [],
                           'head': {'sha': 'head', 'repo': {'full_name': 'org/repo'}},
                           'base': {'ref': 'main'}}}
         self.linked = []
         for target, kwargs in [
-                ('pr_review.issue_eligibility.github_json', {'side_effect': self.github}),
-                ('pr_review.issue_eligibility.connection', {'side_effect': self.connection}),
-                ('pr_review.issue_eligibility.command', {'side_effect': AssertionError('Unexpected command')})]:
+                ('pr_review.forge_github_issues.github_json', {'side_effect': self.github}),
+                ('pr_review.forge_github_issues.connection', {'side_effect': self.connection}),
+                ('pr_review.forge_github_issues.command', {'side_effect': AssertionError('Unexpected command')})]:
             p = patch(target, **kwargs)
             mocked = p.start()
             self.addCleanup(p.stop)
@@ -282,7 +288,7 @@ class ReadinessCacheTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        repo = SimpleNamespace(identity='github.com/org/repo', common=root, cwd=root,
+        repo = forge_repository(identity='github.com/org/repo', common=root, cwd=root,
                                git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}
         owner = SimpleNamespace(execution_lock=root / 'owner.lock', repo=SimpleNamespace(lock=root / 'repo.lock', git=repo.git),
@@ -363,11 +369,13 @@ class ReadinessCacheTest(unittest.TestCase):
         self.assertEqual(2, self.assess.call_count)
 
     def test_pr_feedback_ignores_metadata_but_keeps_review_context(self):
+        from pr_review.forge_github_issue_writes import GitHubIssueWrites
+        self.flow.writes.adapter = GitHubIssueWrites()
         self.flow.repo.name = 'org/repo'
         comment = {'id': 20, 'user': {'login': 'reviewer', 'avatar_url': 'old'}, 'body': 'Fix this.',
                    'path': 'source.txt', 'line': 1, 'commit_id': 'head', 'state': 'CHANGES_REQUESTED',
                    'reactions': {'total_count': 0}}
-        with patch('pr_review.issues.pages', return_value=[comment]):
+        with patch('pr_review.forge_github_issue_writes.pages', return_value=[comment]):
             original = digest(Workflow.feedback_context(self.flow))
             comment['reactions']['total_count'] = 1
             comment['user']['avatar_url'] = 'new'
@@ -456,7 +464,7 @@ class ReplyObligationTest(unittest.TestCase):
             raise ApiError('network', 'Reply was not stored; response lost')
 
         with patch.object(Writes, 'push', autospec=True, side_effect=t.simulate_push), \
-                patch('pr_review.owner_publication.gh', side_effect=lose_response):
+                patch('pr_review.publication.gh', side_effect=lose_response):
             self.assertEqual('uncertain', dispatch(request)['outcome'])
             for _ in range(3):
                 result = dispatch(request)
@@ -469,12 +477,14 @@ class ReplyObligationTest(unittest.TestCase):
                 self.assertFalse(any(k.startswith('ready:') for k in Workflow(request, t.repo_object, t.f).state['actions']))
             self.assertEqual(1, len(attempts))
         self.assertFalse(t.posts)
-        # Explicit staging/publication resolves the reply, while the absent
-        # attempt remains in the journal as historical evidence.
+        # Explicit staging/publication resolves the reply using the same operation
+        # identity, so delayed receipts cannot be mistaken for a new attempt.
         t.request('owner-mutate', operation='stage', reply=data['replies'][0]['id'])
         prepared = t.request('owner-prepare')
         t.request('owner-publish', token=prepared['token'])
-        self.assertEqual('unsent', owner.load()['actions'][0]['status'])
+        self.assertEqual('published', owner.load()['actions'][0]['status'])
+        self.assertEqual(1, len(owner.load()['actions']))
+        self.assertEqual(data['actions'][0]['id'], owner.load()['actions'][0]['id'])
         self.assertEqual('published', owner.load()['replies'][0]['status'])
         with patch.object(Writes, 'push', autospec=True, side_effect=t.simulate_push):
             self.assertEqual('ready', dispatch(request)['outcome'])
@@ -553,7 +563,7 @@ class QuestionPublicationRecoveryTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.repo = SimpleNamespace(identity='github.com/org/repo', name='org/repo',
+        self.repo = forge_repository(identity='github.com/org/repo', name='org/repo',
                                     common=self.root, cwd=self.root,
                                     git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}
@@ -567,11 +577,12 @@ class QuestionPublicationRecoveryTest(unittest.TestCase):
         for target, kwargs in [
                 ('pr_review.issues.state_root', {'return_value': self.root}),
                 ('pr_review.issues.resolve', {'return_value': self.repo}),
+                ('pr_review.forge_github_issues.GitHubIssues.account', {'return_value': {'forge': 'github', 'host': 'github.com', 'username': 'author', 'id': None}}),
                 ('pr_review.issues.collect_eligibility_facts', {'side_effect': self.collect}),
                 ('pr_review.issues.assess_issue', {'side_effect': lambda *a: copy.deepcopy(self.assessment)}),
                 ('pr_review.issues.Workflow.workspace', {'return_value': self.root}),
                 ('pr_review.issues.Workflow.clean', {}),
-                ('pr_review.issue_writes.pages', {'side_effect': lambda *a: copy.deepcopy(self.remote)}),
+                ('pr_review.forge_github_issue_writes.pages', {'side_effect': lambda *a: copy.deepcopy(self.remote)}),
                 ('pr_review.issue_writes.Writes.api', {'side_effect': self.post})]:
             p = patch(target, **kwargs)
             mocked = p.start()
@@ -761,7 +772,7 @@ class TerminalRecoveryTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.repo = SimpleNamespace(identity='github.com/org/repo', name='org/repo',
+        self.repo = forge_repository(identity='github.com/org/repo', name='org/repo',
                                     common=self.root, cwd=self.root,
                                     git=Mock(return_value=SimpleNamespace(stdout='head\n')))
         self.f = {**facts(), 'head': 'head'}
@@ -772,12 +783,13 @@ class TerminalRecoveryTest(unittest.TestCase):
         for target, kwargs in [
                 ('pr_review.issues.state_root', {'return_value': self.root}),
                 ('pr_review.issues.resolve', {'return_value': self.repo}),
+                ('pr_review.forge_github_issues.GitHubIssues.account', {'return_value': {'forge': 'github', 'host': 'github.com', 'username': 'author', 'id': None}}),
                 ('pr_review.issues.collect_eligibility_facts', {'side_effect': self.collect}),
                 ('pr_review.issues.assess_issue', {'side_effect': lambda *a: copy.deepcopy(self.assessment)}),
                 ('pr_review.issues.Workflow.workspace', {'return_value': self.root}),
                 ('pr_review.issues.Workflow.clean', {}),
                 ('pr_review.issues.Workflow.bootstrap', {'autospec': True, 'side_effect': AssertionError('Terminal decision executed a plan')}),
-                ('pr_review.issue_writes.pages', {'side_effect': lambda *a: copy.deepcopy(self.remote)}),
+                ('pr_review.forge_github_issue_writes.pages', {'side_effect': lambda *a: copy.deepcopy(self.remote)}),
                 ('pr_review.issue_writes.Writes.api', {'side_effect': self.post})]:
             p = patch(target, **kwargs)
             mocked = p.start()
@@ -949,7 +961,7 @@ class WriteRecoveryTest(unittest.TestCase):
                         'user': {'login': 'author'}}}
 
     def test_pr_body_links_plan_without_importing_closing_references(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for host in ('github.com', 'github.example.com'):
                 with self.subTest(host=host):
                     self.make_writes('pr')
@@ -971,7 +983,7 @@ class WriteRecoveryTest(unittest.TestCase):
                  lambda a: a['receipt'].update(id=True), lambda a: a['receipt'].update(id=0),
                  lambda a: a['receipt'].update(body='Edited'),
                  lambda a: a['receipt'].update(user={'login': 'other'})]
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for change in cases:
                 with self.subTest(change=change):
                     self.make_writes('pr')
@@ -992,7 +1004,7 @@ class WriteRecoveryTest(unittest.TestCase):
         previous = {'title': 'Fix', 'head': 'fix-issue/12', 'base': 'main', 'draft': True,
                     'body': 'Closes #12\n\nThis fixes #34\n\n<!-- fix-issue workflow=workflow -->'}
         self.state['actions']['create-pr'] = {'status': 'pending', 'payload': copy.deepcopy(previous)}
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             self.send()
         action = self.state['actions']['create-pr']
         self.assertNotIn('fixes #34', self.writes.api.call_args.args[1]['body'])
@@ -1004,7 +1016,7 @@ class WriteRecoveryTest(unittest.TestCase):
         previous = {'status': 'submitting', 'payload': {'body':
             'Closes #12\n\nThis fixes #34\n\n<!-- fix-issue workflow=workflow -->'}}
         self.state['actions']['create-pr'] = copy.deepcopy(previous)
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             with self.assertRaises(ApiError) as caught:
                 self.send()
         self.assertEqual('uncertain', caught.exception.code)
@@ -1016,7 +1028,7 @@ class WriteRecoveryTest(unittest.TestCase):
         payload = {'body': 'Closes #12\n\nThis fixes #34\n\n<!-- fix-issue workflow=workflow -->'}
         self.state['actions']['create-pr'] = {'status': 'submitting', 'payload': copy.deepcopy(payload)}
         receipt = self.post('/pulls', payload)
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             self.assertEqual(receipt, self.send())
         self.assertEqual(payload, self.state['actions']['create-pr']['payload'])
         self.assertEqual('complete', self.state['actions']['create-pr']['status'])
@@ -1055,7 +1067,7 @@ class WriteRecoveryTest(unittest.TestCase):
         self.writes.api.assert_not_called()
 
     def test_accepted_comment_and_pr_reconcile_without_resend(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for kind in ('comment', 'pr'):
                 with self.subTest(kind=kind):
                     self.make_writes(kind)
@@ -1069,7 +1081,7 @@ class WriteRecoveryTest(unittest.TestCase):
                     self.writes.api.assert_not_called()
 
     def test_absent_comment_and_pr_retry_only_after_explicit_decision(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for kind in ('comment', 'pr'):
                 with self.subTest(kind=kind):
                     self.make_writes(kind)
@@ -1092,7 +1104,7 @@ class WriteRecoveryTest(unittest.TestCase):
                     self.assertEqual(1, len(action['history']))
 
     def test_absence_decision_fresh_read_finds_accepted_write(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for kind in ('comment', 'pr'):
                 with self.subTest(kind=kind):
                     self.make_writes(kind)
@@ -1106,7 +1118,7 @@ class WriteRecoveryTest(unittest.TestCase):
                     self.writes.api.assert_not_called()
 
     def test_ambiguous_changed_deleted_and_foreign_writes_block_reset(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for kind in ('comment', 'pr'):
                 for change in ('duplicate', 'edited', 'deleted', 'foreign', 'edited_receipt'):
                     with self.subTest(kind=kind, change=change):
@@ -1130,13 +1142,13 @@ class WriteRecoveryTest(unittest.TestCase):
                         self.writes.api.assert_not_called()
 
     def test_failed_readback_preserves_intent_and_blocks_reset(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for kind in ('comment', 'pr'):
                 with self.subTest(kind=kind):
                     self.make_writes(kind)
                     self.uncertain()
                     before = copy.deepcopy(self.state)
-                    with patch('pr_review.issue_writes.pages', side_effect=ApiError('facts_incomplete', 'Read failed')):
+                    with patch('pr_review.forge_github_issue_writes.pages', side_effect=ApiError('facts_incomplete', 'Read failed')):
                         for operation in (self.writes.reconcile, self.writes.recover, lambda: self.writes.recover(self.key)):
                             with self.assertRaises(ApiError):
                                 operation()
@@ -1144,7 +1156,7 @@ class WriteRecoveryTest(unittest.TestCase):
                     self.writes.api.assert_not_called()
 
     def test_legacy_uncertain_pr_without_payload_recovers(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             self.make_writes('pr')
             self.uncertain(accepted=True)
             self.state['actions'][self.key].pop('payload')
@@ -1156,7 +1168,7 @@ class WriteRecoveryTest(unittest.TestCase):
     def test_pending_intent_is_read_back_before_assessment_too(self):
         # A rejected read-back after an accepted POST can leave legacy actions
         # pending, so status alone cannot prove that the publication is absent.
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             for kind in ('comment', 'pr'):
                 with self.subTest(kind=kind):
                     self.make_writes(kind)
@@ -1171,7 +1183,7 @@ class WriteRecoveryTest(unittest.TestCase):
                     self.writes.api.assert_not_called()
 
     def test_recovery_is_action_specific_and_retains_prior_decisions(self):
-        with patch('pr_review.issue_writes.pages', side_effect=self.page):
+        with patch('pr_review.forge_github_issue_writes.pages', side_effect=self.page):
             self.make_writes('comment')
             self.uncertain()
             other = {'status': 'submitting', 'body': 'Different question'}
@@ -1256,10 +1268,10 @@ class IssueIntegrationTest(unittest.TestCase):
         self.assessment = {'decision': 'plan', 'summary': 'Plan', 'plan': 'Implement the fix and test it.', 'acceptance': ['Correct behavior'], 'questions': []}
         self.repo_object = owner_state.OwnerSession({'session': self.path}).repo
         self.req = {'command': 'issue-run', 'cwd': str(self.repo), 'issue': 12, 'reviewers': ['codex']}
-        for target, effect in [('pr_review.issues.collect_eligibility_facts', self.collect),
+        for target, effect in [('pr_review.forge_github_issues.GitHubIssues.account', lambda repo: {'forge': 'github', 'host': 'github.com', 'username': 'author', 'id': None}),
+                               ('pr_review.issues.collect_eligibility_facts', self.collect),
                                ('pr_review.issues.assess_issue', self.assess),
-                               ('pr_review.issue_writes.pages', self.page),
-                               ('pr_review.issues.pages', self.page),
+                               ('pr_review.forge_github_issue_writes.pages', self.page),
                                ('pr_review.issue_writes.Writes.api', self.api)]:
             p = patch(target, side_effect=effect)
             p.start()
@@ -2188,7 +2200,7 @@ class BootstrapTest(IssueIntegrationTest):
             self.metadata['headRefName'] = payload['head']
             sha = self.git('rev-parse', payload['head'])
             self.git('update-ref', 'remote-feature', sha)
-            self.f['pr'] = {'number': 7, 'state': 'open', 'assignees': [], 'draft': True,
+            self.f['pr'] = {'id': 70, 'number': 7, 'state': 'open', 'assignees': [], 'draft': True,
                             'body': payload['body'], 'user': {'login': 'author'},
                             'head': {'ref': payload['head'], 'sha': sha, 'repo': {'full_name': 'org/repo'}},
                             'base': {'ref': payload['base']}}
@@ -2335,10 +2347,10 @@ class CollectorTest(unittest.TestCase):
             if endpoint == 'repos/org/repo':
                 return {'default_branch': 'main', 'permissions': {'push': True}}
             return copy.deepcopy(self.pull if '/pulls/' in endpoint else self.issue)
-        p = patch('pr_review.issue_eligibility.github_json', side_effect=github)
+        p = patch('pr_review.forge_github_issues.github_json', side_effect=github)
         p.start()
         self.addCleanup(p.stop)
-        p = patch('pr_review.issue_eligibility.connection', return_value=[{'number': 7, 'repository': {'nameWithOwner': 'org/repo'}}])
+        p = patch('pr_review.forge_github_issues.connection', return_value=[{'number': 7, 'repository': {'nameWithOwner': 'org/repo'}}])
         p.start()
         self.addCleanup(p.stop)
 

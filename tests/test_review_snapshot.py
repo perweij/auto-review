@@ -1,4 +1,5 @@
 """Snapshot validation must retain race checks when PR base metadata is stale."""
+import copy
 from pathlib import Path
 import sys
 import unittest
@@ -14,12 +15,15 @@ class SnapshotTest(unittest.TestCase):
     def test_changed_or_missing_refs_fail_before_worktree_creation(self):
         for mismatch in ('head', 'base', 'branch', 'missing-base'):
             with self.subTest(mismatch=mismatch):
-                pr = dict(state='OPEN', baseRefName='main', baseRefOid='old-base', headRefOid='head')
+                pr = {'id': 7, 'url': 'https://example.com/7', 'title': 'Title', 'body': '', 'author': 'person',
+                      'draft': False, 'state': 'open',
+                      'target': {'branch': 'main', 'head': 'old-base', 'project': {'forge': 'github', 'host': 'github.com', 'path': 'org/repo'}},
+                      'source': {'head': 'head'}}
                 repo = Mock(remote='origin', pr=7, head_ref='local-head', base_ref='local-base')
-                latest = dict(pr)
+                latest = copy.deepcopy(pr)
                 if mismatch == 'branch':
-                    latest['baseRefName'] = 'other'
-                repo.metadata.side_effect = [latest, pr] if mismatch == 'branch' else [latest, latest]
+                    latest['target']['branch'] = 'other'
+                repo.forge.change.side_effect = [latest, pr] if mismatch == 'branch' else [latest, latest]
 
                 def git(*args):
                     value = ''
@@ -34,5 +38,5 @@ class SnapshotTest(unittest.TestCase):
                 with patch('pr_review.reviews.say'), self.assertRaises(ApiError) as error:
                     Review.snapshot(review, pr)
                 self.assertEqual(error.exception.code, 'snapshot_changed')
-                self.assertEqual(repo.metadata.call_count, 2)
+                self.assertEqual(repo.forge.change.call_count, 2)
                 self.assertFalse(any(call.args[0] == 'worktree' for call in repo.git.call_args_list))

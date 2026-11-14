@@ -1,6 +1,8 @@
 """Reconcile verified fixes with local code, without Git or GitHub writes."""
 import copy
 
+from .forge_context import owner_change
+
 from .common import ApiError
 from . import owner_git, owner_commit_plan, owner_contracts
 
@@ -74,7 +76,7 @@ def reconcile(session, state):
                     and execution_complete(batch) and batch.get("commit_plan", {}).get("units") == []
                     and batch.get("baseline") == head
                     and batch.get("verified_base")
-                    and batch["verified_base"] == state["metadata"]["baseRefOid"]
+                    and batch["verified_base"] == owner_change(state)['target']['head']
                     and batch.get("verified_fingerprints", {}).get(item["key"]) == fingerprint
                     and item["key"] in batch.get("verified_items", [])
                     and any(o["item"] == item["key"] and o["status"] in ("already_addressed", "no_change")
