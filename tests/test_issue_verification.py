@@ -1,5 +1,6 @@
 """Controller verification fills evidence gaps without another implementation turn."""
 import json
+from contextlib import nullcontext
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -46,7 +47,8 @@ class VerificationRecoveryTest(ScriptedProviders, unittest.TestCase):
                 self.verdict('passed')
             return result
         with patch('pr_review.issue_harness.invoke', side_effect=self.fix), \
-                patch('pr_review.issue_verification.approved_commands', return_value={self.command_text}), \
+                (nullcontext() if getattr(self, 'real_approval', False) else
+                 patch('pr_review.issue_verification.approved_commands', return_value={self.command_text})), \
                 patch('pr_review.issue_verification.collect', side_effect=recover):
             result = self.f.start(issue_harness=True)
         self.assertEqual('ready', result['batches'][-1]['status'])
@@ -54,6 +56,15 @@ class VerificationRecoveryTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual(2, sum(line.startswith('synthesis cwd=') for line in self.marks.read_text().splitlines()))
         self.assertIn('controller_verification', self.stdin_copy.read_text())
         self.assertEqual([], self.last()['review_history']['cycles'])
+
+    def test_real_approved_paragraph_collects_without_a_selection_mock(self):
+        from pr_review import owner_import
+        owner_import.from_issue(self.session,
+            {'revision': 2, 'body': '## Verification\nRun `' + self.command_text + '`. '
+             'Paid providers and live forge smoke tests are not required.', 'acceptance': ['Both work together']},
+            {'title': 'Provider slots', 'html_url': 'https://github.com/org/repo/issues/12'}, 'workflow')
+        self.real_approval = True
+        self.test_missing_source_identity_collects_candidate_evidence_and_resumes_synthesis()
 
     def test_independent_reports_are_reused_after_controller_verification(self):
         state = self.session.load()
@@ -200,6 +211,26 @@ class VerificationRecoveryTest(ScriptedProviders, unittest.TestCase):
 
 
 class CommandSelectionTest(unittest.TestCase):
+    def test_required_checks_survive_unrelated_negative_sentence_in_same_paragraph(self):
+        unittest_command = ('PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=lib:tests python3 -m unittest '
+                            'test_slot_settings test_planning_review test_issues test_issue_settings test_api')
+        paragraph = (f'Run `{unittest_command}`, followed by `make check-backend`. '
+                     'Check help and documentation against the tested economical/expensive distinction, '
+                     'Owner precedence and API scope. Paid providers and live forge smoke tests are not required.')
+        with patch('pr_review.issue_verification.specification.handoff',
+                   return_value={'text': '## Verification\n' + paragraph}):
+            self.assertEqual({unittest_command, 'make check-backend'}, issue_verification.approved_commands(None, None))
+
+    def test_sentence_selection_preserves_code_and_excludes_actual_prohibitions(self):
+        text = ('## Verification\nDo not run `make test-integration`. Run `make check-backend`. '
+                'Optional: `make lint`.\n'
+                'Run `python3 -m unittest package.test_case`. '
+                'Run `pytest -k "not slow"`.\n'
+                'Do not run `make check-unit` or `make check-all`.\n')
+        with patch('pr_review.issue_verification.specification.handoff', return_value={'text': text}):
+            self.assertEqual({'make check-backend', 'python3 -m unittest package.test_case', 'pytest -k "not slow"'},
+                             issue_verification.approved_commands(None, None))
+
     def test_only_literal_supported_approved_checks_are_selected(self):
         document = {'text': '## Verification\nRun `make check-backend` and `PYTHONPATH=lib:tests python3 -m unittest test_api`.\n'
                            '```sh\npytest tests\nmake smoke\nmake check; echo extra\n```\n'

@@ -71,14 +71,28 @@ def approved_commands(session, state):
         if stripped.startswith('```'):
             fenced = not fenced
             continue
-        if re.search(r"\b(?:not|never|skip|avoid|optional|forbidden)\b|don't", stripped, re.I):
+        if fenced:
+            if testing and parse_command(stripped):
+                result.add(stripped)
             continue
-        instruction = re.sub(r'^(?:[-*]|[0-9]+[.)])\s+', '', stripped)
-        explicit = re.match(r'^(?:run|execute)\b', instruction, re.I)
-        if not testing and not explicit:
-            continue
-        snippets = [stripped] if fenced else re.findall(r'(?<!`)`([^`\n]+)`(?!`)', stripped)
-        result.update(s.strip() for s in snippets if parse_command(s.strip()))
+        # Hide code spans before splitting prose: dotted module names, quoted
+        # punctuation and pytest's "not" expressions are command data, not prose.
+        snippets = []
+        def hide_code(match):
+            snippets.append(match[1])
+            return f'\x00{len(snippets) - 1}\x00'
+        prose = re.sub(r'(?<!`)`([^`\n]+)`(?!`)', hide_code, stripped)
+        for sentence in re.split(r'[.!?](?:\s+|$)', prose):
+            if re.search(r"\b(?:not|never|skip|avoid|optional|forbidden)\b|don't", sentence, re.I):
+                continue
+            instruction = re.sub(r'^(?:[-*]|[0-9]+[.)])\s+', '', sentence.strip())
+            explicit = re.match(r'^(?:run|execute)\b', instruction, re.I)
+            if not testing and not explicit:
+                continue
+            for number in re.findall(r'\x00([0-9]+)\x00', sentence):
+                command = snippets[int(number)].strip()
+                if parse_command(command):
+                    result.add(command)
     return result
 
 
