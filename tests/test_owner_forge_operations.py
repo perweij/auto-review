@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import test_owner as fixtures
 from pr_review.common import ApiError
+from pr_review.forge_github_publication import GitHubPublication
+from pr_review import owner_publication
 from pr_review.owner_state import OwnerSession
 
 
@@ -31,6 +33,109 @@ class OwnerOperationsTest(unittest.TestCase):
         session, state = self.session_state()
         self.assertEqual(state['prepared']['operations'][0]['body'], 'Original')
         self.assertFalse(self.t.posts)
+
+    def test_empty_journal_prepare_reads_context_once_without_receipt_lookup(self):
+        session, state = self.session_state()
+        self.assertEqual(state['actions'], [])
+        forge = type(session.repo.forge)
+        with patch.object(forge, 'owner_context', autospec=True, side_effect=forge.owner_context) as context, \
+                patch.object(GitHubPublication, 'lookup_owner', autospec=True,
+                             side_effect=GitHubPublication.lookup_owner) as lookup:
+            prepared = self.prepare()
+        self.assertEqual(context.call_count, 1)
+        lookup.assert_not_called()
+        saved = self.session_state()[1]['prepared']
+        self.assertEqual(prepared['token'], saved['token'])
+        self.assertEqual([r['id'] for r in prepared['replies']], [self.reply])
+        self.assertEqual(saved['operations'][0]['body'], 'Original')
+        self.assertFalse(self.t.posts)
+
+    def test_empty_journal_prepare_still_validates_account_in_refresh(self):
+        self.t.request('owner-mutate', operation='reply', item='thread:T1', body='Original')
+        reply = self.t.view['replies'][-1]['id']
+        self.t.request('owner-mutate', operation='stage', reply=reply)
+        session, before = self.session_state()
+        change, account = session.repo.forge.owner_context(session.repo)
+        forge = type(session.repo.forge)
+        with patch.object(forge, 'owner_context', return_value=(change, {**account, 'username': 'other'})) as context, \
+                patch('pr_review.owner_publication.refresh', wraps=owner_publication.refresh) as refresh, \
+                patch.object(GitHubPublication, 'lookup_owner') as lookup:
+            with self.assertRaises(ApiError) as caught:
+                self.t.request('owner-prepare')
+        self.assertEqual(caught.exception.code, 'account_changed')
+        context.assert_called_once()
+        refresh.assert_called_once()
+        lookup.assert_not_called()
+        after = self.session_state()[1]
+        self.assertNotIn('prepared', after)
+        self.assertEqual(after['replies'], before['replies'])
+        self.assertFalse(self.t.posts)
+
+    def test_recovery_without_candidates_preserves_housekeeping_options(self):
+        self.prepare()
+        original = self.session_state()[1]['prepared']
+        for options in ({}, dict(statuses=('unsent',), clear_prepared=False, refresh_context=False)):
+            with self.subTest(options=options):
+                session, state = self.session_state()
+                state['prepared'] = copy.deepcopy(original)
+                session.save(state)
+                sequence = state['sequence']
+                forge = type(session.repo.forge)
+                with patch.object(forge, 'owner_context', autospec=True, side_effect=forge.owner_context) as context, \
+                        patch('pr_review.owner_publication.refresh', wraps=owner_publication.refresh) as refresh, \
+                        patch.object(GitHubPublication, 'lookup_owner') as lookup:
+                    view = owner_publication.recover(session, state, **options)
+                lookup.assert_not_called()
+                self.assertEqual(context.call_count, 0 if options else 1)
+                self.assertEqual(refresh.call_count, 0 if options else 1)
+                saved = session.load()
+                self.assertGreater(saved['sequence'], sequence)
+                self.assertEqual(view['revision'], saved['sequence'])
+                if options:
+                    self.assertEqual(saved['prepared'], original)
+                else:
+                    self.assertNotIn('prepared', saved)
+
+    def test_prepare_recovers_late_unsent_receipt(self):
+        action = self.failed_send()
+        self.t.request('owner-mutate', operation='stage', reply=self.reply)
+        session, state = self.session_state()
+        receipt = self.t.publish(session, 'comments/101/replies', action['payload'])
+        with patch.object(GitHubPublication, 'lookup_owner', autospec=True,
+                          side_effect=GitHubPublication.lookup_owner) as lookup:
+            with self.assertRaises(ApiError) as caught:
+                self.t.request('owner-prepare')
+        self.assertEqual(caught.exception.code, 'stale_reply')
+        lookup.assert_called_once()
+        self.assertEqual([a['id'] for a in lookup.call_args.args[2]], [action['id']])
+        state = self.session_state()[1]
+        self.assertEqual(state['actions'][0]['status'], 'published')
+        self.assertEqual(state['actions'][0]['receipt'], receipt)
+        self.assertEqual(state['replies'][0]['receipt'], receipt)
+        self.assertEqual(state['replies'][0]['evidence']['id'], receipt['id'])
+        self.assertEqual(len(self.t.posts), 1)
+
+    def test_recovery_candidates_validate_account_before_receipt_lookup(self):
+        self.failed_send()
+        for status in ('unsent', 'published'):
+            with self.subTest(status=status):
+                if status == 'published':
+                    self.t.request('owner-mutate', operation='stage', reply=self.reply)
+                    prepared = self.t.request('owner-prepare')
+                    self.t.request('owner-publish', token=prepared['token'])
+                session, state = self.session_state()
+                self.assertEqual(state['actions'][0]['status'], status)
+                if status == 'published':
+                    self.assertEqual(state['actions'][0]['attempt_count'], 2)
+                change, account = session.repo.forge.owner_context(session.repo)
+                with patch.object(type(session.repo.forge), 'owner_context',
+                                  return_value=(change, {**account, 'username': 'other'})), \
+                        patch.object(GitHubPublication, 'lookup_owner') as lookup:
+                    with self.assertRaises(ApiError) as caught:
+                        self.t.request('owner-prepare')
+                self.assertEqual(caught.exception.code, 'account_changed')
+                lookup.assert_not_called()
+                self.assertEqual(self.session_state()[1]['actions'], state['actions'])
 
     def test_legacy_preview_requires_new_confirmation(self):
         prepared = self.prepare()

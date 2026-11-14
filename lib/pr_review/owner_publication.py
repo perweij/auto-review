@@ -231,12 +231,13 @@ def prepare(session, state):
 
 
 def recover(session, state, *, statuses=('submitting', 'ambiguous'), clear_prepared=True, refresh_context=True):
-    from .forge import check_account
-    _, account = session.repo.forge.owner_context(session.repo)
-    check_account(state.get('forge_account'), account, state.get('viewer'))
     actions = [a for a in state['actions'] if a['status'] in statuses
                or (a['status'] == 'published' and a.get('attempt_count', 1) > 1)]
-    results = publication_adapter(session).lookup_owner(session, actions)
+    if actions:
+        from .forge import check_account
+        _, account = session.repo.forge.owner_context(session.repo)
+        check_account(state.get('forge_account'), account, state.get('viewer'))
+        results = publication_adapter(session).lookup_owner(session, actions)
     for action in actions:
         matches = results[action['id']]
         if len(matches) > 1:
