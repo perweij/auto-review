@@ -152,9 +152,13 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
         if stage != 'review':
             active = state['conversations'].get('active')
             conversation = state['conversations'].get(active, {})
-            if not conversation or conversation['provider'] != choice['provider']:
+            if (not conversation or conversation['provider'] != choice['provider']
+                    or conversation.get('storage') != 'stable-home-v1'):
+                if conversation and conversation.get('storage') != 'stable-home-v1':
+                    emit('progress', message='Starting a fresh planning provider session; retaining completed planning evidence from legacy session storage.')
                 active = uuid.uuid4().hex
-                conversation = {'provider': choice['provider'], 'home': str(root / ('home-' + active))}
+                conversation = {'provider': choice['provider'], 'home': str(root / ('home-' + active)),
+                                'storage': 'stable-home-v1'}
                 state['conversations'][active] = conversation
                 state['conversations']['active'] = active
             if choice['provider'] == 'claude':
@@ -167,8 +171,8 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
         try:
             if conversation:
                 home = Path(conversation['home'])
-                if home.exists():
-                    shutil.copytree(home, workspace.home, dirs_exist_ok=True)
+                if not home.exists():
+                    shutil.copytree(workspace.home, home)
             raw = read_json(attempt / 'validated.json')
             if raw is not None:
                 raw = validate(stage, raw, workspace.checkout, outputs.get('review', {}).get('points', []))
@@ -179,9 +183,9 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
                     args = (arguments(choice, attempt, attempt / 'schema.json', conversation, role='plan')
                             if conversation else argv(choice, Runtime.environment(), 'plan', attempt, attempt / 'schema.json'))
                     env, _ = environment(choice['provider'])
-                    args, env = workspace.wrap(args, env)
-                    def event_line(line):
-                        if not conversation:
+                    args, env = workspace.wrap(args, env, provider_home=conversation['home'] if conversation else None)
+                    def event_line(stream, line):
+                        if stream != "stdout" or not conversation:
                             return
                         try:
                             event = json.loads(line)
@@ -216,16 +220,10 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
             workspace.verify()
             if configuration_snapshot(cwd) != agents or git(['rev-parse', 'HEAD'], cwd=cwd).stdout.strip() != head:
                 raise ApiError('workspace_changed', 'Planning source or configuration changed.')
-            if conversation:
-                shutil.copytree(workspace.home, conversation['home'], dirs_exist_ok=True)
             saved.update(status='complete', hash=hash_file(attempt / 'validated.json'))
             save()
             outputs[stage] = raw
         finally:
-            try:
-                if conversation:
-                    shutil.copytree(workspace.home, conversation['home'], dirs_exist_ok=True)
-            finally:
-                workspace.close()
+            workspace.close()
     return {**outputs['synthesis'], 'agent_configuration': agents, 'planning_artifacts': str(root),
             'planning_choices': {s: state['stages'][s]['choice'] for s in STAGES}}
