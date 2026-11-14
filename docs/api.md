@@ -954,7 +954,10 @@ valid) alongside the existing `checks` summary. Each declaration contains `comma
 (the exact provider-reported string, including wrappers), `cwd`, `log_paths`
 (relative to that attempt's scratch directory), `tested_tree` (an implementer
 claim), `summary`, and nullable `tool_id` / `event_id`. IDs disambiguate commands;
-otherwise matching requires one exact command. Shell syntax is never split into
+otherwise matching requires one unique command. Codex may match an exact script
+inside a canonical, literally quoted `/bin/bash -c` or `-lc` (or `/bin/sh -c`)
+launcher. The recorded wrapped command is retained; extra arguments, altered
+scripts and ambiguous matches remain gaps. Shell syntax is never split into
 invented subcommand outcomes. Legacy attempts keep their original schema and are
 not retrospectively ingested.
 
@@ -985,9 +988,30 @@ checkpoints do not attest command-time source bytes. Earlier versioned attempts 
 the current batch keep their original candidate identity; old tests are never
 relabeled as execution against later code. Failed, unknown, stale, ambiguous or
 truncated evidence cannot establish a passing check, and passing tests do not
-rebut a concrete uncovered defect. No automatic pass, requirement skip or expansion
-to full verification is introduced. Interactive Owner and standalone PR review
+rebut a concrete uncovered defect. These provider records alone introduce no
+automatic pass, requirement skip or expansion of model verification policy. Interactive Owner and standalone PR review
 retain their existing inputs and behavior.
+
+For versioned issue execution, evidence/policy blockers with no repairable findings
+can trigger controller verification of supported argv-only commands explicitly
+quoted in the approved specification. `controller_verification` in synthesis
+context contains `epoch` and `records`. Each record identifies the candidate tree
+and bridge commit, exact argv and environment overrides, disposable checkout,
+status, numeric exit code (or null), elapsed time, `source_check`, and hashed
+stdout/stderr artifacts. `source_check: verified` means the controller selected
+and checked that candidate at launch and found no tracked changes afterward; it
+is not an immutable-filesystem or hostile-process attestation. A successful
+matching record supplies the source provenance absent from provider telemetry.
+
+The batch retains `verification_runs` and immutable result references. Durable
+intent precedes command execution; an interrupted intent recovers as unknown
+without replay. Commands, elapsed time and output are bounded as described in the
+[manual](manual.md#autonomous-issue-execution-and-resource-controls). A new explicit
+synthesis rerun creates a new epoch, permitting another bounded attempt; plain
+resume does not. Failed current-epoch verification cannot validate a passed
+assessment. Log/receipt hashes are checked before synthesis and reuse, and
+acceptance proofs bind controller references as well as provider evidence. Only
+synthesis inputs change; independent reviewer identities remain unchanged.
 
 A durable seal makes interrupted capture idempotent, including a frozen bundle
 not yet referenced in state. A saved completed implementation can finish capture

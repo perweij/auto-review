@@ -31,3 +31,23 @@ check cannot run under this policy and no sufficient reusable evidence exists.
 Name concrete commands and artifacts; do not invent a host problem where no
 command failed. Return incomplete with these blockers; a passed assessment must
 have none.
+
+Controller verification recovery (issue acceptance only):
+When controller_verification is present, inspect its records and referenced logs.
+These are controller-executed commands, distinct from implementation claims. Each
+record identifies the exact candidate checkout created for that command, argv,
+exit status, and source integrity checks before launch and after completion.
+A completed record with exit_code=0, source_check=verified, matching candidate tree
+and complete logs supplies command-time candidate provenance. It does not require
+independent re-execution or a provider source_identity field. Attribute it as
+“controller verification ran…”, not your own execution. Do not demand immutable
+source throughout test execution or hostile-process attestation: those are outside
+this contract. Recorded source changes, unknown outcomes, failures, missing logs
+and mismatched candidates still cannot establish a passing check.
+An explicitly requested synthesis rerun starts a new verification epoch; older
+records remain history. Use current-epoch results for the current candidate.
+A verification blocker may request an exact supported command from the approved
+specification. The coordinator can execute it once in a fresh candidate checkout
+within its bounded allowance, then ask you to assess the new evidence. Do not
+replace the command with shell wrappers, explanations or an unapproved variant.
+This does not expand your focused testing policy or authorize paid smoke tests.

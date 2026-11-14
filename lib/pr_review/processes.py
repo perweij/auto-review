@@ -110,7 +110,8 @@ class Result:
 
 
 def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
-        stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=(), usage_call=None):
+        stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=(), usage_call=None,
+        max_output_bytes=None):
     """Run without a shell; log raw bytes while interpreting complete records."""
     from .issue_resources import check as check_issue_resources, active as issue_resources_active
     check_issue_resources()
@@ -124,6 +125,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
         raise ApiError('invalid_request', 'PR_REVIEW_MAX_EVENT_BYTES must be positive integer bytes.')
     record_limit = int(limit) if model_events or on_line else 0
     captured = {"stdout": [], "stderr": []}
+    output_bytes = 0
     files, events, reason, warned = {}, [], "", False
     child = None
     stopped = False
@@ -224,6 +226,9 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                             line_received(name, pending[name])
                             pending[name].clear()
                         continue
+                    output_bytes += len(data)
+                    if max_output_bytes is not None and output_bytes > max_output_bytes:
+                        raise ApiError("output_limit", "Process exceeded its output byte limit; partial logs are retained.")
                     activity = time.monotonic()
                     silence_warned = False
                     if name in files:

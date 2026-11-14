@@ -215,7 +215,8 @@ bin/fix-issue --generate-json-config /tmp/issue-settings.json
 ```
 
 Pass the appropriate file with `--settings-file PATH`. These templates contain
-built-in defaults, including issue planning, critique and synthesis roles.
+built-in defaults, including issue planning, critique and synthesis roles. Add
+`--economical` or `--expensive` when generating to apply that preset.
 `--economical` alone changes review/processing defaults, not every issue role;
 see the [cookbook](docs/cookbook.md#defaults-presets-precedence-and-resume) for
 an economical configuration covering all roles and the rules for resume.
@@ -237,7 +238,8 @@ Existing no-progress safeguards take precedence after review establishes a third
 unchanged rejection, stopping before adjudication. A new report or evidence can
 still establish acceptance of unchanged source.
 The coordinator handles safeguards and GitHub communication. There is no second
-post-push PR-review pipeline. It does not launch a new coding agent for each task or replay test suites.
+post-push PR-review pipeline. It does not launch a new coding agent for each task. Missing acceptance evidence
+can trigger bounded verification of approved checks in a fresh candidate checkout.
 Real product questions still require an answer. Interactive Owner retains its
 existing task workflow and focused verification policy.
 

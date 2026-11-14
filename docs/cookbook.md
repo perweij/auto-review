@@ -15,8 +15,17 @@ pr-review --generate-json-config /tmp/pr-settings.json
 fix-issue --generate-json-config /tmp/issue-settings.json
 ```
 
-These commands write built-in defaults from the execution defaults source, never
-export a saved session, and refuse to overwrite an existing destination. Edit the
+These commands write built-in defaults from the execution defaults source. Add
+`--economical` or `--expensive` to generate that preset instead:
+
+```sh
+fix-issue --economical --generate-json-config /tmp/economical-issue-settings.json
+pr-review --expensive --generate-json-config /tmp/expensive-pr-settings.json
+```
+
+Presets follow the same rules as execution: issue planning, critique and fixing
+keep their built-in defaults unless you edit the resulting file. Generation never
+exports a saved session and refuses to overwrite an existing destination. Edit the
 file, then use it:
 
 ```sh
@@ -36,8 +45,8 @@ are errors. Accompanying flags cannot repair an incomplete file.
 planner. For compatibility, an older complete issue file omitting **both** fields
 selects the single-assessment workflow; omitting just one is an error.
 
-Generation includes every supported terminal JSON setting. It always writes
-built-in defaults, even alongside preset or model flags. Targets, forge selection,
+Generation includes every supported terminal JSON setting. It writes built-in
+defaults plus the selected preset; other model and role flags are ignored. Targets, forge selection,
 publication, approval, recovery actions and `--max-repair-cycles` remain CLI
 controls. Provider timeouts, permissions, budgets and probe settings remain
 [environment settings](manual.md#configuration); they are not JSON fields.
@@ -249,6 +258,24 @@ one result. Omit `--no-publish` for the interactive publication menu, or use
 `--suggested-changes` to generate separately verified GitHub suggestions.
 Issue commands retain plan approval; `--yolo` skips approval for that invocation,
 but unanswered product questions still block.
+
+## Recover missing issue verification evidence
+
+Normally, resume with the same command. If acceptance needs test evidence, the
+coordinator can run supported checks explicitly named in the approved plan in a
+fresh candidate checkout, then resume synthesis. It does not restart implementation
+just to obtain evidence or rerun checks indefinitely.
+
+If a controller-run check stopped because of an environment problem, fix that
+problem and explicitly request another bounded verification round:
+
+```sh
+fix-issue -i 42 --rerun-review synthesis
+```
+
+This also regenerates synthesis. Ordinary resume retains failed, timed-out and
+interrupted outcomes. See the [manual](manual.md#autonomous-issue-execution-and-resource-controls)
+for supported commands and limits.
 
 ## GitLab local review
 

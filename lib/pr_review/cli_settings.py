@@ -57,7 +57,7 @@ def add_arguments(parser, *, issue=False):
     parser.add_argument('--settings-file', dest='cli_settings_file', default=argparse.SUPPRESS,
                         help='complete named JSON configuration; CLI flags override it in any order')
     parser.add_argument('--generate-json-config', metavar='PATH',
-                        help='write complete built-in defaults without a target or repository; never overwrite')
+                        help='write complete defaults with the selected preset, without a target or repository; never overwrite')
     parser.add_argument('--reviewers', dest='cli_reviewers', type=lambda v: v.split(','),
                         default=argparse.SUPPRESS, metavar='NAME[,NAME]',
                         help='one or two distinct names in order, e.g. codex-1,claude-1')
@@ -178,10 +178,12 @@ def prepare(request, *, issue=False):
         request['_cli_file'] = validate(value, issue=issue)
 
 
-def generate(path, *, issue=False):
+def generate(path, *, issue=False, request=None):
+    preset = {name: (request or {}).get(name, False) for name in settings.PRESETS}
+    value = defaults(issue=issue, request=preset)
     try:
         with Path(path).open('x', encoding='utf-8') as stream:
-            json.dump(defaults(issue=issue), stream, indent=2)
+            json.dump(value, stream, indent=2)
             stream.write('\n')
     except OSError as exc:
         raise ApiError('invalid_request', f'Cannot generate configuration {path}: {exc}') from exc

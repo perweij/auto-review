@@ -109,7 +109,8 @@ retain the current generation, human comment edits, and staging.
 
 ### Complete terminal configuration files
 
-`--generate-json-config PATH` writes complete built-in defaults and exits without
+`--generate-json-config PATH` writes complete built-in defaults, optionally applying
+`--economical` or `--expensive`, and exits without
 a target, repository discovery, authentication, network, or provider tools. It
 never exports a session or overwrites an existing destination. Generation and
 execution use the same defaults source; no separate defaults file is maintained.
@@ -141,7 +142,9 @@ remove that definition; the error names it. Inactive built-in defaults are exemp
 Targets, publication/approval actions, recovery, trust tokens, and environment
 runtime settings are invocation controls, not file fields. `--max-repair-cycles`
 is also a CLI-only control; omission on resume preserves its saved allowance.
-Generation always writes built-in defaults, ignoring presets and model overrides.
+Generation applies the selected preset using the same rules as execution: issue
+planning, critique and implementation defaults remain unchanged. Other model and
+role overrides are ignored during generation; edit the generated file instead.
 
 Provider-wide model/effort flags, positional `--reviewer-N-provider/model/effort`,
 provider-only reviewer lists, and direct role triplets such as
@@ -1269,7 +1272,9 @@ execution always refreshes eligibility before writes.
 After approval, one persistent Codex or Claude Code implementation session owns
 the whole specification: exploration, decomposition, coding, test setup, tests and
 debugging. The coordinator does not split it into independently launched tasks,
-generate test contracts, or replay reported test commands. It resumes the exact
+generate test contracts, or replay arbitrary reported test commands. It can collect
+missing execution evidence for supported checks explicitly named in the approved
+specification, as described below. It resumes the exact
 implementation session when more work is needed; it never selects a global “last”
 session. Interactive Owner keeps its existing task workflow and focused policy.
 
@@ -1286,7 +1291,11 @@ reviews. Use `bin/pr-review` separately when an additional PR review is wanted.
 New implementation turns can hand selected test execution records and scratch logs
 to acceptance synthesis. The controller freezes a versioned evidence bundle with
 provider/tool identities, exact commands, nullable exit status, hashes, byte counts,
-candidate checkpoints and explicit gaps. Only declared records/logs are selected;
+candidate checkpoints and explicit gaps. Codex declarations may omit a canonical
+literal `/bin/bash -c` or `-lc` (or `/bin/sh -c`) launcher; the complete script must
+still match, and the original wrapped command and status are retained. Repeated
+matches require a tool/event identity; no subcommand status is inferred.
+Only declared records/logs are selected;
 large logs stay in artifacts referenced by a compact index. Historical attempts
 are not imported. Under focused policy, synthesis may accept a sufficiently
 supported aggregate result without running that suite again. It must inspect the
@@ -1302,10 +1311,44 @@ reviewers and the approved plan. Altered or missing frozen artifacts stop with
 blockers request `verify_evidence`, observed prerequisite failures request
 `verify_environment`, and verification policy restrictions request `review_policy`;
 mixed or historical uncategorized blockers request `resolve_verification_blockers`.
-The overall result remains `review_incomplete` / `needs_attention`, with concrete
-commands and artifact references. This feature does not independently attest test
-execution, run controller-managed verification or import CI results. See the
-[API evidence contract](api.md) for schema, artifact layout and ingestion limits.
+When verification is the only blocker and cannot be collected automatically, the
+result remains `review_incomplete` / `needs_attention`, with concrete commands and
+artifact references. A
+review with blocking findings enters the bounded repair loop
+even when verification is incomplete. Both findings and verification requirements
+return to the implementer. Incomplete reviews never establish acceptance or count
+as completed verification; further repairs still consume the repair allowance.
+Provider records do not independently attest test execution or import CI results.
+See the [API evidence contract](api.md) for schema and artifact layout.
+
+If acceptance has only evidence or policy blockers, the coordinator can run the
+exact supported checks named as code in the approved specification's testing,
+verification or validation section, or in an explicit Run/Execute instruction.
+Negative and optional instructions are excluded. Each check
+runs directly, without a shell, in a fresh disposable checkout of the candidate.
+The controller records the launch-time candidate tree, command, exit status and
+logs, and checks tracked source before and after execution. These records supply
+candidate provenance without claiming that implementation checkpoints prove which
+bytes were tested. Synthesis receives the new evidence; valid independent reviews
+and the implementation session are reused. Failed checks still require assessment;
+they never produce automatic acceptance.
+
+Automatic collection supports `python[3] -m unittest`, `python[3] -m pytest`,
+`pytest`, and ordinary `make check/test/lint/verify` targets (including suffixes such
+as `check-backend`). A small set of Python/locale environment assignments is
+supported. Shell pipelines, arbitrary scripts, installs and smoke commands are
+not selected. Missing dependencies are reported; nothing is installed and no
+paid providers are launched by the collector. Tests run in the existing host
+or container environment; the disposable checkout is not a security sandbox.
+
+There are at most four commands and 30 minutes total per candidate and explicit
+verification round, with 16 MiB of combined output per command. Existing active
+runtime limits and cancellation still apply. Each command is attempted once;
+failures, timeouts and interrupted executions are retained, not automatically
+retried. A plain resume reuses recorded evidence. After resolving an environment
+problem, `--rerun-review synthesis` explicitly permits a new bounded verification
+round on the same candidate. Source changes naturally require fresh evidence.
+Unsupported or unapproved checks remain concrete verification blockers.
 
 The coordinator retains approval and eligibility checks, isolated worktrees,
 source/Git integrity checks, exact final-tree verification, journaled commits and

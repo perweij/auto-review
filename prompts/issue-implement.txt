@@ -33,7 +33,12 @@ retaining the human-readable checks summary. Each declaration needs the exact
 provider-reported command (including shell wrappers/compound syntax), cwd,
 log_paths relative to this attempt's scratch directory, tested_tree (your claimed
 source tree), summary, and tool_id/event_id (null when unknown). Use available tool
-IDs to disambiguate repeated commands. Save selected test logs in scratch; do not
+IDs to disambiguate repeated commands. For Codex, the controller also recognizes
+a canonical literal /bin/bash -c or -lc (or /bin/sh -c) wrapper around your exact
+script; it retains the original provider command and status. Do not shorten a
+compound command to just its test subcommand. Save selected test logs in scratch; do not
 include unrelated output or credentials. A summary or successful provider exit
 alone is not execution evidence. Do not claim checkpoint equality attests the
-source bytes at command execution time. The controller does not run tests for you.
+source bytes at command execution time. Own testing before returning ready. If acceptance later lacks reusable execution
+evidence, the controller can collect supported checks explicitly named in the
+approved specification; do not rely on this recovery instead of testing.

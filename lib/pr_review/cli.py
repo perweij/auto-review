@@ -65,7 +65,7 @@ def main(argv=None):
         return 1
     if request.get('generate_json_config') is not None:
         try:
-            cli_settings.generate(request['generate_json_config'])
+            cli_settings.generate(request['generate_json_config'], request=request)
             return 0
         except ApiError as exc:
             print('Error: ' + str(exc), file=sys.stderr)

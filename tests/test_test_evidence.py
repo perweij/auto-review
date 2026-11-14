@@ -69,6 +69,31 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn('equal before/after checkpoints do not establish', manifest['limitations'])
         self.assertEqual(reference, evidence.capture(self.record))
 
+    def test_codex_shell_wrapper_preserves_record_and_rejects_ambiguity(self):
+        import shlex
+        command = "set -o pipefail\nmake check-backend 2>&1 | tee 'suite log'"
+        self.record = attempt(self.root, [declaration(command)])
+        wrapped = '/bin/bash -lc ' + shlex.quote(command)
+        event = {'type': 'item.completed', 'item': {'id': 'suite', 'type': 'command_execution',
+                 'command': wrapped, 'exit_code': 0, 'status': 'completed', 'aggregated_output': 'OK'}}
+        (self.root / 'events.jsonl').write_text(json.dumps(event) + '\n')
+        _, manifest = self.capture()
+        self.assertEqual([], manifest['gaps'])
+        record = manifest['commands'][0]
+        self.assertEqual(wrapped, record['command'])
+        self.assertEqual(0, record['exit_code'])
+        self.assertEqual('unknown', record['source_identity'])
+        records, _ = evidence.normalize(self.root, 'codex')
+        for invalid in (wrapped + ' extra', '/bin/bash -lc "' + command + '"',
+                        '/bin/bash -lc ' + shlex.quote(command + '; echo done')):
+            with self.subTest(command=invalid):
+                self.assertIsNone(evidence.match(declaration(command), [{**records[0], 'command': invalid}])[0])
+        self.assertIsNone(evidence.match(declaration(command), [{**records[0], 'provider': 'claude'}])[0])
+        duplicates = [records[0], {**records[0], 'tool_id': 'other', 'command': command}]
+        self.assertEqual('ambiguous recorded command', evidence.match(declaration(command), duplicates)[1])
+        self.assertEqual(records[0], evidence.match(declaration(command, tool_id='suite'), duplicates)[0])
+        self.assertIsNone(evidence.match(declaration('make check-backend'), records)[0])
+
     def test_claude_non_error_without_numeric_status_stays_unknown(self):
         rows = [declaration(), declaration('make check-emacs'), declaration('echo one &&\necho two | tee test.log')]
         self.record = attempt(self.root, rows, provider='claude')

@@ -385,6 +385,10 @@ class IssueAdapter(AcceptanceAdapter):
         self.specification = specification
         # Freeze/verify before any stage identity is computed. The index belongs
         # exclusively to synthesis; independent reviewer inputs stay unchanged.
+        from . import issue_verification
+        issue_verification.recover(session, state, batch)
+        self.controller_references = issue_verification.references(batch)
+        self.controller_index = issue_verification.index(batch)
         self.evidence_references = test_evidence.references(batch)
         self.evidence_index = test_evidence.index(self.evidence_references)
         self.evidence_versioned = any(a.get('test_evidence_version') == test_evidence.VERSION
@@ -415,6 +419,9 @@ class IssueAdapter(AcceptanceAdapter):
         if self.evidence_versioned:
             context['implementation_test_evidence'] = {'format_version': test_evidence.VERSION,
                                                        'bundles': self.evidence_index}
+        if self.controller_index:
+            context['controller_verification'] = {'epoch': self.batch.get('review_reruns', {}).get('synthesis'),
+                                                  'records': self.controller_index}
         if self.history_versioned:
             previous = self.history_input['rounds'][-1]['candidate'] if self.history_input['rounds'] else None
             change = (owner_git.diff(self.session, previous['tree'], self.batch['checkpoint']['tree']) if previous else '').encode()
@@ -426,12 +433,16 @@ class IssueAdapter(AcceptanceAdapter):
 
     def identity(self, run, stage):
         result = super().identity(run, stage)
+        if not review_engine.slot_of(run, stage) and self.controller_references:
+            result['controller_verification'] = self.controller_references
         if not review_engine.slot_of(run, stage) and self.evidence_versioned:
             result['test_evidence'] = self.evidence_references
         return result
 
     def artifacts(self, run, stage):
         result = super().artifacts(run, stage)
+        if not review_engine.slot_of(run, stage) and self.controller_references:
+            result['controller_verification'] = self.controller_references
         if not review_engine.slot_of(run, stage) and self.history_versioned:
             result['review_history_validator'] = 'issue-history/1'
         if not review_engine.slot_of(run, stage) and self.evidence_versioned:
@@ -440,6 +451,10 @@ class IssueAdapter(AcceptanceAdapter):
         return result
 
     def verify_evidence(self):
+        from . import issue_verification
+        if issue_verification.references(self.batch) != self.controller_references:
+            raise ApiError('test_evidence_integrity', 'Controller verification references changed during acceptance.')
+        issue_verification.index(self.batch)
         if test_evidence.references(self.batch) != self.evidence_references:
             raise ApiError('test_evidence_integrity', 'Implementation evidence references changed during acceptance.')
         for reference in self.evidence_references:
@@ -448,7 +463,7 @@ class IssueAdapter(AcceptanceAdapter):
     def render_synthesis(self, run, correction=None):
         self.verify_evidence()
         super().render_synthesis(run, correction)
-        if self.evidence_versioned:
+        if self.evidence_versioned or self.controller_index:
             path = run.path / 'prompts/synthesis-prompt.txt'
             content = path.read_text().replace('List the checks you actually ran in checks, with their outcomes.',
                 'List executed checks with their outcomes and actor attribution in checks.')
@@ -481,6 +496,12 @@ class IssueAdapter(AcceptanceAdapter):
         validate_acceptance(review_history.base_value(value) if self.history_versioned and isinstance(value, dict) else value,
                             keys=self.keys(), exact_outcomes=self.exact_outcomes, cases=self.cases(),
                             tree=run.candidate['tree'], sources=self.sources(run), issue_categories=True)
+        if value.get('assessment') == 'passed':
+            failures = [r for r in self.controller_index if r['candidate']['tree'] == self.batch['checkpoint']['tree']
+                        and r.get('epoch') == self.batch.get('review_reruns', {}).get('synthesis')
+                        and (r['status'] != 'completed' or r['exit_code'] != 0 or r['source_check'] != 'verified')]
+            if failures:
+                raise ApiError('invalid_result', 'Required controller verification did not pass on this candidate.')
         if self.history_versioned:
             review_history.validate(value, self.history_input)
         return value

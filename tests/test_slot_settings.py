@@ -749,10 +749,25 @@ class NamedTerminalSettingsTest(unittest.TestCase):
                                      set(value['model_configs'][value['planning_review']]))
                 generated = self.resolve('--settings-file', str(path), issue=issue)
                 self.assertEqual(self.resolve(issue=issue), generated)
-                preset_path = Path(directory) / 'preset.json'
-                self.assertEqual(0, entry(['--generate-json-config', str(preset_path),
-                                           '--economical', '--codex-1-effort', 'low']))
-                self.assertEqual(value, json.loads(preset_path.read_text()))
+                for preset, choices in settings.PRESETS.items():
+                    preset_path = Path(directory) / (preset + '.json')
+                    with self.subTest(preset=preset):
+                        self.assertEqual(0, entry(['--' + preset, '--generate-json-config',
+                                                  str(preset_path), '--codex-1-effort', 'low']))
+                        preset_value = json.loads(preset_path.read_text())
+                        for name in ('claude-1', 'codex-1', 'codex-2'):
+                            provider = name.split('-')[0]
+                            self.assertEqual(choices[provider + '_model'],
+                                             preset_value['model_configs'][name]['model'])
+                            self.assertEqual('high', preset_value['model_configs'][name]['effort'])
+                        if issue:
+                            for name in ('codex-3', 'codex-4', 'claude-2'):
+                                self.assertEqual(value['model_configs'][name],
+                                                 preset_value['model_configs'][name])
+                        expected = self.resolve('--' + preset, issue=issue)
+                        actual = self.resolve('--settings-file', str(preset_path), issue=issue)
+                        self.assertEqual(expected['_named'], actual['_named'])
+                        self.assertEqual(cli_settings.effective(expected), cli_settings.effective(actual))
                 self.assertEqual(1, entry(['--generate-json-config', str(path)]))
                 self.assertEqual(original, path.read_bytes())
                 self.assertEqual(1, entry(['--generate-json-config', str(path / 'missing')]))

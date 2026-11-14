@@ -178,6 +178,10 @@ def allocate(batch, round_record, feedback):
     used = len(history['cycles'])
     if used >= batch['max_repair_cycles']:
         stop(batch, 'repair_limit', round_record, 'The repair-cycle allowance is exhausted.')
+    if history['cycles'] and history['cycles'][-1]['status'] == 'allocated':
+        # A concrete defect can trigger another repair before verification is
+        # complete. Preserve that distinction without leaving two active cycles.
+        history['cycles'][-1].update(status='incomplete', reviewed_round=round_record['id'])
     cycle = {'id': used + 1, 'origin': round_record['id'], 'blockers':
              [round_record['lineage'][f['id']] for f in round_record.get('projected', round_record['raw'])['findings'] if f['blocking']], 'status': 'allocated'}
     history['cycles'].append(cycle)
@@ -212,15 +216,17 @@ def schema_fields():
 
 def context_identity(session, state, batch):
     """Verify evidence/spec bytes even for an inert, pre-authentication resume."""
-    from . import specification, test_evidence, acceptance
+    from . import specification, test_evidence, acceptance, issue_verification
     document = specification.handoff(session, state)
     refs = test_evidence.references(batch)
     test_evidence.index(refs)
+    issue_verification.index(batch)
     return digest({'tree': batch['checkpoint']['tree'], 'baseline': batch['baseline'],
         'specification': document['locator'], 'feedback': [specification.provenance(i) for i in session.items(state, batch['items'])],
         'trust': [state.get('trusted_snapshot'), state.get('trusted_configuration')],
         'settings': batch.get('review_identity_settings', batch['settings']),
         **({'review_reruns': batch['review_reruns']} if batch.get('review_reruns') else {}),
+        'controller_verification': issue_verification.references(batch),
         'evidence': refs, 'report': batch.get('harness_candidate'),
         'instructions': {k: v for k, v in acceptance._PROMPTS.items() if 'acceptance' in k or k.startswith('synthesis-testing-')},
         'validator': [acceptance.VALIDATOR_VERSION, VERSION]})

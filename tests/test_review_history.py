@@ -533,11 +533,61 @@ class ContinuityEngineTest(ScriptedProviders, unittest.TestCase):
                 self.assertNotEqual(original, history.context_identity(self.session, state, batch))
 
 
+    def test_defects_with_verification_blockers_repair_but_cannot_pass(self):
+        blocker = {'category': 'policy', 'command': 'make check-backend',
+                   'reason': 'No reusable execution record', 'manual_command': 'make check-backend'}
+        def fix(session, state, batch, specification, feedback):
+            report = self.fix(session, state, batch, specification, feedback)
+            if len(self.turns) <= 2:
+                self.blockers()
+            else:
+                self.verdict('incomplete')
+            value = json.loads(self.result_file.read_text())
+            value['verification_blockers'] = [blocker]
+            if len(self.turns) == 1:
+                value['assessment'] = 'incomplete'
+            self.result_file.write_text(json.dumps(value))
+            return report
+        with patch('pr_review.issue_harness.invoke', side_effect=fix), self.assertRaises(ApiError) as caught:
+            self.f.start(issue_harness=True)
+        self.assertEqual('review_incomplete', caught.exception.code)
+        self.assertEqual('review_policy', caught.exception.details['next_action'])
+        self.assertEqual(3, len(self.turns))
+        self.assertTrue(any('Finding F1' in text for text in self.turns[1]))
+        self.assertTrue(any('make check-backend' in text for text in self.turns[1]))
+        batch = self.last()
+        self.assertNotIn('final_tree', batch)
+        self.assertNotIn('harness_evidence_proof', batch)
+        self.assertEqual(['incomplete', 'allocated'], [c['status'] for c in history.ledger(batch)['cycles']])
+        self.assertTrue(all(not r['completed'] for r in history.ledger(batch)['rounds']))
+        self.verdict('passed')
+        with patch('pr_review.issue_harness.invoke', side_effect=AssertionError('implementation')):
+            result = self.f.start(batch=batch['id'])
+        self.assertEqual('ready', result['batches'][-1]['status'])
+        self.assertEqual(2, len(history.ledger(self.last())['cycles']))
+
+    def test_defects_with_verification_blockers_obey_repair_limit(self):
+        def fix(session, state, batch, specification, feedback):
+            report = self.fix(session, state, batch, specification, feedback)
+            self.blockers()
+            value = json.loads(self.result_file.read_text())
+            value['verification_blockers'] = [{'category': 'evidence', 'command': 'test',
+                'reason': 'Missing execution record', 'manual_command': 'test'}]
+            self.result_file.write_text(json.dumps(value))
+            return report
+        with patch('pr_review.issue_harness.invoke', side_effect=fix), self.assertRaises(ApiError) as caught:
+            self.f.start(issue_harness=True, max_repair_cycles=1)
+        self.assertEqual('repair_limit', caught.exception.code)
+        self.assertEqual(2, len(self.turns))
+        self.assertEqual(1, len(history.ledger(self.last())['cycles']))
+        self.assertNotIn('final_tree', self.last())
+
     def test_incomplete_verification_keeps_allocated_cycle_and_resume_reruns_only_synthesis(self):
         self.blockers()
         def fix(session, state, batch, specification, feedback):
             report = self.fix(session, state, batch, specification, feedback)
             if len(self.turns) == 2:
+                self.verdict('incomplete')
                 value = json.loads(self.result_file.read_text())
                 value['verification_blockers'] = [{'category': 'environment', 'command': 'focused-test',
                     'reason': 'daemon unavailable', 'manual_command': 'focused-test on a suitable host'}]

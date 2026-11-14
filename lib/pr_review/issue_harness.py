@@ -15,7 +15,7 @@ from .forge_context import owner_change
 from . import usage
 from .common import ApiError, digest, now
 from .events import emit
-from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit, test_evidence, review_history
+from . import acceptance, specification as canonical, owner_git, owner_providers, owner_commit_plan, owner_auto_commit, test_evidence, review_history, issue_verification
 from .providers import Runtime, environment
 from .processes import run
 from .storage import write_json, atomic_bytes
@@ -421,7 +421,17 @@ def execute(session, state, batch, remote):
             review = acceptance.project_issue(value)
         else:
             result, review = acceptance.review_issue(session, state, batch, approved)
-        if review is None or review_history.enabled(batch) and result.value.get('verification_blockers'):
+        blockers = result.value.get('verification_blockers', [])
+        if (blockers and result.value['assessment'] == 'incomplete'
+                and acceptance.blocking_findings(result.value) and not result.value['questions']):
+            # Partial verification can establish defects, but never acceptance.
+            # Keep the original incomplete artifact/ledger and project repair only.
+            review = acceptance.project_issue({**result.value, 'assessment': 'changes_requested'})
+        repairable = review is not None and review['status'] == 'changes_requested' and review['findings']
+        if review is None or review_history.enabled(batch) and blockers and not repairable:
+            if (review_history.enabled(batch) and blockers and not result.value.get('questions')
+                    and issue_verification.collect(session, state, batch, blockers)):
+                continue  # Same candidate; only synthesis receives the new evidence.
             # An incomplete review writes no proof. The phase stays 'review', so
             # resume reruns only the stages that lack valid evidence.
             raise ApiError('review_incomplete', 'Acceptance review could not finish: ' + result.value['summary'],
@@ -441,8 +451,9 @@ def execute(session, state, batch, remote):
             if record['disputes'] and record['completed'] and not (adjudication_only or saved_decision or saved_stop):
                 value = acceptance.adjudicate(session, state, batch, approved, record)
                 review = acceptance.project_issue(value)
-        if test_evidence.references(batch):
-            batch['harness_evidence_proof'] = {'tree': batch['checkpoint']['tree'], 'bundles': test_evidence.references(batch)}
+        if not blockers and (test_evidence.references(batch) or issue_verification.references(batch)):
+            batch['harness_evidence_proof'] = {'tree': batch['checkpoint']['tree'], 'bundles': test_evidence.references(batch),
+                                               'controller_verification': issue_verification.references(batch)}
         batch['harness_review'] = review
         batch['harness_review_tree'] = batch['checkpoint']['tree']
         if review['status'] == 'needs_input':
@@ -469,8 +480,11 @@ def execute(session, state, batch, remote):
                 batch['harness_counted_rejection'] = round_id
             if batch['harness_repeated_rejection'] >= 3:
                 raise ApiError('automation_failed', 'The same unchanged candidate was repeatedly rejected.', summary='; '.join(review['findings']))
-            # Only blocking findings return to the implementation session.
-            feedback = review['findings'] or [review['summary']]
+            # Repair concrete findings while retaining outstanding verification.
+            feedback = list(review['findings']) or [review['summary']]
+            if blockers:
+                feedback += ['Verification still required (do not claim acceptance until resolved): '
+                             + json.dumps(blocker, sort_keys=True) for blocker in blockers]
             implementation_feedback = feedback
             if review_history.enabled(batch):
                 record = next(r for r in review_history.ledger(batch)['rounds'] if r['id'] == batch['review_round'])

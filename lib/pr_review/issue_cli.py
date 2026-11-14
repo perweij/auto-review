@@ -27,7 +27,7 @@ def parser():
     result.add_argument('--rerun-planning', action='append', choices=('draft', 'review', 'synthesis'), default=argparse.SUPPRESS,
                         help='regenerate a planning stage and its dependents before implementation; repeat for multiple stages')
     result.add_argument('--rerun-review', action='append', choices=('reviewer-1', 'reviewer-2', 'synthesis'),
-                        default=argparse.SUPPRESS, help='explicitly regenerate this saved review stage before committing; repeat for multiple stages')
+                        default=argparse.SUPPRESS, help='regenerate this saved review stage before committing; synthesis also permits a new bounded verification attempt; repeat for multiple stages')
     result.add_argument('--adopt', action='store_true', help='adopt inspected partial Owner workspace changes and reverify')
     recovery = result.add_mutually_exclusive_group()
     recovery.add_argument('--inspect-writes', action='store_true', help='show saved comment/PR intents and fresh read-back; do not send')
@@ -55,7 +55,7 @@ def main(argv=None):
         return 1
     if args.get('generate_json_config') is not None:
         try:
-            cli_settings.generate(args['generate_json_config'], issue=True)
+            cli_settings.generate(args['generate_json_config'], issue=True, request=args)
             return 0
         except ApiError as exc:
             print('Error: ' + str(exc), file=sys.stderr)

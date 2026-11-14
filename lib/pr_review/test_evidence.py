@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import stat
 
 from .common import ApiError
@@ -212,8 +213,23 @@ def normalize(directory, provider):
     return records, gaps
 
 
+def command_matches(declared, record):
+    if record['command'] == declared:
+        return True
+    # Codex records the launcher as well as the submitted script. Recognize only
+    # a literal, canonically quoted whole script, never shell-equivalent commands,
+    # substrings, extra arguments or expanded double-quoted expressions.
+    if record['provider'] != 'codex':
+        return False
+    return record['command'] in {
+        f'{shell} {flag} {shlex.quote(declared)}'
+        for shell, flags in (('/bin/bash', ('-c', '-lc')), ('/bin/sh', ('-c',)))
+        for flag in flags
+    }
+
+
 def match(declaration, records):
-    matches = [r for r in records if r['command'] == declaration['command']
+    matches = [r for r in records if command_matches(declaration['command'], r)
                and (not declaration.get('tool_id') or r['tool_id'] == declaration['tool_id'])
                and (not declaration.get('event_id') or declaration['event_id'] in r['event_ids'])]
     if len(matches) != 1:
@@ -383,11 +399,16 @@ def index(references):
 def proof_current(batch):
     proof = batch.get('harness_evidence_proof')
     versioned = any(a.get('test_evidence_version') == VERSION for a in batch.get('attempts', []))
-    if not versioned:
+    from . import issue_verification
+    controller = issue_verification.references(batch)
+    if not versioned and not controller:
         return True
     if not isinstance(proof, dict) or proof.get('tree') != batch.get('final_tree') or proof.get('bundles') != references(batch):
         return False
+    if proof.get('controller_verification', []) != controller:
+        return False
     try:
+        issue_verification.index(batch)
         for reference in proof['bundles']:
             verify(reference)
     except ApiError:
