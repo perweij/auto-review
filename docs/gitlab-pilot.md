@@ -42,3 +42,19 @@ Offset pagination detects duplicate records but cannot establish an atomic snaps
 while discussions are concurrently deleted or edited. Collection is complete with
 respect to the pages returned by the API; it is not a consistency guarantee across
 concurrent remote mutations.
+
+## Controlled smoke evidence — 2026-11-14
+
+The user supplied a private GitLab test project and authorized fixture creation.
+The [functional smoke suite](live-forge-smoke-tests.md) exercised native MR
+metadata, checkout SHA verification, discussion collection, review and completed
+result reuse. Both scripted providers and real economical models passed review
+and resume. An additional scripted check pushed a second revision and verified
+that a positioned discussion became outdated. Application-operation tracing found
+no GitLab mutations; fixture setup uses separate native API operations. Unsupported
+publication, Owner and issue commands were rejected.
+
+Real-model evidence: `/tmp/auto-review-forge-smoke-93n88ef4/report.md`.
+Extended scripted evidence: `/tmp/auto-review-forge-smoke-7t0_zytw/report.md`.
+No fork MR or actual pipeline execution was tested. This evidence does not extend
+the pilot's supported capabilities to GitLab writes or full Emacs integration.
