@@ -91,12 +91,17 @@ is not implicitly shared. Saved processing, a complete file, or explicit
 `--processing` wins. Two same-provider reviewers do not change other roles.
 Matching single-reviewer and processing triplets retain the direct optimization.
 
-`--economical` selects Haiku and Terra with Terra processing; `--expensive`
-selects Fable and Astra with Astra processing, all at high effort. These mutually
-exclusive presets also apply to newly introduced reviewer and processing names.
-New names used only for issue planning, critique, planning synthesis or
-implementation retain built-in provider defaults; explicitly shared names use the same choice in every referring role.
-Saved and file-defined choices take precedence over presets.
+`--economical` selects Haiku and Terra with Terra processing, all at high effort.
+For terminal `fix-issue`, it also supplies Terra/high planning and implementation,
+Haiku/high planning critique, and synthesis following the planner. Every newly
+introduced issue-role name receives its provider's economical defaults.
+`--expensive` selects Fable/high and Astra/high with Astra/high processing; it
+applies to reviewer and processing names, while independent issue-only names
+retain ordinary provider defaults. Explicitly shared names use the same choice
+in every referring role under either preset. Saved settings, imported Owner
+choices, complete files and explicit flags retain precedence. Nonterminal API
+`issue-run`, API `settings` and Emacs presets keep their existing behavior;
+the broader economical coverage applies only to terminal issue workflows.
 
 Resolution is **defaults → preset → saved settings → complete file → explicit
 CLI flags**. Flags win regardless of argument order. Omitted CLI fields retain
@@ -1129,10 +1134,12 @@ explicit replanning controls.
 Issue CLI roles share the named configuration namespace. `--planning NAME`
 selects issue assessment and subsequent planning turns; `--fix NAME` selects the
 implementation harness; `--reviewers` and `--processing` select acceptance review.
-Defaults use separate `codex-3` and `codex-4` Sol/high configurations for planning
-and implementation, independent of reviewer/processing presets. New workflows
-review the draft with `claude-2` Opus/high, then have the planner synthesize the
-final assessment. `--planning-review none` selects a single assessment.
+Ordinary defaults use separate `codex-3` and `codex-4` Sol/high configurations for
+planning and implementation. New workflows review the draft with `claude-2`
+Opus/high, then have the planner synthesize the final assessment. Terminal
+`--economical` supplies Terra/high for planning and implementation and Haiku/high
+for critique; synthesis follows the planner. `--expensive` leaves these independent
+issue-role defaults unchanged. `--planning-review none` selects a single assessment.
 
 ```sh
 fix-issue -i 42 \
@@ -1147,7 +1154,10 @@ Here planning, processing, and the first reviewer share Sol/high; implementation
 uses Terra/medium. Fully Claude-only operation requires assigning planning,
 implementation, acceptance review and processing to Claude names; planning review
 already defaults to Claude and planning synthesis follows the planner. Unused interactive Owner task-check settings do not activate
-providers. Attached Owner settings are resolved before planning begins.
+providers. Existing Owner settings are resolved before planning begins, even for
+a new issue workflow: fixing, ordered acceptance reviewers, processing and synthesis
+testing policy retain their imported values. Planning and critique still receive
+economical defaults when requested, with synthesis following planning.
 
 `--settings-file` accepts the complete named issue format described above, not
 Owner-format files. Those remain supported by the interactive Owner interface.
@@ -1160,7 +1170,10 @@ published plans still run. Provider choices are validated before the next model 
 To change models, effort or provider on a stopped issue job, edit its settings file
 or pass the usual named options and rerun the same command. No replacement plan or
 extra approval is needed solely for that change. Omitted choices retain their saved
-values; the startup output shows changes before model work begins.
+values; a preset alone never changes a resumed workflow's saved models, approvals
+or completed evidence. Selecting a previously undefined name with `--economical`
+uses that provider's economical defaults for future work. The startup output shows
+the effective choices before model work begins.
 
 For example, if implementation uses `codex-4`, resume it more economically with:
 
@@ -1417,8 +1430,10 @@ is a separate model call included in usage reporting.
 
 ### Reviewed issue planning
 
-New issue workflows draft a plan with `codex-3` (Sol/high), critique it with
-`claude-2` (Opus/high), and return to the planning model for synthesis. The final
+With ordinary defaults, new issue workflows draft a plan with `codex-3` (Sol/high),
+critique it with `claude-2` (Opus/high), and return to the planning model for synthesis.
+Terminal `--economical` uses Terra/high and Haiku/high for those independent names.
+The final
 assessment is the only result published for approval. Technical review points
 are reconciled automatically; consequential unresolved product choices remain
 questions for the user. Critiques and their dispositions are retained locally.

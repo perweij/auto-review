@@ -53,6 +53,28 @@ class ResumeSettingsTest(unittest.TestCase):
         self.assertEqual(1, len(data['batches'][0]['settings_transitions']))
         self.assertEqual(old['assessment_configuration'], after['assessment_configuration'])
 
+    def test_preset_only_resume_keeps_approval_owner_choices_and_completed_evidence(self):
+        with patch('pr_review.issues.now', return_value='2026-11-14T12:00:00+00:00'):
+            before = self.pause()
+        old = self.state()
+        with patch('pr_review.issues.now', return_value='2026-11-14T12:00:02+00:00'):
+            result = dispatch(self.request('--economical'))
+        self.assertEqual('ready', result['outcome'], result)
+        after = self.state()
+        self.assertEqual(old['configuration'], after['configuration'])
+        self.assertNotEqual(old['approval']['at'], after['approval']['at'])
+        self.assertEqual({k: v for k, v in old['approval'].items() if k != 'at'},
+                         {k: v for k, v in after['approval'].items() if k != 'at'})
+        self.assertEqual(old['assessment_configuration'], after['assessment_configuration'])
+        self.assertEqual([], after.get('settings_transitions', []))
+        owner = owner_state.OwnerSession({'session': self.t.path})
+        completed = owner.load()
+        self.assertEqual(before['batches'][0]['settings'], completed['batches'][0]['settings'])
+        self.assertEqual(before['batches'][0]['attempts'][0], completed['batches'][0]['attempts'][0])
+        self.assertEqual('noop', dispatch(self.request('--economical'))['outcome'])
+        self.assertEqual(completed['batches'], owner.load()['batches'])
+        self.assertEqual(1, len(self.t.assessments))
+
     def test_provider_change_updates_effective_execution_and_quota_provider_scope(self):
         self.pause()
         result = dispatch(self.request('--fix', 'claude-7', '--claude-7-model', 'sonnet'))

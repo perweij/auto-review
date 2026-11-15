@@ -584,12 +584,15 @@ class NamedTerminalSettingsTest(unittest.TestCase):
         self.assertEqual('codex', self.resolve('--reviewers', 'claude-1', saved=explicit)['processing']['provider'])
         self.assertEqual('codex', self.resolve('--reviewers', 'claude-1,claude-2')['processing']['provider'])
         for preset in ('economical', 'expensive'):
+            values = settings.ECONOMICAL if preset == 'economical' else settings.DEFAULTS
             result = self.resolve('--' + preset, issue=True)
-            self.assertEqual(settings.DEFAULTS['codex_model'], result['planning']['model'])
-            self.assertEqual(settings.DEFAULTS['codex_model'], result['fix']['model'])
+            self.assertEqual(values['codex_model'], result['planning']['model'])
+            self.assertEqual(values['codex_model'], result['fix']['model'])
+            self.assertEqual(values['claude_model'], result['planning_review']['model'])
+            self.assertIsNone(result['planning_synthesis'])
             custom = self.resolve('--' + preset, '--planning', 'codex-33', '--fix', 'codex-44', issue=True)
-            self.assertEqual(settings.DEFAULTS['codex_model'], custom['planning']['model'])
-            self.assertEqual(settings.DEFAULTS['codex_model'], custom['fix']['model'])
+            self.assertEqual(values['codex_model'], custom['planning']['model'])
+            self.assertEqual(values['codex_model'], custom['fix']['model'])
             resumed = self.resolve('--' + preset, saved=explicit)
             self.assertEqual(explicit, resumed)
 
@@ -618,15 +621,66 @@ class NamedTerminalSettingsTest(unittest.TestCase):
                                           'effort': values[provider + '_effort']}, result['processing'])
                         self.assertNotEqual(result['_named']['processing'], result['_named']['reviewers'][0])
 
-    def test_presets_leave_new_planning_and_fix_only_names_at_defaults(self):
+    def test_presets_for_new_issue_only_names(self):
         for preset in settings.PRESETS:
+            values = settings.ECONOMICAL if preset == 'economical' else settings.DEFAULTS
             for provider in ('claude', 'codex'):
                 with self.subTest(preset=preset, provider=provider):
                     result = self.resolve('--' + preset, '--planning', f'{provider}-33',
-                                          '--fix', f'{provider}-44', issue=True)
-                    for role in ('planning', 'fix'):
-                        self.assertEqual({'provider': provider, 'model': settings.DEFAULTS[provider + '_model'],
-                                          'effort': settings.DEFAULTS[provider + '_effort']}, result[role])
+                                          '--fix', f'{provider}-44', '--planning-review', f'{provider}-55',
+                                          '--planning-synthesis', f'{provider}-66', issue=True)
+                    for role in ('planning', 'fix', 'planning_review', 'planning_synthesis'):
+                        self.assertEqual({'provider': provider, 'model': values[provider + '_model'],
+                                          'effort': values[provider + '_effort']}, result[role])
+
+    def test_economical_partial_overrides_independence_and_sharing(self):
+        for provider in ('claude', 'codex'):
+            for role in ('planning', 'fix', 'planning-review', 'planning-synthesis'):
+                for name in (provider + '-9', 'claude-2' if provider == 'claude' else 'codex-3'):
+                    with self.subTest(provider=provider, role=role, name=name):
+                        for field, override in (('model', 'explicit'), ('effort', 'medium')):
+                            result = self.resolve('--economical', '--' + role, name,
+                                                  '--' + name + '-' + field, override, issue=True)
+                            choice = result[role.replace('-', '_')]
+                            expected = {'provider': provider, 'model': settings.ECONOMICAL[provider + '_model'], 'effort': 'high'}
+                            self.assertEqual({**expected, field: override}, choice)
+        default = self.resolve('--economical', issue=True)
+        named = default['_named']
+        self.assertEqual(6, len(named['model_configs']))
+        changed = self.resolve('--economical', '--codex-3-effort', 'medium', issue=True)
+        for role in ('processing', 'fix', 'planning_review'):
+            self.assertEqual(default[role], changed[role])
+        self.assertEqual(default['reviewer_slots'], changed['reviewer_slots'])
+        shared = self.resolve('--economical', '--planning', 'codex-1', '--fix', 'codex-1',
+                              '--planning-review', 'claude-1', issue=True)
+        # The documented sharing recipe stays within the smoke allowlist, with
+        # synthesis inheriting the effective planner; no paid execution needed.
+        self.assertIsNone(shared['planning_synthesis'])
+        choices = [*shared['reviewer_slots'], *(shared[r] for r in ('processing', 'planning', 'fix', 'planning_review'))]
+        self.assertEqual({('claude', 'haiku', 'high'), ('codex', 'gpt-6.1-terra', 'high')},
+                         {(c['provider'], c['model'], c['effort']) for c in choices})
+        changed = self.resolve('--economical', '--codex-1-effort', 'medium', saved=shared, issue=True)
+        for role in ('planning', 'fix'):
+            self.assertEqual(changed['reviewer_slots'][1]['effort'], changed[role]['effort'])
+        self.assertEqual('high', changed['processing']['effort'])
+
+    def test_economical_resume_retains_issue_choices_and_only_defaults_new_names(self):
+        from pr_review import cli_settings
+        legacy = settings.validate({'processing': {'provider': 'claude', 'model': 'sonnet', 'effort': 'low'}})
+        named = self.resolve('--planning-review', 'none', '--planning-synthesis', 'claude-8',
+                             '--claude-8-effort', 'low', issue=True)
+        for saved in (self.resolve(issue=True), named, legacy):
+            original = self.resolve(saved=saved, issue=True)
+            for flags in ((), ('--economical',)):
+                self.assertEqual(cli_settings.effective(original),
+                                 cli_settings.effective(self.resolve(*flags, saved=saved, issue=True)))
+            changed = self.resolve('--economical', '--fix', 'codex-99', saved=saved, issue=True)
+            self.assertEqual({'provider': 'codex', 'model': 'gpt-6.1-terra', 'effort': 'high'}, changed['fix'])
+            for role in ('reviewer_slots', 'processing', 'planning', 'planning_review', 'planning_synthesis'):
+                self.assertEqual(original[role], changed[role])
+        same = self.resolve('--economical', '--planning-synthesis', 'same', saved=named, issue=True)
+        self.assertIsNone(same['planning_synthesis'])
+        self.assertIsNone(same['planning_review'])
 
     def test_new_shared_names_use_review_presets_for_every_referencing_role(self):
         for preset, values in settings.PRESETS.items():
@@ -673,6 +727,10 @@ class NamedTerminalSettingsTest(unittest.TestCase):
                             self.assertEqual(['file-reviewer', 'explicit'], [c['model'] for c in result['reviewer_slots']])
                             self.assertEqual('low', result['reviewer_slots'][0]['effort'])
                             self.assertEqual('file-processor', result['processing']['model'])
+                            if issue:
+                                for role in ('planning', 'fix', 'planning_review', 'planning_synthesis'):
+                                    self.assertEqual(value['model_configs'][value[role]] if value[role] else None,
+                                                     result[role])
 
     def test_legacy_fix_retains_processing_while_fresh_fix_uses_its_own_default(self):
         fresh = self.resolve('--reviewers', 'claude-1', '--processing', 'claude-1', issue=True)
@@ -747,6 +805,11 @@ class NamedTerminalSettingsTest(unittest.TestCase):
                     self.assertIsNone(value['planning_synthesis'])
                     self.assertEqual({'provider', 'model', 'effort'},
                                      set(value['model_configs'][value['planning_review']]))
+                    for role in ('planning', 'fix'):
+                        self.assertEqual({'provider': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'},
+                                         value['model_configs'][value[role]])
+                    self.assertEqual({'provider': 'claude', 'model': 'opus', 'effort': 'high'},
+                                     value['model_configs'][value['planning_review']])
                 generated = self.resolve('--settings-file', str(path), issue=issue)
                 self.assertEqual(self.resolve(issue=issue), generated)
                 preset_path = Path(directory) / 'preset.json'
@@ -794,6 +857,10 @@ class NamedTerminalSettingsTest(unittest.TestCase):
         help_text = ' '.join(parser().format_help().split())
         self.assertIn('planning_review=claude-2', help_text)
         self.assertIn('planning_synthesis=same as planning', help_text)
+        self.assertIn('Haiku/high or Terra/high defaults for every terminal issue role and new name', help_text)
+        self.assertIn('saved/Owner settings, files and flags take precedence', help_text)
+        self.assertIn('Fable/high or Astra/high reviewer/processing defaults', help_text)
+        self.assertIn('independent issue-only roles keep ordinary defaults', help_text)
 
     def test_complete_validation_and_final_reference_validation(self):
         import copy
@@ -846,7 +913,7 @@ class NamedTerminalSettingsTest(unittest.TestCase):
             del value['fix']
             path.write_text(json.dumps(value))
             with self.assertRaisesRegex(ApiError, 'Missing fields: fix'):
-                self.resolve('--settings-file', str(path), '--fix', 'codex-4', saved=saved, issue=True)
+                self.resolve('--economical', '--settings-file', str(path), '--fix', 'codex-4', saved=saved, issue=True)
             path.write_text('{')
             with self.assertRaisesRegex(ApiError, 'Cannot read settings file'):
                 self.resolve('--settings-file', str(path))
