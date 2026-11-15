@@ -744,3 +744,32 @@ def automatic_cli(run, forge):
         raise Failure('Repeated automatic CLI duplicated publication')
     run.data['automatic'] = result
     run.save()
+
+
+def owner_report(run, forge):
+    fixture = forge.fixture()
+    marker = 'Owner execution report smoke: fix total(price, quantity) to multiply its arguments. Add a focused unittest for total(3, 4) == 12. No other changes.'
+    forge.api('/issues/%s/comments' % fixture['number'], 'POST', {'body': marker})
+    choice = dict(provider='codex', model='gpt-6.1-terra', effort='high')
+    view = run.api(dict(command='owner-open', cwd=str(forge.cwd), repository=forge.repo, pr=fixture['number']), forge.cwd)
+    view = run.api(dict(command='owner-refresh', session=view['session'], revision=view['revision']), forge.cwd)
+    item = next(i['key'] for i in view['feedback'] if marker in json.dumps(i))
+    settings = dict(fix=choice, review=choice, verification='focused')
+    view = run.api(dict(command='owner-mutate', operation='settings', settings=settings,
+                        session=view['session'], revision=view['revision']), forge.cwd)
+    view = run.api(dict(command='owner-fix', items=[item], session=view['session'], revision=view['revision']), forge.cwd, timeout=1200)
+    batch = view['batches'][-1]
+    report = batch.get('execution_report', {})
+    if not report.get('report_path') or not Path(report['report_path']).is_file():
+        raise Failure('Owner did not automatically save its report')
+    data = json.loads(Path(report['report_data_path']).read_text())
+    if not any(r.get('role') == 'implementation' for r in data['activities']):
+        raise Failure('Owner report omitted implementation')
+    ctx = dict(session=view['session'], batch=batch['id'])
+    result = run.api(dict(command='owner-publish-report', revision=view['revision'], **ctx), forge.cwd)
+    view = run.api(dict(command='owner-read', session=view['session']), forge.cwd)
+    repeated = run.api(dict(command='owner-publish-report', revision=view['revision'], **ctx), forge.cwd)
+    if result['report_url'] != repeated['report_url']:
+        raise Failure('Repeated Owner report publication created a duplicate')
+    run.data['owner_report'] = result
+    run.save()

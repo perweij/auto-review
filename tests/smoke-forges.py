@@ -11,7 +11,7 @@ import time
 
 from forge_smoke.runner import Run, Failure
 from forge_smoke.forge import Forge
-from forge_smoke.scenarios import publication, issue, owner, integrity, publication_recovery, edited_preview, stale_head, foreign_issue_commit, issue_plan_recovery, interrupt_and_lock, approval_changes, changed_plan_receipt, emacs_checkouts, owner_reply_recovery, gitlab_advance, accounting, automatic_cli
+from forge_smoke.scenarios import owner_report, publication, issue, owner, integrity, publication_recovery, edited_preview, stale_head, foreign_issue_commit, issue_plan_recovery, interrupt_and_lock, approval_changes, changed_plan_receipt, emacs_checkouts, owner_reply_recovery, gitlab_advance, accounting, automatic_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,7 +24,7 @@ def parser():
     group = result.add_mutually_exclusive_group()
     group.add_argument('--resume', type=Path)
     group.add_argument('--cleanup', type=Path)
-    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery'))
+    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report'))
     return result
 
 
@@ -180,6 +180,10 @@ def main():
                 passed = run.scenario('plan-receipt-' + mode, lambda mode=mode: changed_plan_receipt(run, forges[0], mode)) and passed
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
+        if options.scenario == 'owner-report':
+            passed = run.scenario('owner-report', lambda: owner_report(run, forges[0]))
+            passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
+            return 0 if passed else 1
         if options.scenario == 'issue':
             passed = run.scenario('github-issue', lambda: issue(run, forges[0]))
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
@@ -190,6 +194,7 @@ def main():
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
         if options.suite == 'live':
+            passed = run.scenario('owner-report', lambda: owner_report(run, forges[0])) and passed
             passed = run.scenario('github-issue', lambda: issue(run, forges[0])) and passed
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
@@ -203,6 +208,7 @@ def main():
             passed = run.scenario('gitlab-advance', lambda: gitlab_advance(run, forges[1])) and passed
             passed = run.scenario('owner-reply-recovery', lambda: owner_reply_recovery(run, github)) and passed
             passed = run.scenario('edited-preview', lambda: edited_preview(run, github)) and passed
+        passed = run.scenario('owner-report', lambda: owner_report(run, github)) and passed
         passed = run.scenario('stale-head', lambda: stale_head(run, github)) and passed
         if options.suite == 'extended':
             passed = run.scenario('interruption-and-concurrency', lambda: interrupt_and_lock(run, github)) and passed

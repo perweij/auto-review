@@ -69,6 +69,9 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
 
     # ---- the real engine is the final review -----------------------------------------------------------
     def test_task_checks_stay_single_lightweight_calls_and_final_verification_uses_the_engine(self):
+        self.use(final_review={'reviewer_slots': [{'id': 'reviewer-1', **self.SYNTHESIS},
+                                                  {'id': 'reviewer-2', **self.SYNTHESIS}],
+                               'synthesis': dict(self.SYNTHESIS), 'synthesis_tests': 'focused'})
         view = self.f.start(auto_commit=True)
         batch = view['batches'][-1]
         self.sync()
@@ -83,6 +86,14 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertTrue(owner_contracts.current(batch))
         self.assertEqual(['p1-config', 'p1-pipeline'], [t['id'] for t in batch['tasks']])
         self.assertEqual(2, len(batch['commit_progress']['commits']))
+        from pr_review.owner_reports import root
+        trace = json.loads((root(self.session, batch) / 'execution-trace.json').read_text())
+        roles = {stage['id']: stage['role'] for stage in trace['stages']}
+        acceptance = next(stage for stage in trace['stages'] if stage['role'] == 'acceptance')
+        self.assertIn('reviewer-1', [roles[key] for key in acceptance['inputs']])
+        self.assertIn('reviewer-2', [roles[key] for key in acceptance['inputs']])
+        self.assertEqual(2, sum(stage['role'] == 'task-check' for stage in trace['stages']))
+
         attempt = next(a for a in batch['attempts'] if a.get('kind') == 'review_engine')
         self.assertEqual(('final_review', 'complete'), (attempt['role'], attempt['status']))
         # The approved plan reached the engine as a context file.
@@ -158,6 +169,12 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual(2, self.synthesis_runs())                       # the original and the repaired candidate
         self.assertNotIn('final_tree', batch)
         self.assertEqual('changes_requested', batch['review']['assessment'])
+        from pr_review.owner_reports import root
+        trace = json.loads((root(self.session, batch) / 'execution-trace.json').read_text())
+        stages = {stage['id']: stage for stage in trace['stages']}
+        repair = next(stage for stage in trace['stages'] if stage['role'] == 'control/repair_allocated')
+        self.assertEqual('changes_requested', stages[repair['inputs'][0]]['outcome'])
+
 
     def test_a_repair_that_passes_makes_the_new_candidate_current(self):
         self.verdict('changes_requested', findings=[finding('F1', blocking=True, source='new')])

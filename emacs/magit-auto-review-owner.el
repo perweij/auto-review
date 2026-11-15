@@ -69,6 +69,7 @@
                        ("X" . magit-auto-review-owner-reopen)
                        ("K" . magit-auto-review-owner-cancel)
                        ("T" . magit-auto-review-owner-trust)
+                       ("E" . magit-auto-review-owner-report-menu)
                        ("L" . magit-auto-review-owner-log)
                        ("b" . magit-auto-review-owner-browse)
                        ("B" . magit-auto-review-pull-requests)
@@ -338,6 +339,30 @@
      ((not replies) "Commit linked locally. Push with C-u m, then a checks GitHub and creates staged replies; P previews publication.")
      (t "Replies are published. h marks the feedback handled locally; thread resolution remains a separate action."))))
 
+(defun magit-auto-review-owner-report ()
+  "Open the selected batch's local execution report without running models."
+  (interactive)
+  (let* ((batch (magit-auto-review-owner--batch-id))
+         (result (magit-auto-review--call
+                  (magit-auto-review-owner--request "owner-report" `(batch . ,batch)))))
+    (magit-auto-review-owner-refresh)
+    (find-file (alist-get 'report_path result))))
+
+(defun magit-auto-review-owner-publish-report ()
+  "Explicitly publish the selected stopped batch's execution snapshot."
+  (interactive)
+  (let* ((batch (magit-auto-review-owner--batch-id))
+         (result (magit-auto-review--call
+                  (magit-auto-review-owner--request "owner-publish-report" `(batch . ,batch)))))
+    (magit-auto-review-owner-refresh)
+    (message "Execution report: %s" (alist-get 'report_url result))))
+
+(transient-define-prefix magit-auto-review-owner-report-menu ()
+  "Execution reports for the selected fixing batch."
+  [["Execution report"
+    ("o" "Open local report" magit-auto-review-owner-report)
+    ("p" "Publish snapshot to PR" magit-auto-review-owner-publish-report)]])
+
 (defun magit-auto-review-owner--insert-batch (batch)
   "Insert a concise result for BATCH with folded verification and history."
   (magit-insert-section section (owner-batch (alist-get 'id batch) t)
@@ -352,6 +377,13 @@
           'magit-auto-review-owner-item 'magit-auto-review-owner-attention))
     (unless (alist-get 'superseded_by batch)
       (insert (if (magit-auto-review--true-p (alist-get 'auto_commit batch)) "Auto commit" "Manual commit") " · C-u r chooses completion mode\n"))
+    (when (alist-get 'execution_report batch)
+      (insert-text-button "Execution report"
+                          'follow-link t
+                          'action (lambda (_button)
+                                    (find-file (alist-get 'report_path (alist-get 'execution_report batch)))))
+      (insert " · E opens report actions"
+              (if (alist-get 'report_url (alist-get 'execution_report batch)) " · Published snapshot" " · Local") "\n"))
     (insert (magit-auto-review-owner--next-step batch) "\n")
     (when (equal (alist-get 'status batch) "ready")
       (let* ((plan (alist-get 'commit_plan batch))
@@ -1277,6 +1309,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
   [:class transient-column :setup-children magit-auto-review-owner--context-help]
   [["Selected item" :class transient-column :setup-children magit-auto-review-owner--context-actions]
    ["Navigation"
+    ("E" "Execution report" magit-auto-review-owner-report-menu)
     ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
     ("+" "All commands…" magit-auto-review-owner-all-menu)
@@ -1310,6 +1343,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
     ("P" "Preview/publish staged" magit-auto-review-owner-publish)
     ("O" "Recover uncertain publication" magit-auto-review-owner-recover)]
    ["Navigation"
+    ("E" "Execution report" magit-auto-review-owner-report-menu)
     ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
     ("G" "Fetch GitHub" magit-auto-review-owner-fetch)

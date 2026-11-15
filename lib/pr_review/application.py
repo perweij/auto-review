@@ -12,7 +12,7 @@ def dispatch(request):
     forge = request_forge(request)
     operation = request.get("command")
     capability = ("issues" if operation in ("issue-run", "issue-recover") else
-                  "owner" if operation in ("owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
+                  "owner" if operation in ("owner-publish-report", "owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
                   "publication" if operation in ("publish", "prepare", "resolve", "automatic-review") else "review")
     if forge == 'gitlab' and (str(operation).startswith(('owner-', 'issue-')) or operation in ('toolkit', 'thread-state', 'followup', 'pull-requests')):
         raise ApiError('unsupported_operation', 'This operation is not supported by the GitLab review pilot.')

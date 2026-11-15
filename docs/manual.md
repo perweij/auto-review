@@ -1725,3 +1725,20 @@ normal resume reconciles the frozen report payload.
 
 The initial feature supports issue workflows. Standalone Owner and PR-review
 sessions, tooltips and expansion of GitLab's issue-workflow pilot are excluded.
+
+### Owner execution reports
+
+New standalone fixing and verification batches automatically record execution
+traces and local Markdown reports across resumes. Reports include model settings,
+measured time, reported tokens and stage outcomes; time waiting for user input is
+excluded. A report describes local execution, not proof that changes were pushed
+or replies published.
+
+In Owner mode, `E` opens execution report actions for the batch at point (otherwise
+the latest batch): `o` opens the local report and `p` publishes a snapshot explicitly.
+Paused batches can be shared for diagnosis. The CLI equivalents are
+`bin/pr-review owner PR report` and `bin/pr-review owner PR publish-report`, with
+optional `--batch ID`. Repeating the same snapshot publication is idempotent;
+subsequent execution can produce a new comment. Unknown write outcomes are
+recovered before further publication. Historical untraced batches remain runnable
+but have no execution report. GitLab Owner execution is outside the current pilot.

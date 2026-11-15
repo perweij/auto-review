@@ -5,7 +5,7 @@ import uuid
 
 from .forge_context import owner_change
 
-from . import usage
+from . import usage, owner_reports, session_trace
 from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
@@ -153,7 +153,7 @@ def run_task(session, state, batch, task):
         data = context(session, state, batch, task["items"], task["before"]["tree"])
         data["task"] = {k: task[k] for k in ("id", "rationale", "expected")}
         data["verification_cases"] = owner_contracts.task_cases(task)
-        task["implementation"] = validate_result(models.invoke(session, state, batch, "fix", data), task["items"])
+        task["implementation"] = validate_result(owner_reports.invoke(session, state, batch, "fix", data), task["items"])
         owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
         if not implementation_ready(session, state, batch, task):
             return False
@@ -166,7 +166,7 @@ def run_task(session, state, batch, task):
         data["implementation_report"] = task["implementation"]
         if task.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = task["review"]
-        review = saved_review if saved_review is not None else validate_result(models.invoke(session, state, batch, "review", data), task["items"])
+        review = saved_review if saved_review is not None else validate_result(owner_reports.invoke(session, state, batch, "review", data), task["items"])
         saved_review = None
         owner_contracts.bind(review, owner_contracts.task_cases(task), batch["checkpoint"]["tree"])
         task["review"] = review
@@ -178,12 +178,13 @@ def run_task(session, state, batch, task):
             return True
         can_repair = not batch.get('verify_only') and repairable(review)
         if can_repair and task['repairs'] < 1:
+            task['trace_result'] = session_trace.decision('repair_allocated', sources=[task.get('trace_result')], key=f"{batch['id']}:{task['id']}:{task['repairs']}")
             task["repairs"] += 1  # Persist before launching; crashes do not grant extra repairs.
             task["status"] = "repairing"
             session.save(state)
             data["review_findings"] = review
             data["verification_cases"] = owner_contracts.task_cases(task)
-            task["implementation"] = validate_result(models.invoke(session, state, batch, "fix", data), task["items"])
+            task["implementation"] = validate_result(owner_reports.invoke(session, state, batch, "fix", data), task["items"])
             owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
             if not implementation_ready(session, state, batch, task):
                 return False
@@ -217,6 +218,10 @@ def final_review(session, state, batch):
             data["previous_incomplete_review"] = batch["review"]
         # Final verification runs the shared review engine; per-task checks above
         # stay a single lightweight call. A repair changes the tree, which is a new candidate.
+        if batch.get('execution_trace_version') == 2:
+            batch['trace_candidate'] = session_trace.decision('candidate_review',
+                sources=[batch.get('trace_candidate'), *[t.get('trace_result') for t in batch['tasks'] if t['status'] == 'complete']],
+                key=batch['checkpoint']['tree'])
         _, review = acceptance.review_owner(session, state, batch, keys, data)
         review = validate_result(review, keys)
         owner_contracts.bind(review, data["verification_cases"], batch["checkpoint"]["tree"])
@@ -232,11 +237,12 @@ def final_review(session, state, batch):
             owner_commit_plan.update(session, batch, batch["baseline"])
             return
         if not batch.get("verify_only") and repairable(review) and batch["repairs"] < 1:
+            batch['trace_candidate'] = session_trace.decision('repair_allocated', sources=[session_trace.marked('acceptance_result')], key=f"{batch['id']}:combined:{batch['repairs']}")
             batch["repairs"] += 1
             batch['combined_repair_pending'] = True
             session.save(state)
             data["review_findings"] = review
-            result = validate_result(models.invoke(session, state, batch, "fix", data), keys)
+            result = validate_result(owner_reports.invoke(session, state, batch, "fix", data), keys)
             if result.get('verification_cases'):
                 raise ApiError('invalid_result', 'Integration repair must preserve the completed task contracts; explicitly replan new requirements.')
             owner_contracts.bind(result, data["verification_cases"], batch["checkpoint"]["tree"])
@@ -292,14 +298,17 @@ def plan_tasks(session, state, batch, keys):
             if task['status'] not in ('complete', 'skipped') and set(task['items']) & set(keys)]
         if correction:
             data["plan_correction"] = correction
-        plan = models.invoke(session, state, batch, "plan", data)
         try:
+            plan = owner_reports.invoke(session, state, batch, "plan", data)
             tasks = validate_plan(plan, items)
             return plan, tasks
         except ApiError as exc:
             if exc.code != "invalid_plan":
                 raise
+            plan = getattr(exc, "rejected_plan", locals().get("plan", {}))
             correction = {"plan": plan, "error": str(exc)}
+            if batch.get('execution_trace_version') == 2:
+                session_trace.decision('format_correction', sources=[session_trace.marked('last_failed')], summary=str(exc), key=f"{batch['id']}:{len(batch.get('plan_rejections', []))}")
             batch.setdefault("plan_rejections", []).append({**copy.deepcopy(correction), "at": now()})
             session.save(state)
             if number == 2:
@@ -308,6 +317,11 @@ def plan_tasks(session, state, batch, keys):
 
 
 def execute(session, state, request):
+    from . import owner_reports
+    return owner_reports.execute(_execute, session, state, request)
+
+
+def _execute(session, state, request):
     """Caller holds only the owner execution lock throughout inference."""
     review_history.controls(request)
     if "auto_commit" in request and type(request["auto_commit"]) is not bool:
@@ -346,6 +360,8 @@ def execute(session, state, request):
                                     ('max_repair_cycles' in request or request.get('retry_review_adjudication')))
                                    or request.get('retry_review_adjudication') and batch['status'] == 'ready'):
                     raise ApiError('invalid_request', 'Review controls require a versioned batch with a retryable saved conflict.')
+                from . import owner_reports
+                owner_reports.attach(session, state, batch)
                 replacements = superseded_batches(state).get(batch["id"])
                 if replacements:
                     batch = None  # Preserve the original stop reason and artifacts.
@@ -459,6 +475,9 @@ def execute(session, state, request):
                     review_history.initialize(batch, request)
                 state["batches"].append(batch)
                 session.save(state)
+                if not is_harness:
+                    from . import owner_reports
+                    owner_reports.attach(session, state, batch, new=True)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
             if is_harness and request.get('rerun_review'):
                 from .issue_settings import request_rerun
@@ -478,6 +497,10 @@ def execute(session, state, request):
                     return issue_harness.execute(session, state, batch, remote)
                 finally:
                     completing = bool(batch.get('commit_execution'))
+            for control in ('adopt', 'replan', 'skip'):
+                if request.get(control) and batch.get('execution_trace_version') == 2:
+                    batch['trace_candidate'] = session_trace.decision(control, sources=[batch.get('trace_candidate')],
+                        summary=str(request[control]), key=batch['checkpoint']['tree'])
             if not batch["tasks"] or request.get("replan"):
                 retained = [t for t in batch["tasks"] if t["status"] in ('complete', 'skipped')]
                 unfinished = {k for t in batch['tasks'] if t['status'] not in ('complete', 'skipped') for k in t['items']}

@@ -21,7 +21,21 @@ elif '--json-schema' in args:
     schema = json.loads(args[args.index('--json-schema')+1])
 props = schema.get('properties', {}) if schema else {}
 value = None
-if 'decision' in props:
+if 'tasks' in props:
+    keys = props['tasks']['items']['properties']['items']['items']['enum']
+    value = dict(tasks=[dict(id='multiply', items=keys, depends_on=[], rationale='Fix multiplication', verification_cases=[], expected=[dict(item=k, outcome='total returns product') for k in keys])])
+elif 'outcomes' in props and 'blocking' in props:
+    keys = props['outcomes']['items']['properties']['item']['enum']
+    if 'complete' in props:
+        if not Path.cwd().resolve().is_relative_to(fixture.parent.resolve()):
+            raise RuntimeError('Refusing to edit outside smoke checkout')
+        Path('price.py').write_text('def total(price, quantity):\n    return price * quantity\n')
+    value = dict(summary='Multiplication checked', outcomes=[dict(item=k, status='fixed', evidence='Product returned') for k in keys], checks=['source inspected'], case_results=[], blocking=[])
+    if 'complete' in props:
+        value.update(complete=True, verification_cases=[])
+    else:
+        value['assessment'] = 'passed'
+elif 'decision' in props:
     value = dict(decision='plan', summary='Add a pure multiplication function with standard-library tests.',
         plan='## Outcome\nProvide total(price, quantity) returning their product.\n\n## Scope\nAdd smoke_total.py and test_smoke_total.py only; preserve README.\n\n## Approach\nImplement multiplication with no dependencies.\n\n## Acceptance scenarios\nThree items at four each cost twelve; zero quantity costs zero.\n\n## Verification\nRun python3 -m unittest test_smoke_total.\n',
         acceptance=['total(3, 4) == 12', 'total(3, 0) == 0', 'README unchanged'], questions=[],

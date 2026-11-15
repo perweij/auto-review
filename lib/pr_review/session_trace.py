@@ -74,6 +74,8 @@ def operation(root, enabled, identity=None):
     for record in data['invocations'] + data['stages'] + data['executions']:
         if record.get('status') == 'running':
             record['status'] = 'interrupted'
+            if 'outcome' in record:
+                record['outcome'] = 'interrupted'
             record['timing_coverage'] = 'unknown'
             data['coverage'] = 'partial'
     waiting = data.pop('waiting', None)

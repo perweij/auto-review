@@ -1199,3 +1199,19 @@ matching version-2 trace; old sessions remain executable but are not migrated.
 Normalized report JSON is version 2 and exposes stable stage IDs, explicit
 transitions, semantic outcomes and exact usage references; it does not infer
 workflow links from timestamps. Trace failures do not change task outcomes.
+
+### Owner execution reports
+
+`owner-report` and `owner-publish-report` accept an Owner `session`, its current
+`revision`, and an optional `batch` (defaults to the latest). Both require the
+Owner execution lock; neither runs models. Reports apply to newly created
+standalone batches, not issue-harness batches or historical untraced batches.
+
+`owner-report` returns `batch`, `report_path`, `report_data_path`,
+`report_coverage`, and `report_publication`.
+`owner-publish-report` returns these fields with publication status and a
+`report_url` for the confirmed snapshot.
+Publication is explicit, uses a frozen snapshot and retained receipts, and recovers
+uncertain writes before sending any further snapshot. Report receipts are separate
+from feedback reply receipts. Batch views expose saved `execution_report` metadata
+and any `report_warning`.

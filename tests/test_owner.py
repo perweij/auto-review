@@ -177,6 +177,85 @@ class OwnerTest(unittest.TestCase):
         return dispatch({"protocol": 1, "command": "owner-import", "session": str(review.root),
                          "generation": review.id, "revision": digest(review.load()), "comments": keys, **fields})
 
+    def test_owner_report_failure_does_not_change_fix_result(self):
+        with patch('pr_review.owner_reports.generate', side_effect=OSError('report disk unavailable')):
+            view = self.fix()
+        self.assertEqual('ready', view['batches'][-1]['status'])
+        self.assertIn('report disk unavailable', view['batches'][-1]['report_warning'])
+        self.assertEqual([], self.posts)
+
+    def test_owner_report_refuses_historical_or_missing_trace(self):
+        self.fix()
+        session = OwnerSession({'session': self.path})
+        state = session.load()
+        batch = state['batches'][-1]
+        from pr_review.owner_reports import root
+        trace_path = root(session, batch) / 'execution-trace.json'
+        before = trace_path.read_bytes()
+        batch.pop('execution_trace_version')
+        session.save(state)
+        with self.assertRaisesRegex(ApiError, 'new standalone'):
+            self.request('owner-report')
+        self.assertEqual(before, trace_path.read_bytes())
+        state = session.load()
+        state['batches'][-1]['execution_trace_version'] = 2
+        session.save(state)
+        trace_path.unlink()
+        with self.assertRaises((ValueError, ApiError)):
+            self.request('owner-report')
+        self.assertFalse(trace_path.exists())
+
+    def test_execution_report_publication_is_explicit_and_idempotent(self):
+        self.fix()
+        self.assertEqual([], self.posts)
+        report = self.request('owner-report')
+        self.assertTrue(Path(report['report_path']).is_file())
+        first = self.request('owner-publish-report')
+        second = self.request('owner-publish-report')
+        self.assertEqual(first['report_url'], second['report_url'])
+        self.assertEqual(1, len(self.posts))
+        self.assertIn('Owner batch:', self.posts[0][2]['body'])
+        state = OwnerSession({'session': self.path}).load()
+        self.assertEqual([], state['actions'])
+
+    def test_execution_report_retries_only_after_absence_readback(self):
+        self.fix()
+        from pr_review.publication import publication_adapter
+        adapter = publication_adapter(OwnerSession({'session': self.path}))
+        with patch.object(type(adapter), 'submit', side_effect=ApiError('lost_response', 'Before send')):
+            with self.assertRaises(ApiError):
+                self.request('owner-publish-report')
+        self.assertEqual([], self.posts)
+        result = self.request('owner-publish-report')
+        self.assertEqual('complete', result['report_publication'])
+        self.assertEqual(1, len(self.posts))
+
+    def test_execution_report_recovers_lost_response_without_duplicate(self):
+        self.fix()
+        from pr_review.publication import publication_adapter
+        session = OwnerSession({'session': self.path})
+        adapter = publication_adapter(session)
+        real_submit = type(adapter).submit
+        def lost(adapter, session, action):
+            real_submit(adapter, session, action)
+            raise ApiError('lost_response', 'Response lost')
+        with patch.object(type(adapter), 'submit', lost):
+            with self.assertRaises(ApiError):
+                self.request('owner-publish-report')
+        result = self.request('owner-publish-report')
+        self.assertEqual('complete', result['report_publication'])
+        self.assertEqual(1, len(self.posts))
+
+    def test_new_standalone_batch_records_local_report(self):
+        self.fix()
+        state = OwnerSession({'session': self.path}).load()
+        batch = state['batches'][-1]
+        self.assertEqual(2, batch['execution_trace_version'])
+        report = Path(batch['execution_report']['report_path'])
+        self.assertTrue(report.is_file())
+        self.assertIn(batch['id'], report.read_text())
+        self.assertEqual([], self.posts)
+
     def test_local_handoff_preserves_wording_staging_context_and_order_without_network(self):
         review = self.saved_review()
         state = review.load()

@@ -355,3 +355,22 @@ Missing observations and unavailable waiting measurements remain unknown.
 Reported tokens include repeated context and cache reads according to the usage
 ledger; their proportions do not represent monetary cost. Provider-internal
 verification is included in the provider call; controller verification is separate.
+
+### Inspect an Owner fixing round
+
+New standalone Owner batches automatically save execution reports, including when
+fixing pauses. In the Owner dashboard, select a fixing batch and press `E`, then
+`o` to open its local report. `E p` explicitly publishes a snapshot to the PR
+discussion. Neither action runs models or publishes feedback replies.
+
+From the terminal:
+
+```sh
+bin/pr-review owner 123 report
+bin/pr-review owner 123 publish-report
+```
+
+Both commands default to the latest batch; add `--batch ID` to select an older
+one. Repeating publication of the same snapshot does not send another comment.
+Further execution permits a new snapshot. Existing batches without tracing remain
+usable but cannot be reconstructed into execution reports.

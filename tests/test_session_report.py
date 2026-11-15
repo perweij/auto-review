@@ -34,6 +34,29 @@ class ReportTest(unittest.TestCase):
             self.assertIn('approved', body)
             self.assertNotIn('historical', body.lower())
 
+    def test_shared_ledger_isolates_batch_usage_and_coverage(self):
+        from pr_review import session_trace as trace
+        from pr_review.session_report import report_data
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace.initialize(root, 'batch')
+            with trace.operation(root, True, 'batch'):
+                with trace.stage('implementation') as handle:
+                    handle[1]['call_ids'] = ['own-call']
+                    trace.complete(handle, {'status': 'ready'})
+            journal = json.loads((root / 'execution-trace.json').read_text())
+            calls = {'own-call': {'usage': {'total_tokens': 12}, 'coverage': 'reported'},
+                     'another-batch': {'usage': {'total_tokens': 900}, 'coverage': 'reported'}}
+            data = report_data(journal, calls, shared_ledger=True)
+            self.assertEqual('complete', data['coverage'])
+            self.assertEqual(1, data['total_calls'])
+            self.assertEqual(12, sum(row['tokens'] or 0 for row in data['activities']))
+            self.assertEqual('partial', report_data(journal, calls)['coverage'])
+            del calls['own-call']
+            missing = report_data(journal, calls, shared_ledger=True)
+            self.assertEqual('partial', missing['coverage'])
+            self.assertEqual(0, missing['reported_calls'])
+
     def test_publication_failure_does_not_change_task_result(self):
         from pr_review.session_report import finish
         from unittest.mock import Mock, patch

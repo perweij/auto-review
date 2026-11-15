@@ -9,6 +9,8 @@ from . import session_trace
 
 
 def category(role):
+    if role == 'task-check':
+        return 'Task checks'
     if role == 'verification':
         return 'Verification'
     if role in ('implementation', 'fix'):
@@ -92,6 +94,12 @@ def render(data, bounded=False):
             f"Repair cycles: {data['repairs']}.", '', *graph(data, compact=True, limit=12), '',
             'Edges show consumed results and controller decisions; execution is sequential. Node numbers show recorded stage order.', '',
             'Longest recorded activities:', '']
+    if data.get('owner'):
+        owner = data['owner']
+        text[2:2] = [f"Owner batch: {safe(owner['batch'])}. PR: {safe(owner.get('url') or 'unknown')}.",
+                     f"Candidate tree: {safe(owner['candidate'])}. " +
+                     ('Read-only verification.' if owner.get('verify_only') else 'Fixing round.'),
+                     'This is a local execution snapshot; it does not establish that changes were pushed or replies published.', '']
     text += [f"- {safe(r['role'])}: {r['seconds']/60:.1f} minutes" for r in sorted(rows, key=lambda r: r['seconds'], reverse=True)[:3]]
     text += ['', '<details><summary>Time and token breakdown</summary>', '']
     for index, label in enumerate(('Recorded processing minutes', 'Reported tokens')):
@@ -131,6 +139,17 @@ def generate(directory):
     trace = session_trace.validate(read_json(root / 'execution-trace.json'), state['id'])
     ledger = read_json(root / 'usage/ledger.json', {})
     calls = ledger.get('calls', {})
+    data = report_data(trace, calls, outcome=state.get('phase', 'unknown'))
+    return write_report(root / 'reports', data)
+
+
+def report_data(trace, calls, *, outcome='unknown', shared_ledger=False):
+    """Build a report from explicit trace identities, optionally in a shared ledger.
+
+    Owner batches share their session ledger. Unrelated ledger calls must not
+    affect the batch's accounting or coverage; missing referenced calls still do.
+    """
+    session_trace.validate(trace)
     rows, claimed = [], set()
     coverage = trace.get('coverage', 'partial')
     for stage in trace['stages']:
@@ -161,7 +180,7 @@ def generate(directory):
             status=execution['status'], seconds=execution.get('seconds', 0), invocation=execution['invocation'],
             provider=call.get('provider', 'unknown'), model=call.get('model', 'unknown'), effort=call.get('effort', 'unknown'),
             tokens=(call.get('usage') or {}).get('total_tokens')))
-    if set(calls) - claimed:
+    if not shared_ledger and set(calls) - claimed:
         coverage = 'partial'  # No inference from unmatched usage to missing stages.
     for invocation in trace['invocations']:
         if 'seconds' not in invocation:
@@ -174,13 +193,16 @@ def generate(directory):
                 status=invocation['status'], seconds=overhead, invocation=invocation['id'], tokens=None,
                 provider='controller', model='none', effort='none'))
     observed_calls = [calls[key] for key in claimed if key in calls]
-    data = dict(version=2, outcome=trace.get('outcome', state.get('phase', 'unknown')), activities=rows, transitions=trace['transitions'],
+    return dict(version=2, outcome=trace.get('outcome', outcome), activities=rows, transitions=trace['transitions'],
                 coverage=coverage, waiting_seconds=trace.get('waiting_seconds'),
                 reported_calls=sum(c.get('usage') is not None for c in observed_calls), total_calls=len(claimed),
                 token_partial=any(c.get('coverage') != 'reported' for c in observed_calls),
                 repairs=sum(s['role'] == 'control/repair_allocated' for s in trace['stages']),
                 stage_numbers={s['id']: s['sequence'] for s in trace['stages']})
-    output = root / 'reports'
+
+
+def write_report(output, data):
+    output = Path(output)
     output.mkdir(exist_ok=True, mode=0o700)
     atomic_json(output / 'session.json', data)
     path = output / 'session.md'

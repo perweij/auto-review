@@ -261,3 +261,10 @@ results:
 
 This verifies planning recovery and session resumption, not the remainder of the
 real-model issue-fixing workflow. The storage repair is committed as `c43bd8d`.
+
+Standalone Owner execution reports are included in the smoke and live suites.
+To run only this functional scenario, use
+`python3 tests/smoke-forges.py --suite smoke --scenario owner-report` (scripted
+providers) or replace `smoke` with `live` for economical real models. It creates
+PR feedback, runs a standalone fix, checks automatic local reporting, publishes
+an execution snapshot and verifies that repeated publication does not duplicate it.

@@ -9,7 +9,7 @@ from .owner_state import OwnerSession, open_session, discover, toolkit, refresh,
 from . import owner_git, owner_fixes, owner_publication, owner_commit, owner_completion
 
 
-COMMANDS = ["owner-open", "owner-import", "owner-discover", "owner-read", "owner-reconcile", "owner-refresh", "owner-mutate", "owner-fix",
+COMMANDS = ["owner-publish-report", "owner-report", "owner-open", "owner-import", "owner-discover", "owner-read", "owner-reconcile", "owner-refresh", "owner-mutate", "owner-fix",
             "owner-diff", "owner-prepare-commit", "owner-associate", "owner-prepare", "owner-publish", "owner-recover", "owner-thread-state", "toolkit"]
 
 
@@ -61,6 +61,18 @@ def dispatch(request):
     with locked(session.execution_lock):
         state = session.load()
         session.check(request, state)
+        if name in ("owner-report", "owner-publish-report"):
+            from .owner_reports import generate
+            batch = next((b for b in state['batches'] if b['id'] == request.get('batch')), None) if request.get('batch') else (state['batches'][-1] if state['batches'] else None)
+            if batch is None:
+                raise ApiError('invalid_request', 'Choose an existing Owner batch.')
+            if name == 'owner-publish-report':
+                from .owner_reports import publish
+                with locked(session.repo.lock):
+                    return publish(session, state, batch)
+            fields, _ = generate(session, state, batch)
+            session.save(state)
+            return dict(fields, batch=batch['id'])
         if name == "owner-fix":
             return owner_fixes.execute(session, state, request)
         if name == "owner-refresh":

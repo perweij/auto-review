@@ -138,9 +138,9 @@ class Run:
             raise Failure('%s failed (%s); see %s' % (args[0], process.returncode, stderr))
         return process.returncode, output
 
-    def api(self, request, cwd):
+    def api(self, request, cwd, timeout=120):
         _, output = self.command([str(self.root / 'bin/pr-review'), 'api'], cwd=cwd,
-                                 input_text=json.dumps(dict(protocol=1, **request))+'\n', check=False)
+                                 input_text=json.dumps(dict(protocol=1, **request))+'\n', check=False, timeout=timeout)
         messages = [json.loads(line) for line in output.splitlines()]
         errors = [m for m in messages if m['type'] == 'error']
         if errors:
