@@ -23,8 +23,9 @@ fix-issue --economical --generate-json-config /tmp/economical-issue-settings.jso
 pr-review --expensive --generate-json-config /tmp/expensive-pr-settings.json
 ```
 
-Presets follow the same rules as execution: issue planning, critique and fixing
-keep their built-in defaults unless you edit the resulting file. Generation never
+Presets follow the same rules as execution: `--economical` covers every issue
+role, while `--expensive` leaves independent planning, critique and fixing roles
+at their built-in defaults. Generation never
 exports a saved session and refuses to overwrite an existing destination. Edit the
 file, then use it:
 
@@ -173,26 +174,34 @@ before synthesis.
 | Issue implementation | `codex-4` | Codex / GPT-6.1 Sol / high |
 
 Default model configurations are separate; planning synthesis follows planning.
-`--economical` selects Haiku and Terra reviewers with Terra processing; `--expensive` selects Fable and Astra with Astra processing.
-Both use high effort and leave issue planning, critique and implementation defaults
-unchanged; planning synthesis follows planning.
-New reviewer or processing names also use the selected preset's provider defaults.
-Names used only for planning, critique, planning synthesis or implementation start
-from built-in provider defaults.
-An explicitly shared name keeps one choice for every referring role; saved and
-file-defined choices take precedence over presets.
+`--economical` selects Haiku/high and Terra/high reviewers with Terra/high processing.
+For a fresh terminal `fix-issue` workflow, it also selects Terra/high planning and
+implementation and Haiku/high critique; planning synthesis follows planning.
+New names used for any issue role receive their provider's economical defaults.
+`--expensive` selects Fable/high and Astra/high reviewers with Astra/high processing.
+New reviewer or processing names receive its provider defaults, while independent
+issue-only names keep ordinary defaults. An explicitly shared name keeps one
+choice for every referring role under either preset.
+Saved and file-defined choices take precedence. An existing Owner session supplies
+fixing, ordered acceptance reviewers, processing and synthesis testing policy even
+for a new issue workflow; economical planning and critique defaults still apply.
+Nonterminal API `issue-run`, API `settings` and Emacs presets are unchanged; the
+broader economical coverage is specific to terminal issue workflows.
 
-For economical choices across all issue roles on a new job, share the preset
-configurations explicitly:
+`fix-issue -i 42 --economical` covers all default roles on a fresh job without
+imported settings. Optionally share configurations to couple later model/effort
+edits across roles:
 
 ```sh
 fix-issue -i 42 --economical --planning codex-1 --fix codex-1 \
   --planning-review claude-1 --planning-synthesis same
 ```
 
-`--economical` alone does not change every issue role. On resume, saved choices
-still take precedence over the preset; use explicit model/effort overrides to
-change existing configurations.
+On resume, saved choices still take precedence over the preset; use explicit
+model/effort overrides to change existing configurations. Preset-only resume
+retains saved models, approvals and completed evidence. Selecting a previously
+undefined name with `--economical` supplies economical defaults for that name
+without changing other saved configurations.
 
 Precedence is **defaults → preset → saved settings → complete file → explicit
 CLI flags**, regardless of argument order. Omitted flags retain resolved values.

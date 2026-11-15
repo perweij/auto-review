@@ -100,11 +100,12 @@ def defaults(*, issue=False, request=None):
               'reviewers': ['claude-1', 'codex-1'], 'processing': 'codex-2',
               'synthesis_tests': values['synthesis_tests']}
     if issue:
+        issue_values = values if (request or {}).get('economical') else None
         for role, name in (('planning', 'codex-3'), ('fix', 'codex-4')):
             result[role] = name
-            result['model_configs'][name] = default_choice(name)
+            result['model_configs'][name] = default_choice(name, issue_values)
         result.update(planning_review='claude-2', planning_synthesis=None)
-        result['model_configs']['claude-2'] = default_choice('claude-2')
+        result['model_configs']['claude-2'] = default_choice('claude-2', issue_values)
         result.update(dict.fromkeys(LIMITS))
     else:
         result['suggested_changes'] = values['suggested_changes']
@@ -280,14 +281,15 @@ def resolve(request, saved=None, *, issue=False, owner=None, resources=None):
         for role, sentinel in (('planning_review', 'none'), ('planning_synthesis', 'same')):
             if 'cli_' + role in request:
                 value[role] = None if request['cli_' + role] == sentinel else request['cli_' + role]
-    # New reviewer/processing names use the preset, just like the built-in names.
-    # Planning/fix-only names retain independent defaults. Existing definitions
-    # (including saved/file choices and intentional sharing) keep their values.
+    # Economical terminal issue defaults cover every role, including new names.
+    # Expensive remains limited to reviewer/processing defaults. Existing
+    # definitions (saved, Owner, file or shared) always keep their values.
     review_names = set(value['reviewers']) | {value['processing']}
     review_defaults = settings.initial_settings(request)
     for name in references(value, issue=issue):
         if name not in value['model_configs']:
-            value['model_configs'][name] = default_choice(name, review_defaults if name in review_names else None)
+            use_preset = name in review_names or (issue and request.get('economical'))
+            value['model_configs'][name] = default_choice(name, review_defaults if use_preset else None)
     if not saved and not owner and '_cli_file' not in request and 'cli_processing' not in request and len(value['reviewers']) == 1:
         # Keep an independent processing reference with this provider's defaults.
         p = provider(value['reviewers'][0])

@@ -256,6 +256,10 @@ class ApiTest(unittest.TestCase):
                          ('opus', 'gpt-6.1-sol', 'codex'))
         self.assertEqual(default_settings({})['fix'],
                          dict(provider='codex', model='gpt-6.1-sol', effort='high'))
+        api_economical = dispatch({**fresh, 'economical': True})['settings']
+        self.assertEqual(set(standard), set(api_economical))
+        self.assertEqual(['haiku', 'gpt-6.1-terra'], [s['model'] for s in api_economical['reviewer_slots']])
+        self.assertFalse({'planning', 'fix', 'planning_review', 'planning_synthesis', '_named'} & api_economical.keys())
         args = vars(parser().parse_args(['8', '--economical', '--codex-1-effort', 'medium']))
         economical = dispatch({**fresh, **args})['settings']
         self.assertEqual((economical['claude_model'], economical['codex_model']), ('haiku', 'gpt-6.1-terra'))
