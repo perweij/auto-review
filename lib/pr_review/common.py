@@ -63,11 +63,11 @@ def locked(path, *, wait=False):
         yield
 
 
-def command(argv, *, cwd=None, input_text=None, check=True, timeout=None):
+def command(argv, *, cwd=None, input_text=None, check=True, timeout=None, capture_files=False):
     """Run a cancellable command; deadlines belong to the calling operation."""
     from .processes import run
     result = run(argv, cwd=cwd, input_bytes=(input_text or "").encode("utf-8"),
-                 timeout=timeout, env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                 timeout=timeout, capture_files=capture_files, env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
                                       "GH_PROMPT_DISABLED": "1"})
     if check and result.returncode:
         raise ApiError("command_failed", result.stderr.strip() or f"{argv[0]} failed",

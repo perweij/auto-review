@@ -9,6 +9,7 @@ import selectors
 import signal
 import subprocess
 import time
+import tempfile
 
 from .common import ApiError
 from .events import emit
@@ -111,8 +112,10 @@ class Result:
 
 def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
         stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=(), usage_call=None,
-        max_output_bytes=None):
+        max_output_bytes=None, capture_files=False):
     """Run without a shell; log raw bytes while interpreting complete records."""
+    if capture_files and (stdout_path is not None or stderr_path is not None or model_events or on_line or usage_call):
+        raise ValueError('File capture is only for non-streaming metadata commands.')
     from .issue_resources import check as check_issue_resources, active as issue_resources_active
     check_issue_resources()
     cancellation = _cancellation.get() or Cancellation()
@@ -127,6 +130,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
     captured = {"stdout": [], "stderr": []}
     output_bytes = 0
     files, events, reason, warned = {}, [], "", False
+    capture = {}
     child = None
     stopped = False
     silence_warned = False
@@ -145,12 +149,18 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
             cancellation.check()
             # Metadata reads do not consume the provider-process timeout.
             started = activity = heartbeat = time.monotonic()
+        if capture_files:
+            # Some CLIs exit with queued pipe writes still pending. Regular files
+            # make metadata output synchronous without changing model streaming.
+            for name in pending:
+                capture[name] = tempfile.TemporaryFile()
         child = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 stdout=capture.get('stdout', subprocess.PIPE),
+                                 stderr=capture.get('stderr', subprocess.PIPE),
                                  start_new_session=True, close_fds=True, pass_fds=pass_fds)
         usage.observe(accounting, 'launched')
         with selectors.DefaultSelector() as selector:
-            for name in pending:
+            for name in (() if capture_files else pending):
                 os.set_blocking(getattr(child, name).fileno(), False)
                 selector.register(getattr(child, name), selectors.EVENT_READ, name)
             remaining = memoryview(input_bytes)
@@ -190,6 +200,9 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                 cancellation.check()
                 check_issue_resources()
                 current = time.monotonic()
+                if capture_files and max_output_bytes is not None:
+                    if sum(os.fstat(stream.fileno()).st_size for stream in capture.values()) > max_output_bytes:
+                        raise ApiError("output_limit", "Process exceeded its output byte limit.")
                 if not stopped and timeout is not None and current - started >= timeout:
                     reason = "timeout"
                 if reason and not stopped:
@@ -263,6 +276,13 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                     stopped = True
                     drain_deadline = time.monotonic() + 1
             raw_code = child.wait(timeout=2)
+            if capture_files:
+                for name, stream in capture.items():
+                    output_bytes += os.fstat(stream.fileno()).st_size
+                    if max_output_bytes is not None and output_bytes > max_output_bytes:
+                        raise ApiError("output_limit", "Process exceeded its output byte limit.")
+                    stream.seek(0)
+                    captured[name].append(stream.read())
             code = 124 if reason == "timeout" else (raw_code if raw_code >= 0 else 128 - raw_code)
             if reason and not code:
                 code = 1
@@ -278,7 +298,7 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
             for pipe in (child.stdin, child.stdout, child.stderr):
                 if pipe:
                     pipe.close()
-        for stream in files.values():
+        for stream in [*files.values(), *capture.values()]:
             stream.close()
         usage.observe(accounting, 'finish', completed_result)
         session_trace.end(trace, completed_result)

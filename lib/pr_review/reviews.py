@@ -259,7 +259,7 @@ def capabilities(enabled, processing, runtime, cwd, *, independent_providers=Non
                    '--no-session-persistence', '--disallowed-tools', '--add-dir', '--json-schema', '--append-system-prompt', '--tools', '--disable-slash-commands', '--strict-mcp-config', '--system-prompt', '--setting-sources', '--settings'] + (['--max-budget-usd'] if runtime.budget else [])),
                    (['claude', 'auth', '--help'], ['status'])]
     for argv, flags in checks:
-        result = command(argv, cwd=cwd, check=False, timeout=90)
+        result = command(argv, cwd=cwd, check=False, timeout=90, capture_files=True)
         for flag in flags:
             if flag not in result.stdout + result.stderr:
                 raise ApiError('missing_capability', f'Installed CLI lacks required capability: {flag}')

@@ -77,7 +77,7 @@ def preflight(session, state, *, issue_harness=False):
     log = session.path / "preflight"
     log.mkdir(exist_ok=True)
     for provider in catalogs:
-        help_text = command([provider, "exec", "--help"] if provider == "codex" else [provider, "--help"]).stdout
+        help_text = command([provider, "exec", "--help"] if provider == "codex" else [provider, "--help"], capture_files=True).stdout
         flags = ("--sandbox", "--output-schema", "--ephemeral", "--strict-config", "--cd",
                  "--skip-git-repo-check", "--ignore-rules", "--add-dir") if provider == "codex" else (
             "--permission-prompts", "--json-schema", "--no-session-persistence", "--disallowed", "--settings")
@@ -86,7 +86,7 @@ def preflight(session, state, *, issue_harness=False):
         if independent and any(slot["provider"] == provider for slot in config["reviewer_slots"]):
             # Independent slots use the provider's own review command, not the structured path.
             if provider == "codex":
-                review_help = command(["codex", "exec", "review", "--help"]).stdout
+                review_help = command(["codex", "exec", "review", "--help"], capture_files=True).stdout
                 needed = ("--base", "--output-last-message", "--json", "--ephemeral", "--model", "--config", "--strict-config")
             else:
                 review_help, needed = help_text, ("--append-system-prompt", "--output-format", "stream-json", "--verbose",

@@ -393,6 +393,43 @@ class LegacyBytesTest(unittest.TestCase):
 
 
 class SupervisorTest(unittest.TestCase):
+    def test_metadata_capture_avoids_pipe_truncation_and_retains_both_streams(self):
+        from pr_review.common import command
+        # Simulate a CLI that exits before flushing queued pipe output.
+        code = ("import os,stat; "
+                "regular=all(stat.S_ISREG(os.fstat(fd).st_mode) for fd in (1,2)); "
+                "os.write(1,b'x'*65536+b' --verbose' if regular else b'partial help'); "
+                "os.write(2,b'help diagnostic'); os._exit(0)")
+        result = command([sys.executable, '-c', code], capture_files=True)
+        self.assertTrue(result.stdout.endswith(' --verbose'))
+        self.assertEqual('help diagnostic', result.stderr)
+
+    def test_metadata_capture_preserves_timeout_and_partial_output(self):
+        result = run([sys.executable, '-c',
+                      "import os,time; os.write(1,b'partial'); time.sleep(60)"],
+                     capture_files=True, timeout=.2)
+        self.assertEqual(124, result.returncode)
+        self.assertEqual('partial', result.stdout)
+
+    def test_metadata_capture_remains_cancellable(self):
+        import threading
+        with self.assertRaises(ApiError) as caught:
+            with cancellation_scope() as token:
+                timer = threading.Timer(.1, lambda: token.request(signal.SIGTERM))
+                timer.start()
+                try:
+                    run([sys.executable, '-c', 'import time; time.sleep(60)'], capture_files=True)
+                finally:
+                    timer.cancel()
+                    timer.join()
+        self.assertEqual('cancelled', caught.exception.code)
+
+    def test_metadata_capture_honors_output_limit(self):
+        with self.assertRaises(ApiError) as caught:
+            run([sys.executable, '-c', "print('x'*10000)"],
+                capture_files=True, max_output_bytes=100)
+        self.assertEqual('output_limit', caught.exception.code)
+
     def test_repository_commands_survive_more_than_ninety_seconds(self):
         from pr_review.common import command
         clock = time.monotonic
@@ -632,3 +669,30 @@ class BoundaryTest(unittest.TestCase):
             self.assertEqual(len(files), 1)
             self.assertEqual(files[0].read_bytes(), 'Human β\r\n\n'.encode())
             self.assertEqual(files[0].stat().st_mode & 0o777, 0o600)
+
+class CapabilityCaptureTest(unittest.TestCase):
+    def test_review_help_is_complete_and_missing_flags_still_fail(self):
+        from pr_review.common import command
+        from pr_review.reviews import capabilities
+        flags = ('--print --model --effort --permission-mode --output-format stream-json '
+                 '--verbose --include-partial-messages --no-session-persistence --disallowed-tools '
+                 '--add-dir --json-schema --append-system-prompt --tools --disable-slash-commands '
+                 '--strict-mcp-config --system-prompt --setting-sources --settings')
+        for missing in (False, True):
+            help_text = flags.replace('--verbose', '') if missing else flags
+            code = ("import os,stat; text=" + repr('x'*65536 + help_text) + "; "
+                    "os.write(1,text.encode() if stat.S_ISREG(os.fstat(1).st_mode) else b'--print --model'); "
+                    "os._exit(0)")
+            def invoke(argv, **kwargs):
+                if argv == ['claude', '--help']:
+                    return command([sys.executable, '-c', code], **kwargs)
+                return SimpleNamespace(stdout='version --detach --refmap write-fetch-head --no-tags status', stderr='')
+            forge = SimpleNamespace(executable='gh', cli_checks=lambda: [])
+            with patch('pr_review.reviews.command', side_effect=invoke), \
+                 patch('pr_review.reviews.shutil.which', return_value='/installed'), \
+                 patch('pr_review.forge.adapter', return_value=forge):
+                if missing:
+                    with self.assertRaisesRegex(ApiError, '--verbose'):
+                        capabilities(['claude'], 'claude', SimpleNamespace(budget=None), '.')
+                else:
+                    capabilities(['claude'], 'claude', SimpleNamespace(budget=None), '.')
