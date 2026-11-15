@@ -199,6 +199,9 @@ def collect(session, state, batch, blockers):
         records.append(record)
         current.append(record)
         session.save(state)  # Durable intent precedes any test process.
+        from . import session_trace
+        trace_handle = session_trace.start('verification', inputs=[batch.get('trace_acceptance')], artifact=directory / 'result.json',
+            context={'batch': batch['id'], 'candidate': tree, 'command': command})
         started = time.monotonic()
         raised = None
         try:
@@ -239,7 +242,12 @@ def collect(session, state, batch, blockers):
             value['elapsed_seconds'] = time.monotonic() - started
             try:
                 _finish(session, state, record, value)
+                trace_id = session_trace.complete(trace_handle, {**value, 'summary': command}, directory / 'result.json')
+                if trace_id:
+                    batch.setdefault('trace_verification', []).append(trace_id)
+                    session.save(state)
             finally:
+                session_trace.close(trace_handle, raised)
                 run.close()
         changed = True
         if raised:

@@ -1,176 +1,185 @@
-"""Offline, observational issue-session reports. Never execute session artifacts."""
+"""Render new-session execution traces without reconstructing workflow history."""
 import html
-import json
+import re
 from pathlib import Path
-from .common import ApiError, atomic_json
+
+from .common import ApiError, atomic_json, read_json, digest
 from .storage import atomic_bytes
+from . import session_trace
 
 
 def category(role):
-    if 'synthesis' in role:
+    if role == 'verification':
+        return 'Verification'
+    if role in ('implementation', 'fix'):
+        return 'Implementation'
+    if role in ('acceptance', 'adjudication') or 'synthesis' in role:
         return 'Synthesis'
     if role.startswith('planning'):
         return 'Planning'
-    if role == 'fix':
-        return 'Implementation'
     if 'reviewer' in role:
         return 'Review'
     return 'Other'
 
 
-def read(path, default):
-    try:
-        return json.loads(path.read_text())
-    except FileNotFoundError:
-        return default
+def safe(value, limit=1200):
+    text = str(value)[:limit]
+    text = re.sub(r'(?<![\w:/])/(?:[^\s/]+/)*[^\s/]+', '[local path]', text)
+    return html.escape(text).replace('`', '&#96;').replace('@', '&#64;').replace('|', '&#124;').replace('\n', ' ')
+
+
+def graph(data, *, compact, limit=None):
+    groups, mapping = {}, {}
+    for row in data['activities']:
+        if not row.get('stage'):
+            continue
+        context = row.get('context', {})
+        if compact and not row['role'].startswith('control/'):
+            kind = ('Planning' if row['role'].startswith('planning') else
+                    'Acceptance review' if row['category'] in ('Review', 'Synthesis') else row['category'])
+            key = (kind, context.get('batch'), context.get('cycle'), row.get('group_epoch', 0))
+            label = kind + (f" · cycle {context['cycle']}" if context.get('cycle') is not None else '')
+        else:
+            key, label = row['id'], row['role']
+        if key not in groups:
+            groups[key] = dict(id='n' + str(len(groups)), label=label, seconds=0, outcome='', sequences=[], choices=set())
+        group = groups[key]
+        group['seconds'] += row['seconds']
+        group['outcome'] = row['status']
+        group['sequences'].append(str(row['sequence']))
+        if row.get('model') not in ('none', 'unknown'):
+            group['choices'].add(' / '.join(row[k] for k in ('provider', 'model', 'effort')))
+        mapping[row['id']] = group['id']
+    selected = list(groups.values())
+    if limit and len(selected) > limit:
+        hidden = selected[5:-(limit-6)]
+        hidden_ids = {g['id'] for g in hidden}
+        collapsed = dict(id='omitted', label=f'{len(hidden)} additional groups', seconds=sum(g['seconds'] for g in hidden), outcome='expand local report', sequences=[], choices=set())
+        selected = selected[:5] + [collapsed] + selected[-(limit-6):]
+        mapping = {key: 'omitted' if value in hidden_ids else value for key, value in mapping.items()}
+    lines = ['```mermaid', 'flowchart TD']
+    for group in selected:
+        numbers = ', '.join(group['sequences'])
+        label = f"{numbers}: {group['label']} · {group['seconds']/60:.1f} min · {group['outcome']}"
+        if not compact:
+            label += ' · ' + ', '.join(sorted(group['choices']))
+        lines.append(f' {group["id"]}["{safe(label, 360)}"]')
+    edges = set()
+    for number, edge in enumerate(data['transitions'], 1):
+        source, target = mapping.get(edge['source']), mapping.get(edge['target'])
+        signature = source, target, edge['reason']
+        if source and target and source != target and signature not in edges:
+            edges.add(signature)
+            lines.append(f' {source} -->|"{number}: {safe(edge["reason"], 60)}"| {target}')
+    if not selected:
+        lines.append(' empty["No stage observations available"]')
+    return lines + ['```']
 
 
 def render(data, bounded=False):
     rows = data['activities']
     totals = {}
     for row in rows:
-        item = totals.setdefault(row['category'], [0, 0])
-        item[0] += row['seconds']
-        item[1] += row['tokens'] or 0
-    token_rows = [r for r in rows if r.get('coverage') != 'not-applicable']
+        total = totals.setdefault(row['category'], [0, 0])
+        total[0] += row['seconds']
+        total[1] += row['tokens'] or 0
     waiting = data.get('waiting_seconds')
-    text = ['## Session execution report', '',
-            'Outcome: **' + html.escape(str(data['outcome'])) + '**', '',
-            f"Recorded processing: **{sum(r['seconds'] for r in rows) / 60:.1f} minutes**. "
-            'User pauses are excluded. Historical gaps and unmeasured overhead are unclassified.', '',
-            f"Token observations: {sum(r['tokens'] is not None for r in token_rows)}/{len(token_rows)} activities. "
-            'Totals describe recorded activity, not monetary cost.', '',
-            'Recorded user waiting: ' + (f'{waiting/60:.1f} minutes' if waiting is not None else 'unknown') + '.',
-            f"Repair cycles: {data.get('repairs', 0)}.", '', '```mermaid', 'flowchart TD']
-    groups = []
-    for row in rows:
-        if row['category'] == 'Other':
-            continue
-        name = ('Planning' if row['role'].startswith('planning') else
-                'Acceptance review' if row['category'] in ('Review', 'Synthesis') else row['category'])
-        if not groups or groups[-1][0] != name:
-            groups.append([name, 0])
-        groups[-1][1] += row['seconds']
-    if len(groups) > 11:
-        groups = groups[:5] + [[f'{len(groups)-10} intervening phases', sum(g[1] for g in groups[5:-5])]] + groups[-5:]
-    for i, (name, seconds) in enumerate(groups):
-        text.append(f' n{i}["{name}: {seconds / 60:.1f} min"]')
-        if i:
-            text.append(f' n{i-1} -->|{i}| n{i}')
-    text.append(' final["Session: ' + html.escape(str(data['outcome'])).replace('`', '&#96;') + '"]')
-    if groups:
-        text.append(f' n{len(groups)-1} --> final')
-    text += ['```', '', 'Longest recorded activities:', '']
-    text += [f"- {html.escape(r['role'])}: {r['seconds']/60:.1f} minutes"
-             for r in sorted(rows, key=lambda r: r['seconds'], reverse=True)[:3]]
+    text = ['## Session execution report', '', f"Outcome: **{safe(data['outcome'])}**", '',
+            f"Recorded processing: **{sum(r['seconds'] for r in rows)/60:.1f} minutes**. User pauses are excluded.", '',
+            f"Trace coverage: {data['coverage']}. Unmeasured work remains unknown.",
+            f"Reported tokens: {sum(r['tokens'] or 0 for r in rows) if data['reported_calls'] else 'unknown'}; observations for {data['reported_calls']}/{data['total_calls']} calls. Tokens are not monetary cost.",
+            'Recorded user waiting: ' + (f'{waiting/60:.1f} minutes.' if waiting is not None else 'unknown.'),
+            f"Repair cycles: {data['repairs']}.", '', *graph(data, compact=True, limit=12), '',
+            'Edges show consumed results and controller decisions; execution is sequential. Node numbers show recorded stage order.', '',
+            'Longest recorded activities:', '']
+    text += [f"- {safe(r['role'])}: {r['seconds']/60:.1f} minutes" for r in sorted(rows, key=lambda r: r['seconds'], reverse=True)[:3]]
     text += ['', '<details><summary>Time and token breakdown</summary>', '']
-    for index, title in enumerate(('Recorded processing minutes — partial coverage', 'Reported tokens — partial coverage')):
-        values = [(name, values[index] / (60 if index == 0 else 1)) for name, values in totals.items() if values[index] > 0]
+    for index, label in enumerate(('Recorded processing minutes', 'Reported tokens')):
+        values = [(name, value[index] / (60 if index == 0 else 1)) for name, value in totals.items() if value[index] > 0]
         if values:
-            text += ['```mermaid', 'pie', ' title ' + title]
-            text += [f' "{name}" : {value:.3f}' for name, value in values]
+            partial = data['coverage'] != 'complete' if index == 0 else data['reported_calls'] != data['total_calls'] or data.get('token_partial')
+            text += ['```mermaid', 'pie', ' title ' + label + (' - partial coverage' if partial else '')]
+            text += [f' "{name}" : {value:.6f}' for name, value in values]
             text += ['```', '']
     text += ['| Activity | Minutes | Reported tokens |', '| --- | ---: | ---: |']
-    text += [f'| {name} | {values[0]/60:.1f} | {values[1]} |' for name, values in totals.items()]
-    text += ['', '</details>', '', '<details><summary>Execution graph</summary>', '', '```mermaid', 'flowchart TD']
-    graph_rows = rows[:60] if bounded else rows
-    for index, row in enumerate(graph_rows):
-        label = html.escape(' / '.join(str(row[k])[:80] for k in ('role', 'provider', 'model', 'effort', 'status'))).replace('`', '&#96;').replace('\n', ' ')
-        text.append(f' e{index}["{index+1}: {label} - {row["seconds"]/60:.1f} min"]')
-        if index:
-            text.append(f' e{index-1} -->|{index}| e{index}')
-    if bounded and len(rows) > len(graph_rows):
-        text.append(' omitted["Further executions in local report"]')
-    text += ['```', '', 'Order follows recorded execution timestamps; historical causal links may be unavailable.', '', '</details>', '', '<details><summary>Execution details</summary>', '',
-             '| ID | Role / configuration | Minutes | Tokens | Execution status |', '| --- | --- | ---: | ---: | --- |']
-    for i, row in enumerate(rows, 1):
-        safe = lambda value: html.escape(str(value)).replace('|', '&#124;').replace('\n', ' ')
-        line = f"| {i} | {safe(row['role'])}: {safe(row['provider'])} / {safe(row['model'])} / {safe(row['effort'])} | {row['seconds']/60:.2f} | {row['tokens'] if row['tokens'] is not None else 'unknown'} | {safe(row['status'])} |"
-        if bounded and len('\n'.join(text)) + len(line) > 27000:
-            text += ['', 'Further execution details omitted; the local report retains all records.']
+    text += [f'| {name} | {v[0]/60:.1f} | {v[1]} |' for name, v in totals.items()]
+    text += ['', '</details>', '', '<details><summary>Execution graph</summary>', '',
+             *graph(data, compact=False, limit=35 if bounded else None), '', '</details>', '',
+             '<details><summary>Stage outcomes and accounting</summary>', '']
+    for row in rows:
+        heading = f"**{row.get('sequence', '—')}: {safe(row['role'], 80)} · {safe(row['status'], 80)}**"
+        choice = ' / '.join(safe(row[k], 80) for k in ('provider', 'model', 'effort'))
+        duration = f"{row['seconds']/60:.2f} minutes" if row.get('duration_known', True) else 'duration unknown'
+        lines = [heading, '', f"{choice}; {duration}; tokens: {row['tokens'] if row['tokens'] is not None else 'unknown'}.", '']
+        if row.get('reused_from'):
+            lines += [f"Reuses stage {data['stage_numbers'].get(row['reused_from'], 'unknown')}; no new model usage.", '']
+        if row.get('summary'):
+            lines += [safe(row['summary']), '']
+        if bounded and len('\n'.join(text + lines)) > 29000:
+            text += ['Further details omitted; the local report retains all records.', '']
             break
-        text.append(line)
-    text += ['', 'Execution status describes the process; acceptance outcomes are reported below.', '', '</details>', '', '<details><summary>Stage outcomes</summary>', '']
-    for outcome in data.get('outcomes', []):
-        excerpt = html.escape(outcome['summary'][:1200]).replace('`', '&#96;').replace('@', '&#64;')
-        # Public summaries must not expose local absolute paths.
-        import re
-        excerpt = re.sub(r'(?<![\w:])/(?:[^\s/]+/)*[^\s]*', '[local path]', excerpt)
-        if bounded and len('\n'.join(text)) + len(excerpt) > 29000:
-            text.append('Further outcomes omitted; see the local report.')
-            break
-        text += ['**' + html.escape(str(outcome['stage'])) + '**', '', excerpt, '']
+        text += lines
     text += ['</details>', '']
     return '\n'.join(text)
 
 
 def generate(directory):
     root = Path(directory).resolve()
-    state = read(root / 'session.json', {})
-    if state.get('kind') != 'issue':
-        # Existing stores identify workflows with a versioned kind.
-        if 'issue' not in state or 'assessment' not in state:
-            raise ValueError('Expected an existing issue-session directory.')
-    ledger = read(root / 'usage/ledger.json', {})
-    activities = []
-    for call in ledger.get('calls', {}).values():
-        activities.append(dict(id=call['id'], role=call.get('role', 'unknown'),
-            category=category(call.get('role', '')), provider=call.get('provider', 'unknown'),
-            model=call.get('model', 'unknown'), effort=call.get('effort', 'unknown'),
-            status=call.get('status', 'unknown'), started_at=call.get('started_at', ''),
-            invocation=call.get('invocation'), finished_at=call.get('finished_at'),
-            seconds=max(0, call.get('duration_seconds', 0)),
-            tokens=(call.get('usage') or {}).get('total_tokens'), coverage=call.get('coverage', 'unavailable')))
-    trace = read(root / 'execution-trace.json', {})
-    by_call = {r['id']: r for r in activities}
-    for event in trace.get('executions', []):
-        row = by_call.get(event.get('call_id'))
-        if row is not None:
-            row.update(trace_id=event['id'], trace_invocation=event['invocation'], sequence=event['sequence'],
-                       predecessor=event.get('predecessor'))
-        elif event.get('status') == 'reused':
-            activities.append(dict(id=event['id'], role=event['role'], category=category(event['role']),
-                provider='original configuration', model='retained', effort='retained', status='reused',
-                started_at=event['started_at'], sequence=event['sequence'], seconds=0, tokens=0, coverage='not-applicable'))
-    owner = read(Path(state['owner']) / 'session.json', {}) if state.get('owner') else {}
-    for batch in owner.get('batches', []):
-        for verification in batch.get('verification_runs', []):
-            source = verification.get('input', {})
-            # Crash recovery spends a timeout allowance, which is not measured duration.
-            measured = verification.get('status') not in ('running', 'interrupted')
-            activities.append(dict(id='verification-' + str(len(activities)), role='Standalone verification',
-                category='Verification', provider='controller', model='none', effort='none',
-                status=verification.get('status', 'unknown'), started_at=source.get('started_at', ''),
-                seconds=verification.get('elapsed_seconds', 0) if measured else 0,
-                tokens=None, coverage='not-applicable'))
-    for invocation in trace.get('invocations', []):
-        if 'seconds' not in invocation:
+    state = read_json(root / 'session.json', {})
+    if state.get('kind') != 'issue' or state.get('execution_trace_version') != 2:
+        raise ValueError('Reports support only new issue sessions created with version-2 tracing. Existing workflows can still resume normally.')
+    trace = session_trace.validate(read_json(root / 'execution-trace.json'), state['id'])
+    ledger = read_json(root / 'usage/ledger.json', {})
+    calls = ledger.get('calls', {})
+    rows, claimed = [], set()
+    coverage = trace.get('coverage', 'partial')
+    for stage in trace['stages']:
+        call_ids = [key for key in stage.get('call_ids', []) if key not in claimed]
+        claimed.update(call_ids)
+        observations = [calls[key] for key in call_ids if key in calls]
+        known = [c['usage']['total_tokens'] for c in observations if c.get('usage') is not None]
+        if len(observations) != len(call_ids) or stage['status'] in ('running', 'interrupted') or stage.get('timing_coverage') == 'unknown':
+            coverage = 'partial'
+        choice = stage.get('choice') or {}
+        seconds = stage.get('seconds', 0)
+        if stage['status'] == 'reused' or stage['role'].startswith('control/'):
+            seconds = 0
+        rows.append(dict(id=stage['id'], sequence=stage['sequence'], stage=True, role=stage['role'],
+            category=category(stage['role']), status=('reused: ' + stage['outcome']) if stage['status'] == 'reused' else stage['outcome'], context=stage.get('context', {}),
+            provider=str(choice.get('provider', 'controller')), model=str(choice.get('model', 'none')), effort=str(choice.get('effort', 'none')),
+            seconds=seconds, duration_known='seconds' in stage and stage.get('timing_coverage') != 'unknown', tokens=sum(known) if known else None, invocation=stage['invocation'],
+            summary=stage.get('summary', ''), reused_from=stage.get('reused_from')))
+    # Unassigned calls (e.g. authentication probes) are accounting observations,
+    # never inferred workflow stages or dependency edges.
+    for execution in trace['executions']:
+        key = execution.get('call_id')
+        if not key or key in claimed:
             continue
-        # Sequential workflow: subtract measured child work within this invocation.
-        children = [r for r in activities if r.get('trace_invocation') == invocation['id'] or
-                    r['category'] == 'Verification' and invocation['started_at'] <= r['started_at'] <= invocation.get('finished_at', '')]
-        overhead = max(0, invocation['seconds'] - sum(r['seconds'] for r in children))
-        if overhead > 0:
-            activities.append(dict(id='overhead-' + invocation['id'], role='Orchestration overhead', category='Other',
-                provider='controller', model='none', effort='none', status=invocation['status'],
-                started_at=invocation.get('finished_at', ''), seconds=overhead, tokens=None, coverage='not-applicable'))
-    # Stable sort preserves ledger insertion order for historical timestamp ties.
-    activities.sort(key=lambda row: (row['started_at'], row.get('sequence', 0)))
-    data = dict(version=1, outcome=state.get('phase', 'unknown'), activities=activities,
-                coverage='partial', waiting_seconds=trace.get('waiting_seconds'), trace_version=trace.get('version'),
-                repairs=sum(len(b.get('review_history', {}).get('cycles', [])) for b in owner.get('batches', [])))
-    data['outcomes'] = []
-    assessment = state.get('assessment') or {}
-    if assessment.get('summary'):
-        data['outcomes'].append({'stage': 'Planning', 'summary': assessment['summary']})
-    for batch in owner.get('batches', []):
-        for attempt in batch.get('attempts', []):
-            result = attempt.get('result')
-            if isinstance(result, dict) and isinstance(result.get('summary'), str):
-                data['outcomes'].append({'stage': attempt.get('role', 'Implementation'), 'summary': result['summary']})
-        review = batch.get('review') or {}
-        if isinstance(review, dict) and isinstance(review.get('summary'), str):
-            data['outcomes'].append({'stage': 'Acceptance', 'summary': review['summary']})
+        claimed.add(key)
+        call = calls.get(key, {})
+        rows.append(dict(id=execution['id'], role=execution['role'], category='Other', stage=False,
+            status=execution['status'], seconds=execution.get('seconds', 0), invocation=execution['invocation'],
+            provider=call.get('provider', 'unknown'), model=call.get('model', 'unknown'), effort=call.get('effort', 'unknown'),
+            tokens=(call.get('usage') or {}).get('total_tokens')))
+    if set(calls) - claimed:
+        coverage = 'partial'  # No inference from unmatched usage to missing stages.
+    for invocation in trace['invocations']:
+        if 'seconds' not in invocation:
+            coverage = 'partial'
+            continue
+        measured = sum(r['seconds'] for r in rows if r['invocation'] == invocation['id'])
+        overhead = max(0, invocation['seconds'] - measured)
+        if overhead:
+            rows.append(dict(id='overhead-' + invocation['id'], role='Orchestration overhead', category='Other', stage=False,
+                status=invocation['status'], seconds=overhead, invocation=invocation['id'], tokens=None,
+                provider='controller', model='none', effort='none'))
+    observed_calls = [calls[key] for key in claimed if key in calls]
+    data = dict(version=2, outcome=trace.get('outcome', state.get('phase', 'unknown')), activities=rows, transitions=trace['transitions'],
+                coverage=coverage, waiting_seconds=trace.get('waiting_seconds'),
+                reported_calls=sum(c.get('usage') is not None for c in observed_calls), total_calls=len(claimed),
+                token_partial=any(c.get('coverage') != 'reported' for c in observed_calls),
+                repairs=sum(s['role'] == 'control/repair_allocated' for s in trace['stages']),
+                stage_numbers={s['id']: s['sequence'] for s in trace['stages']})
     output = root / 'reports'
     output.mkdir(exist_ok=True, mode=0o700)
     atomic_json(output / 'session.json', data)
@@ -183,16 +192,9 @@ def finish(flow, result):
     if not flow.state.get('session_report'):
         return result
     try:
-        trace_path = Path(flow.path) / 'execution-trace.json'
-        trace = read(trace_path, {})
-        if trace and flow.state.get('phase') not in ('ready', 'complete'):
-            from .common import now
-            trace.setdefault('waiting_since', now())
-            atomic_json(trace_path, trace)
         fields, body = generate(flow.path)
         result.update(fields)
         if flow.state.get('phase') in ('ready', 'complete') and result.get('exit_code', 0) == 0:
-            from .common import digest
             key = 'session-report:' + digest([flow.state.get('plan'), flow.state.get('remote_head')])
             action = flow.state.get('actions', {}).get(key)
             if action:

@@ -35,7 +35,7 @@ def parser():
     result.add_argument('--min-weekly-quota-remaining', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; stop at this remaining account weekly percentage')
     result.add_argument('--max-weekly-quota-use', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; maximum observed weekly percentage-point increase during active work')
     result.add_argument('--max-runtime', type=lambda v: None if v == 'none' else v, default=argparse.SUPPRESS, help='cumulative active planning and execution for new jobs; saved jobs retain their scope; e.g. 30m or 2h, none disables')
-    result.add_argument('--report-session', metavar='PATH', help='generate an offline report without resuming or publishing')
+    result.add_argument('--report-session', metavar='PATH', help='generate an offline report for a version-2 issue session without resuming or publishing')
     result.add_argument('--session-report', action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS, help='save execution reports and publish on completion')
     result.add_argument('--json', action='store_true')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')

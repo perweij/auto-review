@@ -594,6 +594,8 @@ def execute(session, state, batch, adapter, *, role):
                 if token not in applied:
                     applied.append(token)
     except BaseException as exc:
+        from . import session_trace
+        session_trace.invalidate(getattr(run, 'trace_result', None), exc)
         attempt.update(status='interrupted' if isinstance(exc, Cancelled) or getattr(exc, 'code', None) in
                        ('cancelled', 'resource_limit') else 'failed', error=str(exc), code=getattr(exc, 'code', None))
         raise
@@ -719,6 +721,9 @@ def adjudicate(session, state, batch, specification, record):
     batch['attempts'].append(attempt)
     run.attempt = attempt
     session.save(state)
+    from . import session_trace
+    trace_handle = session_trace.start('adjudication', choice=run.settings['processing'],
+        inputs=[session_trace.reference(record['artifact'])], artifact=output, key=request_id)
     try:
         review_workspace.verify_live(run, 'before')
         if saved.get('response') is not None:
@@ -810,12 +815,19 @@ def adjudicate(session, state, batch, specification, record):
         record['projected'] = copy.deepcopy(projected)
         session.save(state)
         write_json(run.path / 'reviews/projected-acceptance.json', projected)
+        if attempt.get('reused'):
+            trace_id = session_trace.complete_reuse(trace_handle, output, {**projected, 'summary': json.dumps(value['decisions'])})
+        else:
+            trace_id = session_trace.complete(trace_handle, {**projected, 'summary': json.dumps(value['decisions'])}, output)
+        session_trace.mark('acceptance_result', trace_id)
         return projected
     except BaseException as exc:
         if attempt['status'] != 'complete':
             attempt.update(status='failed', error=str(exc))
         raise
     finally:
+        import sys
+        session_trace.close(trace_handle, sys.exc_info()[1])
         attempt['finished_at'] = now()
         run.close()
         session.save(state)

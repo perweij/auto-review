@@ -1701,17 +1701,23 @@ that is already satisfied. Account changes during a run block subsequent writes.
 
 `fix-issue --session-report` saves a Markdown report and normalized JSON under
 `reports/session.md` and `reports/session.json` in the issue session. The option
-persists across resumes; `--no-session-report` disables it. It is a workflow
-control, not a generated model-configuration setting.
+persists across resumes; `--no-session-report` disables automatic report generation
+and publication. New issue sessions always record a lightweight version-2 trace,
+so reports can be enabled later without losing stage history. Recording makes no
+additional model calls. This is separate from generated model-configuration settings.
 
 The report contains a compact Mermaid flowchart and expandable pie charts,
 execution details and structured outcome excerpts. Time measures recorded active
-processing, excluding stopped periods waiting for user input. Earlier sessions
-may lack timing, associations or outcomes; partial coverage is explicit. The
-report does not execute commands found in saved artifacts.
+processing, excluding stopped periods waiting for user input. Stages record their
+validated outcomes, exact result dependencies and controller decisions; process
+exit status alone never implies acceptance. Graph edges show dependencies, not
+parallel execution. Interrupted stages and missing observations remain explicit.
+The report does not execute commands found in saved artifacts.
 
-`--report-session PATH` generates the report offline for an existing issue
-session. It does not resume work, require a checkout, or publish. Completion
+`--report-session PATH` generates the report offline for a version-2 issue
+session. Sessions created before version-2 tracing are unsupported for reporting;
+they continue to execute normally, and their existing reports and receipts remain
+untouched. No historical reconstruction or trace migration is performed. It does not resume work, require a checkout, or publish. Completion
 publication uses existing issue-comment write receipts. If posting fails, the
 task result remains unchanged and `report_warning` explains the failure. Use
 existing `--inspect-writes` and `--retry-absent` controls for uncertain writes;

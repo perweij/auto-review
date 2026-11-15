@@ -111,7 +111,9 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
             result_file = Path(saved['directory']) / 'validated.json'
             if result_file.is_file() and hash_file(result_file) == saved.get('hash'):
                 from .session_trace import reuse
-                reuse('planning-' + stage)
+                from . import session_trace
+                trace_id = reuse('planning-' + stage, result_file, read_json(result_file), choice=saved.get('choice'))
+                session_trace.mark('planning_result', trace_id)
                 outputs[stage] = read_json(result_file)
                 emit('progress', message=f'Planning {stage}: reusing completed evidence under its original model settings.')
                 continue
@@ -170,62 +172,70 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
             head=head, base=head, scratch=attempt, cwd=cwd, output=attempt, protected=[directory.resolve()])
         # Fetch the same immutable commit for both refs; the clone owns its refs.
         workspace = isolation.IndependentWorkspace(None, stage, choice['provider'], inputs=inputs_spec)
-        try:
-            if conversation:
-                home = Path(conversation['home'])
-                if not home.exists():
-                    shutil.copytree(workspace.home, home)
-            raw = read_json(attempt / 'validated.json')
-            if raw is not None:
-                raw = validate(stage, raw, workspace.checkout, outputs.get('review', {}).get('points', []))
-            if raw is None:
-                if saved.get('corrections', 0) >= 2:
-                    raise ApiError('invalid_result', saved['validation_error'] + ' Regenerate this planning stage to retry.')
-                for correction in range(saved.get('corrections', 0), 2):
-                    args = (arguments(choice, attempt, attempt / 'schema.json', conversation, role='plan')
-                            if conversation else argv(choice, Runtime.environment(), 'plan', attempt, attempt / 'schema.json'))
-                    env, _ = environment(choice['provider'])
-                    args, env = workspace.wrap(args, env, provider_home=conversation['home'] if conversation else None)
-                    def event_line(stream, line):
-                        if stream != "stdout" or not conversation:
-                            return
+        from . import session_trace
+        dependencies = {'draft': (), 'review': ('draft',), 'synthesis': ('draft', 'review')}[stage]
+        sources = [session_trace.reference(Path(state['stages'][name]['directory']) / 'validated.json') for name in dependencies]
+        with session_trace.stage('planning-' + stage, choice=choice, inputs=sources,
+                                 artifact=attempt / 'validated.json') as trace_handle:
+            try:
+                if conversation:
+                    home = Path(conversation['home'])
+                    if not home.exists():
+                        shutil.copytree(workspace.home, home)
+                raw = read_json(attempt / 'validated.json')
+                if raw is not None:
+                    raw = validate(stage, raw, workspace.checkout, outputs.get('review', {}).get('points', []))
+                if raw is None:
+                    if saved.get('corrections', 0) >= 2:
+                        raise ApiError('invalid_result', saved['validation_error'] + ' Regenerate this planning stage to retry.')
+                    for correction in range(saved.get('corrections', 0), 2):
+                        args = (arguments(choice, attempt, attempt / 'schema.json', conversation, role='plan')
+                                if conversation else argv(choice, Runtime.environment(), 'plan', attempt, attempt / 'schema.json'))
+                        env, _ = environment(choice['provider'])
+                        args, env = workspace.wrap(args, env, provider_home=conversation['home'] if conversation else None)
+                        def event_line(stream, line):
+                            if stream != "stdout" or not conversation:
+                                return
+                            try:
+                                event = json.loads(line)
+                            except (ValueError, TypeError):
+                                return
+                            sid = event.get('thread_id') if event.get('type') == 'thread.started' else event.get('session_id') if event.get('type') == 'system' else None
+                            if sid:
+                                if conversation.get('started') and conversation['session_id'] != sid:
+                                    raise ApiError('invalid_state', 'Planning provider resumed a different session.')
+                                conversation.update(session_id=sid, started=True)
+                                save()
+                        emit('progress', message=f'Planning {stage}: {choice["provider"]} / {choice["model"]} ({choice["effort"]})')
+                        result = run(args, cwd=workspace.checkout, env=env, input_bytes=prompt.encode(),
+                            timeout=Runtime.environment().model_timeout, stdout_path=attempt / f'events-{correction}.jsonl',
+                            stderr_path=attempt / f'stderr-{correction}.log', model_events=True, on_line=event_line,
+                            stage='planning-' + stage, usage_call=usage.choice('planning-' + stage, choice))
+                        workspace.verify()
                         try:
-                            event = json.loads(line)
-                        except (ValueError, TypeError):
-                            return
-                        sid = event.get('thread_id') if event.get('type') == 'thread.started' else event.get('session_id') if event.get('type') == 'system' else None
-                        if sid:
-                            if conversation.get('started') and conversation['session_id'] != sid:
-                                raise ApiError('invalid_state', 'Planning provider resumed a different session.')
-                            conversation.update(session_id=sid, started=True)
+                            raw = validate(stage, response(choice, result, attempt, invalid_code='invalid_result'), workspace.checkout,
+                                           outputs.get('review', {}).get('points', []))
+                            write_json(attempt / 'validated.json', raw)
+                            break
+                        except ApiError as exc:
+                            if exc.code not in ('invalid_result', 'invalid_artifact'):
+                                raise
+                            saved['corrections'] = correction + 1
+                            saved['validation_error'] = str(exc)
                             save()
-                    emit('progress', message=f'Planning {stage}: {choice["provider"]} / {choice["model"]} ({choice["effort"]})')
-                    result = run(args, cwd=workspace.checkout, env=env, input_bytes=prompt.encode(),
-                        timeout=Runtime.environment().model_timeout, stdout_path=attempt / f'events-{correction}.jsonl',
-                        stderr_path=attempt / f'stderr-{correction}.log', model_events=True, on_line=event_line,
-                        stage='planning-' + stage, usage_call=usage.choice('planning-' + stage, choice))
-                    workspace.verify()
-                    try:
-                        raw = validate(stage, response(choice, result, attempt, invalid_code='invalid_result'), workspace.checkout,
-                                       outputs.get('review', {}).get('points', []))
-                        write_json(attempt / 'validated.json', raw)
-                        break
-                    except ApiError as exc:
-                        if exc.code not in ('invalid_result', 'invalid_artifact'):
-                            raise
-                        saved['corrections'] = correction + 1
-                        saved['validation_error'] = str(exc)
-                        save()
-                        if correction == 1:
-                            raise
-                        prompt += '\nReturn corrected structured output only. Validation error: ' + str(exc)
-            workspace.verify()
-            if configuration_snapshot(cwd) != agents or git(['rev-parse', 'HEAD'], cwd=cwd).stdout.strip() != head:
-                raise ApiError('workspace_changed', 'Planning source or configuration changed.')
-            saved.update(status='complete', hash=hash_file(attempt / 'validated.json'))
-            save()
-            outputs[stage] = raw
-        finally:
-            workspace.close()
+                            if correction == 1:
+                                raise
+                            session_trace.restart(trace_handle, 'format_correction', str(exc))
+                            prompt += '\nReturn corrected structured output only. Validation error: ' + str(exc)
+                workspace.verify()
+                if configuration_snapshot(cwd) != agents or git(['rev-parse', 'HEAD'], cwd=cwd).stdout.strip() != head:
+                    raise ApiError('workspace_changed', 'Planning source or configuration changed.')
+                saved.update(status='complete', hash=hash_file(attempt / 'validated.json'))
+                save()
+                trace_id = session_trace.complete(trace_handle, raw, attempt / 'validated.json')
+                session_trace.mark('planning_result', trace_id)
+                outputs[stage] = raw
+            finally:
+                workspace.close()
     return {**outputs['synthesis'], 'agent_configuration': agents, 'planning_artifacts': str(root),
             'planning_choices': {s: state['stages'][s]['choice'] for s in STAGES}}

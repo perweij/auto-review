@@ -6,45 +6,33 @@ from pr_review.session_report import generate, render
 
 
 class ReportTest(unittest.TestCase):
-    def test_offline_report_excludes_gaps_and_preserves_unknown_tokens(self):
+    def test_historical_session_is_unsupported_and_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / 'session.json').write_text(json.dumps({'issue': 39, 'assessment': {}, 'phase': 'ready'}))
-            (root / 'usage').mkdir()
-            calls = {'a': {'id': 'a', 'role': 'fix', 'duration_seconds': 60,
-                           'started_at': '2026-01-01', 'usage': {'total_tokens': 100}},
-                     'b': {'id': 'b', 'role': 'final-review/reviewer-1', 'duration_seconds': 120,
-                           'started_at': '2026-01-03', 'model': '<script>|bad'}}
-            (root / 'usage/ledger.json').write_text(json.dumps({'calls': calls}))
-            fields, body = generate(root)
-            data = json.loads(Path(fields['report_data_path']).read_text())
-            self.assertEqual(180, sum(r['seconds'] for r in data['activities']))
-            self.assertIsNone(data['activities'][1]['tokens'])
-            self.assertNotIn('<script>', body)
-            self.assertIn('&#124;', body)
-            self.assertIn('3.0 minutes', body)
-            self.assertIn('pie', body)
-
-    def test_wrong_directory_is_not_created(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaises(ValueError):
+            path = Path(directory) / 'session.json'
+            path.write_text(json.dumps({'kind': 'issue', 'phase': 'ready'}))
+            before = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'new issue sessions'):
                 generate(directory)
+            self.assertEqual(before, path.read_bytes())
             self.assertFalse((Path(directory) / 'reports').exists())
 
-    def test_empty_report_has_no_pie(self):
-        self.assertNotIn('\npie\n', render({'activities': [], 'outcome': 'unknown'}))
-
-    def test_trace_persists_reuse_and_excludes_inactive_gaps(self):
-        from pr_review import session_trace
-        from unittest.mock import patch
+    def test_report_renders_explicit_edges_and_excludes_waits(self):
+        from pr_review import session_trace as trace
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(session_trace.time, 'monotonic', side_effect=[10, 11, 15]):
-                with session_trace.operation(directory, True):
-                    session_trace.reuse('planning-draft')
-            data = json.loads((Path(directory) / 'execution-trace.json').read_text())
-            self.assertEqual(5, data['invocations'][0]['seconds'])
-            self.assertEqual('reused', data['executions'][0]['status'])
-            self.assertEqual(0, data['executions'][0]['seconds'])
+            root = Path(directory)
+            (root / 'session.json').write_text(json.dumps({'kind': 'issue', 'id': 'id', 'execution_trace_version': 2, 'phase': 'ready'}))
+            trace.initialize(root, 'id')
+            with trace.operation(root, True, 'id'):
+                with trace.stage('planning', choice={'model': '<bad>|model'}) as handle:
+                    first = trace.complete(handle, {'decision': 'plan', 'summary': 'Plan is ready'})
+                trace.decision('approved', sources=[first])
+            fields, body = generate(root)
+            data = json.loads(Path(fields['report_data_path']).read_text())
+            self.assertEqual(1, len(data['transitions']))
+            self.assertIn('Plan is ready', body)
+            self.assertNotIn('<bad>', body)
+            self.assertIn('approved', body)
+            self.assertNotIn('historical', body.lower())
 
     def test_publication_failure_does_not_change_task_result(self):
         from pr_review.session_report import finish
@@ -68,6 +56,9 @@ class ReportTest(unittest.TestCase):
         fixture = test_issues.IssueIntegrationTest()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
+        result = dispatch(fixture.terminal_request())
+        trace_path = Path(result['session']) / 'execution-trace.json'
+        self.assertEqual(2, json.loads(trace_path.read_text())['version'])
         result = dispatch(fixture.terminal_request('--session-report'))
         self.assertEqual('approval', result['outcome'])
         self.assertEqual('local-only', result['report_publication'])
@@ -94,29 +85,10 @@ class ReportTest(unittest.TestCase):
             self.assertEqual('complete', result['report_publication'])
 
     def test_bounded_report_remains_below_comment_limit(self):
-        row = dict(category='Implementation', role='fix', provider='codex', model='x'*500,
-                   effort='high', seconds=1, tokens=None, status='completed')
-        body = render({'activities': [row]*500, 'outcome': 'ready',
-                       'outcomes': [{'stage': 'Implementation', 'summary': 'x'*5000}]*100}, bounded=True)
+        rows = [dict(id=str(i), sequence=i, stage=True, context={}, category='Implementation', role='implementation',
+                     provider='codex', model='x'*500, effort='high', seconds=1, tokens=None,
+                     status='ready', summary='x'*4000) for i in range(500)]
+        body = render(dict(activities=rows, outcome='ready', transitions=[], coverage='partial',
+                           reported_calls=0, total_calls=500, repairs=0, stage_numbers={}), bounded=True)
         self.assertLess(len(body), 30000)
         self.assertIn('omitted', body)
-
-    def test_corrupt_trace_does_not_block_work(self):
-        from pr_review import session_trace
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'execution-trace.json'
-            path.write_text('{broken')
-            with session_trace.operation(directory, True):
-                session_trace.reuse('planning-draft')
-            self.assertEqual('{broken', path.read_text())
-
-    def test_same_second_calls_preserve_recorded_order(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / 'session.json').write_text(json.dumps({'kind': 'issue', 'phase': 'ready'}))
-            (root / 'usage').mkdir()
-            calls = {key: dict(id=key, started_at='2026-01-01T00:00:00+00:00') for key in ('z', 'a')}
-            (root / 'usage/ledger.json').write_text(json.dumps({'calls': calls}))
-            fields, _ = generate(root)
-            data = json.loads(Path(fields['report_data_path']).read_text())
-            self.assertEqual(['z', 'a'], [r['id'] for r in data['activities']])

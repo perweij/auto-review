@@ -128,6 +128,23 @@ def handoff(session, state, batch=None):
 
 
 def invoke(session, state, batch, specification, feedback):
+    from . import session_trace as trace
+    source = batch.get('trace_next') or batch.get('trace_candidate')
+    with trace.stage('implementation', choice=batch['settings']['fix'], inputs=[source],
+                     key='implementation:' + batch['id'],
+                     context={'batch': batch['id'], 'cycle': len(batch.get('review_history', {}).get('cycles', []))}) as handle:
+        value = _invoke(session, state, batch, specification, feedback)
+        artifact = Path(batch['attempts'][-1]['path']) / 'result.json'
+        identity = trace.complete(handle, value, artifact)
+        trace.mark('implementation_result', identity)
+        if identity:
+            batch['trace_candidate'] = identity
+            batch.pop('trace_next', None)
+            session.save(state)
+        return value
+
+
+def _invoke(session, state, batch, specification, feedback):
     """One implementation turn of the persistent ``fix`` session."""
     choice = batch['settings']['fix']
     from .issue_settings import select_conversation
@@ -271,6 +288,8 @@ def report(session, state, batch, specification, feedback):
     except ApiError as exc:
         if exc.code != 'invalid_result':
             raise
+        from . import session_trace
+        session_trace.decision('format_correction', summary=str(exc), key=str(len(batch.get('attempts', []))))
         emit('progress', message='Correcting harness completion report format')
         return invoke(session, state, batch, specification,
                       list(feedback) + ['Correct the completion report to the supplied schema: ' + str(exc)])
@@ -400,6 +419,8 @@ def execute(session, state, batch, remote):
                 batch['harness_unchanged'] = unchanged
                 if unchanged >= 3:
                     raise ApiError('automation_failed', 'Implementation repeatedly returned without a candidate or source progress.', summary=candidate['summary'])
+                from . import session_trace
+                batch['trace_next'] = session_trace.decision('continue_implementation', sources=[batch.get('trace_candidate')], summary=candidate['summary'])
                 implementation_feedback = feedback + ['Continue the approved implementation to a complete candidate; own testing and debugging.']
                 continue
             batch['harness_unchanged'] = 0
@@ -421,6 +442,10 @@ def execute(session, state, batch, remote):
             review = acceptance.project_issue(value)
         else:
             result, review = acceptance.review_issue(session, state, batch, approved)
+        from . import session_trace
+        acceptance_trace = (session_trace.marked('acceptance_result') if adjudication_only else None) or session_trace.reference(result.artifact)
+        if acceptance_trace:
+            batch['trace_acceptance'] = acceptance_trace
         blockers = result.value.get('verification_blockers', [])
         if (blockers and result.value['assessment'] == 'incomplete'
                 and acceptance.blocking_findings(result.value) and not result.value['questions']):
@@ -431,6 +456,8 @@ def execute(session, state, batch, remote):
         if review is None or review_history.enabled(batch) and blockers and not repairable:
             if (review_history.enabled(batch) and blockers and not result.value.get('questions')
                     and issue_verification.collect(session, state, batch, blockers)):
+                from . import session_trace
+                session_trace.decision('verification_evidence_available', sources=batch.get('trace_verification', []), key=batch.get('harness_candidate_tree'))
                 continue  # Same candidate; only synthesis receives the new evidence.
             # An incomplete review writes no proof. The phase stays 'review', so
             # resume reruns only the stages that lack valid evidence.
@@ -490,6 +517,7 @@ def execute(session, state, batch, remote):
                 record = next(r for r in review_history.ledger(batch)['rounds'] if r['id'] == batch['review_round'])
                 try:
                     review_history.allocate(batch, record, feedback)
+                    batch['trace_next'] = session_trace.decision('repair_allocated', sources=[acceptance_trace], summary=review['summary'], key=record['id'])
                 except ApiError:
                     batch['review_stop']['context'] = review_history.context_identity(session, state, batch)
                     session.save(state)

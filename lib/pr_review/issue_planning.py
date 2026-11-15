@@ -60,19 +60,23 @@ def assess_issue(context, configuration, directory, cwd, previous_assessment=Non
     atomic_bytes(directory / 'prompt.txt', prompt.encode())
     env, _ = environment(choice['provider'])
     env.update(TMPDIR=str(directory / 'scratch'), PYTHONDONTWRITEBYTECODE='1', GIT_OPTIONAL_LOCKS='0')
-    result = run(argv(choice, Runtime.environment(), 'plan', directory, directory / 'schema.json'), cwd=cwd, env=env,
-                 input_bytes=prompt.encode(), timeout=Runtime.environment().model_timeout,
-                 stdout_path=directory / 'events.jsonl', stderr_path=directory / 'stderr.log', model_events=True, stage='issue-plan', usage_call=usage.choice('planning', choice))
-    if configuration_snapshot(cwd) != before:
-        raise ApiError('workspace_changed', 'Agent configuration changed during planning.')
-    value = response(choice, result, directory)
-    if value.get('decision') not in DECISIONS or not isinstance(value.get('summary'), str):
-        raise ApiError('invalid_result', 'Invalid issue assessment.')
-    for field in ('questions', 'acceptance'):
-        if not isinstance(value.get(field), list) or any(not isinstance(v, str) or not v.strip() for v in value[field]):
-            raise ApiError('invalid_result', 'Invalid ' + field)
-    # Mechanical completeness only; whether the decisions are sound is for the approver and the review.
-    specification.check_assessment(value, cwd)
-    value['agent_configuration'] = before
-    write_json(directory / 'result.json', value)
-    return value
+    from . import session_trace
+    with session_trace.stage('planning', choice=choice, artifact=directory / 'result.json') as trace_handle:
+        result = run(argv(choice, Runtime.environment(), 'plan', directory, directory / 'schema.json'), cwd=cwd, env=env,
+                     input_bytes=prompt.encode(), timeout=Runtime.environment().model_timeout,
+                     stdout_path=directory / 'events.jsonl', stderr_path=directory / 'stderr.log', model_events=True, stage='issue-plan', usage_call=usage.choice('planning', choice))
+        if configuration_snapshot(cwd) != before:
+            raise ApiError('workspace_changed', 'Agent configuration changed during planning.')
+        value = response(choice, result, directory)
+        if value.get('decision') not in DECISIONS or not isinstance(value.get('summary'), str):
+            raise ApiError('invalid_result', 'Invalid issue assessment.')
+        for field in ('questions', 'acceptance'):
+            if not isinstance(value.get(field), list) or any(not isinstance(v, str) or not v.strip() for v in value[field]):
+                raise ApiError('invalid_result', 'Invalid ' + field)
+        # Mechanical completeness only; whether the decisions are sound is for the approver and the review.
+        specification.check_assessment(value, cwd)
+        value['agent_configuration'] = before
+        write_json(directory / 'result.json', value)
+        trace_id = session_trace.complete(trace_handle, value, directory / 'result.json')
+        session_trace.mark('planning_result', trace_id)
+        return value

@@ -334,21 +334,24 @@ Enable an execution report for a new or resumed job:
 fix-issue -i 42 --economical --session-report
 ```
 
-This preference persists on resume; `--no-session-report` disables it. Reports
+New issue sessions always record stage outcomes and dependencies locally. This
+flag can therefore be enabled later; `--no-session-report` disables automatic
+generation/publication without stopping recording. The preference persists. Reports
 are saved under the issue session's `reports/` directory. Successful completion
 also posts a separate issue comment. An incomplete run retains a local report.
 The default view is compact; expand the time/token breakdown, execution history
 and stage outcomes for details. No additional model calls are needed.
 
-Generate a local report from an existing issue session without resuming it:
+Generate a local report from a session created with version-2 tracing, without resuming it:
 
 ```sh
 fix-issue --report-session /absolute/path/to/issues-v1/project/issue-42
 ```
 
 This command requires no authentication or network access and never publishes.
-Processing totals exclude time between stopped invocations. Historical gaps,
-missing observations and unavailable waiting measurements remain unknown.
+Older sessions are unsupported for reporting and are never reconstructed. They
+remain resumable. Processing totals exclude time between stopped invocations.
+Missing observations and unavailable waiting measurements remain unknown.
 Reported tokens include repeated context and cache reads according to the usage
 ledger; their proportions do not represent monetary cost. Provider-internal
 verification is included in the provider call; controller verification is separate.

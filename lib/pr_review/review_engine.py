@@ -253,26 +253,32 @@ def independent(run, stage):
     if cache.reusable(run, stage, output, cache.inputs(run, stage)):
         adapter.verify_snapshot(run, stage, 'reuse')
         from .session_trace import reuse
-        reuse('final-review/' + stage)
+        reuse(stage, output, {'status': 'evidence_available', 'summary': output.read_text()[:1200]}, choice=slot or {})
         say(f'Reusing completed {stage.title()} review')
         return
-    if stage == 'claude' and (run.path / 'reviews/codex.md').exists():
-        raise ApiError('independence_failed', 'Independent Claude inputs/output changed after Codex ran; start a new run to preserve independence')
-    output.with_suffix(output.suffix + '.tmp').unlink(missing_ok=True)
-    say(f'[{stage}] Running independent {stage.title()} review')
-    result, _ = run.model(stage, run.command(stage))
-    if provider == 'claude':
-        body = claude_result(run, stage, result).get('result')
-        if not isinstance(body, str) or not body.strip():
-            raise ApiError('model_failed', 'Claude returned an empty independent review')
-        atomic_bytes(output, (body + '\n').encode())
-    else:
-        temp = output.with_suffix('.md.tmp')
-        if not temp.is_file() or not temp.stat().st_size:
-            raise ApiError('model_failed', 'Codex returned an empty review')
-        atomic_bytes(output, temp.read_bytes())
-        temp.unlink()
-    run.complete(stage, output)
+    from . import session_trace
+    with session_trace.stage(stage, choice=slot or {}, artifact=output,
+                             inputs=[getattr(run, 'batch', {}).get('trace_candidate')],
+                             context={'batch': getattr(run, 'batch', {}).get('id'),
+                                      'cycle': len(getattr(run, 'batch', {}).get('review_history', {}).get('cycles', []))}) as trace_handle:
+        if stage == 'claude' and (run.path / 'reviews/codex.md').exists():
+            raise ApiError('independence_failed', 'Independent Claude inputs/output changed after Codex ran; start a new run to preserve independence')
+        output.with_suffix(output.suffix + '.tmp').unlink(missing_ok=True)
+        say(f'[{stage}] Running independent {stage.title()} review')
+        result, _ = run.model(stage, run.command(stage))
+        if provider == 'claude':
+            body = claude_result(run, stage, result).get('result')
+            if not isinstance(body, str) or not body.strip():
+                raise ApiError('model_failed', 'Claude returned an empty independent review')
+            atomic_bytes(output, (body + '\n').encode())
+        else:
+            temp = output.with_suffix('.md.tmp')
+            if not temp.is_file() or not temp.stat().st_size:
+                raise ApiError('model_failed', 'Codex returned an empty review')
+            atomic_bytes(output, temp.read_bytes())
+            temp.unlink()
+        run.complete(stage, output)
+        session_trace.complete(trace_handle, {'status': 'evidence_available', 'summary': output.read_text()[:1200]}, output)
 
 
 # ---- synthesis ---------------------------------------------------------------------------------
@@ -310,7 +316,7 @@ def reusable_synthesis(run, adapter, output):
     return value
 
 
-def produce_synthesis(run, adapter):
+def produce_synthesis(run, adapter, trace_handle=None):
     """Run synthesis, correcting an invalid result on synthesis only."""
     for attempt in range(adapter.corrections + 1):
         try:
@@ -320,26 +326,45 @@ def produce_synthesis(run, adapter):
         except ApiError as exc:
             if attempt >= adapter.corrections or not adapter.correctable(exc):
                 raise
+            from . import session_trace
+            session_trace.restart(trace_handle, 'format_correction', str(exc))
             say('Correcting the synthesis result format; reviewer reports are not rerun.')
             adapter.render_synthesis(run, correction=str(exc))
 
 
 def synthesis(run):
+    from . import session_trace as trace
+    batch = getattr(run, 'batch', {})
+    inputs = [trace.reference(run.path / 'reviews' / (slot['id'] + '.md'))
+              for slot in run.settings.get('reviewer_slots', [])]
+    inputs += [batch.get('trace_candidate'), *batch.get('trace_verification', [])]
+    with trace.stage('acceptance', choice=run.settings.get('processing', {}), inputs=inputs,
+                     key=str(run.path / 'reviews/synthesis.json'),
+                     context={'batch': batch.get('id'), 'cycle': len(batch.get('review_history', {}).get('cycles', []))}) as handle:
+        result = _synthesis(run, handle)
+        if result.reused:
+            identity = trace.complete_reuse(handle, result.artifact, result.value)
+        else:
+            identity = trace.complete(handle, result.value, result.artifact)
+        run.trace_result = identity
+        trace.mark('acceptance_result', identity)
+        return result
+
+
+def _synthesis(run, trace_handle=None):
     adapter = adapter_of(run)
     adapter.render_synthesis(run)
     output = run.path / 'reviews/synthesis.json'
     value = reusable_synthesis(run, adapter, output)
     if value is not None:
         adapter.verify_snapshot(run, 'synthesis', 'reuse')
-        from .session_trace import reuse
-        reuse('final-review/synthesis')
         say(adapter.reuse_message(run))
         status, reused = 'completed', True
     else:
         adapter.prepare_rerun(run)
         adapter.render_synthesis(run)
         say(adapter.running_message(run))
-        value = produce_synthesis(run, adapter)
+        value = produce_synthesis(run, adapter, trace_handle)
         status, reused = adapter.classify(value), False
         if status not in REUSABLE:
             output = retain(run, value, status)

@@ -162,5 +162,5 @@ and resumed commands without changing global provider or container configuration
 For session-report changes, run `PYTHONPATH=lib:tests python3 -m unittest test_session_report` and the backend suite. Manually preview the generated
 Mermaid flowchart and pie blocks in GitHub and GitLab Markdown: check collapsed
 sections, labels, dark/light themes and long reports. This rendering check does
-not require paid model calls. Historical report generation must not resume or
-publish the source session.
+not require paid model calls. Offline report generation must not resume or publish the source session;
+pre-version-2 sessions must be rejected without mutation.

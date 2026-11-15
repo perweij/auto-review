@@ -1192,3 +1192,10 @@ session preference. Result fields `report_path`, `report_data_path`,
 is separate from the task outcome and exit code. The terminal-only
 `fix-issue --report-session PATH [--json]` command generates a local report
 without forge discovery, authentication or model execution.
+
+New issue sessions carry `execution_trace_version: 2` and always record locally.
+`session_report` controls generation/publication only. Offline reports require a
+matching version-2 trace; old sessions remain executable but are not migrated.
+Normalized report JSON is version 2 and exposes stable stage IDs, explicit
+transitions, semantic outcomes and exact usage references; it does not infer
+workflow links from timestamps. Trace failures do not change task outcomes.

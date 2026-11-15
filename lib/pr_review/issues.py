@@ -156,11 +156,12 @@ class Workflow:
         self.path = state_root() / 'issues-v1' / digest([repo.project.storage_key, str(repo.common)])[:32] / f'issue-{number}'
         self.file = self.path / 'session.json'
         self.state = read_json(self.file)
+        self.new_session = not self.state
         if not self.state:
             self.state = {'kind': 'issue', 'format_version': 1, 'sequence': 0, 'id': uuid.uuid4().hex,
                           'issue': number, 'repository': repo.identity, 'forge_project': repo.project.saved(), 'git_common_dir': str(repo.common),
                           'forge_account': facts.get('forge_account'), 'viewer': facts['viewer'], 'phase': 'intake', 'actions': {}, 'allowed_heads': [],
-                          'title': facts['issue']['title'], 'created_at': now(), 'budget_scope': 'planning-and-execution'}
+                          'title': facts['issue']['title'], 'created_at': now(), 'budget_scope': 'planning-and-execution', 'execution_trace_version': 2}
         from .forge import restore, check_account
         if facts.get('forge_account'):
             check_account(self.state.get('forge_account'), facts['forge_account'], self.state['viewer'])
@@ -380,6 +381,10 @@ class Workflow:
                          assessment_configuration=copy.deepcopy(state['configuration']),
                          input_digest=current, assessed_base=facts['base'])
             self.save()
+        from . import session_trace
+        planning_trace = session_trace.marked('planning_result')
+        if planning_trace:
+            state['trace_assessment'] = planning_trace
         assessment = state['assessment']
         if state.get('applied_assessment') != current:
             # Replacement assessments may publish before selecting their next
@@ -447,6 +452,7 @@ class Workflow:
                              'receipt': approved, 'yolo': bool(not approved), 'at': now()}
         state['approved_input'] = input_digest(facts, state)
         state.update(phase='approved', waiting=None)
+        session_trace.decision('approved', sources=[state.get('trace_assessment')], key=state['plan']['digest'])
         self.save()
         return True
 
@@ -1142,6 +1148,10 @@ def dispatch(request):
             actions = flow.writes.recover(request.get('retry_absent'))
             return flow.result('recovered' if request.get('retry_absent') else 'inspected',
                                next_action='retry', actions=actions)
+        from . import session_trace
+        if flow.new_session:
+            flow.save()
+            session_trace.initialize(flow.path, flow.state['id'])
         if 'session_report' in request:
             if type(request['session_report']) is not bool:
                 raise ApiError('invalid_request', 'session_report must be a Boolean.')
@@ -1158,12 +1168,28 @@ def dispatch(request):
             issue_resources.validate(request)
             review_history.controls(request)
             from . import session_trace
-            with session_trace.operation(flow.path, flow.state.get('session_report')), usage.operation(flow.path, legacy=flow.file.exists()):
-                result = flow.run()
+            with session_trace.operation(flow.path, flow.state.get('execution_trace_version') == 2, flow.state['id']), usage.operation(flow.path, legacy=flow.file.exists()):
+                if request.get('rerun_planning') or request.get('rerun_review'):
+                    session_trace.decision('rerun_requested', sources=[flow.state.get('trace_assessment')],
+                        summary=', '.join(request.get('rerun_planning', []) + request.get('rerun_review', [])), key=now())
+                try:
+                    result = flow.run()
+                except BaseException as exc:
+                    session_trace.decision('stopped/' + getattr(exc, 'code', 'interrupted'),
+                        sources=[session_trace.marked('last_failed') or session_trace.marked('acceptance_result') or session_trace.marked('implementation_result')],
+                        summary=str(exc), key=now())
+                    raise
+                if result['outcome'] != 'noop':
+                    session_trace.decision('boundary/' + result['outcome'], sources=[session_trace.marked('acceptance_result') or session_trace.marked('implementation_result') or session_trace.marked('planning_result') or flow.state.get('trace_assessment')],
+                                           key=[flow.state.get('remote_head'), flow.state.get('phase'), flow.state.get('next_action')])
+            if flow.state.get('execution_trace_version') == 2:
+                session_trace.boundary(flow.path, flow.state['id'], result)
             from .session_report import finish
             return finish(flow, result)
         except ApiError as exc:
             if exc.code == 'cancelled':
+                if flow.state.get('execution_trace_version') == 2:
+                    session_trace.boundary(flow.path, flow.state['id'], {'outcome': 'interrupted', 'next_action': 'resume'})
                 from .session_report import finish
                 finish(flow, {'outcome': 'interrupted', 'exit_code': 130})
                 raise
@@ -1213,5 +1239,7 @@ def dispatch(request):
                                5 if exc.code == 'uncertain' else 4 if exc.code == 'partial' else 3,
                                exc.details.get('next_action', 'recover'), error=flow.state['error'],
                                **{key: exc.details[key] for key in ('stage', 'stop_reason', 'repair_cycles_used', 'max_repair_cycles', 'disputed_findings') if key in exc.details})
+            if flow.state.get('execution_trace_version') == 2:
+                session_trace.boundary(flow.path, flow.state['id'], result)
             from .session_report import finish
             return finish(flow, result)

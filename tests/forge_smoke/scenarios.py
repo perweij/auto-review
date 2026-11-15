@@ -164,6 +164,16 @@ def issue(run, forge):
     resumed = json.loads(output)
     if resumed.get('report_publication') != 'complete' or not Path(resumed.get('report_path', '')).is_file():
         raise Failure('Completion report was not saved and published')
+    trace = json.loads((Path(resumed['session']) / 'execution-trace.json').read_text())
+    if trace.get('version') != 2:
+        raise Failure('Expected new-session semantic trace')
+    stages = {s['id']: s for s in trace['stages']}
+    acceptance = [s for s in stages.values() if s['role'] == 'acceptance' and s['outcome'] == 'passed']
+    if not acceptance or not {'reviewer-1', 'reviewer-2'} <= {
+            stages[source]['role'] for source in acceptance[-1]['inputs']}:
+        raise Failure('Acceptance trace lacks explicit reviewer-result dependencies')
+    if not any(s['role'] == 'implementation' and s['outcome'] == 'ready' for s in stages.values()):
+        raise Failure('Implementation semantic outcome was not recorded')
     reports = [c for c in forge.pages('/issues/%s/comments' % fixture['number'])
                if '## Session execution report' in c.get('body', '')]
     if len(reports) != 1:
