@@ -24,7 +24,7 @@ def parser():
     group = result.add_mutually_exclusive_group()
     group.add_argument('--resume', type=Path)
     group.add_argument('--cleanup', type=Path)
-    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report'))
+    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report'))
     return result
 
 
@@ -83,6 +83,26 @@ def review(run, forge):
         raise Failure('Resume charged new non-probe model calls')
     if before is not None and stages.read_text() != before:
         raise Failure('Resume launched new review stages')
+    view = run.api(dict(command='read', forge=forge.kind, session=fixture['session']), forge.cwd)
+    report = run.api(dict(command='review-report', forge=forge.kind, session=fixture['session'], generation=view['generation']), forge.cwd)
+    if not Path(report['report_path']).is_file():
+        raise Failure('Missing generation execution report')
+    if forge.kind == 'github':
+        request = dict(command='review-publish-report', session=fixture['session'], generation=view['generation'], revision=view['revision'])
+        published = run.api(request, forge.cwd)
+        repeated = run.api(request, forge.cwd)
+        if published['report_url'] != repeated['report_url']:
+            raise Failure('Execution report was duplicated')
+        fixture['execution_report'] = published
+        run.save()
+    else:
+        try:
+            run.api(dict(command='review-publish-report', forge='gitlab', session=fixture['session']), forge.cwd)
+        except Failure as exc:
+            if 'unsupported_operation' not in str(exc):
+                raise
+        else:
+            raise Failure('GitLab report publication was accepted')
     if forge.kind == 'gitlab':
         calls = [json.loads(line) for line in (run.directory / 'forge-calls.jsonl').read_text().splitlines()]
         if any(c['tool'] == 'glab' and c['actor'] == 'application' and c['kind'] not in ('read', 'metadata') for c in calls):
@@ -178,6 +198,10 @@ def main():
             passed = run.scenario('approval-changes', lambda: approval_changes(run, forges[0])) and passed
             for mode in ('before', 'after'):
                 passed = run.scenario('plan-receipt-' + mode, lambda mode=mode: changed_plan_receipt(run, forges[0], mode)) and passed
+            passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
+            return 0 if passed else 1
+        if options.scenario == 'review-report':
+            passed = run.scenario('github-review', lambda: review(run, forges[0]))
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
         if options.scenario == 'owner-report':

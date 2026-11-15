@@ -192,6 +192,10 @@ class AutomaticRun:
         if self.root:
             from . import usage
             self.record['usage'] = usage.summary(self.root)
+        if self.store is not None:
+            for field in ('execution_report', 'report_warning'):
+                if self.store.manifest.get(field):
+                    self.record[field] = self.store.manifest[field]
         self.record.update(outcome=outcome, exit_code=fields.pop('exit_code', EXIT_CODES[outcome]), reason=reason,
                            finished_at=now(), receipts=sorted({u for u in receipts if u}),
                            guidance='Open this PR in Emacs. Inspect attention items; R r resumes analysis, P opens publication and recovery, L shows the saved log.', **fields)

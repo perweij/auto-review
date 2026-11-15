@@ -1742,3 +1742,20 @@ optional `--batch ID`. Repeating the same snapshot publication is idempotent;
 subsequent execution can produce a new comment. Unknown write outcomes are
 recovered before further publication. Historical untraced batches remain runnable
 but have no execution report. GitLab Owner execution is outside the current pilot.
+
+### Plain review execution reports
+
+New review generations automatically record model settings, reported tokens,
+active runtime, validated outcomes and explicit stage dependencies. Reports cover
+full reviews, focused follow-ups, discussion matching, reassessment and automatic
+suggestion verification. Later interactive elaboration, edits and manual
+suggestion verification are outside this trace. User waiting time is excluded.
+
+Use `J o` in the reviewer dashboard to open the displayed generation's report and
+`J p` to publish a snapshot explicitly on GitHub. The CLI equivalents are
+`pr-review report SESSION` and `pr-review publish-report SESSION`; both accept
+`--generation ID`. A pending or historical selection never silently redirects to
+the latest generation. Completion describes execution, not publication of findings
+or approval of the PR. Repeated publication recovers receipts and does not duplicate
+an unchanged snapshot. GitLab reports remain local. Existing untraced generations
+are not reconstructed. `--auto-publish` continues to publish findings only.

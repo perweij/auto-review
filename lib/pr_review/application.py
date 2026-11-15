@@ -13,10 +13,13 @@ def dispatch(request):
     operation = request.get("command")
     capability = ("issues" if operation in ("issue-run", "issue-recover") else
                   "owner" if operation in ("owner-publish-report", "owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
-                  "publication" if operation in ("publish", "prepare", "resolve", "automatic-review") else "review")
+                  "publication" if operation in ("review-publish-report", "publish", "prepare", "resolve", "automatic-review") else "review")
     if forge == 'gitlab' and (str(operation).startswith(('owner-', 'issue-')) or operation in ('toolkit', 'thread-state', 'followup', 'pull-requests')):
         raise ApiError('unsupported_operation', 'This operation is not supported by the GitLab review pilot.')
     require(forge, capability)
+    if operation in ("review-report", "review-publish-report"):
+        from .review_reports import dispatch as report_dispatch
+        return report_dispatch(request)
     if operation == "checkout":
         from .checkouts import lookup
         return lookup(request)
@@ -28,11 +31,11 @@ def dispatch(request):
         return owner_dispatch(request)
     if operation == "capabilities" and forge == 'gitlab':
         return {"protocol": PROTOCOL, "features": ["generations", "drafts", "history", "operations", "usage-reporting", "checkout"],
-                "commands": ["capabilities", "checkout", "settings", "models", "read", "history", "diff", "file", "run", "cancel"]}
+                "commands": ["review-report", "capabilities", "checkout", "settings", "models", "read", "history", "diff", "file", "run", "cancel"]}
     if operation == "capabilities":
         from .owner import COMMANDS
         return {"protocol": PROTOCOL, "features": ["generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration", "checkout"],
-                "commands": ["checkout", "discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "elaborate", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
+                "commands": ["review-report", "review-publish-report", "checkout", "discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "elaborate", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":

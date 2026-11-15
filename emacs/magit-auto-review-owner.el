@@ -69,7 +69,7 @@
                        ("X" . magit-auto-review-owner-reopen)
                        ("K" . magit-auto-review-owner-cancel)
                        ("T" . magit-auto-review-owner-trust)
-                       ("E" . magit-auto-review-owner-report-menu)
+                       ("J" . magit-auto-review-owner-report-menu) ("E" . magit-auto-review-owner-report-menu)
                        ("L" . magit-auto-review-owner-log)
                        ("b" . magit-auto-review-owner-browse)
                        ("B" . magit-auto-review-pull-requests)
@@ -1309,7 +1309,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
   [:class transient-column :setup-children magit-auto-review-owner--context-help]
   [["Selected item" :class transient-column :setup-children magit-auto-review-owner--context-actions]
    ["Navigation"
-    ("E" "Execution report" magit-auto-review-owner-report-menu)
+    ("J" "Execution report" magit-auto-review-owner-report-menu)
     ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
     ("+" "All commands…" magit-auto-review-owner-all-menu)
@@ -1343,7 +1343,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
     ("P" "Preview/publish staged" magit-auto-review-owner-publish)
     ("O" "Recover uncertain publication" magit-auto-review-owner-recover)]
    ["Navigation"
-    ("E" "Execution report" magit-auto-review-owner-report-menu)
+    ("J" "Execution report" magit-auto-review-owner-report-menu)
     ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
     ("G" "Fetch GitHub" magit-auto-review-owner-fetch)

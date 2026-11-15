@@ -74,6 +74,25 @@ class ApiTest(unittest.TestCase):
     def change(self, operation, **fields):
         return dispatch(self.request("mutate", operation=operation, **fields))
 
+    def test_review_report_is_local_and_stale_publication_stops_before_network(self):
+        from pr_review import review_reports, session_trace
+        review_reports.new_generation(self.manifest)
+        atomic_json(self.path / 'manifest.json', self.manifest)
+        folder = review_reports.location(self.path, self.manifest)
+        session_trace.initialize(folder, review_reports.binding(self.path, self.manifest))
+        with session_trace.operation(folder, True, review_reports.binding(self.path, self.manifest)):
+            with session_trace.stage('synthesis') as handle:
+                session_trace.complete(handle, {'status': 'reviewed', 'summary': 'Validated findings'})
+        with patch('pr_review.repository.Repository.from_manifest', side_effect=AssertionError('Network forbidden')):
+            report = dispatch(self.request('review-report'))
+            self.assertTrue(Path(report['report_path']).is_file())
+            self.assertEqual(self.session.id, report['generation'])
+            self.assertEqual('complete', report['report_coverage'])
+            with self.assertRaises(ApiError) as caught:
+                dispatch(self.request('review-publish-report', revision='stale'))
+            self.assertEqual('stale_revision', caught.exception.code)
+        self.assertEqual(report, dispatch(self.request())['execution_report'])
+
     def test_local_reads_are_stable_and_never_run_models(self):
         with patch.object(publication, "repository_operation", side_effect=AssertionError("Network forbidden")):
             first = dispatch(self.request())

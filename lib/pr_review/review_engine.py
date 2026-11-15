@@ -253,13 +253,14 @@ def independent(run, stage):
     if cache.reusable(run, stage, output, cache.inputs(run, stage)):
         adapter.verify_snapshot(run, stage, 'reuse')
         from .session_trace import reuse
-        reuse(stage, output, {'status': 'evidence_available', 'summary': output.read_text()[:1200]}, choice=slot or {})
+        from .review_reports import reuse_source
+        reuse(stage, output, {'status': 'evidence_available', 'summary': output.read_text()[:1200]}, choice=slot or {}, external_source=reuse_source(run, stage, output))
         say(f'Reusing completed {stage.title()} review')
         return
     from . import session_trace
     with session_trace.stage(stage, choice=slot or {}, artifact=output,
                              inputs=[getattr(run, 'batch', {}).get('trace_candidate')],
-                             context={'batch': getattr(run, 'batch', {}).get('id'),
+                             context={} if adapter.name == 'pr' else {'batch': getattr(run, 'batch', {}).get('id'),
                                       'cycle': len(getattr(run, 'batch', {}).get('review_history', {}).get('cycles', []))}) as trace_handle:
         if stage == 'claude' and (run.path / 'reviews/codex.md').exists():
             raise ApiError('independence_failed', 'Independent Claude inputs/output changed after Codex ran; start a new run to preserve independence')
@@ -334,18 +335,27 @@ def produce_synthesis(run, adapter, trace_handle=None):
 
 def synthesis(run):
     from . import session_trace as trace
+    adapter = adapter_of(run)
+    if adapter.name == 'pr':
+        adapter.render_synthesis(run)
+        if reusable_synthesis(run, adapter, run.path / 'reviews/synthesis.json') is None:
+            adapter.prepare_rerun(run)
     batch = getattr(run, 'batch', {})
     inputs = [trace.reference(run.path / 'reviews' / (slot['id'] + '.md'))
               for slot in run.settings.get('reviewer_slots', [])]
     inputs += [batch.get('trace_candidate'), *batch.get('trace_verification', [])]
-    with trace.stage('acceptance', choice=run.settings.get('processing', {}), inputs=inputs,
+    with trace.stage('synthesis' if adapter.name == 'pr' else 'acceptance', choice=run.settings.get('processing', {}), inputs=inputs,
                      key=str(run.path / 'reviews/synthesis.json'),
-                     context={'batch': batch.get('id'), 'cycle': len(batch.get('review_history', {}).get('cycles', []))}) as handle:
+                     context={} if adapter.name == 'pr' else {'batch': batch.get('id'), 'cycle': len(batch.get('review_history', {}).get('cycles', []))}) as handle:
         result = _synthesis(run, handle)
+        outcome = ({'status': 'reviewed', 'summary': result.value.get('report_md', '')}
+                   if adapter.name == 'pr' else result.value)
         if result.reused:
-            identity = trace.complete_reuse(handle, result.artifact, result.value)
+            from .review_reports import reuse_source
+            identity = trace.complete_reuse(handle, result.artifact, outcome,
+                external_source=reuse_source(run, 'synthesis', result.artifact) if adapter.name == 'pr' else None)
         else:
-            identity = trace.complete(handle, result.value, result.artifact)
+            identity = trace.complete(handle, outcome, result.artifact)
         run.trace_result = identity
         trace.mark('acceptance_result', identity)
         return result

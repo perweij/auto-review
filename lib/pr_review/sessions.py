@@ -6,6 +6,7 @@ import tempfile
 
 from .common import ApiError, locked, now, read_json, state_root
 from .events import emit
+from . import review_reports
 from .storage import hash_bytes, hash_file, pointer, write_json, sync_directory
 
 DIRECTORIES = ('context', 'prompts', 'reviews', 'publication', 'logs', 'discussion', 'suggestions')
@@ -85,6 +86,7 @@ class Store:
                 status='running', phases={}, publication={'status': 'not_published'}, warnings=[], generated_files=[], removed_environment={}, draft_mutations_tracked=True)
             self.root = self.path = root
             self.reset_directories(DIRECTORIES)
+            review_reports.allocate(self)
             self.save()
         else:
             self.root, self.path = root, selected(root)
@@ -173,6 +175,7 @@ class Store:
                     shutil.copytree(source, candidate / name)
                 else:
                     (candidate / name).mkdir()
+            review_reports.allocate(self)
             self.path = candidate
             self.manifest.update(session_directory=str(self.root), attempt=dict(status='building', previous=str(previous)), draft_mutations_tracked=True)
             self.manifest.pop('publication_reset', None)
@@ -242,7 +245,7 @@ class Store:
         history = Path(str(self.path) + '-history')
         history.mkdir(exist_ok=True, mode=0o700)
         archive = Path(tempfile.mkdtemp(prefix='snapshot-', dir=history))
-        shutil.copytree(self.path, archive, dirs_exist_ok=True)
+        shutil.copytree(self.path, archive, dirs_exist_ok=True, ignore=shutil.ignore_patterns(review_reports.STORE))
         self.manifest['snapshot_update'] = dict(archive=str(archive), worktree=str(self.worktree) + '-' + archive.name,
             run_id=self.path.name + '-' + archive.name, **{'from': old, 'to': snapshot})
         self.save()
@@ -269,6 +272,7 @@ class Store:
         archived = read_json(archive / "manifest.json")
         archived["worktree"] = str(saved)
         write_json(archive / "manifest.json", archived)
+        review_reports.allocate(self)
         self.reset_directories(DIRECTORIES)
         self.manifest.setdefault('snapshot_history', []).append(dict(archive=str(archive), worktree=str(saved), snapshot=journal['from']))
         self.manifest.update(previous_review=dict(archive=str(archive), worktree=str(saved)), snapshot=journal['to'], run_id=journal['run_id'],
@@ -296,4 +300,6 @@ class Store:
             self.save()
             pointer(self.root, '.current-review', self.path)
             self.clear_pending()
+        from . import session_trace
+        session_trace.decision('promoted', sources=[session_trace.marked('review_result')])
         say('Replacement review and drafts are ready; made them current.')

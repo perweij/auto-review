@@ -507,6 +507,11 @@ A different automatic operation makes the saved log current again.")
         (when-let ((url (alist-get 'url magit-auto-review--review)))
           (insert-text-button url 'follow-link t 'action (lambda (_) (browse-url url)))
           (insert "\n\n"))
+        (when-let ((report (alist-get 'execution_report magit-auto-review--review)))
+          (insert-text-button "Execution report" 'follow-link t
+                              'action (lambda (_) (find-file (alist-get 'report_path report))))
+          (insert " · J opens report actions"
+                  (if (alist-get 'report_url report) " · Published snapshot\n" " · Local\n")))
         (magit-auto-review--insert-review-status)
         (magit-auto-review--insert-automatic-status)
         (insert (propertize (format "Model suggestion: %s. Next review verdict: %s (v to choose).\n"

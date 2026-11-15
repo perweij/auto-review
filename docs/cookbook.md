@@ -374,3 +374,21 @@ Both commands default to the latest batch; add `--batch ID` to select an older
 one. Repeating publication of the same snapshot does not send another comment.
 Further execution permits a new snapshot. Existing batches without tracing remain
 usable but cannot be reconstructed into execution reports.
+
+### Inspect a plain review's execution
+
+New PR/MR review generations automatically save an execution report. The CLI
+prints its path, and `J o` in reviewer mode opens the displayed generation's
+report. `J p` explicitly publishes a GitHub snapshot, including a paused run.
+`J` also opens Owner's report menu; its existing `E` shortcut remains available.
+Reviewer `E` still elaborates a finding.
+
+```sh
+bin/pr-review report SESSION
+bin/pr-review publish-report SESSION --generation GENERATION
+```
+
+Commands default to the current generation; use `--generation` for pending or
+historical views. Reports do not run models. GitLab supports local reports only.
+`--auto-publish` publishes findings, not execution reports. Historical generations
+without traces remain runnable but cannot be reconstructed into reports.

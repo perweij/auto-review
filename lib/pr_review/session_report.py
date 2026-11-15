@@ -9,6 +9,12 @@ from . import session_trace
 
 
 def category(role):
+    if role == 'contributions':
+        return 'Discussion matching'
+    if role == 'followup':
+        return 'Focused review'
+    if role.startswith('suggestion-'):
+        return 'Suggestions'
     if role == 'task-check':
         return 'Task checks'
     if role == 'verification':
@@ -39,6 +45,8 @@ def graph(data, *, compact, limit=None):
         if compact and not row['role'].startswith('control/'):
             kind = ('Planning' if row['role'].startswith('planning') else
                     'Acceptance review' if row['category'] in ('Review', 'Synthesis') else row['category'])
+            if data.get('review'):
+                kind = row['role'] if row['category'] == 'Review' else row['category']
             key = (kind, context.get('batch'), context.get('cycle'), row.get('group_epoch', 0))
             label = kind + (f" · cycle {context['cycle']}" if context.get('cycle') is not None else '')
         else:
@@ -94,6 +102,11 @@ def render(data, bounded=False):
             f"Repair cycles: {data['repairs']}.", '', *graph(data, compact=True, limit=12), '',
             'Edges show consumed results and controller decisions; execution is sequential. Node numbers show recorded stage order.', '',
             'Longest recorded activities:', '']
+    if data.get('review'):
+        review = data['review']
+        text[2:2] = [f"Review generation: {safe(review['generation'])}. Change: {safe(review.get('url') or 'unknown')}.",
+                     f"Reviewed head: {safe(review.get('snapshot', {}).get('head', 'unknown'))}. Scope: {safe(review['scope'])}.",
+                     'This execution snapshot does not establish that findings were published or the change was approved.', '']
     if data.get('owner'):
         owner = data['owner']
         text[2:2] = [f"Owner batch: {safe(owner['batch'])}. PR: {safe(owner.get('url') or 'unknown')}.",
@@ -167,7 +180,7 @@ def report_data(trace, calls, *, outcome='unknown', shared_ledger=False):
             category=category(stage['role']), status=('reused: ' + stage['outcome']) if stage['status'] == 'reused' else stage['outcome'], context=stage.get('context', {}),
             provider=str(choice.get('provider', 'controller')), model=str(choice.get('model', 'none')), effort=str(choice.get('effort', 'none')),
             seconds=seconds, duration_known='seconds' in stage and stage.get('timing_coverage') != 'unknown', tokens=sum(known) if known else None, invocation=stage['invocation'],
-            summary=stage.get('summary', ''), reused_from=stage.get('reused_from')))
+            summary=stage.get('summary', '') + ((' Reused from report ' + stage['external_source']['report'] + ', stage ' + stage['external_source']['stage'] + '.') if stage.get('external_source') else ''), reused_from=stage.get('reused_from')))
     # Unassigned calls (e.g. authentication probes) are accounting observations,
     # never inferred workflow stages or dependency edges.
     for execution in trace['executions']:

@@ -145,46 +145,15 @@ def invoke(session, state, batch, role, context):
 
 def publish(session, state, batch):
     """Publish an immutable snapshot; uncertain sends require read-back first."""
-    import uuid
-    from .publication import publication_adapter
+    from . import report_publication
     from .forge import check_account
     fields, body = generate(session, state, batch)
     _, account = session.repo.forge.owner_context(session.repo)
     check_account(state.get('forge_account'), account, state.get('viewer'))
-    adapter = publication_adapter(session)
     journal = trace.validate(read_json(root(session, batch) / 'execution-trace.json'), identity(session, batch))
     key = digest([identity(session, batch), journal, batch['checkpoint']['tree'], batch['status']])
-    actions = batch.setdefault('report_actions', {})
-    for pending in actions.values():
-        if pending['status'] in ('submitting', 'ambiguous'):
-            matches = adapter.lookup_owner(session, [pending])[pending['id']]
-            if len(matches) > 1 or not matches and pending.get('receipt'):
-                raise ApiError('uncertain_report', 'An earlier report publication is uncertain; no new snapshot was sent. Retry recovery after checking the PR discussion.')
-            if matches:
-                pending.update(status='published', receipt=matches[0])
-            else:
-                pending['status'] = 'draft'  # Complete read-back establishes absence before retry.
-            session.save(state)
-    action = actions.get(key)
-    if action is None:
-        action = adapter.prepare_owner_reply(session, {'id': key, 'body': body, 'target': {'kind': 'timeline'}},
-                                             state['viewer'], uuid.uuid4().hex)
-        actions[key] = action
-        session.save(state)
-    if action['status'] != 'published':
-        action['status'] = 'submitting'
-        session.save(state)
-        try:
-            receipt = adapter.submit(session, action)
-            if not adapter.matches(session, action, receipt):
-                raise ApiError('uncertain_report', 'Report response could not be verified; retry to recover its receipt.')
-            action.update(status='published', receipt=receipt)
-            session.save(state)
-        except BaseException:
-            action['status'] = 'ambiguous'
-            session.save(state)
-            raise
-    fields.update(report_publication='complete', report_url=adapter.owner_receipt(action['receipt'])['url'])
+    fields.update(report_publication.publish(session, batch.setdefault('report_actions', {}),
+        key, body, state['viewer'], lambda: session.save(state)))
     batch['execution_report'] = fields
     session.save(state)
     return dict(fields, batch=batch['id'])

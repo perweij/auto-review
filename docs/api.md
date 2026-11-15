@@ -1215,3 +1215,18 @@ Publication is explicit, uses a frozen snapshot and retained receipts, and recov
 uncertain writes before sending any further snapshot. Report receipts are separate
 from feedback reply receipts. Batch views expose saved `execution_report` metadata
 and any `report_warning`.
+
+### Plain review execution reports
+
+`review-report` and `review-publish-report` accept `session` and optional
+`generation` (current generation by default). Publication accepts the displayed
+`revision` and rejects stale revisions. Both acquire the PR execution lock.
+Responses include `generation`, `report_path`, `report_data_path` and
+`report_coverage`; publication additionally returns `report_publication` and
+`report_url`. Snapshot receipts are separate from finding publication state.
+GitLab exposes only local reporting. No report command runs models.
+
+New generations carry a persistent execution-report identity. Replacement and
+snapshot transitions create new identities, while resumes retain the existing
+identity. Report storage is excluded from generation copying. Reviewer views
+expose `execution_report` and `report_warning` metadata.

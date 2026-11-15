@@ -134,6 +134,9 @@ def run(request):
     current = Session({'session': str(session.root)})
     ready = session.path == current.path and session.manifest.get('status') == 'complete'
     outcome = {'new_review_ready': ready, 'status': session.manifest.get('status'), 'usage': usage.summary(session.root)}
+    for field in ('execution_report', 'report_warning'):
+        if field in session.manifest:
+            outcome[field] = session.manifest[field]
     if not ready:
         outcome['pending_generation'] = session.id
     if not request.get('session'):

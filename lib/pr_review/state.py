@@ -263,7 +263,7 @@ class Session:
             context["participated"] = any(c.get("author", "").lower() == self.manifest.get("viewer", "").lower()
                                           for c in thread.get("comments", []))
         from . import usage
-        return {**state, "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
+        return {**state, "execution_report": self.manifest.get("execution_report"), "report_warning": self.manifest.get("report_warning"), "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
                 "automation": self.automation_summary(), "analysis": self.analysis_summary(),
                 "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
                              "threads": self.manifest.get("followup_threads", [])},

@@ -268,3 +268,12 @@ To run only this functional scenario, use
 providers) or replace `smoke` with `live` for economical real models. It creates
 PR feedback, runs a standalone fix, checks automatic local reporting, publishes
 an execution snapshot and verifies that repeated publication does not duplicate it.
+
+
+Plain PR-review execution reports are checked by the review smoke scenario on
+both forges: local generation reporting, explicit GitHub snapshot publication,
+idempotent repeat publication, and GitLab publication rejection. For a focused
+GitHub run, use `python3 tests/smoke-forges.py --suite smoke --scenario review-report`;
+replace `smoke` with `live` for economical real reviewers. The scenario checks
+that resuming the completed review adds no non-probe model calls. Reports and
+publication URLs are retained with the fixture metadata.

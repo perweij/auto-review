@@ -259,6 +259,17 @@ def verify_result(value):
 
 
 def verify_set(session, comments):
+    from . import session_trace as trace
+    choice = settings.validate(settings.from_manifest(session.manifest))['processing']
+    with trace.stage('suggestion-verification', choice=choice,
+                     inputs=[trace.marked('review_result')], key=batch_identity(session, comments)) as handle:
+        result = _verify_set(session, comments)
+        identity = trace.complete(handle, result, Path(result['log_path']) / 'result.json')
+        trace.mark('review_result', identity)
+        return result
+
+
+def _verify_set(session, comments):
     if any(overlaps(a, b) for i, a in enumerate(comments) for b in comments[i + 1:]):
         raise ApiError('invalid_suggestion', 'Selected suggestions overlap; remove one or suppress its finding.')
     with checkout(session, comments) as root:
@@ -354,6 +365,10 @@ def generate(run):
                 continue
             comment['suggestion_generation'] = dict(status='pending', fingerprint=fingerprint)
             session.save(state)
+            from . import session_trace as trace
+            handle = trace.start('suggestion-generation',
+                choice=settings.validate(settings.from_manifest(session.manifest))['processing'],
+                inputs=[trace.marked('review_result')], key=comment['id'])
             try:
                 # Generation is read-only and sees an untouched snapshot.
                 with checkout(session, []) as root:
@@ -385,6 +400,12 @@ def generate(run):
             except ApiError as exc:
                 comment['suggestion_generation'].update(status='failed', reason=str(exc))
             finally:
+                recorded = comment['suggestion_generation']
+                if recorded['status'] in ('generated', 'omitted'):
+                    identity = trace.complete(handle, {'status': recorded['status'], 'summary': recorded.get('reason', '')},
+                        Path(recorded['log_path']) / 'result.json' if recorded.get('log_path') else None)
+                    trace.mark('review_result', identity)
+                trace.close(handle, ApiError('invalid_suggestion', recorded.get('reason', 'Failed')) if recorded['status'] == 'failed' else None)
                 comment['suggestion_generation']['fingerprint'] = fingerprint
                 session.save(state)
         comments = [c for c in state['comments'] if c.get('suggestion') and c['status'] not in ('suppressed', 'published')]

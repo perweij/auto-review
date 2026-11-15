@@ -194,9 +194,9 @@ def stage(role, **kwargs):
         close(handle)
 
 
-def reuse(role, artifact, value, *, choice=None, inputs=()):
+def reuse(role, artifact, value, *, choice=None, inputs=(), external_source=None):
     with stage(role, choice=choice, inputs=inputs, artifact=artifact, reason='reused_result') as handle:
-        return complete_reuse(handle, artifact, value)
+        return complete_reuse(handle, artifact, value, external_source=external_source)
 
 
 def decision(reason, *, sources=(), summary='', key=None):
@@ -255,7 +255,7 @@ def boundary(root, identity, result):
         warn()
 
 
-def complete_reuse(handle, artifact, value):
+def complete_reuse(handle, artifact, value, *, external_source=None):
     if handle is None:
         return None
     journal, record, _, _ = handle
@@ -281,6 +281,9 @@ def complete_reuse(handle, artifact, value):
         record['choice'] = original['choice']
         record['inputs'].append(source)
         journal['data']['transitions'].append(dict(source=source, target=record['id'], reason='reused_result'))
+    elif external_source:
+        record['external_source'] = copy.deepcopy(external_source)
+        record['choice'] = copy.deepcopy(external_source['choice'])
     else:
         journal['data']['coverage'] = 'partial'
     complete(handle, value, artifact)

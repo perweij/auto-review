@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 import tempfile
 from .common import ApiError, ROOT, locked, now, read_json
-from . import cache, discussion, followup, providers, review_engine, validation
+from . import cache, discussion, followup, providers, review_engine, validation, session_trace, review_reports
 from .sessions import say
 from .storage import atomic_bytes, hash_file, json_bytes, write_json
 
@@ -226,9 +226,18 @@ def contributions(run):
                 conversation = read_json(run.manifest['discussion']['path'])
             render_contributions(run)
             say('[final] Matching findings against the complete discussion')
-            value = validation.contributions(structured(run, 'contributions'), findings, conversation)
-            output = run.path / 'reviews/contributions.json'
-            write_json(output, value)
+            with session_trace.stage('contributions', choice=run.settings.get('processing', {}),
+                    inputs=[session_trace.reference(run.path / 'reviews/synthesis.json')], key=str(output)) as handle:
+                value = validation.contributions(structured(run, 'contributions'), findings, conversation)
+                output = run.path / 'reviews/contributions.json'
+                write_json(output, value)
+                identity = session_trace.complete(handle, {'status': 'needs_reassessment' if value['validity_conflicts'] else 'matched'}, output)
+                session_trace.mark('review_result', identity)
+        else:
+            identity = session_trace.reuse('contributions', output, {'status': 'matched'},
+                choice=run.settings.get('processing', {}), inputs=[session_trace.reference(run.path / 'reviews/synthesis.json')],
+                external_source=review_reports.reuse_source(run, 'contributions', output))
+            session_trace.mark('review_result', identity)
         if not value['validity_conflicts']:
             if not reused:
                 run.complete('contributions', output)
@@ -245,6 +254,7 @@ def contributions(run):
         run.manifest['reassessment'] = dict(discussion_hash=run.manifest['discussion']['hash'], input=str(input_path), discussion=run.manifest['discussion']['path'])
         run.save()
         say('Fresh discussion challenges validity; reassessing with the selected processing provider.')
+        session_trace.decision('validity_reassessment', sources=[session_trace.marked('review_result')])
         synthesis(run)
     ledger_path = run.path / 'publication/contributions.json'
     old = read_json(ledger_path, {})
@@ -291,6 +301,9 @@ def focused(run):
     output = run.path / 'reviews/followup.json'
     if cache.reusable(run, 'followup', output, cache.inputs(run, 'followup', followup_input=input_bytes, followup_prompt=prompt())):
         followup.validate(run.session(), read_json(output))
+        identity = session_trace.reuse('followup', output, {'status': 'assessed'}, choice=run.settings.get('processing', {}),
+            external_source=review_reports.reuse_source(run, 'followup', output))
+        session_trace.mark('review_result', identity)
         say('Reusing completed follow-up assessment')
     else:
         if run.manifest['phases'].get('followup', {}).get('status') == 'completed':
@@ -298,9 +311,12 @@ def focused(run):
         atomic_bytes(run.path / 'reviews/followup-input.json', input_bytes)
         atomic_bytes(run.path / 'prompts/followup-prompt.txt', prompt())
         say(f'[followup] Checking selected conversations ({run.settings["processing_provider"]})')
-        value = followup.validate(run.session(), structured(run, 'followup'))
-        output = run.path / 'reviews/followup.json'
-        write_json(output, value)
+        with session_trace.stage('followup', choice=run.settings.get('processing', {}), key=str(output)) as handle:
+            value = followup.validate(run.session(), structured(run, 'followup'))
+            output = run.path / 'reviews/followup.json'
+            write_json(output, value)
+            identity = session_trace.complete(handle, {'status': 'assessed'}, output)
+            session_trace.mark('review_result', identity)
         run.complete('followup', output)
     run.repo.metadata(run.path / 'publication/pr-latest.json')
     discussion.collect(run.repo, run.path)

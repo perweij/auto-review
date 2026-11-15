@@ -12,7 +12,7 @@ from . import cli_settings
 
 def parser():
     result = cli_settings.Parser(prog='pr-review', description='Review a GitHub PR or generate a local GitLab.com MR review. For incoming feedback and fixes, use pr-review owner --help.',
-        epilog='Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan), PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET (optional USD), PR_REVIEW_AUTH_TIMEOUT (default 60), PR_REVIEW_CODEX_PROBE_MODEL, XDG_STATE_HOME, VISUAL/EDITOR.')
+        epilog='Execution reports: pr-review report SESSION [--generation ID]; pr-review publish-report SESSION [--generation ID]. Environment: PR_REVIEW_CLAUDE_PERMISSION_MODE (auto/dontAsk/manual/plan), PR_REVIEW_MODEL_TIMEOUT (optional seconds), PR_REVIEW_CLAUDE_BUDGET (optional USD), PR_REVIEW_AUTH_TIMEOUT (default 60), PR_REVIEW_CODEX_PROBE_MODEL, XDG_STATE_HOME, VISUAL/EDITOR.')
     result.add_argument('pr', nargs='?', help='positive PR/MR number or canonical change URL')
     result.add_argument('--forge', default=None, help='github (default) or gitlab (GitLab.com local review only)')
     result.add_argument('-R', '--repo', dest='repository')
@@ -40,6 +40,9 @@ def main(argv=None):
         from .api import main as api
         api()
         return 0
+    if argv and argv[0] in ('report', 'publish-report'):
+        from .review_reports import cli
+        return cli(argv[1:], argv[0])
     if argv and argv[0] == 'owner':
         from .owner_cli import main as owner
         return owner(argv[1:])
