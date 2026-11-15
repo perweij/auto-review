@@ -35,6 +35,8 @@ def parser():
     result.add_argument('--min-weekly-quota-remaining', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; stop at this remaining account weekly percentage')
     result.add_argument('--max-weekly-quota-use', type=lambda v: None if v == 'none' else float(v), default=argparse.SUPPRESS, help='none disables; maximum observed weekly percentage-point increase during active work')
     result.add_argument('--max-runtime', type=lambda v: None if v == 'none' else v, default=argparse.SUPPRESS, help='cumulative active planning and execution for new jobs; saved jobs retain their scope; e.g. 30m or 2h, none disables')
+    result.add_argument('--report-session', metavar='PATH', help='generate an offline report without resuming or publishing')
+    result.add_argument('--session-report', action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS, help='save execution reports and publish on completion')
     result.add_argument('--json', action='store_true')
     result.add_argument('--trust-agent-config', dest='trusted_snapshot')
     presets = result.add_mutually_exclusive_group()
@@ -49,6 +51,15 @@ def parser():
 def main(argv=None):
     os.umask(0o077)
     args = vars(parser().parse_args(argv))
+    if args.get('report_session'):
+        from .session_report import generate
+        try:
+            result, _ = generate(args['report_session'])
+        except (OSError, ValueError) as exc:
+            print('Error: ' + str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps(result) if args['json'] else result['report_path'])
+        return 0
     from .forge import adapter
     try:
         adapter(args.get("forge"))
@@ -96,7 +107,7 @@ def main(argv=None):
         print(json.dumps(result))
     else:
         print(result['outcome'])
-        for key in ('issue_url', 'pr_url', 'session', 'worktree', 'next_action', 'error'):
+        for key in ('issue_url', 'pr_url', 'session', 'worktree', 'next_action', 'error', 'report_path', 'report_publication', 'report_warning'):
             if result.get(key):
                 print(f'{key}: {result[key]}')
         if 'actions' in result:

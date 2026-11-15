@@ -110,6 +110,8 @@ def assess(context, configuration, directory, cwd, previous_assessment=None, tru
         if saved.get('inputs') == inputs and saved.get('status') == 'complete':
             result_file = Path(saved['directory']) / 'validated.json'
             if result_file.is_file() and hash_file(result_file) == saved.get('hash'):
+                from .session_trace import reuse
+                reuse('planning-' + stage)
                 outputs[stage] = read_json(result_file)
                 emit('progress', message=f'Planning {stage}: reusing completed evidence under its original model settings.')
                 continue

@@ -1183,3 +1183,12 @@ confirmed by fresh state reads, including after a lost response. An already
 satisfied transition completes its saved journal entry without another mutation.
 Core write capabilities are checked before a mutating workflow; acknowledgments
 remain optional and nonblocking. Assignment policy and GitLab support are unchanged.
+
+### Issue execution reports
+
+`issue-run` accepts optional Boolean `session_report`; omission retains the
+session preference. Result fields `report_path`, `report_data_path`,
+`report_publication` and `report_warning` are additive. Report publication status
+is separate from the task outcome and exit code. The terminal-only
+`fix-issue --report-session PATH [--json]` command generates a local report
+without forge discovery, authentication or model execution.

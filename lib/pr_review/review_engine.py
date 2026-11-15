@@ -252,6 +252,8 @@ def independent(run, stage):
                          'reviews/claude-independent.md' if stage == 'claude' else 'reviews/codex.md')
     if cache.reusable(run, stage, output, cache.inputs(run, stage)):
         adapter.verify_snapshot(run, stage, 'reuse')
+        from .session_trace import reuse
+        reuse('final-review/' + stage)
         say(f'Reusing completed {stage.title()} review')
         return
     if stage == 'claude' and (run.path / 'reviews/codex.md').exists():
@@ -329,6 +331,8 @@ def synthesis(run):
     value = reusable_synthesis(run, adapter, output)
     if value is not None:
         adapter.verify_snapshot(run, 'synthesis', 'reuse')
+        from .session_trace import reuse
+        reuse('final-review/synthesis')
         say(adapter.reuse_message(run))
         status, reused = 'completed', True
     else:

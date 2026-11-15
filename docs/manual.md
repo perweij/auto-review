@@ -1696,3 +1696,26 @@ intent. A failed read-back does not authorize another send; use the existing wri
 inspection and retry-absent controls. Draft/ready transitions read back their
 current state and reconcile interrupted actions without repeating a transition
 that is already satisfied. Account changes during a run block subsequent writes.
+
+### Optional issue execution reports
+
+`fix-issue --session-report` saves a Markdown report and normalized JSON under
+`reports/session.md` and `reports/session.json` in the issue session. The option
+persists across resumes; `--no-session-report` disables it. It is a workflow
+control, not a generated model-configuration setting.
+
+The report contains a compact Mermaid flowchart and expandable pie charts,
+execution details and structured outcome excerpts. Time measures recorded active
+processing, excluding stopped periods waiting for user input. Earlier sessions
+may lack timing, associations or outcomes; partial coverage is explicit. The
+report does not execute commands found in saved artifacts.
+
+`--report-session PATH` generates the report offline for an existing issue
+session. It does not resume work, require a checkout, or publish. Completion
+publication uses existing issue-comment write receipts. If posting fails, the
+task result remains unchanged and `report_warning` explains the failure. Use
+existing `--inspect-writes` and `--retry-absent` controls for uncertain writes;
+normal resume reconciles the frozen report payload.
+
+The initial feature supports issue workflows. Standalone Owner and PR-review
+sessions, tooltips and expansion of GitLab's issue-workflow pilot are excluded.

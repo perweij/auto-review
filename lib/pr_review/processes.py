@@ -133,6 +133,8 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
     drain_deadline = None
     from . import usage
     accounting = usage.begin_call(usage_call, env)
+    from . import session_trace
+    trace = session_trace.begin(stage, accounting, stdout_path) if usage_call else None
     completed_result = None
     try:
         for name, path in (("stdout", stdout_path), ("stderr", stderr_path)):
@@ -279,3 +281,4 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
         for stream in files.values():
             stream.close()
         usage.observe(accounting, 'finish', completed_result)
+        session_trace.end(trace, completed_result)

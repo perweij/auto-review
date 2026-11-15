@@ -1,4 +1,5 @@
 """Functional assertions through the public CLI and protocol."""
+from pathlib import Path
 import json
 from .runner import Failure, Blocked
 
@@ -62,7 +63,7 @@ def issue(run, forge):
         fixture.update(number=created['number'], url=created['html_url'])
         run.save()
     args = [str(run.root / 'bin/fix-issue'), '-i', str(fixture['number']), '-R', forge.repo,
-            '--economical', '--planning', 'codex-1', '--fix', 'codex-1', '--planning-review', 'claude-1',
+            '--economical', '--session-report', '--planning', 'codex-1', '--fix', 'codex-1', '--planning-review', 'claude-1',
             '--max-runtime', '60m', '--max-repair-cycles', '1', '--json']
     _, output = run.command(args, cwd=forge.cwd, timeout=3600, check=False)
     result = json.loads(output)
@@ -160,7 +161,14 @@ def issue(run, forge):
     traces = [run.directory / 'models' / name for name in ('stages', 'issue-stages.jsonl')]
     before = {str(p): p.read_bytes() for p in traces if p.exists()}
     _, output = run.command(args, cwd=forge.cwd, timeout=3600, check=False)
-    if json.loads(output).get('exit_code') != 0:
+    resumed = json.loads(output)
+    if resumed.get('report_publication') != 'complete' or not Path(resumed.get('report_path', '')).is_file():
+        raise Failure('Completion report was not saved and published')
+    reports = [c for c in forge.pages('/issues/%s/comments' % fixture['number'])
+               if '## Session execution report' in c.get('body', '')]
+    if len(reports) != 1:
+        raise Failure('Expected exactly one completion report after resume')
+    if resumed.get('exit_code') != 0:
         raise Failure('Completed issue failed on resume')
     if any(p.read_bytes() != before[str(p)] for p in traces if str(p) in before):
         raise Failure('Completed issue launched new model stages')

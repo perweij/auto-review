@@ -1142,19 +1142,30 @@ def dispatch(request):
             actions = flow.writes.recover(request.get('retry_absent'))
             return flow.result('recovered' if request.get('retry_absent') else 'inspected',
                                next_action='retry', actions=actions)
+        if 'session_report' in request:
+            if type(request['session_report']) is not bool:
+                raise ApiError('invalid_request', 'session_report must be a Boolean.')
+            flow.state['session_report'] = request['session_report']
+            flow.save()
         from .checkouts import announce
         announce(flow.state.get('worktree'), flow.state.get('owner') or flow.path, 'owner')
         managed_pr = next((p for p in (facts.get('normalized') or repo.forge.issues.normalize(facts)).get('pulls', []) if p['number'] == flow.state.get('pr')), None)
         if managed_pr and managed_pr.get('merged') and flow.state.get('managed'):
             flow.state['phase'] = 'complete'
-            return flow.result('complete')
+            from .session_report import finish
+            return finish(flow, flow.result('complete'))
         try:
             issue_resources.validate(request)
             review_history.controls(request)
-            with usage.operation(flow.path, legacy=flow.file.exists()):
-                return flow.run()
+            from . import session_trace
+            with session_trace.operation(flow.path, flow.state.get('session_report')), usage.operation(flow.path, legacy=flow.file.exists()):
+                result = flow.run()
+            from .session_report import finish
+            return finish(flow, result)
         except ApiError as exc:
             if exc.code == 'cancelled':
+                from .session_report import finish
+                finish(flow, {'outcome': 'interrupted', 'exit_code': 130})
                 raise
             # Errors describe this invocation; phase records resumable progress.
             flow.state['error'] = {'code': exc.code, 'message': str(exc), **{k: v for k, v in exc.details.items() if k != 'usage'}}
@@ -1198,7 +1209,9 @@ def dispatch(request):
                 except ApiError as notice_error:
                     flow.state['error']['notice_error'] = str(notice_error)
             flow.save()
-            return flow.result('uncertain' if exc.code == 'uncertain' else 'partial' if exc.code == 'partial' else exc.code if exc.code in ('automation_failed', 'resource_limit', 'blocked_external') else 'needs_attention',
+            result = flow.result('uncertain' if exc.code == 'uncertain' else 'partial' if exc.code == 'partial' else exc.code if exc.code in ('automation_failed', 'resource_limit', 'blocked_external') else 'needs_attention',
                                5 if exc.code == 'uncertain' else 4 if exc.code == 'partial' else 3,
                                exc.details.get('next_action', 'recover'), error=flow.state['error'],
                                **{key: exc.details[key] for key in ('stage', 'stop_reason', 'repair_cycles_used', 'max_repair_cycles', 'disputed_findings') if key in exc.details})
+            from .session_report import finish
+            return finish(flow, result)
