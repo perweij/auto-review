@@ -8,8 +8,13 @@ from .storage import write_json
 
 
 class GitLab:
-    capabilities = frozenset(('review', 'report-publication'))
+    capabilities = frozenset(('review', 'report-publication', 'publication'))
     executable = 'glab'
+
+    @property
+    def publication(self):
+        from .forge_gitlab_publication import GitLabPublication
+        return GitLabPublication(self)
 
     @property
     def report_publication(self):

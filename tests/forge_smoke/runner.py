@@ -149,6 +149,7 @@ class Run:
 
     def scenario(self, name, function):
         dependencies = {
+            'gitlab-publication': ('gitlab-review',), 'gitlab-automatic-cli-json': ('gitlab-review',),
             'github-review-report': ('github-review',), 'gitlab-review-report': ('gitlab-review',),
             'github-publication': ('github-review',), 'automatic-cli-json': ('github-review',), 'publication-recovery': ('github-publication',),
             'github-owner': ('github-publication',), 'owner-reply-recovery': ('github-owner',),

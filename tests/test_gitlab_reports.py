@@ -56,10 +56,10 @@ class GitLabReportsTest(unittest.TestCase):
     def publish(self, body='report', key='snapshot'):
         return report_publication.publish(self.session, self.actions, key, body, 'reviewer', self.save)
 
-    def test_capability_does_not_enable_findings_or_owner(self):
+    def test_report_capability_remains_separate_from_owner(self):
         result = dispatch({'command': 'capabilities', 'forge': 'gitlab'})
         self.assertIn('review-publish-report', result['commands'])
-        for op in ('prepare', 'publish', 'resolve', 'automatic-review', 'owner-publish-report', 'issue-run'):
+        for op in ('owner-publish-report', 'thread-state', 'issue-run'):
             with self.subTest(op=op), self.assertRaises(ApiError) as caught:
                 dispatch({'command': op, 'forge': 'gitlab'})
             self.assertEqual('unsupported_operation', caught.exception.code)

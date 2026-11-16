@@ -31,8 +31,8 @@ def dispatch(request):
         from .owner import dispatch as owner_dispatch
         return owner_dispatch(request)
     if operation == "capabilities" and forge == 'gitlab':
-        return {"protocol": PROTOCOL, "features": ["report-publication", "generations", "drafts", "history", "operations", "usage-reporting", "checkout"],
-                "commands": ["review-report", "review-publish-report", "capabilities", "checkout", "settings", "models", "read", "history", "diff", "file", "run", "cancel"]}
+        return {"protocol": PROTOCOL, "features": ["inline-publication", "automatic-review", "report-publication", "generations", "drafts", "history", "operations", "usage-reporting", "checkout"],
+                "commands": ["review-report", "review-publish-report", "capabilities", "checkout", "settings", "models", "read", "history", "diff", "file", "run", "cancel", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "automatic-review", "review-log"]}
     if operation == "capabilities":
         from .owner import COMMANDS
         return {"protocol": PROTOCOL, "features": ["report-publication", "generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration", "checkout"],
@@ -51,6 +51,7 @@ def dispatch(request):
         return operations.run(request)
     if operation == 'automatic-review':
         from .automation import run
+        request = {**request, 'forge': forge}
         if request.get('followup_threads') or request.get('no_publish'):
             raise ApiError('invalid_request', 'Automatic publication requires a full review.')
         if request.get('session'):

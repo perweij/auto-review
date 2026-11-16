@@ -286,15 +286,25 @@ This also regenerates synthesis. Ordinary resume retains failed, timed-out and
 interrupted outcomes. See the [manual](manual.md#autonomous-issue-execution-and-resource-controls)
 for supported commands and limits.
 
-## GitLab local review
+## GitLab review and publication
 
 ```sh
 pr-review --forge gitlab https://gitlab.com/GROUP/PROJECT/-/merge_requests/123 --no-publish
 ```
 
 Use an authenticated `glab` and the project's local checkout. The GitLab pilot
-supports local review, resume and explicit execution-report publication, but not
-finding publication, Owner operations or `fix-issue`. See the
+supports review, resume, COMMENT finding publication and explicit execution-report
+publication. Run without `--no-publish` for the interactive draft menu, or use:
+
+```sh
+pr-review --forge gitlab https://gitlab.com/GROUP/PROJECT/-/merge_requests/123 --economical --auto-publish --json
+```
+
+The automatic workflow stops before writing if any finding needs attention.
+Native inline lines/ranges and overall assessments are supported. Approvals,
+request-changes, replies, suggestions, Owner operations and `fix-issue` remain
+unsupported. Saved suggestion settings can be disabled with
+`--no-suggested-changes`. See the
 [pilot capability and evidence notes](gitlab-pilot.md).
 
 ## Compatibility

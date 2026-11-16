@@ -27,11 +27,14 @@ prepare_gitlab() {
     [ ! -e "$FIXTURE/post-count" ]
 }
 
-@test "GitLab authentication and publication fail before model work" {
+@test "GitLab authentication and unsupported suggestions fail before model work" {
     prepare_gitlab
-    run "$CLI" 7 --forge gitlab --auto-publish
+    run "$CLI" 7 --forge gitlab --suggested-changes
     assert_failure
-    [[ $output == *'does not support publication'* ]]
+    [[ $output == *'GitLab code suggestions are unavailable'* ]]
+    run "$CLI" 7 --forge gitlab --auto-publish --suggested-changes --json
+    assert_failure
+    [[ $output == *'GitLab code suggestions are unavailable'* ]]
     export MOCK_GLAB_AUTH_FAIL=1
     run "$CLI" 7 --forge gitlab
     assert_failure
@@ -60,7 +63,23 @@ call_gitlab_api() {
     saved=$(session_directory)
     run call_gitlab_api "$(jq -nc --arg session "$saved" '{protocol:1,command:"read",session:$session}')"
     assert_success
-    jq -e '.result.verdicts == []' <<< "$output"
+    jq -e '.result.verdicts | map(.value) == ["COMMENT"]' <<< "$output"
+}
+
+@test "GitLab automatic COMMENT publication has native receipts and repeats without writes" {
+    prepare_gitlab
+    export MOCK_GLAB_WRITES=1
+    jq -n '[{id:"F1",title:"Arithmetic",severity:"Medium",validity:"CONFIRMED",blocking:false,evidence:"source.txt:1",body_md:"Check arithmetic",primary_location:{path:"source.txt",side:"RIGHT",line:1,start_line:1},locations:[]}]' > "$FIXTURE/findings.json"
+    run --separate-stderr "$CLI" 7 --forge gitlab --auto-publish --json
+    assert_success
+    result=$(jq -s 'map(select(.outcome)) | last' <<< "$output")
+    jq -e '.outcome == "published" and .exit_code == 0 and (.receipts|length)>0' <<< "$result"
+    count=$(jq length "$FIXTURE/gitlab-notes.json")
+    run --separate-stderr "$CLI" 7 --forge gitlab --auto-publish --json
+    assert_success
+    [[ $output == *'"outcome": "noop"'* ]]
+    [ "$(jq length "$FIXTURE/gitlab-notes.json")" = "$count" ]
+    jq -se 'all(.[]; .tool != "gh")' "$FIXTURE/calls.jsonl"
 }
 
 @test "GitLab explicitly publishes the selected execution report without models or gh" {

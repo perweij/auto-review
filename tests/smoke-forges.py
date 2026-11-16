@@ -11,7 +11,7 @@ import time
 
 from forge_smoke.runner import Run, Failure
 from forge_smoke.forge import Forge
-from forge_smoke.scenarios import review_report, owner_report, publication, issue, owner, integrity, publication_recovery, edited_preview, stale_head, foreign_issue_commit, issue_plan_recovery, interrupt_and_lock, approval_changes, changed_plan_receipt, emacs_checkouts, owner_reply_recovery, gitlab_advance, accounting, automatic_cli
+from forge_smoke.scenarios import gitlab_publication, review_report, owner_report, publication, issue, owner, integrity, publication_recovery, edited_preview, stale_head, foreign_issue_commit, issue_plan_recovery, interrupt_and_lock, approval_changes, changed_plan_receipt, emacs_checkouts, owner_reply_recovery, gitlab_advance, accounting, automatic_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,7 +24,7 @@ def parser():
     group = result.add_mutually_exclusive_group()
     group.add_argument('--resume', type=Path)
     group.add_argument('--cleanup', type=Path)
-    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report'))
+    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report', 'gitlab-publication'))
     return result
 
 
@@ -92,7 +92,7 @@ def review(run, forge):
         calls = [json.loads(line) for line in (run.directory / 'forge-calls.jsonl').read_text().splitlines()]
         if any(c['tool'] == 'glab' and c['actor'] == 'application' and c['kind'] not in ('read', 'metadata') for c in calls):
             raise Failure('GitLab review performed a mutation or unclassified forge operation')
-        for command in ('owner-open', 'issue-run', 'prepare'):
+        for command in ('owner-open', 'issue-run', 'thread-state'):
             try:
                 run.api(dict(command=command, forge='gitlab', cwd=str(forge.cwd), pr=fixture['number']), forge.cwd)
             except Failure as exc:
@@ -191,6 +191,14 @@ def main():
                 passed = run.scenario(forge.kind + '-review-report', lambda forge=forge: review_report(run, forge)) and passed
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
+        if options.scenario == 'gitlab-publication':
+            if options.suite == 'live':
+                raise Failure('GitLab position and recovery checks use scripted providers')
+            passed = run.scenario('gitlab-review', lambda: review(run, forges[1])) and passed
+            passed = run.scenario('gitlab-publication', lambda: gitlab_publication(run, forges[1])) and passed
+            passed = run.scenario('gitlab-automatic-cli-json', lambda: automatic_cli(run, forges[1])) and passed
+            passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
+            return 0 if passed else 1
         if options.scenario == 'owner-report':
             passed = run.scenario('owner-report', lambda: owner_report(run, forges[0]))
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
@@ -212,6 +220,8 @@ def main():
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
         github = forges[0]
+        passed = run.scenario('gitlab-publication', lambda: gitlab_publication(run, forges[1])) and passed
+        passed = run.scenario('gitlab-automatic-cli-json', lambda: automatic_cli(run, forges[1])) and passed
         if any(r['name'] == 'github-review' and r['status'] == 'passed' for r in run.data['results']):
             passed = run.scenario('github-publication', lambda: publication(run, github)) and passed
         if any(r['name'] == 'github-publication' and r['status'] == 'passed' for r in run.data['results']):

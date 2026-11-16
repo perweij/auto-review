@@ -280,8 +280,10 @@ class PublicationRecoveryTest(unittest.TestCase):
             with self.assertRaises(Failure if interruption == 'verification' else KeyboardInterrupt):
                 self.scenario(self.run, self.forge)
             self.assertEqual(1, len(posts))
-            status = 'submitting' if interruption == 'accepted' else 'published'
-            self.assertEqual(status, fixture.session.load()['batches'][0]['actions'][0]['status'])
+            status = 'ambiguous' if interruption == 'accepted' else 'published'
+            action = fixture.session.load()['batches'][0]['actions'][0]
+            self.assertEqual(status, action['status'])
+            self.assertEqual('unknown' if interruption == 'accepted' else 'confirmed', action['operations'][0]['delivery'])
             self.assertEqual(self.original_env, self.run.env)
             retained = self.wrapper.lstat()
             evidence = (self.run.directory / 'fault.json').read_bytes()
@@ -322,6 +324,48 @@ class PublicationRecoveryTest(unittest.TestCase):
                     self.assertEqual('existing entry', self.wrapper.read_text())
                 else:
                     self.assertEqual(other if kind == 'symlink' else other.with_name('missing'), self.wrapper.readlink())
+
+
+class IssuePlanRecoveryTest(unittest.TestCase):
+    def test_retry_keeps_fault_evidence_and_does_not_repeat_an_accepted_plan(self):
+        from forge_smoke.scenarios import issue_plan_recovery
+        for mode in ('before', 'after'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                run = SimpleNamespace(directory=Path(directory), root=Path(__file__).resolve().parents[1],
+                                      env={'PATH': '/native/bin'}, data={}, save=Mock())
+                original_env = dict(run.env)
+                forge = SimpleNamespace(repo='example/test', cwd=Path(directory),
+                    issue=Mock(return_value={'number': 7}),
+                    pages=Mock(return_value=[{'body': '## Outcome\n\n## Verification'}]))
+                config = run.directory / ('issue-fault-' + mode + '.json')
+                calls, posts = [], []
+                def command(args, **kwargs):
+                    if '--inspect-writes' in args:
+                        return 0, json.dumps({'actions': {'plan:1': {'readback': {
+                            'outcome': 'accepted' if posts else 'absent'}}}})
+                    if '--retry-absent' in args:
+                        posts.append('plan')
+                        return 0, '{}'
+                    calls.append(args)
+                    if len(calls) == 1:
+                        evidence = json.loads(config.read_text())
+                        evidence['used'] = True
+                        if mode == 'after':
+                            posts.append('plan')
+                            evidence.update(forwarded_exit=0, response_bytes=10)
+                        config.write_text(json.dumps(evidence))
+                        return 5, '{}'
+                    return (3, '{"outcome":"needs_attention"}') if len(calls) == 2 else (2, '{"outcome":"approval"}')
+                run.command = command
+                with patch('shutil.which', return_value='/native/gh'):
+                    with self.assertRaisesRegex(Failure, 'Recovered plan did not reach'):
+                        issue_plan_recovery(run, forge, mode)
+                    retained = config.read_bytes()
+                    issue_plan_recovery(run, forge, mode)
+                    self.assertEqual(3, len(calls))
+                    self.assertEqual(['plan'], posts)
+                    self.assertEqual(retained, config.read_bytes())
+                    self.assertEqual(original_env, run.env)
 
 
 class CleanupContractTest(unittest.TestCase):

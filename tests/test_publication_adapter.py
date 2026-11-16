@@ -176,3 +176,11 @@ class PublicationAdapterTest(unittest.TestCase):
             publication.make_actions(self.session,state)
         self.assertEqual('unsupported_operation',caught.exception.code)
         self.adapter.prepare.assert_not_called()
+
+    def test_inline_id_does_not_hide_an_unrelated_timeline_comment(self):
+        from pr_review.discussion import external
+        action = dict(status='published', evidence=dict(comment_ids=[42], review_ids=[]))
+        discussion = {'items': [dict(kind='comment', comments=[{'id': 42}]),
+                                dict(kind='thread', comments=[{'id': 42}])]}
+        result = external(discussion, [action])
+        self.assertEqual([dict(kind='comment', comments=[{'id': 42}])], result['items'])

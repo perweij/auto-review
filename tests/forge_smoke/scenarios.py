@@ -17,6 +17,7 @@ def publication(run, forge):
     def read():
         return run.api(dict(command='read', **ctx), forge.cwd)
     view = read()
+    view = run.api(dict(command='refresh', generation=view['generation'], revision=view['revision'], **ctx), forge.cwd)['review']
     number = run.data['fixtures'][forge.kind]['number']
     existing = [c for c in forge.pages('/pulls/%s/comments' % number) if 'Multiply price by quantity' in c['body']]
     if existing:
@@ -419,8 +420,16 @@ def issue_plan_recovery(run, forge, mode):
     args = [str(run.root / 'bin/fix-issue'), '-i', str(number), '-R', forge.repo, '--economical',
             '--planning', 'codex-1', '--fix', 'codex-1', '--planning-review', 'claude-1', '--json']
     config = run.directory / ('issue-fault-' + mode + '.json')
-    atomic_json(config, dict(executable=shutil.which('gh'), method='POST',
-        endpoint='repos/%s/issues/%s/comments' % (forge.repo, number), mode=mode))
+    intent = dict(executable=shutil.which('gh'), method='POST',
+        endpoint='repos/%s/issues/%s/comments' % (forge.repo, number), mode=mode)
+    if config.exists():
+        evidence = json.loads(config.read_text())
+        if any(evidence.get(k) != v for k, v in intent.items()):
+            raise Failure('Conflicting issue fault configuration; original evidence retained')
+    else:
+        atomic_json(config, intent)
+        evidence = intent
+    reused = bool(evidence.get('used'))
     wrapper = run.directory / 'fault-bin'
     wrapper.mkdir(exist_ok=True)
     if not (wrapper / 'gh').exists():
@@ -428,22 +437,23 @@ def issue_plan_recovery(run, forge, mode):
     old_path = run.env['PATH']
     run.env.update(PATH=str(wrapper)+os.pathsep+old_path, SMOKE_FAULT_FILE=str(config))
     try:
-        code, output = run.command(args, cwd=forge.cwd, timeout=600, check=False)
+        if not reused:
+            code, output = run.command(args, cwd=forge.cwd, timeout=600, check=False)
     finally:
         run.env['PATH'] = old_path
         run.env.pop('SMOKE_FAULT_FILE', None)
     evidence = json.loads(config.read_text())
     if not evidence.get('used') or (mode != 'before' and evidence.get('forwarded_exit') != 0):
         raise Failure('Issue fault was not injected at the intended write')
-    if code != 5:
+    if not reused and code != 5:
         raise Failure('Lost plan response did not preserve uncertainty: ' + output[-1000:])
     _, inspected = run.command(args + ['--inspect-writes'], cwd=forge.cwd)
     actions = json.loads(inspected)['actions']
     action = actions.get('plan:1')
-    expected = 'absent' if mode == 'before' else 'accepted'
-    if not action or action['readback']['outcome'] != expected:
+    expected = ('absent', 'accepted') if mode == 'before' and reused else ('absent',) if mode == 'before' else ('accepted',)
+    if not action or action['readback']['outcome'] not in expected:
         raise Failure('Wrong independent plan-write readback: ' + str(actions))
-    if mode == 'before':
+    if mode == 'before' and action['readback']['outcome'] == 'absent':
         run.command(args + ['--retry-absent', 'plan:1'], cwd=forge.cwd)
     _, output = run.command(args, cwd=forge.cwd, timeout=600, check=False)
     if json.loads(output).get('outcome') != 'approval':
@@ -725,24 +735,25 @@ def accounting(run, forges):
 
 
 def automatic_cli(run, forge):
-    directory = run.directory / 'automatic'
+    directory = run.directory / ('automatic' if forge.kind == 'github' else 'automatic-gitlab')
     directory.mkdir(exist_ok=True)
     checkout = directory / 'repo'
     if not checkout.exists():
         run.command(['git', 'clone', '--quiet', forge.remote, str(checkout)])
     env = dict(run.env, XDG_STATE_HOME=str(directory / 'state'))
-    args = [str(run.root / 'bin/pr-review'), run.data['fixtures']['github']['url'], '--economical', '--auto-publish', '--json']
-    number = run.data['fixtures']['github']['number']
+    args = [str(run.root / 'bin/pr-review'), run.data['fixtures'][forge.kind]['url'], '--forge', forge.kind, '--economical', '--auto-publish', '--json']
+    number = run.data['fixtures'][forge.kind]['number']
+    suffix = '/pulls/%s/comments' % number if forge.kind == 'github' else '/merge_requests/%s/notes' % number
     _, output = run.command(args, cwd=checkout, env=env, timeout=600)
     result = json.loads(output)
     if result.get('outcome') not in ('published', 'noop') or result.get('exit_code') != 0:
         raise Failure('Automatic CLI did not publish the controlled fixture')
-    count = len(forge.pages('/pulls/%s/comments' % number))
+    count = len(forge.pages(suffix))
     _, output = run.command(args, cwd=checkout, env=env, timeout=600)
     repeated = json.loads(output)
-    if repeated.get('outcome') != 'noop' or len(forge.pages('/pulls/%s/comments' % number)) != count:
+    if repeated.get('outcome') != 'noop' or len(forge.pages(suffix)) != count:
         raise Failure('Repeated automatic CLI duplicated publication')
-    run.data['automatic'] = result
+    run.data['automatic' if forge.kind == 'github' else 'automatic_gitlab'] = result
     run.save()
 
 
@@ -841,4 +852,100 @@ def review_report(run, forge):
     if usage != view_after.get('usage') or stage_before is not None and stages.read_bytes() != stage_before:
         raise Failure('Report publication launched a model')
     fixture['execution_report'] = published
+    run.save()
+
+
+def gitlab_publication(run, forge):
+    """Native inline/range positions and interrupted multi-write COMMENT batches."""
+    from .injection import fault, accepted
+    fixture = run.data['fixtures']['gitlab']
+    ctx = dict(session=fixture['session'])
+    view = run.api(dict(command='read', **ctx), forge.cwd)
+    view = run.api(dict(command='refresh', generation=view['generation'], revision=view['revision'], **ctx), forge.cwd)['review']
+    ledger = Path(fixture['session']) / 'usage/ledger.json'
+    usage = ledger.read_bytes()
+    endpoint = '/merge_requests/' + str(fixture['number'])
+    before = forge.api(endpoint)
+    notes_before = forge.pages(endpoint + '/notes')
+    def change(operation, **fields):
+        nonlocal view
+        result = run.api(dict(command='mutate', operation=operation, generation=view['generation'],
+                              revision=view['revision'], **ctx, **fields), forge.cwd)
+        view = result['review']
+        return result
+    def prepare():
+        nonlocal view
+        preview = run.api(dict(command='prepare', generation=view['generation'], revision=view['revision'], **ctx), forge.cwd)
+        if not preview['ready']:
+            raise Failure('GitLab preview was blocked: ' + str(preview))
+        view = preview['review']
+        return dict(command='publish', generation=view['generation'], revision=view['revision'], confirmation=preview['confirmation'], **ctx)
+    first = next(c for c in view['comments'] if c['status'] == 'unstaged')
+    change('stage', comment=first['id'])
+    request = prepare()
+    with fault(run, 'gitlab-finding', tool='glab', endpoint_suffix='/discussions') as evidence:
+        result = run.api(request, forge.cwd)
+        if result.get('complete') or not result.get('needs_recovery'):
+            raise Failure('Accepted-write response loss was not retained as uncertain')
+        accepted(evidence)
+    view = run.api(dict(command='read', **ctx), forge.cwd)
+    view = run.api(dict(command='resolve', generation=view['generation'], revision=view['revision'], **ctx), forge.cwd)['review']
+    if not any(c['id'] == first['id'] and c['status'] == 'published' for c in view['comments']):
+        raise Failure('Inline receipt did not recover')
+    specs = [
+        ('Overview', '**Smoke assessment**\n/close\n```sh\n/close\n```\n```html\n<pre>\n```\n/close\n<pre>\n```\n</pre>\n/close', {'kind': 'review'}),
+        ('Removed line', 'Smoke removed-line finding.', {'kind': 'inline', 'path': 'price.py', 'side': 'LEFT', 'line': 3}),
+        ('Context', 'Smoke unchanged-context finding.', {'kind': 'inline', 'path': 'price.py', 'side': 'RIGHT', 'line': 2}),
+        ('Range', 'Smoke multiline finding.', {'kind': 'inline', 'path': 'price.py', 'side': 'RIGHT', 'start_line': 1, 'line': 3}),
+    ]
+    for title, body, placement in specs:
+        created = change('create', title=title, body=body, placement=placement)
+        change('stage', comment=created['changed'][0])
+    request = prepare()
+    with fault(run, 'gitlab-mixed', tool='glab', endpoint_suffix='/discussions') as evidence:
+        result = run.api(request, forge.cwd)
+        if result.get('complete') or not result.get('needs_recovery'):
+            raise Failure('Mixed GitLab batch did not retain the interrupted remainder')
+        accepted(evidence)
+    view = run.api(dict(command='read', **ctx), forge.cwd)
+    view = run.api(dict(command='resolve', generation=view['generation'], revision=view['revision'], **ctx), forge.cwd)['review']
+    result = run.api(prepare(), forge.cwd)
+    if not result.get('complete'):
+        raise Failure('GitLab mixed batch stopped: ' + str(result.get('reason')))
+    view = result['review']
+    repeated = run.api(dict(command='prepare', generation=view['generation'], revision=view['revision'], **ctx), forge.cwd)
+    if repeated['ready']:
+        raise Failure('An unchanged completed GitLab batch became publishable again')
+    remote = forge.pages(endpoint + '/discussions')
+    notes = [n for d in remote for n in d['notes']]
+    by_id = {n['id']: n for n in notes}
+    checks = []
+    for c in view['comments']:
+        if c['status'] != 'published':
+            continue
+        receipt = c['receipt']
+        note = by_id[receipt['id']]
+        if note['body'] != receipt['body']:
+            raise Failure('Frozen GitLab finding body changed')
+        pos = note.get('position') or {}
+        placement = c['placement']
+        if placement['kind'] == 'inline':
+            if pos.get('head_sha') != before['sha'] or pos.get('new_path') != 'price.py':
+                raise Failure('GitLab finding attached to a different snapshot/path')
+            key = 'old_line' if placement['side'] == 'LEFT' else 'new_line'
+            if pos.get(key) != placement['line']:
+                raise Failure('GitLab finding has the wrong native line')
+            if placement.get('start_line', placement['line']) != placement['line'] and not pos.get('line_range'):
+                raise Failure('GitLab dropped the multiline position')
+        elif '/\u200bclose' not in note['body'] or '```sh\n/close\n```' not in note['body']:
+            raise Failure('Quick-action neutralization changed literal code or left an executable command')
+        checks.append(dict(id=note['id'], url=receipt['html_url'], position=pos))
+    after = forge.api(endpoint)
+    if any(before[k] != after[k] for k in ('state', 'sha', 'title', 'description')):
+        raise Failure('Finding publication mutated the MR')
+    if len(forge.pages(endpoint + '/notes')) - len(notes_before) != 5 or len(checks) != 5:
+        raise Failure('GitLab publication duplicated or omitted a finding')
+    if usage != ledger.read_bytes():
+        raise Failure('GitLab publication invoked a model')
+    run.data['gitlab_publication'] = checks
     run.save()

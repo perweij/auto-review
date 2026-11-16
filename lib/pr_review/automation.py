@@ -199,11 +199,21 @@ class AutomaticRun:
         self.record.update(outcome=outcome, exit_code=fields.pop('exit_code', EXIT_CODES[outcome]), reason=reason,
                            finished_at=now(), receipts=sorted({u for u in receipts if u}),
                            guidance='Open this PR in Emacs. Inspect attention items; R r resumes analysis, P opens publication and recovery, L shows the saved log.', **fields)
+        selected_forge = getattr(self, 'forge', 'github')
+        if self.store is not None:
+            from .forge import restore
+            selected_forge = restore(self.store.manifest).forge
+        if selected_forge == 'gitlab':
+            self.record['guidance'] = (('Resume pr-review with the MR URL and --resume SESSION. '
+                    'Use the terminal preview/publication menu; resolve looks up uncertain receipts. '
+                    'Saved artifacts and logs remain available.').replace('SESSION', str(self.root)) if self.root else
+                    'Run pr-review --forge gitlab from the target project checkout and inspect the reported error.')
+            self.record['reason'] = self.record['reason'].replace('in Emacs', 'in the CLI publication menu').replace('Inspect GitHub', 'Inspect GitLab')
         self.save()
         self.operation.update(exit_code=self.record['exit_code'],
                               status='cancelled' if outcome == 'interrupted' else 'stopped')
         from .events import emit
-        emit('progress', message=reason)
+        emit('progress', message=self.record['reason'])
         return dict(self.record)
 
     def interrupt(self, exit_code):
@@ -307,7 +317,7 @@ class AutomaticRun:
                     raise
                 result = {'complete': False, 'reason': str(exc)}
             if result['complete']:
-                return self.finish('published', 'Publication confirmed by GitHub.', state)
+                return self.finish('published', 'Publication confirmed by the forge.', state)
             recovered = self.recover(session, state, result['reason'])
             if recovered:
                 return recovered
@@ -325,7 +335,10 @@ def _execute(request, controller):
     # Scope the internal capability to this invocation, including failures.
     token = _active.set(controller)
     try:
-        repo = Repository.resolve(request['pr'], request.get('repository'), request.get('cwd'))
+        from .forge import request_forge
+        request = {**request, 'forge': request_forge(request)}
+        controller.forge = request['forge']
+        repo = Repository.resolve(request['pr'], request.get('repository'), request.get('cwd'), request['forge'])
         operation.update(common=str(repo.common), pr=str(repo.pr))
         atomic_json(state_root() / 'operations' / (operation['operation_id'] + '.json'), operation)
         with locked(repo.lock):
@@ -335,6 +348,8 @@ def _execute(request, controller):
             if result:
                 return result
         configured = settings.resolve({**request, 'session': str(root) if root else None})['settings']
+        if request['forge'] == 'gitlab' and configured['suggested_changes']:
+            raise ApiError('unsupported_operation', 'GitLab code suggestions are unavailable; use --no-suggested-changes.')
         required = set(configured['reviewers']) | {configured['processing_provider']}
         catalogs = {p: models.discover({'provider': p}) for p in sorted(required)}
         models.validate_selection(configured, catalogs)

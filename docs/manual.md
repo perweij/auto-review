@@ -1544,8 +1544,8 @@ directory. JSON result output remains unchanged.
 ### Forge selection and compatibility
 
 Review, Owner and fix-issue commands accept `--forge github`. GitHub is the
-default, including enterprise hosts; GitLab.com supports local MR reviews and
-explicit execution-report publication.
+default, including enterprise hosts; GitLab.com supports MR reviews, COMMENT
+finding publication and explicit execution-report publication.
 Unknown selections fail before starting work. Existing repository selectors,
 GitHub URLs and saved session locations remain supported; this option does not
 enable other GitLab workflows; the GitLab.com pilot is described below.
@@ -1561,7 +1561,7 @@ The internal forge interface owns identity, account lookup, URLs, fetch refs,
 CLI/authentication requirements and basic operation capabilities. Local Git and
 workflow decisions remain shared. Completed issues #19–#25 established normalized
 review context, adapter-owned publication and recovery, and the GitLab.com review
-pilot. General GitLab finding publication remains unavailable.
+pilot. GitLab finding publication supports COMMENT assessments and inline text discussions.
 
 ### Forge review context
 
@@ -1584,7 +1584,7 @@ Adapters provide change details, discovery, initial model context, complete
 conversations and review status. Code anchors and native position data are
 separate from conversation freshness identities. The read-contract fixtures
 include opaque IDs and nested projects for the GitLab pilot; finding publication
-and conversation mutations require separate capabilities.
+and conversation mutations have separate capability boundaries.
 
 Normalized Owner `change` facts are authoritative; `metadata` remains a compatibility
 projection for older clients and legacy saved state. New writers
@@ -1595,7 +1595,7 @@ so local review reports can still be retained; complete discussion matching and
 publication continue to require a validated snapshot. A cancelled review-status
 refresh clears the previous status rather than leaving an old approval visible.
 
-### GitLab.com local review pilot
+### GitLab.com review and COMMENT publication
 
 From a checkout with exactly one remote matching the target project:
 
@@ -1610,11 +1610,13 @@ fork. Deleted or inaccessible source projects produce a warning while the retain
 target MR ref remains reviewable. GitLab project identity is case-folded for remote
 matching and storage; renamed/transferred projects must use their current path. The checkout path is logged; local reports, synthesis, discussion matching,
 history and resume use the shared engine. `--resume SESSION` restores the saved
-forge. The CLI automatically ends after the local review without opening the
-publication menu. `--no-publish` is accepted but unnecessary.
+forge. Interactive runs open the existing draft/publication menu; `--no-publish`
+retains a local review. `--auto-publish --json` uses the same guarded, unattended
+COMMENT workflow as GitHub and returns native note receipt URLs.
 
-Only GitLab.com is supported. Finding publication (including auto-publication),
-Owner operations, issue fixing, focused follow-up, repository MR listing, monitor
+Only GitLab.com is supported. Owner operations, issue fixing, approvals,
+request-changes verdicts, replies, resolve/reopen, code suggestions,
+focused follow-up, repository MR listing, monitor
 integration and full Emacs integration are outside this pilot. Explicit unsupported
 operations fail before remote writes. Explicit execution-report publication is
 available separately through `pr-review publish-report SESSION`. GitLab approvals are not GitHub verdicts;
@@ -1641,7 +1643,23 @@ Reviewer publication keeps approval, freshness checks, durable intent and retry
 policy in the shared workflow. The forge adapter renders preview text and prepares
 remote operations, submits each operation once, and interprets receipt evidence.
 GitHub retains its existing comment/suggestion text, tracking markers and verdicts.
-GitLab has a separate report-publication capability; it cannot publish findings.
+GitLab supports COMMENT-only overall notes and inline text discussions, including
+ranges, context lines and renamed/new/deleted files. Approvals, request-changes,
+replies and code suggestions fail before writing. Requested suggestion generation
+fails before model execution; use `--no-suggested-changes` if saved settings enable it.
+
+GitLab previews show the canonical publication body, including protection against
+executable slash commands; literal code blocks and ordinary Markdown are retained.
+Saved human wording is unchanged. Inline positions freeze the native diff version
+matching the reviewed head and merge base. An unchanged reviewed diff permits
+ordinary target-branch advancement without silently re-anchoring comments.
+
+One logical COMMENT review may send multiple notes. Each operation has its own
+durable intent and receipt; confirmed notes are never sent again when continuing
+an unchanged remainder. Edited, duplicate or incomplete receipts block recovery.
+After unknown delivery, an empty lookup is still uncertain; definitive rejection
+such as permission denial remains retryable. Report publication retains its own
+capability and journal.
 
 New logical actions contain versioned operation records. Each operation is saved
 before sending; its returned receipt is saved before supplemental inline-receipt
@@ -1769,7 +1787,7 @@ the snapshot as an MR timeline note. The recorded generation and SHA remain
 visible even when the MR has advanced, closed or merged. Existing untraced generations
 are not reconstructed. `--auto-publish` continues to publish findings only.
 
-Report publication does not run models or enable other GitLab writes. Notes are
+Report publication does not run models or enable other GitLab workflows. Notes are
 bound to the original project, MR and account. A lost response triggers receipt
 lookup on the next invocation. An edited/duplicate match or incomplete lookup
 stops publication. If a GitLab send may have succeeded and lookup finds nothing,

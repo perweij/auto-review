@@ -78,7 +78,7 @@ class GitLabTest(unittest.TestCase):
 
     def test_unsupported_operations_fail_before_session_or_transport(self):
         with patch('pr_review.application.Session', side_effect=AssertionError('Session opened')):
-            for op in ('prepare', 'publish', 'resolve', 'automatic-review', 'owner-fix', 'owner-read', 'issue-run', 'issue-eligibility', 'thread-state'):
+            for op in ('owner-fix', 'owner-read', 'issue-run', 'issue-eligibility', 'thread-state'):
                 with self.subTest(op=op), self.assertRaises(ApiError) as caught:
                     dispatch(dict(command=op, forge='gitlab'))
                 self.assertEqual('unsupported_operation', caught.exception.code)
@@ -99,10 +99,11 @@ class GitLabTest(unittest.TestCase):
             self.assertNotIn('GLAB_TOKEN', env)
         self.assertIn('Bash(glab:*)', DENIED_TOOLS)
 
-    def test_capabilities_exclude_writes(self):
+    def test_capabilities_exclude_owner_and_approval_workflows(self):
         value = dispatch({'command': 'capabilities', 'forge': 'gitlab'})
         self.assertIn('run', value['commands'])
-        self.assertNotIn('publish', value['commands'])
+        self.assertIn('publish', value['commands'])
+        self.assertEqual(frozenset(('COMMENT',)), self.forge.publication.verdicts)
         self.assertNotIn('owner', value['features'])
 
     def test_malformed_thread_is_required_context_failure(self):

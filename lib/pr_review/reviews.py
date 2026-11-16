@@ -302,6 +302,8 @@ def execute(request, *, confirm_trust=None):
             configuration.update(settings.validate(settings.from_manifest(saved_manifest)))
         settings.apply_overrides(configuration, request, fresh=not root)
         configuration = settings.validate(configuration)
+        if repo.project.forge == 'gitlab' and configuration['suggested_changes']:
+            raise ApiError('unsupported_operation', 'GitLab code suggestions are unavailable; use --no-suggested-changes.')
         if request.get('catalogs') is not None:
             from .models import validate_selection
             validate_selection(configuration, request['catalogs'], reviewers=kind != 'followup')

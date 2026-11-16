@@ -15,17 +15,22 @@ def normalize(issues, reviews, inline, threads):
 
 
 def external(discussion, actions, adapter=None):
-    replies, reviews = set(), set()
+    replies, reviews, timeline = set(), set(), set()
     from .receipts import evidence
     for value in evidence(actions, adapter):
         replies.update(value['comment_ids'])
         reviews.update(value['review_ids'])
+        timeline.update(value.get('timeline_ids', []))
     result = copy.deepcopy(discussion)
     items = []
     for item in result["items"]:
         if item["kind"] == "thread":
             item["comments"] = [c for c in item["comments"] if c["id"] not in replies]
             if not item["comments"]:
+                continue
+        elif item["kind"] == "comment":
+            item['comments'] = [c for c in item['comments'] if c['id'] not in timeline]
+            if not item['comments']:
                 continue
         elif item["kind"] == "review" and item["comments"][0]["id"] in reviews:
             continue

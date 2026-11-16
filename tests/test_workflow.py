@@ -101,7 +101,7 @@ class WorkflowTest(unittest.TestCase):
                 result = dispatch(self.f.request("publish", confirmation=prepared["confirmation"]))
             posts.assert_not_called()
         self.assertFalse(result["complete"])
-        self.assertIn("review status changed", result["reason"])
+        self.assertIn("review status changed", result["reason"].lower())
         self.assertEqual(result["review"]["comments"][0]["status"], "staged")
 
     def test_comment_activity_does_not_invalidate_opinionated_status(self):

@@ -35,8 +35,9 @@ def edit_text(body):
         raise
 
 
-def inspect(comment):
-    print(f"\n{comment['title']} · {comment['placement']}\n{comment['body']}")
+def inspect(comment, *, publication=False):
+    body = comment.get('publication_body', comment['body']) if publication else comment['body']
+    print(f"\n{comment['title']} · {comment['placement']}\n{body}")
     for row in comment['context'].get('rows', []):
         print(f"{row['old'] or '':>5} {row['new'] or '':>5} {'>' if row['highlight'] else ' '} {row['kind']}{row['text']}")
     for entry in (comment['context'].get('thread') or {}).get('comments', []):
@@ -111,7 +112,7 @@ def terminal(path):
                 result = call({**request, 'command': 'verify-suggestions'})
                 for comment in result['review']['comments']:
                     if comment.get('suggestion'):
-                        inspect(comment)
+                        inspect(comment, publication=True)
                 continue
             if key == 'p':
                 prepared = call({**request, 'command': 'prepare'})
@@ -120,7 +121,7 @@ def terminal(path):
                     continue
                 for comment in prepared['review']['comments']:
                     if comment['status'] == 'staged':
-                        inspect(comment)
+                        inspect(comment, publication=True)
                 for warning in prepared.get('warnings', []):
                     print(warning)
                 if input(f"Publish these {prepared['counts']} with {prepared['verdict'] or 'replies only'}? Type yes: ") == 'yes':

@@ -71,8 +71,8 @@ publication markers.
 6. Advance PR head after preparing publication: refuse stale preview and review
    a new generation on resume.
 7. Foreign commit on managed issue branch: stop without overwriting/pushing.
-8. GitLab read-only review/resume, source SHA, discussion anchors, honest pipeline
-   coverage. Unsupported-operation rejection is local capability coverage;
+8. GitLab read-only review/resume with `--no-publish`, source SHA, discussion
+   anchors and honest pipeline coverage. Unsupported-operation rejection is local capability coverage;
    successful reads and zero mutations establish live coverage.
 9. Integrity/output: supplied working copies/default branches unchanged,
    parseable JSON, distinct checkout/artifact paths.
@@ -81,6 +81,10 @@ publication markers.
     unchanged MR state, reference suppression and no new model calls. Run this
     bounded scenario with `python3 tests/smoke-forges.py --suite smoke --scenario review-report`.
     Ordinary GitLab review remains read-only; report writes are asserted separately.
+11. GitLab COMMENT publication: native overall and added/removed/context/range
+    discussions, accepted-response-loss recovery, unchanged partial remainder,
+    receipt URLs, exact prepared bodies and automatic CLI JSON/idempotency.
+    Isolate with `--scenario gitlab-publication`; it uses scripted providers only.
 
 ### Extended scenarios
 
@@ -276,9 +280,17 @@ an execution snapshot and verifies that repeated publication does not duplicate 
 
 
 Plain PR-review execution reports are checked by the review smoke scenario on
-both forges: local generation reporting, explicit GitHub snapshot publication,
-idempotent repeat publication, and GitLab publication rejection. For a focused
+both forges: local generation reporting, explicit snapshot publication,
+idempotent repeat publication, and uncertain-write recovery. For a focused
 GitHub run, use `python3 tests/smoke-forges.py --suite smoke --scenario review-report`;
 replace `smoke` with `live` for economical real reviewers. The scenario checks
 that resuming the completed review adds no non-probe model calls. Reports and
 publication URLs are retained with the fixture metadata.
+
+GitLab COMMENT publication is included in `make smoke-fast`. Controlled run
+`state/forge-smoke/run-pu9ap25o` passed all 19 scenarios on both forges, including
+native overview/inline positions, mixed-batch response-loss recovery and automatic
+CLI idempotency. A final GitLab-only run, `state/forge-smoke/run-vt7k_qc7`, passed
+all six scenarios after HTML/fence quick-action hardening. See the
+[finding-publication evidence and retained comments](gitlab-pilot.md#controlled-finding-evidence--2026-11-16).
+No paid models were used.

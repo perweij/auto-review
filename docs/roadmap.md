@@ -18,7 +18,7 @@ workflows before introducing additional automation or forge support.
 | 4 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
 | 5 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
 | 6 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
-| 7 | Further GitLab workflows | [#19–#25](https://github.com/perweij/auto-review/issues/19) are completed. Local MR reviews and explicit execution-report notes are supported; finding publication, Owner and issue workflows remain separate future work. See [current GitLab capabilities](gitlab-pilot.md). |
+| 7 | Further GitLab workflows | [#19–#25](https://github.com/perweij/auto-review/issues/19) are completed. MR reviews, COMMENT finding publication and execution-report notes are supported; Emacs integration, Owner and issue workflows remain future work. See [current GitLab capabilities](gitlab-pilot.md). |
 | 8 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
 
 The forge series consists of identity/authentication (#19), review context (#20),
@@ -109,4 +109,5 @@ The delivered order was #19 → #20 → #25 → #21 → #22 → #23 → #24. The
 provides capability rejection, saved project/account identity, normalized context,
 shared read contracts and adapter-owned write interfaces. GitHub storage and
 legacy receipt interpretation remain compatible. GitLab execution-report notes
-use a separate capability; other GitLab writes require new follow-up work.
+use a separate capability from COMMENT findings; other GitLab workflows require
+new follow-up work.

@@ -125,13 +125,18 @@ def recover(session, state):
                     continue
                 if operation['status'] == 'draft' and operation is not action:
                     continue
-                matches = publication_adapter(session).lookup(session, operation)
+                adapter = publication_adapter(session)
+                matches = adapter.lookup(session, operation)
                 if len(matches) > 1:
                     raise ApiError('duplicate_receipts', 'Multiple posts match this operation; inspect before continuing.')
                 if matches:
+                    if not adapter.matches(session, operation, matches[0]):
+                        raise ApiError('incomplete_receipts', 'The matching publication was edited or moved; no retry sent.')
                     verify_operation(session, state, action, operation, matches[0])
                 elif operation.get('result'):
                     raise ApiError('incomplete_receipts', 'Submitted operation cannot currently be verified; no retry sent.')
+                elif getattr(adapter, 'requires_absence_proof', False) and operation.get('delivery') != 'not_sent':
+                    raise ApiError('uncertain_publication', 'GitLab delivery is unknown and no receipt is visible. Retry receipt lookup; no duplicate was sent.')
                 else:
                     operation['status'] = 'superseded' if action.get('legacy') else 'failed'
                     action['status'] = operation['status']
@@ -223,7 +228,7 @@ def publish(session, state, request):
     if refresh(session, state):
         return {"complete": False, "reason": "Discussion changed after confirmation.", "review": session.view(state)}
     if batch.get("review_status") != workflow.status_fingerprint(session):
-        return {"complete": False, "reason": "GitHub review status changed. Inspect it and prepare publication again.",
+        return {"complete": False, "reason": "Review status changed. Inspect it and prepare publication again.",
                 "review": session.view(state)}
     repository_operation(session, "validate", next((a["event"] for a in batch["actions"] if a["kind"] == "review"), "COMMENT"))
     if any(session.blockers(c, state) for c in state['comments'] if c['status'] == 'staged'):
@@ -271,17 +276,22 @@ def publish(session, state, request):
                     return {'complete': False, 'reason': 'Review status changed; prepare remaining operations again.', 'review': session.view(state)}
                 repository_operation(session, 'validate', action['event'])
             operation['status'] = action['status'] = 'submitting'
+            operation['delivery'] = 'unknown'  # Non-delivery proof belongs only to the previous attempt.
             persist_action(session, state, action)
             try:
                 receipt = publication_adapter(session).submit(session, operation)
+                operation['response'] = receipt
+                persist_action(session, state, action)
                 if not publication_adapter(session).matches(session, operation, receipt):
                     raise ApiError('invalid_response', 'Submission response could not be verified.')
                 verify_operation(session, state, action, operation, receipt)
                 sent_here = True
-            except ApiError as exc:
-                operation['status'] = action['status'] = 'ambiguous'
+            except BaseException as exc:
+                not_sent = getattr(exc, 'write_not_sent', False)
+                operation['delivery'] = 'not_sent' if not_sent else 'unknown'
+                operation['status'] = action['status'] = 'failed' if not_sent else 'ambiguous'
                 persist_action(session, state, action)
-                if exc.code == 'cancelled':
+                if not isinstance(exc, ApiError) or exc.code == 'cancelled':
                     raise
                 return {'complete': False, 'reason': str(exc), 'needs_recovery': True, 'review': session.view(state)}
         complete_action(session, state, action)
@@ -298,6 +308,7 @@ def publication_adapter(session):
 def verify_operation(session, state, action, operation, receipt):
     operation['result'] = receipt
     operation['receipt_verified'] = True
+    operation['delivery'] = 'confirmed'
     operation['evidence'] = publication_adapter(session).evidence(operation)
     persist_action(session, state, action)
     operation['comment_results'] = publication_adapter(session).comments(session, operation, receipt, state)

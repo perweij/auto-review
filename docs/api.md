@@ -1127,9 +1127,25 @@ failed saves preserve its local draft. This does not alter frozen batch settings
 GitLab.com MR URL and the existing repository/cwd fields. The compatibility name
 `pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
 checkout lookup and artifacts retain the existing protocol format. This adapter
-supports local review and explicit execution-report publication: finding
-publication, conversation mutation, Owner and issue workflows are rejected.
+supports review, COMMENT finding publication and explicit execution-report
+publication. Conversation mutation, Owner and issue workflows remain unavailable.
 GitLab approval state is not converted into review verdicts.
+
+GitLab advertises `preview-comment`, `mutate`, `refresh`, `prepare`, `publish`,
+`resolve`, `automatic-review` and `review-log`. Its verdict catalog contains only
+COMMENT and placements support overall assessments and inline text lines/ranges.
+`prepare` freezes platform-normalized bodies and native positions; `publish`
+retains the existing confirmation/revision contract. The CLI preview displays
+the `publication_body` projection. Unsupported replies, verdicts and suggestions
+fail before writing. `resolve` recovers publication receipts; it does not resolve
+GitLab conversations. Thread-state operations remain unsupported.
+
+GitLab logical reviews contain independently journaled note/discussion operations.
+Receipts retain native IDs and expose canonical `html_url` links. Recovery locates
+identity candidates before body/position validation and never treats unknown
+delivery plus an empty offset-paginated collection as permission to resend.
+Confirmed own notes are excluded from discussion freshness checks; unrelated
+replies remain visible. Existing GitHub operation interpretation is unchanged.
 
 Reviewer publication now delegates rendering, payload preparation and receipt
 interpretation to the forge adapter. Protocol 1 `prepare`, `publish`, `resolve`,
