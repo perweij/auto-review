@@ -293,8 +293,9 @@ pr-review --forge gitlab https://gitlab.com/GROUP/PROJECT/-/merge_requests/123 -
 ```
 
 Use an authenticated `glab` and the project's local checkout. The GitLab pilot
-supports local review and resume, but not publication, Owner operations or
-`fix-issue`. See the [pilot capability and evidence notes](gitlab-pilot.md).
+supports local review, resume and explicit execution-report publication, but not
+finding publication, Owner operations or `fix-issue`. See the
+[pilot capability and evidence notes](gitlab-pilot.md).
 
 ## Compatibility
 
@@ -389,6 +390,8 @@ bin/pr-review publish-report SESSION --generation GENERATION
 ```
 
 Commands default to the current generation; use `--generation` for pending or
-historical views. Reports do not run models. GitLab supports local reports only.
+historical views. Reports do not run models. The same CLI commands publish GitLab
+reports as MR timeline notes. Repeating a command recovers its receipt; an
+uncertain send without a visible receipt stops rather than risking a duplicate.
 `--auto-publish` publishes findings, not execution reports. Historical generations
 without traces remain runnable but cannot be reconstructed into reports.

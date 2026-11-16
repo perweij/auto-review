@@ -773,3 +773,72 @@ def owner_report(run, forge):
         raise Failure('Repeated Owner report publication created a duplicate')
     run.data['owner_report'] = result
     run.save()
+def review_report(run, forge):
+    """Explicit report write, accepted-response loss, and native idempotency."""
+    from .injection import fault, accepted
+    fixture = run.data['fixtures'][forge.kind]
+    view = run.api(dict(command='read', session=fixture['session']), forge.cwd)
+    request = dict(command='review-publish-report', session=fixture['session'],
+                   generation=view['generation'], revision=view['revision'])
+    suffix = (('/issues/' if forge.kind == 'github' else '/merge_requests/')
+              + str(fixture['number']) + ('/comments' if forge.kind == 'github' else '/notes'))
+    before = forge.pages(suffix)
+    usage = view.get('usage')
+    stages = run.directory / 'models/stages'
+    stage_before = stages.read_bytes() if stages.exists() else None
+    mr_before = forge.api(('/pulls/' if forge.kind == 'github' else '/merge_requests/') + str(fixture['number']))
+    referenced_before = forge.pages('/merge_requests/1/notes') if forge.kind == 'gitlab' else []
+    with fault(run, forge.kind + '-report', tool='gh' if forge.kind == 'github' else 'glab',
+               endpoint_suffix='/comments' if forge.kind == 'github' else '/notes',
+               body_contains='Session execution report') as evidence:
+        try:
+            run.api(request, forge.cwd)
+        except Failure:
+            accepted(evidence)
+        else:
+            raise Failure('Expected report response loss was not reported')
+    # Recover through the public CLI, then repeat through the protocol.
+    _, output = run.command([str(run.root / 'bin/pr-review'), 'publish-report', fixture['session'],
+                             '--generation', view['generation']], cwd=forge.cwd)
+    published = json.loads(output)
+    repeated = run.api(request, forge.cwd)
+    if published['report_url'] != repeated['report_url']:
+        raise Failure('Execution report was duplicated')
+    after = forge.pages(suffix)
+    created = [n for n in after if n['id'] not in {n['id'] for n in before}]
+    if len(created) != 1 or 'Session execution report' not in created[0]['body']:
+        raise Failure('Expected exactly one execution-report note')
+    folder = Path(published['report_path']).parents[1]
+    journal = json.loads((folder / 'publication.json').read_text())
+    action = next(a for a in journal.values() if a['status'] == 'published')
+    if created[0]['body'] != action['payload']['body']:
+        raise Failure('Remote report differs from its frozen payload')
+    if forge.kind == 'gitlab':
+        mr_after = forge.api('/merge_requests/' + str(fixture['number']))
+        if any(mr_before[k] != mr_after[k] for k in ('state', 'sha', 'title', 'description')):
+            raise Failure('Report publication mutated the MR')
+        # No reference side effects on the existing MR mentioned by the double.
+        referenced_after = forge.pages('/merge_requests/1/notes')
+        if fixture['number'] != 1 and referenced_before != referenced_after:
+            raise Failure('Report produced a cross-reference on another MR')
+        from html.parser import HTMLParser
+        class References(HTMLParser):
+            unwanted = False
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == 'a' and attrs.get('data-reference-type'):
+                    own_mr = attrs.get('data-reference-type') == 'merge_request' and attrs.get('data-iid') == str(fixture['number'])
+                    reviewed_commit = attrs.get('data-reference-type') == 'commit' and attrs.get('data-commit') == mr_before['sha']
+                    if attrs.get('data-project-path') != forge.repo or not (own_mr or reviewed_commit):
+                        self.unwanted = True
+        _, html = run.command(['glab', 'api', '--hostname', forge.host, '--method', 'POST',
+                               'markdown', '--input', '-'], input_text=json.dumps(dict(
+                                   text=created[0]['body'], gfm=True, project=forge.repo)))
+        rendered = References(); rendered.feed(json.loads(html)['html'])
+        if rendered.unwanted:
+            raise Failure('Report Markdown contains active user or unrelated object references')
+    view_after = run.api(dict(command='read', session=fixture['session']), forge.cwd)
+    if usage != view_after.get('usage') or stage_before is not None and stages.read_bytes() != stage_before:
+        raise Failure('Report publication launched a model')
+    fixture['execution_report'] = published
+    run.save()

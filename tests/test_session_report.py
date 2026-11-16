@@ -6,6 +6,73 @@ from pr_review.session_report import generate, render
 
 
 class ReportTest(unittest.TestCase):
+    def test_token_labels_distinguish_measurements_reuse_and_non_model_work(self):
+        from types import SimpleNamespace
+        from pr_review import session_trace as trace
+        from pr_review.session_report import report_data
+        for tokens, partial in ((None, False), (0, False), (17, False), (17, True)):
+            with self.subTest(tokens=tokens, partial=partial), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                trace.initialize(root, 'session')
+                artifact = root / 'review.md'
+                with trace.operation(root, True, 'session'):
+                    with trace.stage('reviewer-1', choice={'provider': 'codex', 'model': 'test', 'effort': 'low'}) as handle:
+                        handle[1]['call_ids'] = ['model'] + (['unrecorded'] if partial else [])
+                        artifact.write_text('Checked result')
+                        trace.complete(handle, {'status': 'evidence_available'}, artifact)
+                    probe = trace.begin('claude_auth_probe', SimpleNamespace(record={'id': 'probe'}))
+                    trace.end(probe, SimpleNamespace(returncode=0))
+                    trace.decision('boundary/complete')
+                with trace.operation(root, True, 'session'):
+                    trace.reuse('reviewer-1', artifact, {'status': 'evidence_available'})
+                journal = json.loads((root / 'execution-trace.json').read_text())
+                # Deterministic overhead, independent of clock resolution.
+                for invocation in journal['invocations']:
+                    invocation['seconds'] = 60
+                calls = {'model': {'usage': None if tokens is None else {'total_tokens': tokens}, 'coverage': 'reported' if tokens is not None else 'unavailable'},
+                         'probe': {'usage': None, 'coverage': 'unavailable', 'provider': 'claude', 'model': 'haiku', 'effort': 'low'}}
+                data = report_data(journal, calls)
+                original, controller, reused = [r for r in data['activities'] if r['stage']]
+                self.assertEqual(tokens, original['tokens'])
+                self.assertEqual(0, reused['tokens'])
+                self.assertEqual('reused', reused['token_status'])
+                self.assertEqual('not_applicable', controller['token_status'])
+                self.assertEqual('unknown', next(r for r in data['activities'] if r['role'] == 'claude_auth_probe')['token_status'])
+                self.assertTrue(all(r['token_status'] == 'not_applicable' for r in data['activities'] if r['role'] == 'Orchestration overhead'))
+                body = render(data)
+                expected = 'unknown' if tokens is None else str(tokens) + (' (partial)' if partial else '')
+                self.assertIn(f'codex / test / low; {original["seconds"]/60:.2f} minutes; tokens: {expected}.', body)
+                self.assertIn('tokens: 0 additional.', body)
+                self.assertIn('controller / none / none; 0.00 minutes; tokens: not applicable.', body)
+                self.assertIn('claude / haiku / low;', body)
+                self.assertIn(f'| Review | {original["seconds"]/60:.1f} | {expected} |', body)
+                self.assertIn('tokens: unknown.', body)  # Probe measurements are genuinely absent.
+                self.assertEqual(tokens or 0, sum(r['tokens'] or 0 for r in data['activities']))
+                self.assertEqual(3 if partial else 2, data['total_calls'])
+
+    def test_token_summary_does_not_turn_unknown_categories_into_zero(self):
+        from pr_review.session_report import token_text
+        known = dict(tokens=7, token_status='reported')
+        unknown = dict(tokens=None, token_status='unknown')
+        reused = dict(tokens=0, token_status='reused')
+        control = dict(tokens=None, token_status='not_applicable')
+        self.assertEqual('unknown', token_text([unknown, reused, control]))
+        self.assertEqual('0 additional', token_text([reused, control]))
+        self.assertEqual('not applicable', token_text([control]))
+        self.assertEqual('7', token_text([known, reused, control]))
+        self.assertEqual('7 (partial)', token_text([known, unknown, reused, control]))
+
+    def test_remote_urls_remain_intact_and_generated_references_are_inert(self):
+        from pr_review.session_report import safe
+        for url in ('https://gitlab.com/g/p/-/merge_requests/7', 'https://github.com/g/p/pull/7'):
+            data = dict(activities=[], transitions=[], outcome='complete', coverage='complete',
+                        reported_calls=0, total_calls=0, repairs=0, stage_numbers={},
+                        review=dict(generation='selected', url=url, scope='full'))
+            self.assertIn(url, render(data))
+        self.assertEqual('@\u200buser #\u200b1 !\u200b1 ~\u200blabel', safe('@user #1 !1 ~label'))
+        self.assertNotIn('/close', safe('/close'))
+        self.assertNotIn('/home/private', safe('/home/private'))
+
     def test_historical_session_is_unsupported_and_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'session.json'

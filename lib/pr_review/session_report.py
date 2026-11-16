@@ -30,10 +30,15 @@ def category(role):
     return 'Other'
 
 
-def safe(value, limit=1200):
+def safe(value, limit=1200, *, remote_url=False):
     text = str(value)[:limit]
-    text = re.sub(r'(?<![\w:/])/(?:[^\s/]+/)*[^\s/]+', '[local path]', text)
-    return html.escape(text).replace('`', '&#96;').replace('@', '&#64;').replace('|', '&#124;').replace('\n', ' ')
+    if not remote_url:
+        # Reference filters decode entities. Break reference tokens explicitly,
+        # and neutralize slash commands independently of local-path redaction.
+        text = re.sub(r'([@#!~])', lambda m: m[0] + '\u200b', text)
+        text = re.sub(r'(?m)^(\s*)/', lambda m: m[1] + '/\u200b', text)
+        text = re.sub(r'(?<![\w:/])/(?:[^\s/]+/)*[^\s/]+', '[local path]', text)
+    return html.escape(text).replace('`', '&#96;').replace('|', '&#124;').replace('\n', ' ')
 
 
 def graph(data, *, compact, limit=None):
@@ -86,6 +91,20 @@ def graph(data, *, compact, limit=None):
     return lines + ['```']
 
 
+def token_text(rows):
+    applicable = [r for r in rows if r.get('token_status') != 'not_applicable']
+    if not applicable:
+        return 'not applicable'
+    measured = [r for r in applicable if r.get('token_status') != 'reused']
+    if not measured:
+        return '0 additional'
+    known = [r['tokens'] for r in measured if r['tokens'] is not None]
+    if not known:
+        return 'unknown'
+    partial = len(known) != len(measured) or any(r.get('token_status') == 'partial' for r in measured)
+    return str(sum(known)) + (' (partial)' if partial else '')
+
+
 def render(data, bounded=False):
     rows = data['activities']
     totals = {}
@@ -97,19 +116,19 @@ def render(data, bounded=False):
     text = ['## Session execution report', '', f"Outcome: **{safe(data['outcome'])}**", '',
             f"Recorded processing: **{sum(r['seconds'] for r in rows)/60:.1f} minutes**. User pauses are excluded.", '',
             f"Trace coverage: {data['coverage']}. Unmeasured work remains unknown.",
-            f"Reported tokens: {sum(r['tokens'] or 0 for r in rows) if data['reported_calls'] else 'unknown'}; observations for {data['reported_calls']}/{data['total_calls']} calls. Tokens are not monetary cost.",
+            f"Reported tokens: {token_text(rows)}; observations for {data['reported_calls']}/{data['total_calls']} calls. Tokens are not monetary cost.",
             'Recorded user waiting: ' + (f'{waiting/60:.1f} minutes.' if waiting is not None else 'unknown.'),
             f"Repair cycles: {data['repairs']}.", '', *graph(data, compact=True, limit=12), '',
             'Edges show consumed results and controller decisions; execution is sequential. Node numbers show recorded stage order.', '',
             'Longest recorded activities:', '']
     if data.get('review'):
         review = data['review']
-        text[2:2] = [f"Review generation: {safe(review['generation'])}. Change: {safe(review.get('url') or 'unknown')}.",
+        text[2:2] = [f"Review generation: {safe(review['generation'])}. Change: {safe(review.get('url') or 'unknown', remote_url=True)}.",
                      f"Reviewed head: {safe(review.get('snapshot', {}).get('head', 'unknown'))}. Scope: {safe(review['scope'])}.",
                      'This execution snapshot does not establish that findings were published or the change was approved.', '']
     if data.get('owner'):
         owner = data['owner']
-        text[2:2] = [f"Owner batch: {safe(owner['batch'])}. PR: {safe(owner.get('url') or 'unknown')}.",
+        text[2:2] = [f"Owner batch: {safe(owner['batch'])}. PR: {safe(owner.get('url') or 'unknown', remote_url=True)}.",
                      f"Candidate tree: {safe(owner['candidate'])}. " +
                      ('Read-only verification.' if owner.get('verify_only') else 'Fixing round.'),
                      'This is a local execution snapshot; it does not establish that changes were pushed or replies published.', '']
@@ -123,7 +142,7 @@ def render(data, bounded=False):
             text += [f' "{name}" : {value:.6f}' for name, value in values]
             text += ['```', '']
     text += ['| Activity | Minutes | Reported tokens |', '| --- | ---: | ---: |']
-    text += [f'| {name} | {v[0]/60:.1f} | {v[1]} |' for name, v in totals.items()]
+    text += [f"| {name} | {v[0]/60:.1f} | {token_text([r for r in rows if r['category'] == name])} |" for name, v in totals.items()]
     text += ['', '</details>', '', '<details><summary>Execution graph</summary>', '',
              *graph(data, compact=False, limit=35 if bounded else None), '', '</details>', '',
              '<details><summary>Stage outcomes and accounting</summary>', '']
@@ -131,7 +150,7 @@ def render(data, bounded=False):
         heading = f"**{row.get('sequence', '—')}: {safe(row['role'], 80)} · {safe(row['status'], 80)}**"
         choice = ' / '.join(safe(row[k], 80) for k in ('provider', 'model', 'effort'))
         duration = f"{row['seconds']/60:.2f} minutes" if row.get('duration_known', True) else 'duration unknown'
-        lines = [heading, '', f"{choice}; {duration}; tokens: {row['tokens'] if row['tokens'] is not None else 'unknown'}.", '']
+        lines = [heading, '', f"{choice}; {duration}; tokens: {token_text([row])}.", '']
         if row.get('reused_from'):
             lines += [f"Reuses stage {data['stage_numbers'].get(row['reused_from'], 'unknown')}; no new model usage.", '']
         if row.get('summary'):
@@ -176,10 +195,17 @@ def report_data(trace, calls, *, outcome='unknown', shared_ledger=False):
         seconds = stage.get('seconds', 0)
         if stage['status'] == 'reused' or stage['role'].startswith('control/'):
             seconds = 0
+        tokens = sum(known) if known else None
+        token_status = ('partial' if len(known) < len(call_ids) else 'reported') if known else 'unknown'
+        if not stage.get('call_ids'):
+            if stage['status'] == 'reused':
+                tokens, token_status = 0, 'reused'
+            elif stage['role'].startswith('control/'):
+                token_status = 'not_applicable'
         rows.append(dict(id=stage['id'], sequence=stage['sequence'], stage=True, role=stage['role'],
             category=category(stage['role']), status=('reused: ' + stage['outcome']) if stage['status'] == 'reused' else stage['outcome'], context=stage.get('context', {}),
             provider=str(choice.get('provider', 'controller')), model=str(choice.get('model', 'none')), effort=str(choice.get('effort', 'none')),
-            seconds=seconds, duration_known='seconds' in stage and stage.get('timing_coverage') != 'unknown', tokens=sum(known) if known else None, invocation=stage['invocation'],
+            seconds=seconds, duration_known='seconds' in stage and stage.get('timing_coverage') != 'unknown', tokens=tokens, token_status=token_status, invocation=stage['invocation'],
             summary=stage.get('summary', '') + ((' Reused from report ' + stage['external_source']['report'] + ', stage ' + stage['external_source']['stage'] + '.') if stage.get('external_source') else ''), reused_from=stage.get('reused_from')))
     # Unassigned calls (e.g. authentication probes) are accounting observations,
     # never inferred workflow stages or dependency edges.
@@ -192,7 +218,8 @@ def report_data(trace, calls, *, outcome='unknown', shared_ledger=False):
         rows.append(dict(id=execution['id'], role=execution['role'], category='Other', stage=False,
             status=execution['status'], seconds=execution.get('seconds', 0), invocation=execution['invocation'],
             provider=call.get('provider', 'unknown'), model=call.get('model', 'unknown'), effort=call.get('effort', 'unknown'),
-            tokens=(call.get('usage') or {}).get('total_tokens')))
+            tokens=(call.get('usage') or {}).get('total_tokens'),
+            token_status='reported' if call.get('usage') is not None else 'unknown'))
     if not shared_ledger and set(calls) - claimed:
         coverage = 'partial'  # No inference from unmatched usage to missing stages.
     for invocation in trace['invocations']:
@@ -203,7 +230,7 @@ def report_data(trace, calls, *, outcome='unknown', shared_ledger=False):
         overhead = max(0, invocation['seconds'] - measured)
         if overhead:
             rows.append(dict(id='overhead-' + invocation['id'], role='Orchestration overhead', category='Other', stage=False,
-                status=invocation['status'], seconds=overhead, invocation=invocation['id'], tokens=None,
+                status=invocation['status'], seconds=overhead, invocation=invocation['id'], tokens=None, token_status='not_applicable',
                 provider='controller', model='none', effort='none'))
     observed_calls = [calls[key] for key in claimed if key in calls]
     return dict(version=2, outcome=trace.get('outcome', outcome), activities=rows, transitions=trace['transitions'],

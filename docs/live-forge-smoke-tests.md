@@ -1,6 +1,6 @@
 # Live forge smoke and functional tests
 
-Status: implemented on `feature/glab`. Autonomous results and known
+Status: implemented on `main`. Autonomous results and known
 limitations are recorded below; assisted checks remain pending.
 Follow-up: https://github.com/perweij/auto-review/issues/39 tracks economical
 preset coverage. Production preset changes are outside this work.
@@ -76,6 +76,11 @@ publication markers.
    successful reads and zero mutations establish live coverage.
 9. Integrity/output: supplied working copies/default branches unchanged,
    parseable JSON, distinct checkout/artifact paths.
+10. Explicit execution reports on GitHub and GitLab: accepted response loss,
+    CLI receipt recovery, protocol repeat without duplicates, exact frozen body,
+    unchanged MR state, reference suppression and no new model calls. Run this
+    bounded scenario with `python3 tests/smoke-forges.py --suite smoke --scenario review-report`.
+    Ordinary GitLab review remains read-only; report writes are asserted separately.
 
 ### Extended scenarios
 

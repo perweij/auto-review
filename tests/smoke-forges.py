@@ -11,7 +11,7 @@ import time
 
 from forge_smoke.runner import Run, Failure
 from forge_smoke.forge import Forge
-from forge_smoke.scenarios import owner_report, publication, issue, owner, integrity, publication_recovery, edited_preview, stale_head, foreign_issue_commit, issue_plan_recovery, interrupt_and_lock, approval_changes, changed_plan_receipt, emacs_checkouts, owner_reply_recovery, gitlab_advance, accounting, automatic_cli
+from forge_smoke.scenarios import review_report, owner_report, publication, issue, owner, integrity, publication_recovery, edited_preview, stale_head, foreign_issue_commit, issue_plan_recovery, interrupt_and_lock, approval_changes, changed_plan_receipt, emacs_checkouts, owner_reply_recovery, gitlab_advance, accounting, automatic_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -48,7 +48,8 @@ def scripted(run):
                    body_md='Multiply price by quantity: total(3, 4) must be 12, but returns 7.',
                    primary_location=dict(path='price.py', side='RIGHT', line=3, start_line=3), locations=[])
     (fixture / 'findings.json').write_text(json.dumps([finding]))
-    run.env.update(FIXTURE=str(fixture), PATH=str(fixture / 'bin') + os.pathsep + run.env['PATH'])
+    run.env.update(FIXTURE=str(fixture), PATH=str(fixture / 'bin') + os.pathsep + run.env['PATH'],
+                   MOCK_REVIEW_TEXT='Smoke reviewer evidence: /close @perweij #1 !1 ~fixture')
     return subprocess.Popen([sys.executable, str(ROOT / 'tests/helpers/mock-review-bridge.py'), str(fixture)],
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -87,22 +88,6 @@ def review(run, forge):
     report = run.api(dict(command='review-report', forge=forge.kind, session=fixture['session'], generation=view['generation']), forge.cwd)
     if not Path(report['report_path']).is_file():
         raise Failure('Missing generation execution report')
-    if forge.kind == 'github':
-        request = dict(command='review-publish-report', session=fixture['session'], generation=view['generation'], revision=view['revision'])
-        published = run.api(request, forge.cwd)
-        repeated = run.api(request, forge.cwd)
-        if published['report_url'] != repeated['report_url']:
-            raise Failure('Execution report was duplicated')
-        fixture['execution_report'] = published
-        run.save()
-    else:
-        try:
-            run.api(dict(command='review-publish-report', forge='gitlab', session=fixture['session']), forge.cwd)
-        except Failure as exc:
-            if 'unsupported_operation' not in str(exc):
-                raise
-        else:
-            raise Failure('GitLab report publication was accepted')
     if forge.kind == 'gitlab':
         calls = [json.loads(line) for line in (run.directory / 'forge-calls.jsonl').read_text().splitlines()]
         if any(c['tool'] == 'glab' and c['actor'] == 'application' and c['kind'] not in ('read', 'metadata') for c in calls):
@@ -201,7 +186,9 @@ def main():
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
         if options.scenario == 'review-report':
-            passed = run.scenario('github-review', lambda: review(run, forges[0]))
+            for forge in forges:
+                passed = run.scenario(forge.kind + '-review', lambda forge=forge: review(run, forge)) and passed
+                passed = run.scenario(forge.kind + '-review-report', lambda forge=forge: review_report(run, forge)) and passed
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
         if options.scenario == 'owner-report':
@@ -217,6 +204,8 @@ def main():
         if options.scenario == 'review':
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
+        for forge in forges:
+            passed = run.scenario(forge.kind + '-review-report', lambda forge=forge: review_report(run, forge)) and passed
         if options.suite == 'live':
             passed = run.scenario('owner-report', lambda: owner_report(run, forges[0])) and passed
             passed = run.scenario('github-issue', lambda: issue(run, forges[0])) and passed

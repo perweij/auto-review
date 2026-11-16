@@ -1127,8 +1127,9 @@ failed saves preserve its local draft. This does not alter frozen batch settings
 GitLab.com MR URL and the existing repository/cwd fields. The compatibility name
 `pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
 checkout lookup and artifacts retain the existing protocol format. This adapter
-supports local review only: publication, conversation mutation, Owner and issue
-workflows are rejected. GitLab approval state is not converted into review verdicts.
+supports local review and explicit execution-report publication: finding
+publication, conversation mutation, Owner and issue workflows are rejected.
+GitLab approval state is not converted into review verdicts.
 
 Reviewer publication now delegates rendering, payload preparation and receipt
 interpretation to the forge adapter. Protocol 1 `prepare`, `publish`, `resolve`,
@@ -1136,7 +1137,7 @@ confirmation tokens, receipt URLs and exit semantics are unchanged. Unsupported
 publication placements/verdicts fail before a write; no downgrade is performed.
 The private draft journal adds versioned per-operation records to new logical
 actions, retaining partial receipts and treating older actions as single operations.
-Owner helper compatibility remains in place pending its separate extraction.
+Owner remote operations also use the forge interface, retaining legacy receipts.
 
 
 Owner reply preparation also freezes forge-owned operations before confirmation.
@@ -1162,7 +1163,7 @@ write; ordinary refresh does not discard it. Pending intent
 prevents Owner automatic completion for that thread; confirmed resolution and
 reopening continue to use the existing `github_completion` rules. GitHub GraphQL
 encoding, reply endpoints, markers and commit URLs belong to the adapter. GitLab
-remains read-only; these changes do not enable GitLab Owner workflows.
+Owner workflows remain unavailable; execution-report notes are a separate capability.
 
 Issue eligibility reads now use the forge issue adapter. Shared policy consumes
 normalized assignment, change-state and branch facts; Git snapshot verification
@@ -1224,7 +1225,12 @@ and any `report_warning`.
 Responses include `generation`, `report_path`, `report_data_path` and
 `report_coverage`; publication additionally returns `report_publication` and
 `report_url`. Snapshot receipts are separate from finding publication state.
-GitLab exposes only local reporting. No report command runs models.
+GitLab.com also supports explicit publication as an MR timeline note. The additive
+`report-publication` capability is separate from finding publication. No report
+command runs models. GitLab receipts bind numeric project/MR/actor identities,
+marker and frozen body; body verification is separate from marker lookup, so an
+edited match cannot become a resend. Empty or incomplete lookup after uncertain
+delivery remains uncertain. Existing GitHub report journals remain compatible.
 
 New generations carry a persistent execution-report identity. Replacement and
 snapshot transitions create new identities, while resumes retain the existing

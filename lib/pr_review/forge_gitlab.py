@@ -1,4 +1,4 @@
-"""Read-only GitLab.com API transport and normalized review facts."""
+"""GitLab.com read transport, normalized review facts, and report capability."""
 import json
 import re
 from urllib.parse import quote
@@ -8,8 +8,13 @@ from .storage import write_json
 
 
 class GitLab:
-    capabilities = frozenset(('review',))
+    capabilities = frozenset(('review', 'report-publication'))
     executable = 'glab'
+
+    @property
+    def report_publication(self):
+        from .forge_gitlab_reports import GitLabReports
+        return GitLabReports(self)
 
     def project(self, value):
         from .forge import Project

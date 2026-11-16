@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitLab transport fixture; rejects every non-GET request."""
+"""GitLab transport fixture; report notes require explicit test opt-in."""
 import json
 import os
 from pathlib import Path
@@ -12,9 +12,12 @@ with (root / 'calls.jsonl').open('a') as stream:
 if '--version' in args:
     print('glab test'); sys.exit()
 if '--help' in args:
-    print('--hostname --method'); sys.exit()
-assert args[:6] == ['api', '--hostname', 'gitlab.com', '--method', 'GET', args[-1]], args
-endpoint = args[-1].split('?')[0]
+    print('--hostname --method --input'); sys.exit()
+assert args[:4] == ['api', '--hostname', 'gitlab.com', '--method'], args
+method = args[4]
+assert method == 'GET' or os.environ.get('MOCK_GLAB_REPORTS') == '1', args
+endpoint = args[5].split('?')[0]
+notes = root / 'gitlab-notes.json'
 head = subprocess.check_output(['git', '--git-dir', str(root/'remote.git'), 'rev-parse', 'refs/merge-requests/7/head'], text=True).strip()
 base = subprocess.check_output(['git', '--git-dir', str(root/'remote.git'), 'rev-parse', 'refs/heads/main'], text=True).strip()
 if endpoint == 'user':
@@ -29,8 +32,17 @@ elif endpoint.endswith('/discussions'):
     value = []
 elif endpoint.endswith('/pipelines'):
     value = [dict(id=9, sha=head, status='success', web_url='https://gitlab.com/group/Sub/repo/-/pipelines/9')]
+elif endpoint == 'projects/1/merge_requests/7/notes':
+    value = json.loads(notes.read_text()) if notes.exists() else []
+    if method == 'POST':
+        payload = json.load(sys.stdin)
+        note = dict(id=len(value) + 1, body=payload['body'], author={'id': 123, 'username': 'reviewer'},
+                    system=False, project_id=1, noteable_type='MergeRequest', noteable_id=70, noteable_iid=7)
+        value.append(note)
+        notes.write_text(json.dumps(value))
+        value = note
 elif endpoint == 'projects/group%2Fsub%2Frepo/merge_requests/7':
-    value = dict(iid=7, web_url='https://gitlab.com/group/Sub/repo/-/merge_requests/7', title='Pilot', description='Test', author={'username':'author'}, state='opened', draft=False,
+    value = dict(id=70, iid=7, web_url='https://gitlab.com/group/Sub/repo/-/merge_requests/7', title='Pilot', description='Test', author={'username':'author'}, state='opened', draft=False,
                  source_project_id=2, target_project_id=1, source_branch='feature', target_branch='main', sha=head,
                  diff_refs=dict(head_sha=head, start_sha=base, base_sha=base))
 else:

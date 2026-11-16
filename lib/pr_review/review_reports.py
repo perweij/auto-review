@@ -64,7 +64,7 @@ def dispatch(request):
     session = Session(request)
     publishing = request['command'] == 'review-publish-report'
     if publishing:
-        require(restore(session.manifest).forge, 'publication')
+        require(restore(session.manifest).forge, 'report-publication')
     with locked(session.pr_lock):
         session = Session(request)
         with locked(session.lock):

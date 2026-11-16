@@ -62,3 +62,21 @@ call_gitlab_api() {
     assert_success
     jq -e '.result.verdicts == []' <<< "$output"
 }
+
+@test "GitLab explicitly publishes the selected execution report without models or gh" {
+    prepare_gitlab
+    export MOCK_GLAB_REPORTS=1
+    run "$CLI" 7 --forge gitlab
+    assert_success
+    saved=$(session_directory)
+    stages=$(cat "$FIXTURE/stages")
+    run "$CLI" publish-report "$saved"
+    assert_success
+    [[ $output == *'#note_1'* ]]
+    run call_gitlab_api "$(jq -nc --arg session "$saved" '{protocol:1,command:"review-publish-report",session:$session}')"
+    assert_success
+    [ "$(jq length "$FIXTURE/gitlab-notes.json")" = 1 ]
+    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    jq -e '.[0].body | ascii_downcase | contains("https://gitlab.com/group/sub/repo/-/merge_requests/7")' "$FIXTURE/gitlab-notes.json"
+    jq -se 'all(.[]; .tool != "gh")' "$FIXTURE/calls.jsonl"
+}

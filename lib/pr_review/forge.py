@@ -1,4 +1,4 @@
-"""Forge identity and capabilities for GitHub and the read-only GitLab pilot."""
+"""Forge identity and capabilities for GitHub and the GitLab review pilot."""
 from dataclasses import asdict, dataclass
 import json
 import re
@@ -61,7 +61,12 @@ class GitHub:
         from .forge_github_publication import GitHubPublication
         return GitHubPublication()
 
-    capabilities = frozenset(('review', 'publication', 'owner', 'issues'))
+    @property
+    def report_publication(self):
+        from .report_publication import GitHubReports
+        return GitHubReports(self.publication)
+
+    capabilities = frozenset(('review', 'publication', 'report-publication', 'owner', 'issues'))
     executable = 'gh'
 
     def change_from_legacy(self, value, project):

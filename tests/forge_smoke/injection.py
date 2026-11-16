@@ -7,15 +7,15 @@ from .runner import atomic_json, Failure
 
 
 @contextmanager
-def fault(run, name, **spec):
+def fault(run, name, *, tool='gh', **spec):
     config = run.directory / (name + '-fault.json')
-    trace = run.directory / 'trace-bin/gh'
-    atomic_json(config, dict(executable=str(trace) if trace.exists() else shutil.which('gh'),
+    trace = run.directory / 'trace-bin' / tool
+    atomic_json(config, dict(executable=str(trace) if trace.exists() else shutil.which(tool),
                             method='POST', mode='after', **spec))
     wrapper = run.directory / 'fault-bin'
     wrapper.mkdir(exist_ok=True)
-    if not (wrapper / 'gh').exists():
-        (wrapper / 'gh').symlink_to(run.root / 'tests/forge_smoke/fault.py')
+    if not (wrapper / tool).exists():
+        (wrapper / tool).symlink_to(run.root / 'tests/forge_smoke/fault.py')
     old_path = run.env['PATH']
     run.env.update(PATH=str(wrapper)+os.pathsep+old_path, SMOKE_FAULT_FILE=str(config))
     try:

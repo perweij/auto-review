@@ -1,8 +1,23 @@
-# GitLab.com read-only pilot (#25)
+# GitLab.com review pilot (#25) and execution reports
 
 The pilot validates the shared review engine with GitLab metadata, discussions,
-MR pipeline summaries and Git fetching. It intentionally leaves remote writes,
-Owner, issue fixing, monitor and full Emacs integration for separate work.
+MR pipeline summaries and Git fetching. Ordinary reviews remain read-only.
+Explicit execution-report publication is supported separately; finding publication,
+Owner, issue fixing, monitor and full Emacs integration remain separate work.
+
+## Explicit execution-report publication
+
+Use `pr-review publish-report SESSION [--generation ID]` to post the selected
+generation's frozen report to its MR discussion. `review-publish-report` provides
+the same protocol operation. Authenticate as the account that ran the review.
+No models run, and an unchanged snapshot returns its existing note URL.
+
+Report notes use a separate capability from finding publication. Their journal
+records the destination, actor and body before sending; recovery locates the
+marker before checking content. Edited/duplicate matches and incomplete lookups
+block sending. Unknown delivery with no visible match remains uncertain rather
+than being resent. Reports preserve the recorded SHA after MR advancement or
+closure. Markdown neutralizes slash commands, mentions and object references.
 
 ## Live procedure
 
@@ -25,7 +40,7 @@ installed in this workspace, so an installed Guix build is also unavailable.
 
 ## Abstraction gaps and follow-ups
 
-- Publication (#21 and a future GitLab write issue) needs explicit GitLab note,
+- Finding publication (building on completed #21) needs explicit GitLab note,
   discussion and approval semantics; native diff positions are retained for this.
 - Owner (#22) must distinguish reply permissions, resolvability and outdated
   positions; this pilot advertises no mutation permissions.
@@ -56,5 +71,32 @@ publication, Owner and issue commands were rejected.
 
 Real-model evidence: `/tmp/auto-review-forge-smoke-93n88ef4/report.md`.
 Extended scripted evidence: `/tmp/auto-review-forge-smoke-7t0_zytw/report.md`.
-No fork MR or actual pipeline execution was tested. This evidence does not extend
-the pilot's supported capabilities to GitLab writes or full Emacs integration.
+No fork MR or actual pipeline execution was tested. This historical evidence does
+not validate report writes or full Emacs integration; report publication has its
+own smoke scenario below.
+
+## Report validation
+
+Run `python3 tests/smoke-forges.py --suite smoke --scenario review-report` with
+both controlled projects authenticated. This uses scripted providers and tests
+native GitHub/GitLab report notes, accepted-write/lost-response recovery,
+idempotency, unchanged review results and absence of new model calls while
+publishing. Retain the run's report and URLs. Hosted Mermaid rendering requires
+browser inspection; API success alone does not establish it.
+
+### Controlled report evidence — 2026-11-16
+
+Scripted run `state/forge-smoke/run-c9zffjx0` passed all seven preflight, review,
+report and integrity scenarios on GitHub and GitLab. Each report recovered an
+accepted write whose response was hidden, then reused the same receipt through
+CLI and API without another note or model call. Native API checks verified exact
+frozen content, unchanged MR state and no reference side effects. Markdown preview
+confirmed that the test mentions and object references remained inert.
+
+- [GitLab report on MR !14](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/14#note_4243377432)
+- [GitHub comparison on PR #49](https://github.com/perweij/temp-eval-auto-review/pull/49#issuecomment-6914227600)
+
+Local Mermaid parsing passed for the generated report and a larger synthetic
+report containing both pie charts. Hosted GitLab browser inspection was blocked
+by sign-in/security verification; the GitLab link above remains the assisted
+visual check. This evidence does not establish hosted diagram rendering.

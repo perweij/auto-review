@@ -1543,11 +1543,12 @@ directory. JSON result output remains unchanged.
 
 ### Forge selection and compatibility
 
-Review, Owner and fix-issue commands accept `--forge github`. GitHub remains the
-only installed forge implementation and the default, including enterprise hosts.
+Review, Owner and fix-issue commands accept `--forge github`. GitHub is the
+default, including enterprise hosts; GitLab.com supports local MR reviews and
+explicit execution-report publication.
 Unknown selections fail before starting work. Existing repository selectors,
 GitHub URLs and saved session locations remain supported; this option does not
-provide GitLab writes; the read-only GitLab.com pilot is described below.
+enable other GitLab workflows; the GitLab.com pilot is described below.
 
 New sessions record forge, host and full project path separately, and retain the
 existing repository and viewer fields for compatibility. Legacy sessions are
@@ -1558,9 +1559,9 @@ blocks continuation rather than downgrading to a username-only check.
 
 The internal forge interface owns identity, account lookup, URLs, fetch refs,
 CLI/authentication requirements and basic operation capabilities. Local Git and
-workflow decisions remain shared. Issue #20 will normalize review context and
-establish cross-adapter read contracts; #25 exercises those contracts with a
-read-only GitLab.com adapter. Publication encoding and recovery remain #21.
+workflow decisions remain shared. Completed issues #19–#25 established normalized
+review context, adapter-owned publication and recovery, and the GitLab.com review
+pilot. General GitLab finding publication remains unavailable.
 
 ### Forge review context
 
@@ -1582,11 +1583,11 @@ authorize an operation. Local snapshot checks and publication policy are unchang
 Adapters provide change details, discovery, initial model context, complete
 conversations and review status. Code anchors and native position data are
 separate from conversation freshness identities. The read-contract fixtures
-include opaque IDs and nested projects for the forthcoming GitLab pilot; this
-contract does not enable GitLab writes.
+include opaque IDs and nested projects for the GitLab pilot; finding publication
+and conversation mutations require separate capabilities.
 
 Normalized Owner `change` facts are authoritative; `metadata` remains a compatibility
-projection for older clients and the pending write-path extractions. New writers
+projection for older clients and legacy saved state. New writers
 must update the canonical facts and derive that projection together. Reading an
 old session without `change` translates only the needed facts in memory.
 Malformed initial comment bodies are reported as unavailable context with a warning,
@@ -1612,10 +1613,11 @@ history and resume use the shared engine. `--resume SESSION` restores the saved
 forge. The CLI automatically ends after the local review without opening the
 publication menu. `--no-publish` is accepted but unnecessary.
 
-Only GitLab.com is supported. Remote publication (including auto-publication),
+Only GitLab.com is supported. Finding publication (including auto-publication),
 Owner operations, issue fixing, focused follow-up, repository MR listing, monitor
 integration and full Emacs integration are outside this pilot. Explicit unsupported
-operations fail before remote writes. GitLab approvals are not GitHub verdicts;
+operations fail before remote writes. Explicit execution-report publication is
+available separately through `pr-review publish-report SESSION`. GitLab approvals are not GitHub verdicts;
 review status is reported unavailable. CI covers MR pipelines matching the reviewed
 source SHA, not every job, child pipeline or external check. Missing pipelines or
 unknown statuses never imply success.
@@ -1639,7 +1641,7 @@ Reviewer publication keeps approval, freshness checks, durable intent and retry
 policy in the shared workflow. The forge adapter renders preview text and prepares
 remote operations, submits each operation once, and interprets receipt evidence.
 GitHub retains its existing comment/suggestion text, tracking markers and verdicts.
-GitLab still has no publication capability.
+GitLab has a separate report-publication capability; it cannot publish findings.
 
 New logical actions contain versioned operation records. Each operation is saved
 before sending; its returned receipt is saved before supplemental inline-receipt
@@ -1751,11 +1753,28 @@ full reviews, focused follow-ups, discussion matching, reassessment and automati
 suggestion verification. Later interactive elaboration, edits and manual
 suggestion verification are outside this trace. User waiting time is excluded.
 
+Token labels distinguish missing measurements (`unknown`), reused results
+(`0 additional`), and controller work (`not applicable`). Measured zero remains
+`0`. Category and report totals say `partial` when some model usage is unknown;
+reused results never add their original token usage again.
+
 Use `J o` in the reviewer dashboard to open the displayed generation's report and
 `J p` to publish a snapshot explicitly on GitHub. The CLI equivalents are
 `pr-review report SESSION` and `pr-review publish-report SESSION`; both accept
 `--generation ID`. A pending or historical selection never silently redirects to
 the latest generation. Completion describes execution, not publication of findings
 or approval of the PR. Repeated publication recovers receipts and does not duplicate
-an unchanged snapshot. GitLab reports remain local. Existing untraced generations
+an unchanged snapshot. GitLab.com supports the same CLI/API commands, publishing
+the snapshot as an MR timeline note. The recorded generation and SHA remain
+visible even when the MR has advanced, closed or merged. Existing untraced generations
 are not reconstructed. `--auto-publish` continues to publish findings only.
+
+Report publication does not run models or enable other GitLab writes. Notes are
+bound to the original project, MR and account. A lost response triggers receipt
+lookup on the next invocation. An edited/duplicate match or incomplete lookup
+stops publication. If a GitLab send may have succeeded and lookup finds nothing,
+the result remains uncertain: an offset-paginated listing cannot prove that the
+write failed. Retrying checks for the receipt without sending another note.
+Definitive API rejections, such as permission denial or rate limiting, remain
+retryable after the underlying problem is resolved.
+Local reports and review results remain available after publication failure.

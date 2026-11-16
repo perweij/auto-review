@@ -320,12 +320,12 @@ if [[ $stage == codex ]]; then
             git --git-dir="$FIXTURE/remote.git" update-ref "$ref" "$new"
         fi
     fi
-    while (($#)); do if [[ $1 == -o ]]; then echo 'Codex finding: inspect source.txt:1' > "$2"; break; fi; shift; done
+    while (($#)); do if [[ $1 == -o ]]; then echo "${MOCK_REVIEW_TEXT:-Codex finding: inspect source.txt:1}" > "$2"; break; fi; shift; done
     echo '{"type":"review.completed"}'
 elif [[ $stage == claude ]]; then
     echo '{"type":"assistant","message":"investigating"}'
     if [[ ${MOCK_CLAUDE_ERROR:-} == 1 ]]; then echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"result":"Budget exceeded"}'
-    else echo '{"type":"result","subtype":"success","is_error":false,"result":"Claude independent finding: source.txt:1","permission_denials":[]}'; fi
+    else jq -nc --arg text "${MOCK_REVIEW_TEXT:-Claude independent finding: source.txt:1}" '{type:"result",subtype:"success",is_error:false,result:$text,permission_denials:[]}'; fi
 elif [[ $stage == followup ]]; then
     if [[ -f $FIXTURE/followup-model.json ]]; then result=$(cat "$FIXTURE/followup-model.json")
     else result='{"assessments":[{"thread_key":"thread:T1","outcome":"ADDRESSED","evidence":"Current implementation persists the retry key.","limitations":"Code tracing only; no tests run.","suggested_reply":""}]}'; fi
