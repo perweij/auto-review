@@ -52,6 +52,12 @@ class EmacsRunnerTest(unittest.TestCase):
 (ert-deftest fixture/owner ()
   (should (eq (magit-auto-review-owner-open) 'checkout)))
 ''')
+        (self.tests / 'magit-auto-review-gitlab-tests.el').write_text("(require 'ert)\n")
+        helpers = self.checkout / 'tests/helpers'
+        helpers.mkdir(parents=True)
+        # This miniature checkout tests runner isolation. The complete checkout
+        # separately executes the real GitLab process workflow.
+        (helpers / 'gitlab-emacs-fixture.py').write_text('pass\n')
         self.installed = self.root / 'installed'
         self.installed.mkdir()
         self.foreign = self.installed / 'magit-auto-review-setup.el'

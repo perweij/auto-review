@@ -31,8 +31,9 @@ API settings objects.
 
 | Command | Additional request fields | Result |
 | --- | --- | --- |
-| `capabilities` | none | Protocol version, features, command names |
-| `discover` | `cwd`, optional `pr`, `repository` | Matching saved sessions in this Git common directory |
+| `capabilities` | optional `forge`, `session` | Protocol version, features, command names, supported `placements` and `verdicts` |
+| `review-target` | `cwd`, optional `pr`, `repository`, `forge` | Local normalized `forge_project`, `repository`, numeric `pr`, canonical `url`, capabilities and `projects` candidates |
+| `discover` | `cwd`, optional `pr`, `repository`, `forge` | Matching saved sessions in this Git common directory |
 | `pull-requests` | `cwd`, optional `repository` | Repository choices, cached PR list, last-check time, and matching saved sessions |
 | `read` | `session`, optional `generation` | Saved review, comments, contextual rows/threads, staging, last check, operations |
 | `review-log` | `session`, `operation_id` | Saved automatic-operation log as `{operation_id,text}`; operation must belong to the session |
@@ -40,6 +41,21 @@ API settings objects.
 | `diff` | `session`, `generation`, optional `path` | Reviewed changed files, hunks, and patches |
 | `file` | `session`, `generation`, `path`, optional `side`, `commit` | Immutable Git blob text and revision |
 | `preview-comment` | `session`, `generation`, `revision`, `placement`, optional `title`, `body` | Unsaved comment rendered in context; no draft is persisted |
+
+`review-target` reads Git remotes and retained manifests only: no authentication,
+network/model calls, checkout creation or preference writes. `gitlab.com` selects
+GitLab; other hosts retain GitHub Enterprise handling. An explicit GitLab identity
+on another host fails. One unambiguous remote project is selected automatically;
+saved reviews annotate competing remotes without overriding them. If remotes are
+absent, saved manifests can establish a project. Ambiguous results have null
+`forge_project`/`capabilities` and `projects` rows containing `forge_project`,
+`repository` and saved-session annotations. Resubmit an explicit repository.
+
+Discovery rows and review views expose `forge_project`; review views also expose
+the same capability object. Filter explicit project/forge identity before MR/PR
+numbers. Legacy GitHub manifests are read without migration. Running operations
+are scoped by common directory, project and number; untagged legacy records need
+saved-session evidence establishing their ownership.
 
 Omitting `generation` in `read` selects the completed current generation. Pin
 the returned identity for subsequent reads; do not silently follow a pointer.
@@ -671,8 +687,9 @@ is used.
    refreshes context, validates Git snapshot/account/placements, and returns
    `ready`, a fresh `review`, counts, verdict, and a `confirmation` token.
 2. If not ready, show the reason and affected Unstaged comments. If ready,
-   inspect the Staged view, display any returned `warnings` (including retained
-   blockers when approving), and ask for a brief final confirmation.
+   inspect the Staged view and any `preview` projection, display returned
+   `warnings` (including retained blockers when approving), and ask for a brief
+   final confirmation.
 3. `publish` includes the returned review revision and confirmation token.
    Any intervening local mutation invalidates confirmation. Source/discussion
    are revalidated before and between writes.
@@ -680,6 +697,16 @@ is used.
    confirmed comments are Published and unsent comments remain Staged unless
    fresh discussion requires inspection. `resolve` explicitly reconciles
    ambiguous outcomes before preparing another batch.
+
+GitLab advertises `prepared-publication-preview`. Its optional `prepare.preview`
+is `{operations:[{operation_id,kind,destination,body,position,marker_omitted}]}`;
+`kind` is `inline` or `review`, and `position` is the frozen native position or
+null. Constructed after failed-action reuse, it projects unsent operation payloads
+and excludes confirmed writes. `body` omits exactly the appended two newlines
+and that operation's exact tracking marker. No other markers or prose are removed.
+Counts reflect remaining writes. Clients display this read-only before confirming;
+original draft bodies remain unchanged. The revision and confirmation guards
+continue to reject stale preparations. GitHub retains its existing confirmation.
 
 Each draft becomes one comment. New inline comments use the GitHub review
 `comments` array; replies use the root-comment reply endpoint. There is at most
@@ -1124,14 +1151,16 @@ failed saves preserve its local draft. This does not alter frozen batch settings
 ### GitLab.com pilot
 
 `run` accepts `forge: "gitlab"` with `pr` containing an MR IID or canonical
-GitLab.com MR URL and the existing repository/cwd fields. The compatibility name
-`pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
+GitLab.com MR URL and the existing repository/cwd fields. Canonical and legacy
+MR paths accept query strings, fragments and diff/commit tab suffixes. The
+compatibility name `pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
 checkout lookup and artifacts retain the existing protocol format. This adapter
 supports review, COMMENT finding publication and explicit execution-report
 publication. Conversation mutation, Owner and issue workflows remain unavailable.
 GitLab approval state is not converted into review verdicts.
 
-GitLab advertises `preview-comment`, `mutate`, `refresh`, `prepare`, `publish`,
+GitLab also advertises local `discover`, finding `elaborate`, and read-only
+conversations, alongside `preview-comment`, `mutate`, `refresh`, `prepare`, `publish`,
 `resolve`, `automatic-review` and `review-log`. Its verdict catalog contains only
 COMMENT and placements support overall assessments and inline text lines/ranges.
 `prepare` freezes platform-normalized bodies and native positions; `publish`

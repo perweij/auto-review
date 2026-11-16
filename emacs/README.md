@@ -28,7 +28,8 @@ Select a PR with `RET`, or use `R` to open its setup and `r` to run it. The setu
 menu shows the target PR. A sole old saved review is never selected automatically.
 
 If there are several repository remotes, choose which repository to list. Use `o`
-in the list (or `C-u M-x magit-auto-review`) to open a known PR number directly.
+in the list to open a known PR number. `C-u M-x magit-auto-review` accepts a PR
+number or URL directly.
 Opening from a Forge PR still opens that PR directly. Merely opening a buffer
 never invokes a model or contacts GitHub; the list shows when it was last checked.
 A failed GitHub refresh retains the saved list and reports the error.
@@ -50,6 +51,33 @@ The backend uses its existing GitHub and model authentication. This package
 does not copy tokens into authinfo or change credential storage. Existing `gh`,
 Claude, and Codex credentials/environment remain under the caller's control.
 Model CLI programs are required only for an explicit model operation.
+
+## GitLab Reviewer
+
+Open a selected Forge GitLab MR with the same `V` or `M-x magit-auto-review`
+command. From a GitLab checkout, the command offers saved reviews and accepts an
+MR number or URL. `C-u M-x magit-auto-review` also accepts a number or URL.
+Nested project paths, legacy MR URLs and diff/commit tabs are normalized locally.
+Choose a project only when remotes are ambiguous; opening does not authenticate,
+contact the forge, create a checkout or run models. Remote MR browsing is deferred.
+
+`R` configures and runs/resumes Reviewer; saved models are retained. Fresh GitLab
+runs ignore the GitHub suggestion default. If a saved run enables suggestions,
+setup explains the incompatibility and `s` disables them for this run.
+
+Edit and stage normally. `P p` displays a read-only preview of the frozen unsent
+notes and native positions before the yes/no confirmation. Only each operation's
+appended tracking marker is omitted. Slash directives are inert in publication;
+the dashboard and editor retain your original wording. Declining sends nothing.
+Partial retries preview and count only the remaining writes. Receipt links open
+GitLab notes. `P r` checks uncertain publication receipts.
+
+Conversations are read-only. History, elaboration (`E`), checkout (`w`), reports
+(`J`), progress (`L`) and cancellation (`K`) are supported. Unsupported Owner,
+replies, thread resolution, focused follow-up, verdict choices and suggestions
+are hidden and direct commands fail locally. GitLab selects Reviewer automatically.
+Use existing `glab` authentication for explicit network operations. Only
+`gitlab.com` is supported; other hosts retain GitHub Enterprise handling.
 
 ## PR owner toolkit
 

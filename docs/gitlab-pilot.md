@@ -3,7 +3,8 @@
 The pilot validates the shared review engine with GitLab metadata, discussions,
 MR pipeline summaries and Git fetching. `--no-publish` reviews remain read-only.
 COMMENT finding publication and explicit execution reports are supported;
-Owner, issue fixing, monitor and full Emacs integration remain separate work.
+Emacs Reviewer supports the same workflow. Owner, issue fixing and monitor
+remain separate work.
 
 ## Finding publication
 
@@ -22,7 +23,19 @@ Previews retain Markdown and code while neutralizing executable quick actions.
 
 Only COMMENT is supported. Approvals, request-changes, replies, resolve/reopen and
 code suggestions are unavailable. Suggestion generation is rejected before model
-execution. GitLab workflow recovery instructions use the supported terminal menu.
+execution. Publication recovery is available through the terminal or Emacs `P r`.
+
+## Emacs entry and confirmation
+
+The existing Magit/Forge command opens a selected GitLab MR automatically. With
+no selected MR, choose a saved review or enter an MR number/URL; ambiguous remotes
+require project selection. Identity travels through setup, resume, history and
+child buffers. GitLab always selects Reviewer. Unsupported actions fail locally.
+
+The confirmation preview projects frozen unsent native operations after retry
+reuse. It shows the exact outgoing prose and positions, omitting only the exact
+appended tracking suffix. Original editor/dashboard wording and saved model
+choices remain intact. See the [Emacs reference](../emacs/README.md#gitlab-reviewer).
 
 ## Explicit execution-report publication
 
@@ -64,8 +77,8 @@ installed in this workspace, so an installed Guix build is also unavailable.
 - GitLab Owner expansion (building on completed #22) needs reply permissions,
   resolvability and outdated positions; this increment advertises no thread mutation permissions.
 - Issue work (#23–#24) needs GitLab eligibility and write contracts separately.
-- MR listing, focused follow-up and frontend capability-aware menus need separate
-  follow-ups. The pilot supports the explicit CLI/API review path only.
+- Remote MR listing and focused follow-up remain separate follow-ups. Emacs
+  uses local target resolution, saved reviews and capability-driven menus.
 - CI coverage is MR pipeline summaries for the reviewed SHA. Merged-result,
   downstream and external checks need a richer coverage contract before inclusion.
 
@@ -150,3 +163,47 @@ Local Mermaid parsing passed for the generated report and a larger synthetic
 report containing both pie charts. Hosted GitLab browser inspection was blocked
 by sign-in/security verification; the GitLab link above remains the assisted
 visual check. This evidence does not establish hosted diagram rendering.
+
+## Emacs automated validation — 2026-11-16
+
+`make -j3 check-all` passed: 203 shell tests, 1,370 Python tests, byte
+compilation, 196 ERT tests and the batch workflow described below.
+
+The frontend checks passed 196 ERT cases, including GitLab entry paths, project
+selection, setup/presets, saved settings, capability-driven menus and local
+command guards, history/child-buffer identity, and unchanged editor wording.
+The same batch scenario also passed with real Git/backend/Emacs processes and
+local forge/model doubles. It exercised declined and accepted previews,
+publication, reopen/resume, checkout and execution reports. The captured preview
+was compared with frozen payloads and the transport double's notes, including
+positions and the exact tracking-suffix omission. No model stages were repeated
+by publication or resume.
+
+Initial unauthenticated smoke attempts stopped before fixture creation; their
+reports remain in `state/forge-smoke/run-c78ylxjb` and `run-1wuc_col`.
+After loading the supplied credentials and selecting the existing GitHub
+credential with access to the fixture repository, live validation completed:
+
+- `run-x5crfrk6`: all four GitLab Emacs/preflight/integrity checks passed on
+  [MR !23](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/23).
+  `gitlab-emacs-evidence.json` captures the declined and accepted confirmations,
+  visible preview, frozen payloads, unchanged editor wording, and usage snapshots.
+  All five native finding notes matched the frozen bodies and positions, with
+  no duplicates or change to MR state. Publication, resume and report actions
+  left all four scripted review-stage call counts unchanged.
+- [Published execution report](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/23#note_4247035846)
+  was also verified after reopen/resume and checkout/report commands.
+- `run-32knzktz`: the complete smoke-fast suite finished with 19 passed, zero
+  failed or blocked checks after resuming the interrupted GitLab cases. This
+  includes native accepted-write/lost-response recovery and mixed-batch retries.
+
+GitLab initially returned HTTP 429 while the suites ran concurrently, reporting
+`burst_traffic_per_user_free_plan` with a limit of 100. Validation then paced the
+native `glab` transport to one API start per 0.95 seconds through a temporary
+wrapper. A later read timeout was retried before any write. Prior failures and
+confirmed receipts remain in the retained reports; successful retries did not
+repeat confirmed writes. Credential helpers were process-local. No paid models
+were used, and fixtures remain available for inspection.
+
+Interactive GUI inspection remains pending and is separate from the automated
+batch evidence above.

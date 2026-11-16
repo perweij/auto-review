@@ -229,4 +229,33 @@ def request_forge(request):
         else:
             return explicit or 'github'  # Normal session validation supplies the error.
         return restore(state, explicit).forge
+    from .review_target import target, project_for
+    if request.get('pr') is not None:
+        project, _ = target(request['pr'], request.get('repository'), explicit)
+        if project:
+            return project.forge
+    elif request.get('repository'):
+        return project_for(request['repository'], explicit).forge
     return explicit or 'github'
+
+
+def capabilities(kind=None):
+    """The public feature contract, shared by resolution, views and dispatch."""
+    forge = adapter(kind)
+    features = ['report-publication', 'generations', 'inline-context', 'drafts', 'history',
+                'inline-publication', 'operations', 'conversations', 'automatic-review',
+                'usage-reporting', 'finding-elaboration', 'checkout', 'discovery']
+    commands = ['review-target', 'capabilities', 'review-report', 'review-publish-report', 'checkout',
+                'discover', 'settings', 'models', 'read', 'review-log', 'history', 'diff', 'file',
+                'preview-comment', 'mutate', 'refresh', 'prepare', 'publish', 'resolve', 'run',
+                'automatic-review', 'elaborate', 'cancel']
+    if kind == 'gitlab':
+        features += ['prepared-publication-preview']
+    else:
+        from .owner import COMMANDS
+        features += ['followup', 'review-status', 'pull-requests', 'toolkits', 'owner',
+                     'suggested-changes', 'issue-workflow', 'replies', 'thread-state', 'verdicts']
+        commands += ['pull-requests', 'verify-suggestions', 'adapt', 'thread-state', 'followup',
+                     'issue-run', 'issue-read', 'issue-eligibility', 'issue-recover', *COMMANDS]
+    return dict(protocol=1, features=features, commands=commands,
+                placements=sorted(forge.publication.placements), verdicts=sorted(forge.publication.verdicts))

@@ -111,7 +111,8 @@ When nil, a sole reviewer is used, or Codex for a pair."
     ,@(when magit-auto-review-processing-provider
         `((processing_provider . ,magit-auto-review-processing-provider)))
     (synthesis_tests . ,magit-auto-review-synthesis-tests)
-    (suggested_changes . ,(if magit-auto-review-suggested-changes t :false))))
+    (suggested_changes . ,(if (and magit-auto-review-suggested-changes
+                                  (magit-auto-review--supports-p "suggested-changes")) t :false))))
 
 (defun magit-auto-review-run ()
   "Configure this review, then explicitly run or resume it."
@@ -122,7 +123,7 @@ When nil, a sole reviewer is used, or Codex for a pair."
   (setq magit-auto-review--choice-adapter nil)
   (let ((resolved
          (magit-auto-review--call
-          (append
+          (append (magit-auto-review--identity)
            (if magit-auto-review--session
                `((command . "settings") (session . ,magit-auto-review--session))
              `((command . "settings") (pr . ,magit-auto-review--target) (cwd . ,default-directory)
@@ -138,18 +139,19 @@ When nil, a sole reviewer is used, or Codex for a pair."
           magit-auto-review--setup-owner (current-buffer))
     (when (alist-get 'session resolved)
       (setq magit-auto-review--session (alist-get 'session resolved)))
-    ;; The protocol decoder returns lists; JSON arrays must be vectors when
-    ;; these settings are sent back, including the compatibility snapshot.
-    (setf (alist-get 'reviewer_slots magit-auto-review--setup-settings)
-          (vconcat (alist-get 'reviewer_slots magit-auto-review--setup-settings)))
-    (dolist (settings (list magit-auto-review--setup-settings
-                            (alist-get '_compatibility magit-auto-review--setup-settings)))
-      (when (assq 'reviewers settings)
-        (setf (alist-get 'reviewers settings)
-              (vconcat (alist-get 'reviewers settings))))))
+    (magit-auto-review--normalize-setup-arrays))
   (add-hook 'kill-buffer-hook #'magit-auto-review--setup-stop nil t)
   (magit-auto-review-refresh-choices)
   (transient-setup (or (plist-get magit-auto-review--choice-adapter :menu) 'magit-auto-review-setup-menu)))
+
+(defun magit-auto-review--normalize-setup-arrays ()
+  "Encode settings arrays explicitly after every settings response."
+  (setf (alist-get 'reviewer_slots magit-auto-review--setup-settings)
+        (vconcat (alist-get 'reviewer_slots magit-auto-review--setup-settings)))
+  (dolist (settings (list magit-auto-review--setup-settings
+                          (alist-get '_compatibility magit-auto-review--setup-settings)))
+    (when (assq 'reviewers settings)
+      (setf (alist-get 'reviewers settings) (vconcat (alist-get 'reviewers settings))))))
 
 (defun magit-auto-review--setup-providers ()
   "Return providers used by reviewer slots and processing."
@@ -192,6 +194,7 @@ When nil, a sole reviewer is used, or Codex for a pair."
   (let ((roles (append (append (alist-get 'reviewer_slots magit-auto-review--setup-settings) nil)
                        (list (alist-get 'processing magit-auto-review--setup-settings)))))
     (and (car roles)
+         (not (magit-auto-review--incompatible-suggestions-p))
          (cl-every (lambda (role)
                      (let* ((provider (alist-get 'provider role))
                             (model (magit-auto-review--setup-model-for provider (alist-get 'model role))))
@@ -361,11 +364,27 @@ When nil, a sole reviewer is used, or Codex for a pair."
   "Describe metadata loading and failure without hiding the Run action."
   (transient-parse-suffixes
    'magit-auto-review-setup-menu
+   (append (when (magit-auto-review--incompatible-suggestions-p)
+             '("Saved suggested changes are incompatible with GitLab. Use s to disable for this run."))
    (mapcar (lambda (p) (format "%s: %s" (capitalize p)
                                (if (eq (alist-get (intern p) magit-auto-review--setup-status) 'ready)
                                    "Choices refreshed"
                                  (or (alist-get (intern p) magit-auto-review--setup-status) "Loading…"))))
-           (magit-auto-review--setup-providers))))
+           (magit-auto-review--setup-providers)))))
+
+(defun magit-auto-review--incompatible-suggestions-p ()
+  "Whether a saved suggestion setting needs an explicit per-run override."
+  (and (not (magit-auto-review--supports-p "suggested-changes"))
+       (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings))))
+
+(defun magit-auto-review-setup-suggestions ()
+  "Toggle supported suggestions or disable an incompatible saved setting."
+  (interactive)
+  (unless (or (magit-auto-review--supports-p "suggested-changes")
+              (magit-auto-review--incompatible-suggestions-p))
+    (user-error "GitLab suggestions are unavailable"))
+  (setf (alist-get 'suggested_changes magit-auto-review--setup-settings)
+        (if (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings)) :false t)))
 
 (defun magit-auto-review--setup-preset (preset)
   "Apply PRESET as a default without overriding saved or edited roles."
@@ -383,8 +402,9 @@ When nil, a sole reviewer is used, or Codex for a pair."
     (setq magit-auto-review--setup-settings
           (alist-get 'settings
                      (magit-auto-review--call
-                      (append `((command . "settings") (,preset . t) (defaults . ,defaults))
+                      (append (magit-auto-review--identity) `((command . "settings") (,preset . t) (defaults . ,defaults))
                               overrides))))
+    (magit-auto-review--normalize-setup-arrays)
     (magit-auto-review-refresh-choices)))
 
 (defun magit-auto-review-setup-economical ()
@@ -431,12 +451,12 @@ When nil, a sole reviewer is used, or Codex for a pair."
    ("t" (lambda () (magit-auto-review--setup-label 'synthesis_tests "Testing"))
     (lambda () (interactive) (magit-auto-review--choice-open 'synthesis_tests)) :transient t)
    ("s" (lambda () (format "Suggested changes: %s"
-                           (if (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings)) "on" "off")))
-    (lambda () (interactive)
-      (setf (alist-get 'suggested_changes magit-auto-review--setup-settings)
-            (if (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings)) :false t))) :transient t)]
+                           (if (magit-auto-review--incompatible-suggestions-p) "incompatible — disable for this run"
+                             (if (magit-auto-review--true-p (alist-get 'suggested_changes magit-auto-review--setup-settings)) "on" "off"))))
+    magit-auto-review-setup-suggestions :transient t
+    :if (lambda () (or (magit-auto-review--supports-p "suggested-changes") (magit-auto-review--incompatible-suggestions-p))))]
   [:class transient-column :setup-children magit-auto-review--setup-info]
-  [:description (lambda () (format "PR #%s · %s"
+  [:description (lambda () (format "%s #%s · %s" (magit-auto-review--change-label)
                                   (or (alist-get 'pr magit-auto-review--review) magit-auto-review--target)
                                   (or (alist-get 'repository magit-auto-review--review)
                                       magit-auto-review--repository "current repository")))

@@ -403,3 +403,11 @@ class TraceContractTest(unittest.TestCase):
             records = [json.loads(line) for line in log.read_text().splitlines()]
             self.assertEqual(['read', 'mutation'], [r['kind'] for r in records])
             self.assertNotIn('private fixture text', log.read_text())
+
+
+class GitLabEmacsTest(unittest.TestCase):
+    def test_missing_emacs_is_an_explicit_failure(self):
+        from forge_smoke.gitlab_emacs import emacs_arguments
+        with patch('forge_smoke.gitlab_emacs.shutil.which', return_value=None), self.assertRaises(Failure) as caught:
+            emacs_arguments(SimpleNamespace(root=Path('/source')))
+        self.assertIn('requires Emacs', str(caught.exception))

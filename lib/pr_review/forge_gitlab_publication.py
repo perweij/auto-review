@@ -140,6 +140,23 @@ class GitLabPublication:
     def render(self, comment):
         return render_body(comment['body'])
 
+    @staticmethod
+    def preview(actions):
+        """Project only frozen, remaining writes, including reused failed actions."""
+        rows = []
+        for action in actions:
+            for op in action['operations']:
+                if op['status'] == 'published' or op.get('receipt_verified'):
+                    continue
+                body = op['payload']['body']
+                suffix = '\n\n' + op['marker']
+                if not body.endswith(suffix):
+                    raise ApiError('invalid_state', 'Prepared operation is missing its exact tracking suffix.')
+                rows.append(dict(operation_id=op['id'], kind='inline' if op['kind'] == 'discussion' else 'review',
+                                 destination=copy.deepcopy(op['destination']), body=body[:-len(suffix)],
+                                 position=copy.deepcopy(op['payload'].get('position')), marker_omitted=True))
+        return {'operations': rows}
+
     def validate_verdict(self, change, viewer, verdict):
         if verdict not in self.verdicts:
             raise ApiError('verdict_unavailable', 'GitLab publication supports COMMENT only; approvals and request-changes are unavailable.')

@@ -200,13 +200,19 @@ def prepare(session, state):
     counts = {"inline": sum(c["status"] == "staged" and c["placement"]["kind"] == "inline" for c in state["comments"]),
               "replies": sum(a["kind"] == "reply" for a in actions),
               "overall": sum(c["status"] == "staged" and c["placement"]["kind"] == "review" for c in state["comments"])}
+    preview = None
+    projector = getattr(publication_adapter(session), 'preview', None)
+    if projector:
+        preview = projector(actions)
+        counts = {key: sum(op['kind'] == kind for op in preview['operations'])
+                  for key, kind in (('inline', 'inline'), ('replies', 'reply'), ('overall', 'review'))}
     warnings = ([f"{state['blocking_findings']} retained blocking findings remain."]
                 if state.get("blocking_findings", 0) and any(a["event"] == "APPROVE" for a in actions) else [])
     if session.manifest.get("analysis_kind") == "followup":
         warnings.append(f"Limited coverage: only {len(session.manifest.get('followup_threads', []))} selected conversations were assessed; the whole PR was not reviewed.")
     return {"ready": True, "confirmation": digest(batch), "counts": counts,
             "verdict": next((a["event"] for a in actions if a["kind"] == "review"), None),
-            "warnings": warnings,
+            "warnings": warnings, **({'preview': preview} if preview is not None else {}),
             "review": session.view(state)}
 
 

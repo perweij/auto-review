@@ -307,6 +307,15 @@ unsupported. Saved suggestion settings can be disabled with
 `--no-suggested-changes`. See the
 [pilot capability and evidence notes](gitlab-pilot.md).
 
+In Emacs, select the MR in Forge and press `V`, or run
+`C-u M-x magit-auto-review` and enter its number or URL. From a GitLab checkout,
+`M-x magit-auto-review` offers saved reviews and MR entry. Use `R r` to configure
+and run, edit with `e`, stage with `s`, and use `P p` to inspect frozen outgoing
+notes/positions and confirm. `P r` recovers uncertain receipts. `C` reads saved
+conversations, `w` opens the checkout and `J` opens report actions. Unsupported
+actions are omitted. GitLab uses Reviewer automatically; remote MR browsing,
+Owner and issue fixing remain deferred.
+
 ## Compatibility
 
 Provider-wide `--codex-model/effort` and `--claude-model/effort`, positional

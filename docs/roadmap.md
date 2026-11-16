@@ -7,20 +7,18 @@ Current usage is documented in the [manual](manual.md) and
 
 ## Priority order (2026-11-16)
 
-The next planning task is GitLab Reviewer support in Emacs. Review, COMMENT
-publication, recovery and execution reports already work through the CLI/API;
-the frontend still assumes GitHub. Complete that user-facing workflow before
-expanding GitLab Owner and issue execution.
+GitLab Reviewer now connects the existing review, COMMENT publication, recovery,
+checkout and report backend to Emacs. The next GitLab increments extend the
+supported capabilities to Owner and issue execution.
 
 | Priority | Work | Tracking and scope |
 | --- | --- | --- |
-| 1 | GitLab Reviewer in Emacs | Automatically retain forge/project identity when opening an MR or saved session; expose supported review, publication, recovery, checkout and report actions. Keep unsupported actions out of the menus. MR listing can remain a separate increment. No matching open issue. |
-| 2 | GitLab Owner | Establish feedback and permission contracts, replies and resolve/reopen, then integrate fixing, verification and publication. Builds on the shared Owner engine and write adapters. No matching open issue. |
-| 3 | GitLab issue fixing | Define eligibility and issue-conversation behavior, then support planning, assignment, draft MR creation and ready transitions using the shared workflow. No matching open issue. |
-| 4 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
-| 5 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
-| 6 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
-| 7 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
+| 1 | GitLab Owner | Establish feedback and permission contracts, replies and resolve/reopen, then integrate fixing, verification and publication. Builds on the shared Owner engine and write adapters. No matching open issue. |
+| 2 | GitLab issue fixing | Define eligibility and issue-conversation behavior, then support planning, assignment, draft MR creation and ready transitions using the shared workflow. No matching open issue. |
+| 3 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
+| 4 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
+| 5 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
+| 6 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
 
 The GitLab items are follow-ups beyond the completed #19–#25 forge series.
 Current GitLab support covers MR review, COMMENT findings and execution-report
@@ -35,6 +33,12 @@ support; expandable report sections provide the detail today.
 The following implementations are present in local `main`. This records completed
 work without assuming that every local commit has been pushed.
 
+- GitLab Reviewer in Emacs: local target resolution, structured Forge MR entry,
+  saved-review/manual target prompts, project-scoped sessions and operations,
+  capability-driven actions and frozen remaining-write previews. Remote MR
+  browsing, approvals, replies and suggestions remain deferred. Automated
+  validation and pending GUI inspection are recorded in the
+  [GitLab notes](gitlab-pilot.md).
 - Accounting improvements: cumulative provider/role usage (`d989f82`) and
   unreliable-token diagnostics (`9a2f9cc`).
 - [#37](https://github.com/perweij/auto-review/issues/37): change execution

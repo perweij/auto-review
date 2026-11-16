@@ -258,14 +258,14 @@ def resolve(request):
     settings = initial_settings(request)
     session_path = request.get("session")
     if not session_path and request.get("pr"):
-        matches = discover({**request, "pr": str(request["pr"]).rstrip("/").split("/")[-1]})["sessions"]
+        matches = discover(request)["sessions"]
         if len(matches) > 1:
             paths = "\n".join("  " + match["session"] for match in matches)
             raise ApiError("ambiguous_session", "Multiple saved runs match this checkout and PR; select one with --resume RUN_DIRECTORY:\n" + paths)
         if matches:
             session_path = matches[0]["session"]
     if session_path:
-        session = Session({"session": session_path})
+        session = Session({"session": session_path, "forge": request.get('forge'), "repository": request.get('repository')})
         manifest = read_json((session.pointer(".pending-review") or session.path) / "manifest.json", {})
         settings.update(validate(from_manifest(manifest)))
     apply_overrides(settings, request, fresh=not session_path)

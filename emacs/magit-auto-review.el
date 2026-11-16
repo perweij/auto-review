@@ -19,6 +19,7 @@
 (require 'magit-auto-review-api)
 
 (defvar forge-buffer-topic)
+(declare-function forge-get-repository "forge-repo" (demand &optional remote notatpt))
 (declare-function magit-auto-review--render-conversations "magit-auto-review-conversations" ())
 (declare-function magit-auto-review--insert-review-status "magit-auto-review-conversations" ())
 (declare-function magit-auto-review-pull-requests "magit-auto-review-pulls" (&optional directory))
@@ -64,6 +65,9 @@ A different automatic operation makes the saved log current again.")
 (defvar-local magit-auto-review--new-ready nil)
 (defvar-local magit-auto-review--target nil)
 (defvar-local magit-auto-review--repository nil)
+(defvar-local magit-auto-review--forge nil)
+(defvar-local magit-auto-review--project nil)
+(defvar-local magit-auto-review--capabilities nil)
 (defvar-local magit-auto-review--sections nil)
 (defvar-local magit-auto-review--history-origin nil)
 (defvar-local magit-auto-review--history-view nil)
@@ -130,9 +134,49 @@ A different automatic operation makes the saved log current again.")
 
 (defun magit-auto-review--request (command &rest properties)
   "Build COMMAND request with PROPERTIES for the currently viewed generation."
-  (append `((command . ,command) (session . ,magit-auto-review--session)
+  (append (magit-auto-review--identity) `((command . ,command) (session . ,magit-auto-review--session)
             (generation . ,magit-auto-review--generation)
             (revision . ,(alist-get 'revision magit-auto-review--review))) properties))
+
+(defun magit-auto-review--identity ()
+  "Return the resolved target identity, even before a session exists."
+  (when magit-auto-review--forge
+    `((forge . ,magit-auto-review--forge) (repository . ,magit-auto-review--repository))))
+
+(defun magit-auto-review--gitlab-p ()
+  "Whether this buffer targets GitLab."
+  (equal magit-auto-review--forge "gitlab"))
+
+(defun magit-auto-review--forge-label ()
+  "Return the current forge's display name."
+  (if (magit-auto-review--gitlab-p) "GitLab" "GitHub"))
+
+(defun magit-auto-review--change-label ()
+  "Return the current change request's display name."
+  (if (magit-auto-review--gitlab-p) "MR" "PR"))
+
+(defun magit-auto-review--supports-p (feature)
+  "Whether FEATURE is advertised, with compatibility for legacy GitHub views."
+  (if magit-auto-review--capabilities
+      (member feature (alist-get 'features magit-auto-review--capabilities))
+    (and (not (magit-auto-review--gitlab-p))
+         (not (equal feature "prepared-publication-preview")))))
+
+(defun magit-auto-review--require-feature (feature)
+  "Reject unavailable FEATURE locally, before a backend request."
+  (unless (magit-auto-review--supports-p feature)
+    (user-error "%s does not support %s" (magit-auto-review--forge-label) feature)))
+
+(defun magit-auto-review--copy-identity (origin)
+  "Copy resolved target metadata from ORIGIN into a child buffer."
+  (dolist (variable '(magit-auto-review--forge magit-auto-review--project
+                      magit-auto-review--repository magit-auto-review--target
+                      magit-auto-review--capabilities))
+    (set (make-local-variable variable) (buffer-local-value variable origin))))
+
+(defun magit-auto-review--forge-slot (object slot)
+  "Read SLOT directly from a Forge OBJECT without a runtime Forge dependency."
+  (slot-value object slot))
 
 (defun magit-auto-review--comment (id)
   "Return comment ID in the displayed saved review."
@@ -202,13 +246,14 @@ A different automatic operation makes the saved log current again.")
                  (magit-auto-review--history-view " Saved review (N opens current) |")
                  (magit-auto-review--notice (concat " " magit-auto-review--notice " |"))
                  (t ""))
-           (format " PR #%s · %s%s · %s"
+           (format " %s #%s · %s%s · %s"
+                  (magit-auto-review--change-label)
                   (or (alist-get 'pr magit-auto-review--review) magit-auto-review--target "?")
                   (if head (substring head 0 (min 12 (length head))) "no saved review")
                   (if (or magit-auto-review--history-view (magit-auto-review--true-p (alist-get 'historical magit-auto-review--review))) " · History (read-only)" "")
-                  (if checked (format "GitHub checked %s%s" (alist-get 'at checked)
+                  (if checked (format "%s checked %s%s" (magit-auto-review--forge-label) (alist-get 'at checked)
                                       (if (equal head (alist-get 'head checked)) "" " · SOURCE CHANGED"))
-                    "GitHub freshness not checked here"))))))
+                    (concat (magit-auto-review--forge-label) " freshness not checked here")))))))
 
 (defun magit-auto-review--notify (text &optional urls)
   "Show persistent action feedback TEXT and record clickable URLS in the log."
@@ -238,7 +283,7 @@ A different automatic operation makes the saved log current again.")
       ("reply" (format "Reply in %s%s" (or (alist-get 'path context) "existing discussion")
                        (if (alist-get 'line context) (format ":%s" (alist-get 'line context))
                          (if thread "" " (context unavailable)"))))
-      ("review" "Overall PR assessment")
+      ("review" (concat "Overall " (magit-auto-review--change-label) " assessment"))
       (_ "Needs placement (a to choose)"))))
 
 (defun magit-auto-review--insert-code (context)
@@ -315,7 +360,7 @@ A different automatic operation makes the saved log current again.")
         (insert (propertize "Analysis is unfinished; this is not a completed empty review. R r resumes saved work.\n" 'face 'warning))))
       (when-let ((checked-head (alist-get 'head (alist-get 'checked magit-auto-review--review))))
         (unless (equal checked-head (alist-get 'head (alist-get 'snapshot magit-auto-review--review)))
-          (insert (propertize "PR source changed since analysis. R r reviews the new snapshot; acknowledging a draft does not update its source.\n" 'face 'warning))))
+          (insert (propertize (concat (magit-auto-review--change-label) " source changed since analysis. R r reviews the new snapshot; acknowledging a draft does not update its source.\n") 'face 'warning))))
       (let* ((target (or pending displayed))
              (discussion (alist-get 'discussion target)))
         (when-let ((error (alist-get 'error discussion)))
@@ -375,7 +420,7 @@ A different automatic operation makes the saved log current again.")
         (when thread
           (magit-insert-section (review-thread (alist-get 'key thread) t)
             (magit-insert-heading
-              (format "GitHub discussion%s%s (%d posted comments)"
+              (format "%s discussion%s%s (%d posted comments)" (magit-auto-review--forge-label)
                       (if (magit-auto-review--true-p (alist-get 'is_resolved thread)) " · resolved" "")
                       (if (magit-auto-review--true-p (alist-get 'is_outdated thread)) " · outdated" "")
                       (length (alist-get 'comments thread))))
@@ -389,7 +434,9 @@ A different automatic operation makes the saved log current again.")
                     (if (magit-auto-review--true-p (alist-get 'composing comment)) "New unsaved" "Your draft"))
                   (if (equal (alist-get 'kind (alist-get 'placement comment)) "reply") " reply" " comment")))
         (unless (equal (alist-get 'status comment) "published")
-          (insert (propertize "This text and any attached suggestion are published. e edits; k excludes; S manages suggestions.\n"
+          (insert (propertize (if (magit-auto-review--supports-p "suggested-changes")
+                                  "This text and any attached suggestion are published. e edits; k excludes; S manages suggestions.\n"
+                                "This text is published. e edits; k excludes.\n")
                               'face 'shadow)))
         (let ((start (point)))
           (insert (alist-get 'body comment))
@@ -430,7 +477,9 @@ A different automatic operation makes the saved log current again.")
       (when (alist-get 'blockers comment)
         (insert (propertize (concat "  " (string-join (alist-get 'blockers comment) " ") "\n") 'face 'warning)))
       (when (equal (alist-get 'kind (alist-get 'placement comment)) "unplaced")
-        (insert "  Press a to choose a code line, thread, or overall PR assessment.\n"))
+        (insert (if (magit-auto-review--supports-p "replies")
+                    "  Press a to choose a code line, thread, or overall PR assessment.\n"
+                  "  Press a to choose a code line or overall MR assessment.\n")))
       (when (and (not (alist-get 'blockers comment)) (alist-get 'bulk_blockers comment))
         (unless (member (alist-get 'status comment) '("staged" "published" "suppressed"))
           (insert (propertize (concat "  " (string-join (alist-get 'bulk_blockers comment) " ")
@@ -514,13 +563,17 @@ A different automatic operation makes the saved log current again.")
                   (if (alist-get 'report_url report) " · Published snapshot\n" " · Local\n")))
         (magit-auto-review--insert-review-status)
         (magit-auto-review--insert-automatic-status)
-        (insert (propertize (format "Model suggestion: %s. Next review verdict: %s (v to choose).\n"
+        (insert (propertize (format (if (magit-auto-review--supports-p "verdicts")
+                                        "Model suggestion: %s. Next review verdict: %s (v to choose).\n"
+                                      "Model suggestion: %s. GitLab publication: %s.\n")
                                     (or (alist-get 'recommendation magit-auto-review--review)
                                         (if (equal (alist-get 'kind (alist-get 'coverage magit-auto-review--review)) "followup")
                                             "none (limited follow-up)" "unavailable"))
                                     (magit-auto-review--verdict-label)) 'face 'shadow))
-        (insert "Each item is one draft; its GitHub discussion is context. s stages; k excludes this draft.\n")
-        (insert "o sends findings to Owner for fixing. a chooses an attachment. P publishes Staged. ? shows actions.\n")
+        (insert (format "Each item is one draft; its %s discussion is context. s stages; k excludes this draft.\n" (magit-auto-review--forge-label)))
+        (insert (if (magit-auto-review--supports-p "owner")
+                    "o sends findings to Owner for fixing. a chooses an attachment. P publishes Staged. ? shows actions.\n"
+                  "a chooses an attachment. P previews and publishes Staged. ? shows actions.\n"))
         (when-let ((reason (alist-get 'reason (cl-find-if (lambda (v) (not (magit-auto-review--true-p (alist-get 'available v))))
                                                          (alist-get 'verdicts magit-auto-review--review)))))
           (insert (propertize (concat reason "\n") 'face 'shadow)))
@@ -538,7 +591,7 @@ A different automatic operation makes the saved log current again.")
             (magit-insert-section (review-group (car group) t)
               (magit-insert-heading
                 (format "%s (%d)%s" (cdr group) (length comments)
-                        (if (equal (car group) "staged")
+                        (if (and (equal (car group) "staged") (magit-auto-review--supports-p "verdicts"))
                             (concat " · Overall verdict: " (magit-auto-review--verdict-label) " (v)") "")))
               (dolist (comment comments) (magit-auto-review--insert-comment comment))
               (insert "\n"))))
@@ -573,6 +626,12 @@ A different automatic operation makes the saved log current again.")
           magit-auto-review--generation (alist-get 'generation review)
           magit-auto-review--new-ready
           (not (equal magit-auto-review--generation (alist-get 'current_generation review))))
+    (when (alist-get 'forge_project review)
+      (setq magit-auto-review--project (alist-get 'forge_project review)
+            magit-auto-review--forge (alist-get 'forge magit-auto-review--project)
+            magit-auto-review--repository (alist-get 'repository review)
+            magit-auto-review--target (alist-get 'pr review)
+            magit-auto-review--capabilities (alist-get 'capabilities review)))
     (let ((operation (car (alist-get 'operations review))))
       (cond (operation
              (setq magit-auto-review--operation (alist-get 'operation_id operation)
@@ -583,24 +642,69 @@ A different automatic operation makes the saved log current again.")
 
 ;;;###autoload
 (defun magit-auto-review (&optional pr)
-  "Open PR from Forge or a prefix argument; otherwise list repository PRs."
-  (interactive (list (and current-prefix-arg (read-number "Pull request number: "))))
+  "Open a selected Forge change, or enter a number/URL with a prefix.
+GitLab offers saved reviews and MR entry; GitHub retains its PR browser."
+  (interactive (list (and current-prefix-arg (read-string "PR/MR number or URL: "))))
   (let* ((directory (or (magit-toplevel) default-directory))
          ;; Forge's current-topic helper also falls back to cached branch
          ;; metadata. Only an explicitly selected/visited PR bypasses the list.
          (topic (or (magit-section-value-if 'pullreq)
                     (and (boundp 'forge-buffer-topic) forge-buffer-topic)))
-         (number (or pr (and topic (object-of-class-p topic 'forge-pullreq) (oref topic number)))))
-    (if number (magit-auto-review--open-pr directory number)
-      (magit-auto-review-pull-requests directory))))
+         (selected (and topic (object-of-class-p topic 'forge-pullreq)))
+         (repo (and selected (ignore-errors (forge-get-repository topic))))
+         (gitlab (and repo (object-of-class-p repo 'forge-gitlab-repository)))
+         (repository (and repo (format "%s/%s/%s" (magit-auto-review--forge-slot repo 'githost)
+                                      (magit-auto-review--forge-slot repo 'owner) (magit-auto-review--forge-slot repo 'name))))
+         (number (or pr (and selected (oref topic number)))))
+    (when (and gitlab (not pr)
+               (not (equal (downcase (magit-auto-review--forge-slot repo 'githost)) "gitlab.com")))
+      (user-error "GitLab Reviewer supports gitlab.com only"))
+    (cond
+     ((and number gitlab (not pr))
+      (magit-auto-review--open-pr directory number repository "gitlab"))
+     (number (if (and repository (not pr)) (magit-auto-review--open-pr directory number repository)
+               (magit-auto-review--open-pr directory number)))
+     (t (let ((context (magit-auto-review--resolve-target directory)))
+          (if (equal (alist-get 'forge (alist-get 'forge_project context)) "gitlab")
+              (magit-auto-review--prompt-mr directory context)
+            (let ((magit-auto-review--repository (alist-get 'repository context))
+                  (magit-auto-review--forge (alist-get 'forge (alist-get 'forge_project context)))
+                  (magit-auto-review--capabilities (alist-get 'capabilities context)))
+              (magit-auto-review-pull-requests directory))))))))
 
-(defun magit-auto-review--find-session (directory number repository)
+(defun magit-auto-review--resolve-target (directory &optional number repository forge)
+  "Resolve a local target, selecting a project only when ambiguous."
+  (let* ((request `((command . "review-target") (cwd . ,directory)
+                    (pr . ,number) (repository . ,repository) (forge . ,forge)))
+         (context (magit-auto-review--call request))
+         (projects (alist-get 'projects context)))
+    (when (and (not (alist-get 'forge_project context)) (> (length projects) 1))
+      (setf (alist-get 'repository request)
+            (completing-read "Project: " (mapcar (lambda (p) (alist-get 'repository p)) projects) nil t))
+      (setq context (magit-auto-review--call request)))
+    context))
+
+(defun magit-auto-review--prompt-mr (directory context)
+  "Offer saved reviews and number/URL entry for the resolved CONTEXT."
+  (let* ((repository (alist-get 'repository context))
+         (sessions (alist-get 'sessions (magit-auto-review--call
+                                         `((command . "discover") (cwd . ,directory)
+                                           (forge . "gitlab") (repository . ,repository)))))
+         (choices (mapcar (lambda (s) (cons (format "!%s · %s · %s" (alist-get 'pr s)
+                                                   repository (alist-get 'created_at s)) s)) sessions))
+         (answer (completing-read "GitLab MR number, URL, or saved review: " choices nil nil))
+         (saved (cdr (assoc answer choices))))
+    (if saved
+        (magit-auto-review--open-review-pr directory (alist-get 'pr saved) repository context saved)
+      (magit-auto-review--open-pr directory answer repository "gitlab"))))
+
+(defun magit-auto-review--find-session (directory number repository &optional forge)
   "Find a saved session for NUMBER in DIRECTORY, scoped to REPOSITORY.
 Ask which session to open when more than one matches.  Discovery is local."
   (let* ((default-directory directory)
          (sessions (alist-get 'sessions
                              (magit-auto-review--call `((command . "discover") (cwd . ,directory)
-                                                       (pr . ,number) (repository . ,repository))))))
+                                                       (pr . ,number) (repository . ,repository) (forge . ,forge))))))
     (if (= (length sessions) 1) (car sessions)
       (when sessions
         (let* ((choices (mapcar (lambda (s) (cons (format "#%s · %s · %s" (alist-get 'pr s) (alist-get 'repository s) (alist-get 'created_at s)) s)) sessions))
@@ -610,29 +714,38 @@ Ask which session to open when more than one matches.  Discovery is local."
 (defun magit-auto-review--toolkit-repository (directory repository)
   "Resolve REPOSITORY before reading or saving a toolkit for DIRECTORY."
   (or repository
-      (let* ((result (magit-auto-review--call `((command . "pull-requests") (cwd . ,directory))))
+      (let* ((result (magit-auto-review--call `((command . "pull-requests") (forge . "github") (cwd . ,directory))))
              (choices (alist-get 'repositories result)))
         (or (alist-get 'repository result)
             (and choices (completing-read "Repository: " choices nil t))
             (user-error "Choose a checkout with a GitHub remote or saved review")))))
 
-(defun magit-auto-review--open-pr (directory number &optional repository)
+(defun magit-auto-review--open-pr (directory number &optional repository forge)
   "Open NUMBER using the remembered toolkit for DIRECTORY and REPOSITORY."
-  (setq repository
-        (magit-auto-review--toolkit-repository
-         directory (or repository
-                       (and (stringp number)
-                            (string-match "\\`https://\\([^/]+/[^/]+/[^/]+\\)/pull/[0-9]+/?\\'" number)
-                            (match-string 1 number)))))
-  (let ((choice (magit-auto-review--call `((command . "toolkit") (cwd . ,directory) (repository . ,repository)))))
-    (if (equal (alist-get 'toolkit choice) "owner")
-        (progn (require 'magit-auto-review-owner)
-               (magit-auto-review-owner-open directory number repository))
-      (magit-auto-review--open-review-pr directory number repository))))
+  (let* ((context (when (or (not repository) (equal forge "gitlab")
+                            (string-prefix-p "gitlab.com/" (or repository "")))
+                    (magit-auto-review--resolve-target directory number repository forge)))
+         (gitlab (equal (alist-get 'forge (alist-get 'forge_project context)) "gitlab")))
+    (if gitlab
+        (magit-auto-review--open-review-pr directory (alist-get 'pr context)
+                                           (alist-get 'repository context) context)
+      (setq number (or (alist-get 'pr context) number)
+            repository
+            (magit-auto-review--toolkit-repository
+             directory (or (alist-get 'repository context) repository
+                           (and (stringp number)
+                                (string-match "\\`https://\\([^/]+/[^/]+/[^/]+\\)/pull/[0-9]+/?\\'" number)
+                                (match-string 1 number)))))
+      (let ((choice (magit-auto-review--call `((command . "toolkit") (forge . "github") (cwd . ,directory) (repository . ,repository)))))
+        (if (equal (alist-get 'toolkit choice) "owner")
+            (progn (require 'magit-auto-review-owner)
+                   (magit-auto-review-owner-open directory number repository))
+          (magit-auto-review--open-review-pr directory number repository context))))))
 
 (defun magit-auto-review-select-toolkit ()
   "Select and remember a toolkit, retaining existing workflow buffers."
   (interactive)
+  (magit-auto-review--require-feature "toolkits")
   (let* ((directory (or (magit-toplevel) default-directory))
          (number magit-auto-review--target)
          (repository (magit-auto-review--toolkit-repository directory magit-auto-review--repository))
@@ -645,9 +758,10 @@ Ask which session to open when more than one matches.  Discovery is local."
 
 (define-key magit-auto-review-mode-map (kbd "M") #'magit-auto-review-select-toolkit)
 
-(defun magit-auto-review--open-review-pr (directory number &optional repository)
+(defun magit-auto-review--open-review-pr (directory number &optional repository context saved)
   "Open NUMBER in DIRECTORY, optionally scoped to REPOSITORY."
-  (let ((selected (magit-auto-review--find-session directory number repository)))
+  (let ((selected (or saved (magit-auto-review--find-session directory number repository
+                                                          (alist-get 'forge (alist-get 'forge_project context))))))
     (pop-to-buffer (get-buffer-create (format "*Auto-review %s #%s (%s)*"
                                                (or repository (alist-get 'repository selected)
                                                    (file-name-nondirectory (directory-file-name directory)))
@@ -657,11 +771,19 @@ Ask which session to open when more than one matches.  Discovery is local."
       (magit-auto-review-mode)
       (setq default-directory directory magit-auto-review--target number
             magit-auto-review--repository (or repository (alist-get 'repository selected))
+            magit-auto-review--forge (or (alist-get 'forge (alist-get 'forge_project context))
+                                         (alist-get 'forge (alist-get 'forge_project selected)) "github")
             magit-auto-review--session (alist-get 'session selected)
             magit-auto-review--generation (alist-get 'generation selected))
+      (when context
+        (setq magit-auto-review--project (alist-get 'forge_project context)
+              magit-auto-review--forge (alist-get 'forge magit-auto-review--project)
+              magit-auto-review--capabilities (alist-get 'capabilities context)))
       (if selected (magit-auto-review-refresh)
         (magit-auto-review--render-placeholder
-         "No saved review found here. Use R to run the reviewers explicitly; B lists pull requests.")))))
+         (if (magit-auto-review--gitlab-p)
+             "No saved review found here. Use R to configure and run the reviewers explicitly."
+           "No saved review found here. Use R to run the reviewers explicitly; B lists pull requests."))))))
 
 (defun magit-auto-review-refresh (&optional current)
   "Load the latest completed review locally, leaving an inline edit intact.
@@ -675,7 +797,7 @@ earlier results remain in history; this never makes network or model calls."
                         (alist-get 'session
                                    (magit-auto-review--find-session
                                     default-directory magit-auto-review--target
-                                    magit-auto-review--repository))))
+                                    magit-auto-review--repository magit-auto-review--forge))))
            (request (magit-auto-review--request "read"))
            (previous magit-auto-review--generation))
       (unless session
@@ -895,7 +1017,8 @@ earlier results remain in history; this never makes network or model calls."
          (path (alist-get 'path location)))
     (when (alist-get 'file_unavailable location) (user-error "%s" (alist-get 'file_unavailable location)))
     (unless (and path (alist-get 'line location)) (user-error "Choose a code attachment first"))
-    (let* ((source (magit-auto-review--call (magit-auto-review--request "file" `(path . ,path)
+    (let* ((origin (current-buffer))
+           (source (magit-auto-review--call (magit-auto-review--request "file" `(path . ,path)
                                                                      `(side . ,(or (alist-get 'side location) "RIGHT"))
                                                                      `(commit . ,(alist-get 'commit location)))))
            (buffer (get-buffer-create (format "*Review file %s:%s*" (substring (alist-get 'commit source) 0 12) path))))
@@ -905,6 +1028,7 @@ earlier results remain in history; this never makes network or model calls."
         (erase-buffer) (insert (alist-get 'text source))
         (setq buffer-file-name nil)
         (let ((buffer-file-name path)) (set-auto-mode))
+        (magit-auto-review--copy-identity origin)
         (magit-auto-review-file-mode 1)
         (goto-char (point-min))
         (forward-line (1- (or (alist-get 'start_line location) (alist-get 'line location))))

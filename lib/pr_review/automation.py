@@ -169,8 +169,8 @@ class AutomaticRun:
         binding = (store.root, store.path, identity[1])
         if binding == self.bound_identity:
             return
-        self.operation.update(session=str(self.root), common=store.manifest['git_common_dir'],
-                              pr=str(store.manifest['pr']))
+        from .operations import owner
+        self.operation.update(owner(store.manifest, self.root))
         atomic_json(state_root() / 'operations' / (self.record['operation_id'] + '.json'), self.operation)
         self.save()
         self.bound_identity = binding
@@ -204,10 +204,9 @@ class AutomaticRun:
             from .forge import restore
             selected_forge = restore(self.store.manifest).forge
         if selected_forge == 'gitlab':
-            self.record['guidance'] = (('Resume pr-review with the MR URL and --resume SESSION. '
-                    'Use the terminal preview/publication menu; resolve looks up uncertain receipts. '
-                    'Saved artifacts and logs remain available.').replace('SESSION', str(self.root)) if self.root else
-                    'Run pr-review --forge gitlab from the target project checkout and inspect the reported error.')
+            self.record['guidance'] = ('Open this MR in Emacs. Inspect attention items; R r resumes analysis, '
+                    'P opens publication and receipt recovery, L shows the saved log.' if self.root else
+                    'Open the MR in Emacs or run pr-review --forge gitlab from the target project checkout and inspect the reported error.')
             self.record['reason'] = self.record['reason'].replace('in Emacs', 'in the CLI publication menu').replace('Inspect GitHub', 'Inspect GitLab')
         self.save()
         self.operation.update(exit_code=self.record['exit_code'],
@@ -339,7 +338,7 @@ def _execute(request, controller):
         request = {**request, 'forge': request_forge(request)}
         controller.forge = request['forge']
         repo = Repository.resolve(request['pr'], request.get('repository'), request.get('cwd'), request['forge'])
-        operation.update(common=str(repo.common), pr=str(repo.pr))
+        operation.update(common=str(repo.common), pr=str(repo.pr), forge_project=repo.project.saved())
         atomic_json(state_root() / 'operations' / (operation['operation_id'] + '.json'), operation)
         with locked(repo.lock):
             root, _ = locate(repo, request.get('session'))

@@ -22,6 +22,13 @@ def generation(path, manifest):
 
 
 def discover(request):
+    from .review_target import target, project_for
+    from .forge import restore
+    if request.get('pr') is not None:
+        project, number = target(request['pr'], request.get('repository'), request.get('forge'))
+    else:
+        project = project_for(request['repository'], request.get('forge')) if request.get('repository') else None
+        number = None
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"],
                  cwd=request.get("cwd", ".")).stdout.strip()
     sessions = []
@@ -32,14 +39,21 @@ def discover(request):
             continue  # An unrelated damaged run must not hide usable reviews.
         if not isinstance(m, dict):
             continue
-        if m.get("git_common_dir") != common or (request.get("pr") and str(m.get("pr")) != str(request["pr"])):
+        if m.get("git_common_dir") != common:
             continue
-        if request.get("repository") and m.get("repository") != request["repository"]:
+        try:
+            saved_project = restore(m)
+        except (ApiError, KeyError):
+            continue
+        if ((project and project != saved_project)
+                or (request.get('forge') and request['forge'] != saved_project.forge)):
+            continue
+        if number and str(m.get('pr')) != str(number):
             continue
         if m.get("session_directory") and Path(m["session_directory"]).resolve() != file.parent.resolve():
             continue
         session = Session({"session": str(file.parent)})
-        sessions.append({"session": str(session.root), "repository": m["repository"], "pr": m["pr"],
+        sessions.append({"session": str(session.root), "repository": m["repository"], "forge_project": saved_project.saved(), "pr": m["pr"],
                          "url": m.get("url"), "generation": session.id,
                          "head": session.manifest.get("snapshot", {}).get("head"), "created_at": m.get("created_at"),
                          "automation": session.automation_summary()})
@@ -63,7 +77,10 @@ class Session:
             self.path = candidates[0]
         self.manifest = read_json(self.path / "manifest.json", {})
         from .forge import restore
+        from .review_target import project_for
         project = restore(self.manifest, request.get("forge"))
+        if request.get('repository') and project_for(request['repository'], request.get('forge')) != project:
+            raise ApiError('invalid_request', 'Repository conflicts with saved session.')
         self.id = generation(self.path, self.manifest)
         self.git = GitContext(self.manifest)
         self.file = self.path / "publication/drafts.json"
@@ -224,7 +241,7 @@ class Session:
         return reasons
 
     def view(self, state):
-        from .operations import process_start
+        from .operations import process_start, belongs_to
         comments = copy.deepcopy(state["comments"])
         assessments = finding_assessments({} if self.manifest.get("analysis_kind") == "followup"
                                          else read_json(self.path / "reviews/synthesis.json", {}))
@@ -249,8 +266,7 @@ class Session:
         active = []
         for file in (state_root() / "operations").glob("*.json"):
             op = read_json(file, {})
-            if (op.get("status") == "running" and op.get("common") == self.manifest["git_common_dir"]
-                    and op.get("pr") == str(self.manifest["pr"]) and op.get("pid")
+            if (op.get("status") == "running" and belongs_to(op, self.manifest, self.root) and op.get("pid")
                     and process_start(op["pid"]) == op.get("start")):
                 active.append({"operation_id": file.stem, "kind": op["kind"]})
         thread_contexts = {t["key"]: self.comment_context({"placement": {"kind": "reply", "key": t["key"]}}, state)
@@ -263,6 +279,8 @@ class Session:
             context["participated"] = any(c.get("author", "").lower() == self.manifest.get("viewer", "").lower()
                                           for c in thread.get("comments", []))
         from . import usage
+        from .forge import restore, capabilities
+        project = restore(self.manifest)
         return {**state, "execution_report": self.manifest.get("execution_report"), "report_warning": self.manifest.get("report_warning"), "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
                 "automation": self.automation_summary(), "analysis": self.analysis_summary(),
                 "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
@@ -271,7 +289,7 @@ class Session:
                 "session": str(self.root), "revision": digest(state),
                 "historical": self.path != current, "current_generation": generation(current, read_json(current / "manifest.json", {})),
                 "pending_generation": generation(pending, read_json(pending / "manifest.json", {})) if pending else None,
-                "repository": self.manifest["repository"], "pr": self.manifest["pr"], "url": self.manifest.get("url"),
+                "repository": self.manifest["repository"], "forge_project": project.saved(), "capabilities": capabilities(project.forge), "pr": self.manifest["pr"], "url": self.manifest.get("url"),
                 "snapshot": self.manifest.get("snapshot"), "verdicts": self.verdicts(state)}
 
     def automation_summary(self):

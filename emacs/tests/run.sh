@@ -31,4 +31,5 @@ args+=(-l emacs/tests/bootstrap.el)
   (mapc (lambda (file) (unless (byte-compile-file file) (error "Byte compilation failed: %s" file)))
         (directory-files "emacs" t "\\.el$"))
   (auto-review-test-assert-origin))'
-"${EMACS:-emacs}" "${args[@]}" -l emacs/tests/magit-auto-review-tests.el -l emacs/tests/magit-auto-review-owner-tests.el --eval '(auto-review-test-assert-origin)' -f ert-run-tests-batch-and-exit
+"${EMACS:-emacs}" "${args[@]}" -l emacs/tests/magit-auto-review-tests.el -l emacs/tests/magit-auto-review-owner-tests.el -l emacs/tests/magit-auto-review-gitlab-tests.el --eval '(auto-review-test-assert-origin)' -f ert-run-tests-batch-and-exit
+python3 tests/helpers/gitlab-emacs-fixture.py "${EMACS:-emacs}" "${args[@]}"

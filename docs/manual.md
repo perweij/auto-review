@@ -1637,6 +1637,31 @@ Claude tool restrictions also deny `glab`. Independent reviewers use isolated ho
 These execution policies are not a new security sandbox; the existing documented
 outer-container trust boundary still applies.
 
+### GitLab Reviewer in Emacs
+
+The existing Magit/Forge Auto-review command opens a selected GitLab MR directly.
+Without a selected MR, a GitLab checkout offers saved reviews and number/URL
+entry. Prefix invocation accepts a number or URL, including legacy MR paths and
+diff/commit tabs. Project selection is required only for ambiguous local remotes.
+Resolution reads local data and preserves GitHub Enterprise behavior for other
+hosts. Self-hosted GitLab and remote MR browsing are deferred.
+
+Forge/project identity and capabilities remain attached through setup, resume,
+history, conversations and async completion. GitLab selects Reviewer. Existing
+Reviewer edit/stage, history, read-only conversations, elaboration, checkout,
+reports, logs and cancellation commands remain available. Unsupported actions
+are hidden; direct invocation fails locally. Fresh GitLab reviews ignore GitHub
+suggestion defaults. A saved enabled setting requires the explicit setup action
+to disable it for this run; saved model choices are retained.
+
+`P p` opens a read-only preview before confirmation. It uses frozen remaining
+operation payloads/positions after retry reuse, removing only each operation's
+exact appended tracking suffix. Confirmed writes are omitted from preview and
+counts. Human wording in the dashboard/editor is preserved; publication makes
+slash commands inert. Declining sends nothing. Revision and confirmation guards
+reject stale preparation. `P r` checks uncertain receipts. See the
+[Emacs reference](../emacs/README.md#gitlab-reviewer).
+
 ### Publication adapter and recovery
 
 Reviewer publication keeps approval, freshness checks, durable intent and retry

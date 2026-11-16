@@ -8,6 +8,7 @@
 ;;; Code:
 (require 'json)
 (require 'subr-x)
+(declare-function magit-auto-review--identity "magit-auto-review" ())
 
 (defun magit-auto-review--open-checkout (toolkit session &optional generation)
   "Open TOOLKIT's SESSION checkout, optionally pinned to GENERATION."
@@ -55,6 +56,10 @@
   ;; to subprocesses without shell expansion.  Copy before normalizing so saved
   ;; requests remain unchanged.  Both synchronous and async calls use this path.
   (let ((request (copy-alist request)))
+    (when (fboundp 'magit-auto-review--identity)
+      (dolist (field (magit-auto-review--identity))
+        (unless (assq (car field) request)
+          (push field request))))
     (when (alist-get 'cwd request)
       (setf (alist-get 'cwd request) (expand-file-name (alist-get 'cwd request))))
     (concat (json-serialize (cons '(protocol . 1) request)

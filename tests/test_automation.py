@@ -13,6 +13,7 @@ from pr_review.application import dispatch
 from pr_review.commands import mutate
 from pr_review.common import ApiError, atomic_json, digest, read_json, state_root
 from pr_review.state import Session
+from pr_review.forge import restore
 
 
 class AutomationTest(unittest.TestCase):
@@ -43,7 +44,7 @@ class AutomationTest(unittest.TestCase):
     def automatic(self, execute_error=None):
         from pr_review import models, reviews, settings
         from pr_review.repository import Repository
-        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock)
+        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock, project=restore(self.f.manifest))
         with patch.object(Repository, 'resolve', return_value=repo), \
                 patch('pr_review.sessions.locate', return_value=(self.session.root, self.f.repo)), \
                 patch.object(settings, 'resolve', return_value={'settings': settings.DEFAULTS}), \
@@ -55,7 +56,7 @@ class AutomationTest(unittest.TestCase):
         from pr_review import models, reviews, settings
         from pr_review.repository import Repository
         config = settings.validate({'reviewers': ['claude'], 'processing_provider': 'codex'})
-        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock)
+        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock, project=restore(self.f.manifest))
         with patch.object(Repository, 'resolve', return_value=repo), \
                 patch('pr_review.sessions.locate', return_value=(None, self.f.repo)), \
                 patch.object(settings, 'resolve', return_value={'settings': config}), \
@@ -860,7 +861,7 @@ class AutomationTest(unittest.TestCase):
         from types import SimpleNamespace
         from pr_review import models, reviews, settings
         from pr_review.repository import Repository
-        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock)
+        repo = SimpleNamespace(common=self.f.repo / '.git', pr=7, lock=self.session.pr_lock, project=restore(self.f.manifest))
         def fail(request):
             automation.observe(self.session)
             raise ApiError('confirmation_required', 'Trust required', snapshot='head:base', paths=['AGENTS.md'])

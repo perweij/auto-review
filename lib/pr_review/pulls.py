@@ -15,6 +15,8 @@ def repository_name(value, forge=None):
     candidate = re.sub(r'^[^/@]+@([^:]+):', r'\1/', candidate).rstrip('/').removesuffix('.git')
     if len(candidate.split('/')) < 3:
         return None
+    if candidate.split('/')[0].lower() == 'gitlab.com' and forge != 'gitlab':
+        return None
     try:
         return adapter(forge).project(candidate).repository
     except ApiError:
@@ -39,7 +41,7 @@ def normalize(pull, repository):
 def list_pulls(request):
     cwd = request.get("cwd", ".")
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd).stdout.strip()
-    sessions = discover({"cwd": cwd})["sessions"]
+    sessions = discover({"cwd": cwd, "forge": request.get('forge') or 'github'})["sessions"]
     from .owner_state import discover as owner_discover, toolkit
     owner_sessions = owner_discover({"cwd": cwd})["sessions"]
     remotes = git(["config", "--get-regexp", r"^remote\..*\.url$"], cwd=cwd, check=False)
@@ -81,6 +83,7 @@ def list_pulls(request):
         pulls.setdefault(number, {"pr": number, "repository": repository,
                                   "url": session.get("url"), "title": "Saved owner session" if selected_toolkit == "owner" else "Saved review", "state": "UNKNOWN"})
     for pull in pulls.values():
+        pull['forge_project'] = project.saved()
         pull["sessions"] = [s for s in sessions if s["pr"] == pull["pr"]]
     return {"repositories": repositories, "repository": repository, "toolkit": selected_toolkit, "checked_at": cache.get("checked_at"),
             "pull_requests": sorted(pulls.values(), key=lambda p: (p["state"] != "OPEN", -p["pr"]))}

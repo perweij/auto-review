@@ -33,7 +33,7 @@
   "Execution report for the displayed generation."
   [["Execution report"
     ("o" "Open local report" magit-auto-review-execution-report)
-    ("p" "Publish snapshot to PR" magit-auto-review-publish-execution-report)]])
+    ("p" (lambda () (concat "Publish snapshot to " (magit-auto-review--change-label))) magit-auto-review-publish-execution-report)]])
 
 (defun magit-auto-review-open-checkout ()
   "Open the displayed review's retained checkout in Dired."
@@ -45,6 +45,7 @@
 (defun magit-auto-review-send-to-owner ()
   "Send saved comments at point or selected headings to Owner for fixing."
   (interactive)
+  (magit-auto-review--require-feature "owner")
   (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
@@ -98,7 +99,7 @@
   (setq magit-auto-review--followup-request nil)
   (setq magit-auto-review--run-settings (copy-tree settings))
   (magit-auto-review--start
-   (append (if magit-auto-review--session (magit-auto-review--request "run")
+   (append (unless magit-auto-review--session (magit-auto-review--identity)) (if magit-auto-review--session (magit-auto-review--request "run")
              `((command . "run") (pr . ,magit-auto-review--target) (cwd . ,default-directory)
                (repository . ,magit-auto-review--repository)))
            settings
@@ -126,7 +127,7 @@
   "Run the shared automatic controller with explicit SETTINGS and CATALOGS."
   (setq magit-auto-review--run-settings nil magit-auto-review--followup-request nil)
   (magit-auto-review--start
-   (append (if magit-auto-review--session (magit-auto-review--request "automatic-review")
+   (append (unless magit-auto-review--session (magit-auto-review--identity)) (if magit-auto-review--session (magit-auto-review--request "automatic-review")
              `((command . "automatic-review") (pr . ,magit-auto-review--target)
                (cwd . ,default-directory) (repository . ,magit-auto-review--repository)))
            settings `((catalogs . ,catalogs)))
@@ -249,6 +250,7 @@
 (defun magit-auto-review-set-verdict ()
   "Choose the overall PR verdict for the next submitted review."
   (interactive)
+  (magit-auto-review--require-feature "verdicts")
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
     (let* ((verdicts (alist-get 'verdicts magit-auto-review--review))
@@ -268,12 +270,30 @@
           (magit-auto-review--mutate "verdict" `(verdict . ,value))
           (magit-auto-review--notify (concat "Overall review verdict: " (magit-auto-review--verdict-label))))))))
 
+(defun magit-auto-review--show-publication-preview (preview)
+  "Display the backend's frozen PREVIEW without changing any draft text."
+  (let ((buffer (get-buffer-create "*Auto-review publication preview*")))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "Prepared GitLab publication\n\nOnly the appended tracking marker is omitted from each body.\n\n")
+        (dolist (op (alist-get 'operations preview))
+          (insert (format "%s · %s\n" (alist-get 'kind op)
+                          (alist-get 'url (alist-get 'destination op))))
+          (when (alist-get 'position op)
+            (insert "Position: " (json-serialize (alist-get 'position op)) "\n"))
+          (insert "\n" (alist-get 'body op) "\n\n"))
+        (special-mode)
+        (goto-char (point-min))))
+    (display-buffer buffer '(display-buffer-pop-up-window))
+    buffer))
+
 (defun magit-auto-review-publish ()
   "Validate Staged comments, then briefly confirm counts and the chosen verdict."
   (interactive)
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
-    (magit-auto-review--notify "Checking GitHub and preparing the staged comments for publication…")
+    (magit-auto-review--notify (format "Checking %s and preparing the staged comments for publication…" (magit-auto-review--forge-label)))
     (magit-auto-review--start
      (magit-auto-review--request "prepare")
      (lambda (result)
@@ -282,11 +302,15 @@
            (magit-auto-review--notify (alist-get 'reason result))
          (let ((counts (alist-get 'counts result)))
            (when (and (not magit-auto-review--editor)
+                      (magit-auto-review--supports-p "prepared-publication-preview"))
+             (unless (alist-get 'preview result) (user-error "Backend omitted the prepared publication preview"))
+             (magit-auto-review--show-publication-preview (alist-get 'preview result)))
+           (when (and (not magit-auto-review--editor)
                       (yes-or-no-p (format "%sPublish %d inline comment(s), %d thread reply/replies, %d overall assessment(s)%s? "
                                            (if (alist-get 'warnings result)
                                                (concat (string-join (alist-get 'warnings result) " ") " ") "")
                                            (alist-get 'inline counts) (alist-get 'replies counts) (alist-get 'overall counts)
-                                           (if (alist-get 'verdict result)
+                                           (if (and (not (magit-auto-review--gitlab-p)) (alist-get 'verdict result))
                                                (concat "; overall PR verdict: "
                                                        (pcase (alist-get 'verdict result)
                                                          ("REQUEST_CHANGES" "Request changes") ("APPROVE" "Approve") (_ "Comment"))) ""))))
@@ -301,7 +325,7 @@
                     (push url urls))
                   (magit-auto-review--notify
                    (if (magit-auto-review--true-p (alist-get 'complete published))
-                       "Publication confirmed by GitHub. Expand Published; b opens the comment, L lists receipt URLs."
+                       (format "Publication confirmed by %s. Expand Published; b opens the comment, L lists receipt URLs." (magit-auto-review--forge-label))
                      (concat "Publication paused: " (alist-get 'reason published))) urls)))))))))))
 
 (defun magit-auto-review-resolve-publication ()
@@ -323,7 +347,11 @@
 (defun magit-auto-review--new-comment-at (title placement)
   "Compose TITLE at PLACEMENT, asking for its attachment when absent."
   (if placement (magit-auto-review--compose-comment title placement)
-    (let ((choice (read-char-choice "Attach new comment to [c]ode, [t]hread, [o]verall PR; [q] cancel: " '(?c ?t ?o ?q))))
+    (let ((choice (read-char-choice
+                   (if (magit-auto-review--supports-p "replies")
+                       "Attach new comment to [c]ode, [t]hread, [o]verall PR; [q] cancel: "
+                     "Attach new comment to [c]ode, [o]verall MR; [q] cancel: ")
+                   (if (magit-auto-review--supports-p "replies") '(?c ?t ?o ?q) '(?c ?o ?q)))))
       (pcase choice
         (?o (magit-auto-review--compose-comment title '((kind . "review"))))
         ((or ?c ?t)
@@ -334,6 +362,7 @@
 (defun magit-auto-review--compose-comment (title placement &optional body)
   "Preview TITLE at PLACEMENT and edit BODY; persist only when saved."
   (magit-auto-review--editable)
+  (when (equal (alist-get 'kind placement) "reply") (magit-auto-review--require-feature "replies"))
   (when magit-auto-review--editor (user-error "Finish the current inline edit first"))
   (let* ((original magit-auto-review--review)
          (result (magit-auto-review--call
@@ -366,9 +395,12 @@
     (magit-auto-review--editable)
     (let* ((id (magit-auto-review--id)) (comment (magit-auto-review--comment id)))
       (pcase (read-char-choice
-              (format "Current: %s · %s. Choose [c]ode, [t]hread, [o]verall, [a]utomatic: "
+              (format (if (magit-auto-review--supports-p "replies")
+                          "Current: %s · %s. Choose [c]ode, [t]hread, [o]verall, [a]utomatic: "
+                        "Current: %s · %s. Choose [c]ode, [o]verall, [a]utomatic: ")
                       (magit-auto-review--placement-label comment)
-                      (if (magit-auto-review--true-p (alist-get 'override comment)) "manual" "automatic")) '(?c ?t ?o ?a))
+                      (if (magit-auto-review--true-p (alist-get 'override comment)) "manual" "automatic"))
+              (if (magit-auto-review--supports-p "replies") '(?c ?t ?o ?a) '(?c ?o ?a)))
         (?c (magit-auto-review--placement-browser id 'code))
         (?t (magit-auto-review--placement-browser id 'thread))
         (?o (magit-auto-review--mutate "placement" `(comment . ,id) '(placement . ((kind . "review")))))
@@ -376,12 +408,14 @@
 
 (defun magit-auto-review--placement-browser (id kind &optional callback)
   "Pick an attachment of KIND for ID, or pass it to CALLBACK for a new comment."
+  (when (eq kind 'thread) (magit-auto-review--require-feature "replies"))
   (let* ((origin (current-buffer))
          (review magit-auto-review--review)
          (context (magit-auto-review--request "read"))
          (diff (and (eq kind 'code) (magit-auto-review--call (magit-auto-review--request "diff")))))
     (pop-to-buffer (generate-new-buffer "*Choose comment placement*"))
     (magit-section-mode)
+    (magit-auto-review--copy-identity origin)
     (setq-local magit-auto-review--history-origin origin)
     (setq-local magit-auto-review--placement-comment id)
     (setq-local magit-auto-review--placement-callback callback)
@@ -469,10 +503,12 @@
 (defun magit-auto-review-diff ()
   "Show the full reviewed PR diff from immutable Git revisions."
   (interactive)
-  (let ((result (magit-auto-review--call (magit-auto-review--request "diff"))))
-    (pop-to-buffer (generate-new-buffer "*Auto-review PR diff*"))
+  (let ((result (magit-auto-review--call (magit-auto-review--request "diff")))
+        (origin (current-buffer)))
+    (pop-to-buffer (generate-new-buffer (format "*Auto-review %s diff*" (magit-auto-review--change-label))))
     (dolist (file (alist-get 'diffs result)) (insert (alist-get 'patch file)))
     (diff-mode)
+    (magit-auto-review--copy-identity origin)
     (magit-auto-review-file-mode 1)
     (goto-char (point-min))))
 
@@ -509,6 +545,7 @@
 (defun magit-auto-review-adapt ()
   "Explicitly request wording that considers the full attached conversation."
   (interactive)
+  (magit-auto-review--require-feature "replies")
   (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (let ((id (magit-auto-review--id)) (origin (current-buffer)))
@@ -535,6 +572,7 @@
         (origin (current-buffer)))
     (pop-to-buffer (generate-new-buffer "*Auto-review history*"))
     (magit-section-mode)
+    (magit-auto-review--copy-identity origin)
     (setq-local magit-auto-review--history-origin origin)
     (let ((inhibit-read-only t))
       (magit-insert-section (history-root)
@@ -566,6 +604,7 @@
     (unless generation (user-error "Move to a saved generation"))
     (pop-to-buffer (generate-new-buffer "*Auto-review saved generation*"))
     (magit-auto-review-mode)
+    (magit-auto-review--copy-identity origin)
     (setq default-directory directory magit-auto-review--session session
           magit-auto-review--generation generation magit-auto-review--history-origin origin
           magit-auto-review--history-view t)
@@ -616,7 +655,7 @@
   (let* ((comment (ignore-errors (magit-auto-review--comment (magit-auto-review--id))))
          (url (or (alist-get 'html_url (alist-get 'receipt comment))
                   (alist-get 'url magit-auto-review--review))))
-    (unless url (user-error "No GitHub URL is available here"))
+    (unless url (user-error "No %s URL is available here" (magit-auto-review--forge-label)))
     (browse-url url)))
 
 (defun magit-auto-review--mutable-p ()
@@ -666,7 +705,7 @@
 
 (defun magit-auto-review--reply-draft-p ()
   "Whether adaptation to a discussion applies here."
-  (and (magit-auto-review--draft-p)
+  (and (magit-auto-review--supports-p "replies") (magit-auto-review--draft-p)
        (alist-get 'thread (alist-get 'context (magit-auto-review--comment (magit-auto-review--id))))))
 
 (defun magit-auto-review--attention-p ()
@@ -683,15 +722,15 @@
 (transient-define-prefix magit-auto-review-publish-menu ()
   "Publish exactly the comments shown under Staged."
   :refresh-suffixes t
-  [:description (lambda () (concat "Publish Staged · Overall PR verdict: " (magit-auto-review--verdict-label)))
-   ("v" "Choose overall PR verdict" magit-auto-review-set-verdict :transient t)
+  [:description (lambda () (if (magit-auto-review--gitlab-p) "Publish Staged · GitLab COMMENT" (concat "Publish Staged · Overall PR verdict: " (magit-auto-review--verdict-label))))
+   ("v" "Choose overall PR verdict" magit-auto-review-set-verdict :transient t :if (lambda () (magit-auto-review--supports-p "verdicts")))
    ("p" "Publish staged comments" magit-auto-review-publish)
-   ("r" "Check uncertain submissions on GitHub" magit-auto-review-resolve-publication :if magit-auto-review--uncertain-publication-p)
+   ("r" (lambda () (concat "Check uncertain submissions on " (magit-auto-review--forge-label))) magit-auto-review-resolve-publication :if magit-auto-review--uncertain-publication-p)
    ("q" "Close menu" transient-quit-one)])
 
 (transient-define-prefix magit-auto-review-edit-menu ()
   "Save or cancel the active inline comment."
-  ["Inline comment · these actions do not publish to GitHub"
+  [:description (lambda () (concat "Inline comment · these actions do not publish to " (magit-auto-review--forge-label)))
    ("l" "Elaborate finding (model)" magit-auto-review-elaborate)
    ("K" "Cancel model operation" magit-auto-review-cancel-operation)
    ("s" "Save draft locally" magit-auto-review-save)
@@ -706,9 +745,11 @@
     ('version '("This is earlier saved wording, not an outgoing comment."
                 "TAB reads it; y recovers a copy. Saved versions are never published."
                 "Empty earlier snapshots are omitted from this view."))
-    ('discussion '("These are comments already posted on GitHub, shown as context."
-                   "Draft actions do not change these messages."
-                   "Move to Your draft reply to edit or exclude the outgoing reply."))
+    ('discussion (list (format "These are comments already posted on %s, shown as context." (magit-auto-review--forge-label))
+                       "Draft actions do not change these messages."
+                       (if (magit-auto-review--supports-p "replies")
+                           "Move to Your draft reply to edit or exclude the outgoing reply."
+                         "GitLab conversations are read-only.")))
     (_ (if (magit-auto-review--status-p "published")
            '("This comment has already been published. f composes a new follow-up.")
          '("Each item contains one outgoing draft; the code, discussion, and versions are context."
@@ -749,6 +790,7 @@
 (defun magit-auto-review-suggestion-edit ()
   "Edit the selected generated replacement in a separate recovery buffer."
   (interactive)
+  (magit-auto-review--require-feature "suggested-changes")
   (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
@@ -766,6 +808,7 @@
 (defun magit-auto-review-suggestion-remove ()
   "Remove the selected suggestion while keeping its ordinary finding."
   (interactive)
+  (magit-auto-review--require-feature "suggested-changes")
   (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (magit-auto-review--mutate "suggestion-remove" `(comment . ,(magit-auto-review--id)))))
@@ -773,6 +816,7 @@
 (defun magit-auto-review-suggestion-verify ()
   "Verify active suggestions independently and together through the backend."
   (interactive)
+  (magit-auto-review--require-feature "suggested-changes")
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
     (magit-auto-review--start
@@ -787,18 +831,21 @@
   ["Suggested changes"
    ("e" "Edit generated replacement" magit-auto-review-suggestion-edit)
    ("v" "Verify active suggestions (model)" magit-auto-review-suggestion-verify)
-   ("k" "Remove suggestion, retain finding" magit-auto-review-suggestion-remove)])
+   ("k" "Remove suggestion, retain finding" magit-auto-review-suggestion-remove)]
+  (interactive)
+  (magit-auto-review--require-feature "suggested-changes")
+  (transient-setup 'magit-auto-review-suggestion-menu))
 
 (transient-define-prefix magit-auto-review-dispatch ()
   "Inspect, edit, stage, and publish contextual review comments."
   [:class transient-column :setup-children magit-auto-review--context-help]
   [["Comments"
-    ("o" "Send to Owner for fixing" magit-auto-review-send-to-owner :if magit-auto-review--mutable-p)
+    ("o" "Send to Owner for fixing" magit-auto-review-send-to-owner :if (lambda () (and (magit-auto-review--supports-p "owner") (magit-auto-review--mutable-p))))
     ("s" "Move to Staged" magit-auto-review-stage :if (lambda () (magit-auto-review--stage-context-p "unstaged")))
     ("u" "Move to Unstaged" magit-auto-review-unstage :if (lambda () (magit-auto-review--stage-context-p "staged")))
     ("e" "Edit displayed comment" magit-auto-review-edit :if magit-auto-review--draft-p)
-    ("S" "Suggested change: edit / verify / remove" magit-auto-review-suggestion-menu :if magit-auto-review--mutable-p)
-    ("a" "Choose code/thread/overall attachment" magit-auto-review-placement :inapt-if (lambda () (not (magit-auto-review--draft-p))))
+    ("S" "Suggested change: edit / verify / remove" magit-auto-review-suggestion-menu :if (lambda () (and (magit-auto-review--supports-p "suggested-changes") (magit-auto-review--mutable-p))))
+    ("a" (lambda () (if (magit-auto-review--supports-p "replies") "Choose code/thread/overall attachment" "Choose code/overall attachment")) magit-auto-review-placement :inapt-if (lambda () (not (magit-auto-review--draft-p))))
     ("k" "Exclude this draft from publication (Suppressed)" magit-auto-review-suppress :if (lambda () (and (magit-auto-review--draft-p) (magit-auto-review--status-p "unstaged" "staged"))))
     ("r" "Restore to Unstaged" magit-auto-review-restore :if (lambda () (magit-auto-review--stage-context-p "suppressed")))
     ("c" "New comment…" magit-auto-review-new-comment :if magit-auto-review--mutable-p)
@@ -809,24 +856,24 @@
     ("E" "Elaborate finding (model)" magit-auto-review-elaborate)
     ("C" "Conversations and follow-up" magit-auto-review-conversations :if (lambda () magit-auto-review--review))
     ("RET" "Reviewed file" magit-auto-review-visit :if magit-auto-review--code-context-p)
-    ("d" "Full PR diff" magit-auto-review-diff :if (lambda () magit-auto-review--review))
+    ("d" (lambda () (concat "Full " (magit-auto-review--change-label) " diff")) magit-auto-review-diff :if (lambda () magit-auto-review--review))
     ("l" "Other evidence" magit-auto-review-evidence :if magit-auto-review--evidence-p)
     ("h" "Saved generations" magit-auto-review-history :if (lambda () magit-auto-review--review))
     ("A" "Suggest reply using full discussion (model)" magit-auto-review-adapt :if magit-auto-review--reply-draft-p)
     ("i" "Mark changed discussion as inspected" magit-auto-review-acknowledge :if magit-auto-review--attention-p)
-    ("b" "Open comment / PR on GitHub" magit-auto-review-browse)]
+    ("b" (lambda () (format "Open comment / %s on %s" (magit-auto-review--change-label) (magit-auto-review--forge-label))) magit-auto-review-browse)]
    ["Review"
-    ("M" "Select toolkit" magit-auto-review-select-toolkit)
-    ("B" "Repository pull requests" magit-auto-review-pull-requests)
+    ("M" "Select toolkit" magit-auto-review-select-toolkit :if (lambda () (magit-auto-review--supports-p "toolkits")))
+    ("B" "Repository pull requests" magit-auto-review-pull-requests :if (lambda () (magit-auto-review--supports-p "pull-requests")))
     ("g" "Refresh results (history stays pinned)" magit-auto-review-refresh :if (lambda () magit-auto-review--review))
     ("R" "Configure and run/resume…" magit-auto-review-run)
     ("N" "Open current completed review" magit-auto-review-switch-current :if (lambda () (or magit-auto-review--new-ready magit-auto-review--history-view)))
     ("L" "Progress and receipt URLs" magit-auto-review-log)
-    ("v" "Choose overall PR verdict" magit-auto-review-set-verdict :if magit-auto-review--mutable-p)
+    ("v" "Choose overall PR verdict" magit-auto-review-set-verdict :if (lambda () (and (magit-auto-review--supports-p "verdicts") (magit-auto-review--mutable-p))))
     ("P" "Publish Staged…" magit-auto-review-publish-menu :if magit-auto-review--mutable-p)
     ("q" "Close menu" transient-quit-one)]
    ["Advanced"
-    ("G" "Refresh GitHub context" magit-auto-review-refresh-github :if magit-auto-review--mutable-p)
+    ("G" (lambda () (concat "Refresh " (magit-auto-review--forge-label) " context")) magit-auto-review-refresh-github :if magit-auto-review--mutable-p)
     ("K" "Cancel model operation" magit-auto-review-cancel-operation :if (lambda () magit-auto-review--operation))
     ("T" "Confirm agent configuration" magit-auto-review-trust-config)
     ("y" "Recover saved wording" magit-auto-review-recover :if magit-auto-review--recoverable-p)]])

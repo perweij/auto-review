@@ -414,10 +414,10 @@ def generate(run):
 
 
 def verify_operation(session, request):
-    from .operations import operation
+    from .operations import operation, owner
     from .repository import Repository
     from .commands import mutable
-    with operation({'kind': 'suggestion-verification', 'common': session.git.common, 'pr': str(session.manifest['pr'])}), usage.operation(session.root):
+    with operation({**owner(session.manifest, session.root), 'kind': 'suggestion-verification'}), usage.operation(session.root):
         with locked(session.pr_lock), locked(session.lock):
             state = session.load()
             session.check_write(request, state)

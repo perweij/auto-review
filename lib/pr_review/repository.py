@@ -74,9 +74,13 @@ class Repository:
     @classmethod
     def resolve(cls, target, repository=None, cwd=None, forge=None):
         from .forge import adapter
+        from .review_target import target as parse_target
         adapter(forge)
         cwd = Path(cwd or Path.cwd()).resolve()
-        implied_project, pr = adapter(forge).target(target)
+        resolved_project, pr = parse_target(target, repository, forge)
+        if resolved_project:
+            forge = resolved_project.forge
+        implied_project, _ = adapter(forge).target(target)
         implied = implied_project.repository if implied_project else None
         if repository:
             identity = adapter(forge).project(repository).repository

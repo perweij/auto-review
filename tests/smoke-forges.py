@@ -24,7 +24,7 @@ def parser():
     group = result.add_mutually_exclusive_group()
     group.add_argument('--resume', type=Path)
     group.add_argument('--cleanup', type=Path)
-    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report', 'gitlab-publication'))
+    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report', 'gitlab-publication', 'gitlab-emacs'))
     return result
 
 
@@ -108,12 +108,14 @@ def review(run, forge):
 def main():
     os.umask(0o077)
     options = parser().parse_args()
+    if options.scenario == 'gitlab-emacs' and options.suite in ('live', 'all'):
+        raise Failure('gitlab-emacs requires scripted providers; use --suite smoke or extended.')
     required = ['git', 'gh', 'glab', 'python3']
     if not options.cleanup:
         required += ['claude', 'codex'] if options.suite == 'live' else ['bash', 'jq']
         if options.suite == 'all':
             required += ['claude', 'codex']
-        if options.suite == 'extended':
+        if options.suite == 'extended' or options.scenario == 'gitlab-emacs':
             required.append('emacs')
     missing = [tool for tool in required if shutil.which(tool) is None]
     if missing:
@@ -191,6 +193,11 @@ def main():
                 passed = run.scenario(forge.kind + '-review-report', lambda forge=forge: review_report(run, forge)) and passed
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
+        if options.scenario == 'gitlab-emacs':
+            from forge_smoke.gitlab_emacs import scenario
+            passed = run.scenario('gitlab-emacs', lambda: scenario(run, forges[1])) and passed
+            passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
+            return 0 if passed else 1
         if options.scenario == 'gitlab-publication':
             if options.suite == 'live':
                 raise Failure('GitLab position and recovery checks use scripted providers')
@@ -228,6 +235,8 @@ def main():
             passed = run.scenario('publication-recovery', lambda: publication_recovery(run, github)) and passed
             passed = run.scenario('github-owner', lambda: owner(run, github)) and passed
         if options.suite == 'extended':
+            from forge_smoke.gitlab_emacs import scenario
+            passed = run.scenario('gitlab-emacs', lambda: scenario(run, forges[1])) and passed
             passed = run.scenario('gitlab-advance', lambda: gitlab_advance(run, forges[1])) and passed
             passed = run.scenario('owner-reply-recovery', lambda: owner_reply_recovery(run, github)) and passed
             passed = run.scenario('edited-preview', lambda: edited_preview(run, github)) and passed

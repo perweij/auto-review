@@ -1,21 +1,24 @@
 """Shared application operations for the terminal and protocol adapters."""
 
 from . import usage
-from .common import ApiError, PROTOCOL, locked
+from .common import ApiError, locked
 from .commands import mutate, preview_comment
 from .state import Session, discover
 from . import operations, publication, settings, models, workflow, pulls
 
 
 def dispatch(request):
-    from .forge import request_forge, require
+    if request.get('command') == 'review-target':
+        from .review_target import resolve
+        return resolve(request)
+    from .forge import request_forge, require, capabilities
     forge = request_forge(request)
     operation = request.get("command")
     capability = ("report-publication" if operation == "review-publish-report" else
                   "issues" if operation in ("issue-run", "issue-recover") else
                   "owner" if operation in ("owner-publish-report", "owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
                   "publication" if operation in ("publish", "prepare", "resolve", "automatic-review") else "review")
-    if forge == 'gitlab' and (str(operation).startswith(('owner-', 'issue-')) or operation in ('toolkit', 'thread-state', 'followup', 'pull-requests')):
+    if forge == 'gitlab' and (str(operation).startswith(('owner-', 'issue-')) or operation in ('toolkit', 'thread-state', 'followup', 'pull-requests', 'adapt', 'verify-suggestions')):
         raise ApiError('unsupported_operation', 'This operation is not supported by the GitLab review pilot.')
     require(forge, capability)
     if operation in ("review-report", "review-publish-report"):
@@ -30,13 +33,8 @@ def dispatch(request):
     if isinstance(operation, str) and (operation.startswith("owner-") or operation == "toolkit"):
         from .owner import dispatch as owner_dispatch
         return owner_dispatch(request)
-    if operation == "capabilities" and forge == 'gitlab':
-        return {"protocol": PROTOCOL, "features": ["inline-publication", "automatic-review", "report-publication", "generations", "drafts", "history", "operations", "usage-reporting", "checkout"],
-                "commands": ["review-report", "review-publish-report", "capabilities", "checkout", "settings", "models", "read", "history", "diff", "file", "run", "cancel", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "automatic-review", "review-log"]}
     if operation == "capabilities":
-        from .owner import COMMANDS
-        return {"protocol": PROTOCOL, "features": ["report-publication", "generations", "inline-context", "drafts", "history", "inline-publication", "operations", "conversations", "followup", "review-status", "pull-requests", "toolkits", "owner", "suggested-changes", "automatic-review", "issue-workflow", "usage-reporting", "finding-elaboration", "checkout"],
-                "commands": ["review-report", "review-publish-report", "checkout", "discover", "pull-requests", "settings", "models", "read", "review-log", "history", "diff", "file", "preview-comment", "mutate", "refresh", "prepare", "publish", "resolve", "run", "automatic-review", "verify-suggestions", "cancel", "adapt", "elaborate", "thread-state", "followup", "issue-run", "issue-read", "issue-eligibility", "issue-recover", *COMMANDS]}
+        return capabilities(forge)
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":

@@ -94,6 +94,34 @@ class GitLabPublicationTest(unittest.TestCase):
         self.assertTrue(self.posts[1][0].endswith('/discussions'))
         self.assertTrue(all(c['status'] == 'published' and c['receipt']['html_url'].startswith(self.url + '#note_') for c in self.state['comments']))
 
+    def test_prepared_preview_projects_frozen_payloads_and_only_omits_exact_suffix(self):
+        self.state['comments'][0]['body'] = '/close\n\n<!-- pr-review action=literal -->\nKeep this marker.'
+        before = copy.deepcopy(self.state['comments'])
+        prepared = self.prepare()
+        for row, op in zip(prepared['preview']['operations'], self.state['prepared']['actions'][0]['operations']):
+            self.assertEqual(row['body'] + '\n\n' + op['marker'], op['payload']['body'])
+            self.assertEqual(row['position'], op['payload'].get('position'))
+        self.assertIn('/\u200bclose', prepared['preview']['operations'][0]['body'])
+        self.assertIn('<!-- pr-review action=literal -->', prepared['preview']['operations'][0]['body'])
+        self.assertEqual(before, self.state['comments'])
+
+    def test_retry_preview_uses_reused_payload_and_excludes_confirmed_operations(self):
+        prepared = self.prepare()
+        previous = copy.deepcopy(self.state['prepared']['actions'][0])
+        previous['status'] = 'failed'
+        previous['operations'][0].update(status='published', receipt_verified=True, delivery='confirmed')
+        previous['operations'][1].update(status='failed', delivery='not_sent')
+        self.state['batches'].append(dict(actions=[previous]))
+        # Recovery has been tested separately; freeze its outcome here so this
+        # assertion specifically checks projection after failed-action reuse.
+        with patch.object(publication, 'recover'):
+            retry = self.prepare()
+        rows = retry['preview']['operations']
+        self.assertEqual(1, len(rows))
+        self.assertEqual(previous['operations'][1]['id'], rows[0]['operation_id'])
+        self.assertEqual(prepared['preview']['operations'][1], rows[0])
+        self.assertEqual({'inline': 1, 'replies': 0, 'overall': 0}, retry['counts'])
+
     def test_terminal_previews_the_normalized_body_before_confirmation(self):
         from pr_review import terminal
         self.state['comments'][0]['body'] = '**Finding**\n/close'

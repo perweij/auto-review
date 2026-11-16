@@ -30,20 +30,21 @@
          (activity (alist-get 'latest_activity status))
          (coverage (alist-get 'coverage magit-auto-review--review))
          (threads (cl-remove-if-not (lambda (x) (equal (alist-get 'kind x) "thread"))
-                                   (alist-get 'items (alist-get 'discussion magit-auto-review--review))))
+                                    (alist-get 'items (alist-get 'discussion magit-auto-review--review))))
          (unresolved (cl-remove-if (lambda (x) (magit-auto-review--true-p (alist-get 'is_resolved x))) threads)))
-    (insert (format "GitHub review status: %s · Your submitted decision: %s\n"
-                    (or (alist-get 'decision status) "unavailable")
-                    (if (magit-auto-review--true-p (alist-get 'available status))
-                        (or (alist-get 'state opinion) "none") "unavailable")))
-    (when opinion
-      (insert (format "Decision at %s · %s\n" (or (alist-get 'oid (alist-get 'commit opinion)) "unknown commit")
-                      (or (alist-get 'submittedAt opinion) "unknown time")))
-      (when-let ((url (alist-get 'url opinion)))
-        (insert-text-button "Open submitted review" 'follow-link t 'action (lambda (_) (browse-url url)))
-        (insert "\n")))
-    (when (and activity (not (equal (alist-get 'id activity) (alist-get 'id opinion))))
-      (insert (format "Latest review activity: %s (separate from the submitted decision)\n" (alist-get 'state activity))))
+    (when (magit-auto-review--supports-p "review-status")
+      (insert (format "GitHub review status: %s · Your submitted decision: %s\n"
+                      (or (alist-get 'decision status) "unavailable")
+                      (if (magit-auto-review--true-p (alist-get 'available status))
+                          (or (alist-get 'state opinion) "none") "unavailable")))
+      (when opinion
+        (insert (format "Decision at %s · %s\n" (or (alist-get 'oid (alist-get 'commit opinion)) "unknown commit")
+                        (or (alist-get 'submittedAt opinion) "unknown time")))
+        (when-let ((url (alist-get 'url opinion)))
+          (insert-text-button "Open submitted review" 'follow-link t 'action (lambda (_) (browse-url url)))
+          (insert "\n")))
+      (when (and activity (not (equal (alist-get 'id activity) (alist-get 'id opinion))))
+        (insert (format "Latest review activity: %s (separate from the submitted decision)\n" (alist-get 'state activity)))))
     (when (equal (alist-get 'kind coverage) "followup")
       (insert (propertize (format "Limited follow-up: %d selected conversations; the whole PR was not reviewed.\n"
                                   (length (alist-get 'threads coverage))) 'face 'warning)))
@@ -80,6 +81,7 @@
         (magit-auto-review-conversations-mode))
       (setq default-directory directory magit-auto-review--conversation-origin origin
             magit-auto-review--history-view history)
+      (magit-auto-review--copy-identity origin)
       (magit-auto-review--accept review))))
 
 (defun magit-auto-review--render-conversations ()
@@ -90,10 +92,13 @@
      (lambda (s) (puthash (magit-auto-review--fold-key s) (oref s hidden) folds)))
     (erase-buffer)
     (magit-insert-section (review-conversations)
-      (insert (format "Conversations for PR #%s\n\n" (alist-get 'pr magit-auto-review--review)))
+      (insert (format "Conversations for %s #%s\n\n" (magit-auto-review--change-label) (alist-get 'pr magit-auto-review--review)))
       (magit-auto-review--insert-review-status)
-      (insert (format "Next review verdict: %s (v to choose)\n" (magit-auto-review--verdict-label)))
-      (insert "c Reply draft · F Check selected conversations · x Resolve · X Reopen · G Refresh GitHub\n\n")
+      (if (magit-auto-review--supports-p "replies")
+          (progn
+            (insert (format "Next review verdict: %s (v to choose)\n" (magit-auto-review--verdict-label)))
+            (insert "c Reply draft · F Check selected conversations · x Resolve · X Reopen · G Refresh GitHub\n\n"))
+        (insert "Saved conversations (read-only) · G Refresh GitLab\n\n"))
       (dolist (resolved '(nil t))
         (let ((threads (cl-remove-if-not
                         (lambda (x) (and (equal (alist-get 'kind x) "thread")
@@ -153,6 +158,7 @@
 (defun magit-auto-review-conversation-reply ()
   "Compose an attached reply, optionally using a fresh saved proposal."
   (interactive)
+  (magit-auto-review--require-feature "replies")
   (magit-auto-review--editable)
   (when (and (buffer-live-p magit-auto-review--conversation-origin)
              (buffer-local-value 'magit-auto-review--editor magit-auto-review--conversation-origin))
@@ -173,6 +179,7 @@
 
 (defun magit-auto-review--change-thread (resolved)
   "Explicitly change the selected thread to RESOLVED."
+  (magit-auto-review--require-feature "thread-state")
   (magit-auto-review--editable)
   (let ((key (or (magit-auto-review--thread-at-point) (user-error "Choose a conversation"))))
     (magit-auto-review--start
@@ -187,6 +194,7 @@
 
 (defun magit-auto-review--launch-followup (request)
   "Run a frozen follow-up REQUEST, including any explicit snapshot trust."
+  (magit-auto-review--require-feature "followup")
   (setq magit-auto-review--followup-request (copy-tree request))
   (magit-auto-review--start
    request (lambda (result)
@@ -197,6 +205,7 @@
 (defun magit-auto-review-check-conversations ()
   "Check the conversation at point or selected sibling conversations."
   (interactive)
+  (magit-auto-review--require-feature "followup")
   (magit-auto-review--editable)
   (let ((keys (when (use-region-p)
                 (let (values)
@@ -224,7 +233,7 @@
     (magit-auto-review-visit context)))
 (defun magit-auto-review--can-change-thread-p (resolve)
   "Whether the displayed permissions allow RESOLVE (or reopening)."
-  (and (magit-auto-review--mutable-p)
+  (and (magit-auto-review--supports-p "thread-state") (magit-auto-review--mutable-p)
        (let ((thread (alist-get 'thread (magit-auto-review--thread-context))))
          (and thread (not (eq (magit-auto-review--true-p (alist-get 'is_resolved thread)) resolve))
               (magit-auto-review--true-p (alist-get (if resolve 'can_resolve 'can_unresolve) thread))))))
@@ -232,15 +241,15 @@
 (transient-define-prefix magit-auto-review-conversations-menu ()
   "Inspect and follow up on GitHub conversations."
   [["Conversations"
-    ("c" "Create reply draft" magit-auto-review-conversation-reply :if magit-auto-review--mutable-p)
-    ("F" "Check selected conversations (model)" magit-auto-review-check-conversations :if magit-auto-review--mutable-p)
+    ("c" "Create reply draft" magit-auto-review-conversation-reply :if (lambda () (and (magit-auto-review--supports-p "replies") (magit-auto-review--mutable-p))))
+    ("F" "Check selected conversations (model)" magit-auto-review-check-conversations :if (lambda () (and (magit-auto-review--supports-p "followup") (magit-auto-review--mutable-p))))
     ("x" "Resolve conversation" magit-auto-review-resolve-thread :if (lambda () (magit-auto-review--can-change-thread-p t)))
     ("X" "Reopen conversation" magit-auto-review-reopen-thread :if (lambda () (magit-auto-review--can-change-thread-p nil)))
-    ("b" "Open conversation on GitHub" magit-auto-review-browse-thread)]
+    ("b" (lambda () (concat "Open conversation on " (magit-auto-review--forge-label))) magit-auto-review-browse-thread)]
    ["Review"
     ("g" "Load latest saved results" magit-auto-review-refresh)
-    ("G" "Refresh GitHub context" magit-auto-review-refresh-github :if magit-auto-review--mutable-p)
-    ("v" "Choose next verdict" magit-auto-review-set-verdict :if magit-auto-review--mutable-p)
+    ("G" (lambda () (concat "Refresh " (magit-auto-review--forge-label) " context")) magit-auto-review-refresh-github :if magit-auto-review--mutable-p)
+    ("v" "Choose next verdict" magit-auto-review-set-verdict :if (lambda () (and (magit-auto-review--supports-p "verdicts") (magit-auto-review--mutable-p))))
     ("P" "Publish staged comments / verdict" magit-auto-review-publish-menu :if magit-auto-review--mutable-p)
     ("q" "Close menu" transient-quit-one)]
    ["Advanced"

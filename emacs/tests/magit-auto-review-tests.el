@@ -114,7 +114,7 @@
                 ((symbol-function 'magit-auto-review--call)
                  (lambda (request)
                    (push (alist-get 'command request) requests)
-                   (if (equal (alist-get 'command request) "pull-requests")
+                   (if (member (alist-get 'command request) '("review-target" "pull-requests"))
                        '((repository . "github.com/org/repo"))
                      '((sessions . nil))))))
         (unwind-protect
@@ -131,7 +131,7 @@
               (magit-auto-review 98761)
               (should (eq opened (current-buffer)))
               (magit-section-post-command-hook)
-              (should (equal requests '("discover" "toolkit" "pull-requests" "discover" "toolkit" "pull-requests"))))
+              (should (equal requests '("discover" "toolkit" "review-target" "discover" "toolkit" "review-target"))))
           (when (buffer-live-p opened) (kill-buffer opened)))))))
 
 (ert-deftest auto-review/failed-initial-read-keeps-a-usable-section ()
@@ -141,7 +141,7 @@
                 ((symbol-function 'magit-auto-review--call)
                  (lambda (request)
                    (pcase (alist-get 'command request)
-                     ("pull-requests" '((repository . "github.com/org/repo")))
+                     ((or "review-target" "pull-requests") '((repository . "github.com/org/repo")))
                      ("toolkit" '((toolkit . "reviewer")))
                      ("discover" '((sessions . (((pr . 98762) (session . "/test/missing") (generation . "old"))))))
                      (_ (setq opened (current-buffer))
@@ -170,6 +170,7 @@
       (cl-letf (((symbol-function 'magit-toplevel) (lambda () auto-review-test-root))
                 ((symbol-function 'forge-current-topic)
                  (lambda (&rest _) (setq used-branch-fallback t) 'stale-branch-topic))
+                ((symbol-function 'magit-auto-review--resolve-target) (lambda (&rest _) nil))
                 ((symbol-function 'magit-auto-review-pull-requests) (lambda (&rest _) (setq listed t))))
         (magit-auto-review))
       (should listed)
@@ -194,6 +195,7 @@
                  (lambda (request)
                    (push request requests)
                    (pcase (alist-get 'command request)
+                     ("review-target" '((repository . "github.com/org/repo")))
                      ("toolkit" '((toolkit . "reviewer")))
                      ("pull-requests"
                       (should-not (alist-get 'refresh request))
@@ -230,7 +232,7 @@
               (should (equal (alist-get 'repository run-request) "github.com/org/repo"))
               (should-not (alist-get 'session run-request))
               (should (equal (mapcar (lambda (r) (alist-get 'command r)) (reverse requests))
-                             '("pull-requests" "toolkit" "discover"))))
+                             '("review-target" "pull-requests" "toolkit" "discover"))))
           (dolist (buffer (list listing review))
             (when (buffer-live-p buffer) (kill-buffer buffer))))))))
 

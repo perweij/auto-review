@@ -330,7 +330,7 @@ def _execute(session, state, request):
         owner_auto_commit.timeout()
         if request.get("verify_only"):
             raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
-    with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "kind": "owner-fix"}), \
+    with operation({"common": str(session.repo.common), "pr": str(session.repo.pr), "forge_project": session.repo.project.saved(), "session": str(session.path), "kind": "owner-fix"}), \
             usage.operation(usage.owner_root(session, state), legacy=bool(state.get("batches"))):
         from .checkouts import announce
         announce(state.get("worktree"), session.path, "owner")

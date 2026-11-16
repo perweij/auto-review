@@ -33,6 +33,39 @@ def process_identity():
         raise ApiError('ownership_unavailable', 'Cannot establish Linux process ownership for this operation.')
 
 
+def owner(manifest, session=None):
+    from .forge import restore
+    return dict(common=str(manifest['git_common_dir']), pr=str(manifest['pr']),
+                forge_project=restore(manifest).saved(), **({'session': str(session)} if session else {}))
+
+
+def belongs_to(record, manifest, root):
+    """Old untagged records need retained-session evidence, never just an IID."""
+    from .forge import restore
+    if record.get('common') != manifest['git_common_dir'] or str(record.get('pr')) != str(manifest['pr']):
+        return False
+    project = restore(manifest)
+    if record.get('forge_project'):
+        return record['forge_project'] == project.saved()
+    if isinstance(record.get('session'), str) and record['session']:
+        path = Path(record['session'])
+        for name in ('manifest.json', 'session.json'):
+            try:
+                saved = read_json(path / name, {})
+                if saved and restore(saved) == project and str(saved.get('pr')) == str(manifest['pr']) and saved.get('git_common_dir') == manifest['git_common_dir']:
+                    return True
+            except (ApiError, KeyError, TypeError, AttributeError):
+                pass
+    identity = record.get('operation_id', '')
+    if isinstance(identity, str) and re.fullmatch(r'[a-f0-9]{32}', identity):
+        try:
+            saved = read_json(Path(root) / 'automatic-runs' / (identity + '.json'), {})
+            return isinstance(saved, dict) and saved.get('operation_id') == identity and saved.get('session') == str(root)
+        except ApiError:
+            pass
+    return False
+
+
 def cancel(request):
     identity = request.get("operation_id", "")
     if not isinstance(identity, str) or not re.fullmatch(r"[a-f0-9]{32}", identity):
@@ -117,19 +150,26 @@ def run(request):
     from .settings import resolve
     from .models import validate_selection
     from .forge import adapter, request_forge
+    from .review_target import resolve as resolve_target
     if not request.get('session'):
         adapter(request_forge(request)).target(request.get('pr', ''))
+        context = resolve_target(request)
+        if not context['forge_project']:
+            raise ApiError('invalid_request', 'Choose a project before starting a review.', projects=context['projects'])
+        request = {**request, 'pr': context['pr'], 'repository': context['repository'], 'forge': context['forge_project']['forge']}
     configuration = resolve(request)['settings']
     if 'catalogs' in request:
         validate_selection(configuration, request['catalogs'], reviewers=not bool(request.get('followup_threads')))
     request = {**request, **configuration}
     if request.get('session'):
-        session = Session({'session': request['session']})
+        session = Session({'session': request['session'], 'forge': request.get('forge'), 'repository': request.get('repository')})
         request = {**request, 'pr': session.manifest['pr'], 'repository': session.manifest['repository'],
-                   'session': str(session.root), 'cwd': checkout(session)}
+                   'forge': request_forge({'session': str(session.root)}), 'session': str(session.root), 'cwd': checkout(session)}
     from .common import git
     common = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=request.get('cwd', '.')).stdout.strip()
-    with operation({'common': common, 'pr': str(request.get('pr', '')).rstrip('/').split('/')[-1], 'kind': 'followup' if request.get('followup_threads') else 'review'}):
+    project = adapter(request_forge(request)).project(request['repository'])
+    with operation({**owner({'git_common_dir': common, 'pr': request['pr'], 'repository': project.repository, 'forge_project': project.saved()}, request.get('session')),
+                    'kind': 'followup' if request.get('followup_threads') else 'review'}):
         session = execute(request)
     current = Session({'session': str(session.root)})
     ready = session.path == current.path and session.manifest.get('status') == 'complete'
@@ -174,7 +214,7 @@ def processing_text(session, request, prompt, kind, comment_id):
     from .settings import from_manifest, validate
     configuration = from_manifest(session.manifest)
     env, _ = environment(configuration['processing_provider'])
-    with locked(session.pr_lock), operation({'common': session.manifest['git_common_dir'], 'pr': str(session.manifest['pr']), 'kind': kind}), usage.operation(session.root):
+    with locked(session.pr_lock), operation({**owner(session.manifest, session.root), 'kind': kind}), usage.operation(session.root):
         with tempfile.TemporaryDirectory(prefix='pr-review-adapt-') as neutral:
             args = adaptation_command(configuration)
             if kind == 'elaborate' and configuration['processing_provider'] == 'codex':

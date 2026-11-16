@@ -32,7 +32,7 @@ class GitLab:
         return Project('gitlab', 'gitlab.com', value.split('/', 1)[1].lower())
 
     def target(self, value):
-        match = re.fullmatch(r'https://(gitlab\.com/.+)/-/merge_requests/([1-9][0-9]*)/?', str(value), re.IGNORECASE)
+        match = re.fullmatch(r'https://(gitlab\.com/.+?)/(?:-/)?merge_requests/([1-9][0-9]*)(?:/(?:diffs|commits)(?:/[a-fA-F0-9]+)?)?/?(?:\?[^#]*)?(?:#.*)?', str(value), re.IGNORECASE)
         if match:
             return self.project(match[1]), int(match[2])
         if not re.fullmatch(r'[1-9][0-9]*', str(value)):

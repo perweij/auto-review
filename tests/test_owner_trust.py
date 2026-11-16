@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_review.common import ApiError
 from pr_review import owner_fixes, owner_git, owner_providers
 
+from pr_review.forge import adapter
+
 
 class ConfigurationTrustTest(unittest.TestCase):
     def setUp(self):
@@ -22,7 +24,8 @@ class ConfigurationTrustTest(unittest.TestCase):
         self.state = {"worktree": str(self.root), "metadata": {"baseRefOid": "base", "headRefOid": "head"}}
         self.changed = []
         self.tree_patch = ""
-        self.session = SimpleNamespace(repo=SimpleNamespace(git=Mock(side_effect=self.git), common=self.root, pr=1),
+        self.session = SimpleNamespace(repo=SimpleNamespace(git=Mock(side_effect=self.git), common=self.root, pr=1,
+                                                          project=adapter().project('github.com/org/repo')),
                                        path=self.root, save=Mock())
         # Even an ignored directory is scanned; Git reports no configuration in the tree.
         self.write(".gitignore", "CLAUDE.local.md\n.claude/\nignored/\n")

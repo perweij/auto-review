@@ -82,6 +82,7 @@
 (defun magit-auto-review-pull-requests (&optional directory)
   "Open the PR list for DIRECTORY, initially using only saved local data."
   (interactive)
+  (magit-auto-review--require-feature "pull-requests")
   (let* ((directory (or directory (magit-toplevel) default-directory))
          (repository magit-auto-review--repository)
          (result (magit-auto-review--call `((command . "pull-requests") (cwd . ,directory)

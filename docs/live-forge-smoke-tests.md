@@ -11,6 +11,23 @@ preset coverage. Production preset changes are outside this work.
 - `make smoke-fast`: scripted smoke only; no model quota.
 - `make smoke-extended`: smoke plus extended scripted functional cases; no model quota.
 
+`python3 tests/smoke-forges.py --scenario gitlab-emacs --suite smoke` creates a
+fresh controlled GitLab MR and drives the real Emacs commands in `emacs --batch`
+with scripted providers. This scenario explicitly requires Emacs 29.1+ and the
+same Lisp dependencies as `make check-emacs`. It is included in the extended
+suite; ordinary `make smoke-fast` remains independent of Emacs.
+
+The scenario stubs completion/confirmation prompts while recording their text,
+polls async completion with bounded timeouts, and exercises open, configure,
+run, edit, stage, declined preview, confirmed publication, reopen, resume,
+checkout and reports. At confirmation it captures the displayed read-only preview
+and frozen operation payloads. Native notes must match exactly after accounting
+only for the declared tracking-suffix omission. Assertions cover positions,
+inert slash commands, unchanged MR state, no duplicate notes and no implicit
+model work. Evidence is retained as `gitlab-emacs-evidence.json`. Automated batch
+results do not substitute for later interactive GUI inspection. No paid models
+are required or permitted by this scenario.
+
 Defaults use sibling `temp-eval-auto-review-github` and
 `temp-eval-auto-review-gitlab` checkouts. Advanced runner options select repositories,
 scenarios, retained run resume, or explicit cleanup. No studying a manual or
@@ -294,3 +311,27 @@ CLI idempotency. A final GitLab-only run, `state/forge-smoke/run-vt7k_qc7`, pass
 all six scenarios after HTML/fence quick-action hardening. See the
 [finding-publication evidence and retained comments](gitlab-pilot.md#controlled-finding-evidence--2026-11-16).
 No paid models were used.
+
+## GitLab Emacs validation — 2026-11-16
+
+`make -j3 check-all` passed 203 shell, 1,370 Python and 196 ERT tests, plus
+the real-process batch workflow.
+
+The real GitLab Emacs run `run-x5crfrk6` passed all four checks on
+[MR !23](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/23).
+Its `gitlab-emacs-evidence.json` records both confirmation prompts, the visible
+preview, frozen payloads and usage snapshots. The five native notes matched,
+including positions and inert slash commands; MR state and model-stage call
+counts stayed unchanged through publication, reopen/resume, checkout and reports.
+
+The smoke-fast run `run-32knzktz` completed all 19 scenarios after resuming the
+rate-limited GitLab cases. Initial authentication failures (`run-c78ylxjb` and
+`run-1wuc_col`), HTTP 429 responses and a later pre-write read timeout are retained
+as earlier attempts. The successful native runs used process-local Git credential
+helpers and a temporary `glab` wrapper spacing API starts by 0.95 seconds, below
+the account's reported burst limit. Run GitLab scenarios sequentially when that
+limit applies. No paid models were used.
+
+See the [GitLab validation record](gitlab-pilot.md#emacs-automated-validation--2026-11-16)
+for receipt links and remaining assisted work. Interactive GUI inspection remains
+pending and is separate from the passing automated batch checks.
