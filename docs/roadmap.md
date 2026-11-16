@@ -5,30 +5,35 @@ dates. Recently completed work is listed separately for tracking reconciliation.
 Current usage is documented in the [manual](manual.md) and
 [Emacs reference](../emacs/README.md).
 
-## Priority order (2026-11-10)
+## Priority order (2026-11-16)
 
-The next task is #17. This order favors clear interaction and completing existing
-workflows before introducing additional automation or forge support.
+The next planning task is GitLab Reviewer support in Emacs. Review, COMMENT
+publication, recovery and execution reports already work through the CLI/API;
+the frontend still assumes GitHub. Complete that user-facing workflow before
+expanding GitLab Owner and issue execution.
 
 | Priority | Work | Tracking and scope |
 | --- | --- | --- |
-| 1 | Command acknowledgment and human-attention signals | [#17](https://github.com/perweij/auto-review/issues/17): acknowledge recognized commands, explain rejected approvals, and mention the initiator when action is needed; no new configuration. |
-| 2 | Complete Owner configuration UI | [#14](https://github.com/perweij/auto-review/issues/14): add editing controls for final-review slots and synthesis, which are already displayed. Shared-engine prerequisite #27 is complete. |
-| 3 | Avoid unrelated Git configuration invalidating verification | [#33](https://github.com/perweij/auto-review/issues/33): narrowly tolerate proven-irrelevant metadata while retaining conservative integrity checks. |
+| 1 | GitLab Reviewer in Emacs | Automatically retain forge/project identity when opening an MR or saved session; expose supported review, publication, recovery, checkout and report actions. Keep unsupported actions out of the menus. MR listing can remain a separate increment. No matching open issue. |
+| 2 | GitLab Owner | Establish feedback and permission contracts, replies and resolve/reopen, then integrate fixing, verification and publication. Builds on the shared Owner engine and write adapters. No matching open issue. |
+| 3 | GitLab issue fixing | Define eligibility and issue-conversation behavior, then support planning, assignment, draft MR creation and ready transitions using the shared workflow. No matching open issue. |
 | 4 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
 | 5 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
 | 6 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
-| 7 | Further GitLab workflows | [#19–#25](https://github.com/perweij/auto-review/issues/19) are completed. MR reviews, COMMENT finding publication and execution-report notes are supported; Emacs integration, Owner and issue workflows remain future work. See [current GitLab capabilities](gitlab-pilot.md). |
-| 8 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
+| 7 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
 
-The forge series consists of identity/authentication (#19), review context (#20),
-review publication (#21), Owner remote operations (#22), issue eligibility facts
-(#23), issue remote writes (#24), and the read-only GitLab pilot (#25). All seven
-issues are closed as completed; they did not include general GitLab writes.
+The GitLab items are follow-ups beyond the completed #19–#25 forge series.
+Current GitLab support covers MR review, COMMENT findings and execution-report
+notes; see [capabilities and native validation evidence](gitlab-pilot.md).
+Approvals/request-changes, code suggestions, focused follow-up, MR listing and
+richer CI coverage are separate extensions, not prerequisites for this first
+Emacs increment. Hover tooltips remain deferred pending reliable hosted-renderer
+support; expandable report sections provide the detail today.
 
 ## Completed work and tracking reconciliation
 
-The following implementations are on remote `main` as of 2026-11-10:
+The following implementations are present in local `main`. This records completed
+work without assuming that every local commit has been pushed.
 
 - Accounting improvements: cumulative provider/role usage (`d989f82`) and
   unreliable-token diagnostics (`9a2f9cc`).
@@ -40,10 +45,28 @@ The following implementations are on remote `main` as of 2026-11-10:
 - [#29](https://github.com/perweij/auto-review/issues/29): planner draft,
   independent critique, and planner synthesis with durable stage reuse and
   accounting (`7d5968f`).
+- [#17](https://github.com/perweij/auto-review/issues/17): acknowledge issue
+  commands and highlight requests for human action (`18f4578`).
+- [#14](https://github.com/perweij/auto-review/issues/14): complete Emacs Owner
+  configuration with a unified settings draft (`01f7057`).
+- [#33](https://github.com/perweij/auto-review/issues/33): preserve Owner
+  verification after unrelated Git metadata changes (`c05ca2c`).
+- Session checkout access in Emacs and CLI (`a0dfd59`).
+- [#19–#25](https://github.com/perweij/auto-review/issues/19): forge identity,
+  normalized context, shared write contracts and the initial GitLab review pilot.
+  All seven issues are closed; their scope did not include general GitLab writes.
+- [#39](https://github.com/perweij/auto-review/issues/39): economical settings
+  across issue-workflow roles, merged through PR #41 (`8894708`).
+- Execution reports for issue workflows (`3380f7b`), standalone Owner sessions
+  (`9ec3872`) and plain reviews (`d67595c`), with recorded stage outcomes and
+  causal links (`582c101`). Reports support newly traced sessions; historical
+  session reconstruction is outside scope.
+- GitLab MR execution-report publication (`7313be5`) and COMMENT finding
+  publication with durable receipt recovery (`dcbbfe8`).
 
-These three feature issues were closed as completed on 2026-11-10, with links to
-their implementation commits. The remaining 11 open issues are covered above.
-All existing PRs were already closed when checked.
+GitHub was checked on 2026-11-16: #18 is the only open issue and there are no open
+PRs. The completed feature issues above are closed. The remaining local roadmap
+items do not yet have matching open issues.
 
 GitHub bookkeeping is reconciled: #14 and #19–#25 now reference completed #27 /
 PR #28 instead of deleted #13; the forge series acknowledges completed #15 /
