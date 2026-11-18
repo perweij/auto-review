@@ -242,10 +242,11 @@ def request_forge(request):
 def capabilities(kind=None):
     """The public feature contract, shared by resolution, views and dispatch."""
     forge = adapter(kind)
-    features = ['report-publication', 'generations', 'inline-context', 'drafts', 'history',
+    env_commands = ['environment-' + action for action in ('show', 'save', 'generate', 'apply')]
+    features = ['environment-profiles', 'report-publication', 'generations', 'inline-context', 'drafts', 'history',
                 'inline-publication', 'operations', 'conversations', 'automatic-review',
                 'usage-reporting', 'finding-elaboration', 'checkout', 'discovery']
-    commands = ['review-target', 'capabilities', 'review-report', 'review-publish-report', 'checkout',
+    commands = [*env_commands, 'review-target', 'capabilities', 'review-report', 'review-publish-report', 'checkout',
                 'discover', 'settings', 'models', 'read', 'review-log', 'history', 'diff', 'file',
                 'preview-comment', 'mutate', 'refresh', 'prepare', 'publish', 'resolve', 'run',
                 'automatic-review', 'elaborate', 'cancel']

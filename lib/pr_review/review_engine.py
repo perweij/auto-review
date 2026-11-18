@@ -480,11 +480,17 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
     commands = read_json(run.path / 'logs/commands.json', [])
     commands.append(dict(stage=stage, time=now(), cwd=str(cwd), argv=argv))
     write_json(run.path / 'logs/commands.json', commands)
-    context = adapter.begin_stage(run, stage, slot, provider, env)
+    from . import environment
+    profile = environment.stage_profile(run, stage)
+    temporary = None
+    context = None
     workspace = None
     try:
+        if not profile and stage == 'synthesis':
+            say('Environment setup unconfigured.')
+        context = adapter.begin_stage(run, stage, slot, provider, env)
         actual_argv = argv
-        if slot:
+        if slot or (profile and adapter.name == 'pr'):
             from . import isolation
             workspace = isolation.IndependentWorkspace(run, stage, provider, adapter.workspace_inputs(run, stage, slot))
             before_names = set(env)
@@ -495,6 +501,23 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
             commands[-1].update(cwd=str(cwd), source_worktree=str(run.worktree),
                                 isolation='private-snapshot-container-v1', workspace_argv=actual_argv)
             write_json(run.path / 'logs/commands.json', commands)
+        if profile:
+            if workspace:
+                workspace.verify()
+            temporary = tempfile.TemporaryDirectory(dir=run.scratch)
+            logs = Path(tempfile.mkdtemp(prefix='environment-' + stage + '-', dir=run.path / 'logs'))
+            report = environment.prepare(profile, run.repo.project, cwd, Path(temporary.name), logs, env)
+            record['environment'] = report
+            run.save()
+            if workspace:
+                workspace.verify()
+                tracked = workspace.tracked
+            else:
+                run.verify_checkout(stage, 'after environment preparation')
+                tracked = run.checkouts[stage]
+            from .isolation import _git
+            tracked.update(_git(cwd, 'ls-files', '--others', '-z').stdout.split('\0'))
+            actual_argv, input_bytes = environment.provider_guidance(actual_argv, input_bytes, environment.guidance(report))
         result = runner(actual_argv, cwd=cwd, env=env, input_bytes=input_bytes,
                         timeout=run.runtime.model_timeout,
                         stdout_path=output, stderr_path=stderr, model_events=True, stage=stage,
@@ -524,6 +547,8 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
             adapter.interrupted(run, stage, context)
         raise
     finally:
+        if temporary:
+            temporary.cleanup()
         # Retain both private reviewer artifacts and shared-worktree artifacts
         # after the child stops, including cancellation and resource exhaustion.
         try:
@@ -538,7 +563,8 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
                     workspace.close()
         finally:
             try:
-                adapter.end_stage(run, stage, slot, context)
+                if context is not None:
+                    adapter.end_stage(run, stage, slot, context)
             finally:
                 run.save()
     record.update(exit_status=result.returncode, finished_at=now())

@@ -5,6 +5,7 @@ launch-time source to a Git tree; before/after integrity checks reject modificat
 It uses the host development environment, not a security sandbox or CI attestation.
 """
 import copy
+import json
 import os
 from pathlib import Path
 import re
@@ -42,6 +43,11 @@ def parse_command(command):
         environment[name] = value
     if not args or any('smoke' in a.lower() for a in args):
         return None
+    wrapper = []
+    if args[0] == 'pr-review-check':
+        if len(args) < 3 or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]*', args[1]):
+            return None
+        wrapper, args = args[:2], args[2:]
     program = args[0]
     if re.fullmatch(r'python(?:3(?:\.\d+)?)?', program):
         valid = len(args) >= 3 and args[1] == '-m' and args[2] in ('unittest', 'pytest')
@@ -51,7 +57,7 @@ def parse_command(command):
         valid = len(args) > 1 and all(re.fullmatch(r'(?:check|test|lint|verify)(?:[-_][A-Za-z0-9_-]+)?', a) for a in args[1:])
     else:
         valid = False
-    return (args, environment) if valid else None
+    return (wrapper + args, environment) if valid else None
 
 
 def approved_commands(session, state):
@@ -203,6 +209,7 @@ def collect(session, state, batch, blockers):
         trace_handle = session_trace.start('verification', inputs=[batch.get('trace_acceptance')], artifact=directory / 'result.json',
             context={'batch': batch['id'], 'candidate': tree, 'command': command})
         started = time.monotonic()
+        private = None
         raised = None
         try:
             verify_live(run, 'before')
@@ -214,6 +221,34 @@ def collect(session, state, batch, blockers):
                        GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null', GIT_TERMINAL_PROMPT='0')
             env.update(overrides)
             env['PATH'] = isolation._safe_path(env.get('PATH', ''))
+            profile = batch.get('environment_profile')
+            if profile:
+                import tempfile
+                from . import environment
+                private = tempfile.TemporaryDirectory(dir=directory)
+                report = environment.prepare(profile, session.repo.project, run.checkout_path(stage),
+                                             Path(private.name), directory / 'environment', env,
+                                             remaining=remaining - (time.monotonic() - started), test_overrides=overrides)
+                run.verify_checkout(stage, 'after preparation')
+                value['environment_profile_hash'] = report['profile']
+                if args[0] == 'pr-review-check':
+                    name = args[1]
+                else:
+                    roots = [k for k, spec in profile['projects'].items() if Path(spec['directory']) == Path('.')]
+                    if len(roots) != 1:
+                        raise ApiError('verify_environment', 'Specify pr-review-check PROJECT in the approved check.')
+                    name = roots[0]
+                    args = ['pr-review-check', name, *args]
+                if report['projects'].get(name, {}).get('status') != 'ready':
+                    record['environment_setup_failed'] = name
+                    raise ApiError('verify_environment', f'Project {name} unavailable. See {directory}/environment/report.json')
+                value['project'] = name
+                value['project_directory'] = profile['projects'][name]['directory']
+                runtime_project = json.loads((Path(private.name) / 'bin/projects.json').read_text())[name]
+                value['expanded_argv'] = runtime_project['prefix'] + args[2:]
+                value['cwd'] = runtime_project['cwd']
+            elif args[0] == 'pr-review-check':
+                raise ApiError('verify_environment', 'The approved command requires an environment profile.')
             argv = [isolation._executable(args[0], env['PATH']), *args[1:]]
             value['argv'] = argv
             emit('progress', message=f'Collecting verification evidence for candidate {tree[:12]}: {command}')
@@ -231,6 +266,8 @@ def collect(session, state, batch, blockers):
             if getattr(exc, 'code', '') in ('cancelled', 'resource_limit', 'integrity_failed', 'worktree_changed'):
                 raised = exc
         finally:
+            if private:
+                private.cleanup()
             try:
                 verify_live(run, 'after')
             except ApiError as exc:

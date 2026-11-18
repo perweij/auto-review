@@ -461,8 +461,16 @@ def execute(session, state, batch, remote):
                 continue  # Same candidate; only synthesis receives the new evidence.
             # An incomplete review writes no proof. The phase stays 'review', so
             # resume reruns only the stages that lack valid evidence.
+            failed_projects = sorted({name for stage in batch.get('attempts', [])[-1].get('stages', {}).values()
+                                      for name in stage.get('environment_failures', [])}) if batch.get('attempts') else []
+            for check in batch.get('verification_runs', []):
+                project_name = check.get('environment_setup_failed')
+                if (isinstance(project_name, str) and check.get('tree') == batch['checkpoint']['tree']
+                        and check.get('epoch') == batch.get('review_reruns', {}).get('synthesis')
+                        and project_name not in failed_projects):
+                    failed_projects.append(project_name)
             raise ApiError('review_incomplete', 'Acceptance review could not finish: ' + result.value['summary'],
-                           summary=result.value['summary'], artifact=str(result.artifact),
+                           summary=result.value['summary'], artifact=str(result.artifact), environment_failures=failed_projects,
                            verification_blockers=result.value.get('verification_blockers', []),
                            next_action=verification_action(result.value.get('verification_blockers', [])))
         if review_history.enabled(batch):

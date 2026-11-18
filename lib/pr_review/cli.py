@@ -36,6 +36,9 @@ def parser():
 def main(argv=None):
     os.umask(0o077)
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == 'environment':
+        from .environment_commands import cli
+        return cli(argv[1:])
     if argv and argv[0] == 'api':
         from .api import main as api
         api()

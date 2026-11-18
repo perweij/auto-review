@@ -86,6 +86,29 @@ def preserve_generated(checkout, tracked, logs, run_path, stage):
     return archive, retained
 
 
+def verify_checkout(checkout, verifier, expected_head, base_ref, expected_base):
+    """Verify the detached commit and tracked files with the controller's Git index."""
+    gitdir = checkout / '.git'
+    if gitdir.is_symlink() or not gitdir.is_dir():
+        raise ApiError('integrity_failed', 'Independent reviewer changed its isolated Git directory')
+    # Verify content using a saved Git directory and fresh index, never the
+    # reviewer's index, filters, hooks or config. These are integrity guards,
+    # not protection from a process deliberately attacking the controller.
+    prefix = ['--git-dir=' + str(verifier), '--work-tree=' + str(checkout)]
+    def invoke(*args):
+        return _git(checkout, *prefix, *args)
+    head = _git(checkout, 'rev-parse', 'HEAD')
+    base = _git(checkout, 'rev-parse', base_ref)
+    (verifier / 'index').unlink(missing_ok=True)
+    invoke('read-tree', expected_head)
+    invoke('add', '-u', '--', '.')
+    staged = _git(checkout, 'write-tree').stdout.strip()
+    tree = invoke('write-tree').stdout.strip()
+    expected = invoke('rev-parse', expected_head + '^{tree}').stdout.strip()
+    if (head.stdout.strip() != expected_head or base.stdout.strip() != expected_base or tree != expected or staged != expected):
+        raise ApiError('integrity_failed', 'Independent reviewer changed its isolated snapshot')
+
+
 @dataclass
 class WorkspaceInputs:
     """Everything a reviewer workspace needs from its workflow, without PR attributes."""
@@ -215,25 +238,7 @@ class IndependentWorkspace:
         return [(str(self.root / 'result.md') if arg == output else arg) for arg in command], env
 
     def verify(self):
-        gitdir = self.checkout / '.git'
-        if gitdir.is_symlink() or not gitdir.is_dir():
-            raise ApiError('integrity_failed', 'Independent reviewer changed its isolated Git directory')
-        # Verify content using a saved Git directory and fresh index, never the
-        # reviewer's index, filters, hooks or config. These are integrity guards,
-        # not protection from a process deliberately attacking the controller.
-        prefix = ['--git-dir=' + str(self.verifier), '--work-tree=' + str(self.checkout)]
-        def invoke(*args):
-            return _git(self.checkout, *prefix, *args)
-        head = _git(self.checkout, 'rev-parse', 'HEAD')
-        base = _git(self.checkout, 'rev-parse', self.inputs.base_ref)
-        (self.verifier / 'index').unlink(missing_ok=True)
-        invoke('read-tree', self.inputs.head)
-        invoke('add', '-u', '--', '.')
-        staged = _git(self.checkout, 'write-tree').stdout.strip()
-        tree = invoke('write-tree').stdout.strip()
-        expected = invoke('rev-parse', self.inputs.head + '^{tree}').stdout.strip()
-        if (head.stdout.strip() != self.inputs.head or base.stdout.strip() != self.inputs.base or tree != expected or staged != expected):
-            raise ApiError('integrity_failed', 'Independent reviewer changed its isolated snapshot')
+        verify_checkout(self.checkout, self.verifier, self.inputs.head, self.inputs.base_ref, self.inputs.base)
 
     def preserve_generated(self):
         """Retain untracked files without placing them in another reviewer's tree."""

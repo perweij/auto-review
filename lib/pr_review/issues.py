@@ -1230,6 +1230,9 @@ def dispatch(request):
                 for blocker in exc.details.get('verification_blockers', []):
                     body += ('\n\nVerification blocked: ' + blocker['command'] + '\n' + blocker['reason']
                              + '\nManual verification: ' + blocker['manual_command'])
+                if exc.details.get('environment_failures'):
+                    body = ('Verification environment setup failed for ' + ', '.join(exc.details['environment_failures'])
+                            + '. Inspect the local verification report and resume after addressing the failure.')
                 try:
                     flow.writes.comment(body, 'execution-stop:' + digest(body))
                 except ApiError as notice_error:

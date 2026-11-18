@@ -36,6 +36,18 @@ class Review(Store):
 
     def configure(self, kind, threads):
         self.scope(kind, threads)
+        pending_profile = self.root / 'environment-apply.json'
+        intent = read_json(pending_profile, None)
+        from .state import generation
+        if intent and intent['generation'] in {generation(self.path, self.manifest),
+                                              generation(self.current, read_json(self.current / 'manifest.json'))}:
+            self.begin()
+            self.manifest['environment_profile'] = intent['profile']
+            self.save()
+            pending_profile.unlink()
+        elif not getattr(self, 'resuming', False):
+            from .environment import capture
+            capture(self.manifest, self.repo.project)
         if (settings.effective_review(settings.from_manifest(self.manifest)) != settings.effective_review(self.settings) and
                 any(self.manifest['phases'].get(s, {}).get('status') == 'completed' for s in ('synthesis', 'followup'))):
             self.begin()
@@ -172,6 +184,8 @@ class Review(Store):
         old = self.manifest.get('snapshot', {})
         if old and any(old[k] != snapshot[k] for k in ('head', 'merge_base')):
             self.update_snapshot(snapshot)
+            from .environment import capture
+            capture(self.manifest, self.repo.project)
         if not self.worktree.exists() and self.manifest['phases'].get('setup', {}).get('status') != 'completed':
             self.repo.git('worktree', 'add', '--detach', str(self.worktree), head)
         if not self.worktree.is_dir() or self.repo.git('rev-parse', '--path-format=absolute', '--git-common-dir', cwd=self.worktree).stdout.strip() != str(self.repo.common):

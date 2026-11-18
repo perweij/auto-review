@@ -14,6 +14,9 @@
 
 (declare-function magit-auto-review-owner-show-import "magit-auto-review-owner" (result directory))
 
+(declare-function magit-auto-review-owner--start "magit-auto-review-owner" (request &optional callback))
+(declare-function magit-auto-review-owner--request "magit-auto-review-owner" (command &rest fields))
+(declare-function magit-auto-review-owner--batch-at-point "magit-auto-review-owner" ())
 (defvar-local magit-auto-review--checkout-event nil)
 
 (defun magit-auto-review-execution-report ()
@@ -836,6 +839,73 @@
   (magit-auto-review--require-feature "suggested-changes")
   (transient-setup 'magit-auto-review-suggestion-menu))
 
+(defvar-local magit-auto-review-environment--save-request nil)
+
+(defun magit-auto-review-environment-available-p ()
+  "Return whether the backend advertises environment profiles."
+  (member "environment-profiles" (alist-get 'features magit-auto-review--capabilities)))
+
+(defun magit-auto-review-environment--request (action)
+  (let ((command (concat "environment-" action)))
+    (if (derived-mode-p 'magit-auto-review-owner-mode)
+        (let ((batch (magit-auto-review-owner--batch-at-point)))
+          (when (and (equal action "apply") (not batch))
+            (user-error "Select a stopped fix batch first"))
+          (magit-auto-review-owner--request command `(batch . ,(alist-get 'id batch))))
+      (magit-auto-review--request command))))
+
+(defun magit-auto-review-environment-generate ()
+  "Generate and save a profile using Codex."
+  (interactive)
+  (let ((request (magit-auto-review-environment--request "generate"))
+        (done (lambda (_result) (message "Environment profile saved. Inspect/Edit opens the recipe."))))
+    (if (derived-mode-p 'magit-auto-review-owner-mode)
+        (magit-auto-review-owner--start request done)
+      (magit-auto-review--start request done))))
+
+(defun magit-auto-review-environment-edit ()
+  "Open the repository profile for inspection and editing."
+  (interactive)
+  (let* ((request (magit-auto-review-environment--request "save"))
+         (view (magit-auto-review--call (magit-auto-review-environment--request "show")))
+         (profile (alist-get 'profile_text view)))
+    (unless (stringp profile) (user-error "Environment setup unconfigured. Choose Generate first"))
+    (pop-to-buffer (generate-new-buffer "*Review environment*"))
+    (setq-local magit-auto-review-environment--save-request request)
+    (insert profile)
+    (goto-char (point-min))
+    (use-local-map (make-sparse-keymap))
+    (local-set-key (kbd "C-c C-c") #'magit-auto-review-environment-save)
+    (message "Edit the profile, then C-c C-c to validate and save")))
+
+(defun magit-auto-review-environment-save ()
+  "Validate and save this environment profile."
+  (interactive)
+  (magit-auto-review--call
+   (append magit-auto-review-environment--save-request
+           `((profile_text . ,(buffer-substring-no-properties (point-min) (point-max))))))
+  (set-buffer-modified-p nil)
+  (message "Environment profile saved"))
+
+(defun magit-auto-review-environment-apply ()
+  "Preview and apply the saved profile to this review."
+  (interactive)
+  (let* ((request (magit-auto-review-environment--request "apply"))
+         (preview (magit-auto-review--call (append request '((preview . t))))))
+    (if (not (magit-auto-review--true-p (alist-get 'changed preview)))
+        (message "This run already uses the saved profile")
+      (when (yes-or-no-p (format "Apply profile and reverify %s on resume? "
+                                 (mapconcat #'identity (alist-get 'stages preview) ", ")))
+        (magit-auto-review--call (append request `((expected_hash . ,(alist-get 'profile_hash preview)))))
+        (message "Profile applied. Resume the selected review.")))))
+
+(transient-define-prefix magit-auto-review-environment-menu ()
+  "Manage the repository verification environment."
+  [["Verification environment"
+    ("g" "Generate with Codex" magit-auto-review-environment-generate)
+    ("e" "Inspect/Edit profile" magit-auto-review-environment-edit)
+    ("a" "Apply to stopped review" magit-auto-review-environment-apply)]])
+
 (transient-define-prefix magit-auto-review-dispatch ()
   "Inspect, edit, stage, and publish contextual review comments."
   [:class transient-column :setup-children magit-auto-review--context-help]
@@ -852,6 +922,7 @@
     ("f" "New follow-up draft" magit-auto-review-follow-up :if (lambda () (and (magit-auto-review--mutable-p) (magit-auto-review--status-p "published"))))]
    ["Context and history"
     ("w" "Open checkout" magit-auto-review-open-checkout)
+    ("Y" "Verification environment" magit-auto-review-environment-menu :if magit-auto-review-environment-available-p)
     ("J" "Execution report" magit-auto-review-execution-report-menu)
     ("E" "Elaborate finding (model)" magit-auto-review-elaborate)
     ("C" "Conversations and follow-up" magit-auto-review-conversations :if (lambda () magit-auto-review--review))

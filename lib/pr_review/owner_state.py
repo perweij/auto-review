@@ -279,6 +279,8 @@ class OwnerSession:
 
     def view(self, state=None):
         result = copy.deepcopy(state or self.load())
+        from .forge import capabilities
+        result['capabilities'] = capabilities(self.repo.project.forge)
         superseded = superseded_batches(result)
         for batch in result["batches"]:
             batch.pop("superseded_by", None)

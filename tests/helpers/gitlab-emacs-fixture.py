@@ -39,6 +39,13 @@ def main():
         git('push', '-q', remote, base + ':refs/heads/main', 'HEAD:refs/merge-requests/7/head', cwd=repo)
         git('remote', 'add', 'origin', 'https://gitlab.com/group/sub/repo.git', cwd=repo)
         git('config', '--global', 'url.' + str(remote) + '.insteadOf', 'https://gitlab.com/group/sub/repo.git')
+        profile = root / 'verification.json'
+        profile.write_text(json.dumps({'version': 1, 'projects': {'root': {
+            'directory': '.', 'readiness': [[sys.executable, '-c',
+                'from pathlib import Path; assert Path("price.py").is_file()']]}}}))
+        subprocess.run([str(ROOT / 'bin/pr-review'), 'environment', 'save', '--repo',
+                        'gitlab.com/group/sub/repo', '--file', str(profile)], env=env, cwd=repo,
+                       stdout=subprocess.DEVNULL, check=True)
         for tool in ('claude', 'codex'):
             (binary / tool).symlink_to(ROOT / 'tests/helpers/mock-cli')
         (binary / 'glab').symlink_to(ROOT / 'tests/helpers/mock-glab.py')
@@ -56,6 +63,9 @@ def main():
                            cwd=ROOT, env=env, check=True, timeout=300)
             evidence = json.loads((root / 'evidence.json').read_text())
             verify(evidence, json.loads((root / 'gitlab-notes.json').read_text()))
+            reports = list((root / 'state').rglob('environment-synthesis-*/report.json'))
+            if not reports or any(json.loads(p.read_text())['projects']['root']['status'] != 'ready' for p in reports):
+                raise AssertionError('PR synthesis did not verify the prepared checkout')
             calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
             if any(c['tool'] == 'gh' for c in calls):
                 raise AssertionError('GitLab Emacs invoked gh')

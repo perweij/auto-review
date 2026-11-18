@@ -8,6 +8,9 @@ from . import operations, publication, settings, models, workflow, pulls
 
 
 def dispatch(request):
+    if str(request.get('command')).startswith('environment-'):
+        from .environment_commands import dispatch as environment_dispatch
+        return environment_dispatch(request)
     if request.get('command') == 'review-target':
         from .review_target import resolve
         return resolve(request)

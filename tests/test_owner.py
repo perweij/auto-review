@@ -931,6 +931,30 @@ class OwnerTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), local)
         self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
 
+    def test_applied_profile_can_resume_after_exact_local_baseline_was_pushed(self):
+        self.request("owner-fix", items=["thread:T1"])
+        local = self.commit_fix(push=False)
+
+        def incomplete(*args):
+            report = self.model(*args)
+            if args[3] == 'review' and 'scope' in args[4]:
+                report.update(complete=False, blocking=['Missing pytest'])
+            return report
+
+        with patch('pr_review.owner_providers.invoke', side_effect=incomplete):
+            paused = self.request('owner-fix', items=['thread:T2'])['batches'][-1]
+        self.assertEqual(paused['status'], 'paused')
+        self.assertEqual(paused['baseline'], local)
+        self.git('update-ref', 'refs/pull/7/head', local)
+        self.metadata['headRefOid'] = local
+        self.request('environment-save', profile={'version': 1, 'projects': {'root': {'directory': '.'}}})
+        self.request('environment-apply', batch=paused['id'])
+        self.calls.clear()
+        resumed = self.request('owner-fix', batch=paused['id'])['batches'][-1]
+        self.assertEqual([role for role, _ in self.calls], ['review'])
+        self.assertEqual(resumed['remote_head'], local)
+        self.assertEqual(resumed['status'], 'ready')
+
     def test_behind_owner_worktree_preserves_unstaged_staged_and_untracked_changes(self):
         worktree = self.prepare_owner()
         remote = self.advance_pr()

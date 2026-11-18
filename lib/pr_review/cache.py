@@ -97,6 +97,10 @@ def inputs(run, stage, *, followup_input=None, followup_prompt=None):
                     merge_base=run.manifest['snapshot']['merge_base'],
                     cli_version=cli_version,
                     command=cache_command(run.command(stage)), artifacts=artifacts)
+    from .environment import VERSION, identity as profile_identity, stage_profile
+    profile = stage_profile(run, stage)
+    if profile:
+        identity['environment'] = dict(profile=profile_identity(profile), runner=VERSION)
     rerun = getattr(run, 'batch', {}).get('review_reruns', {}).get(stage)
     if rerun:
         identity['review_rerun'] = rerun
@@ -140,6 +144,8 @@ def reusable(run, stage, output, expected):
                    for k in ('provider', 'model', 'effort')) for slot in slots):
             return False
     record = run.manifest.get('phases', {}).get(stage, {})
+    if any(p['status'] != 'ready' for p in record.get('environment', {}).get('projects', {}).values()):
+        return False
     if not output.is_file() or not output.stat().st_size or record.get('status') != 'completed' or record.get('output_hash') != hash_file(output):
         return False
     # Older versions accepted these provider diagnostics as completed reports.

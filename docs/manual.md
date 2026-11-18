@@ -1821,3 +1821,49 @@ write failed. Retrying checks for the receipt without sending another note.
 Definitive API rejections, such as permission denial or rate limiting, remain
 retryable after the underlying problem is resolved.
 Local reports and review results remain available after publication failure.
+
+### Preparing the verification environment
+
+From a Reviewer or Owner buffer, open the command menu with `?` and choose
+**Y → Generate with Codex**. Select the relevant batch first when its candidate
+includes local fixes. Generation inspects the candidate and saves its recipe
+under the repository’s forge identity in the persistent pr-review state volume.
+**Inspect/Edit** opens the saved JSON. Use `C-c C-c` to save edits.
+
+New reviews use the saved profile. For an existing stopped fix, select its
+batch, choose **Y → Apply to stopped review**, inspect the preview, then resume
+with `r`. Merely generating or editing a recipe does not update that batch.
+
+The terminal equivalents are `pr-review environment show|generate|save|apply`.
+Use `--session PATH --batch ID` for an Owner batch or `--session PATH` for a PR
+review, `save --file profile.json` to import a recipe, and `apply --preview`
+to see what applying it will change.
+
+For example, the following project uses the checked-in development dependencies
+for a nested uv package:
+
+```json
+{
+  "version": 1,
+  "projects": {
+    "quality": {
+      "directory": "tools/quality",
+      "setup": [["uv", "sync", "--locked", "--group", "dev"]],
+      "environment": {
+        "UV_PROJECT_ENVIRONMENT": "{scratch}/venv",
+        "UV_CACHE_DIR": "{cache}",
+        "UV_LINK_MODE": "copy"
+      },
+      "prefix": ["uv", "run", "--no-sync"],
+      "readiness": [["python", "-c", "import pytest, dotenv"]]
+    }
+  }
+}
+```
+
+Reviewers run `pr-review-check quality pytest tests/test_source_collection.py`
+in the prepared checkout. Setup and readiness share a 600-second allowance
+(configurable with `timeout` up to 1800 seconds) and a 16 MiB log limit.
+Preparation failures are recorded under the attempt's environment logs and
+provided to review as evidence. Required checks that could not run must be
+identified in the assessment.

@@ -57,6 +57,19 @@ class VerificationRecoveryTest(ScriptedProviders, unittest.TestCase):
         self.assertIn('controller_verification', self.stdin_copy.read_text())
         self.assertEqual([], self.last()['review_history']['cycles'])
 
+    def test_profile_routes_approved_check_and_records_environment(self):
+        from pr_review.environment_commands import dispatch
+        dispatch({'command': 'environment-save', 'session': str(self.session.path),
+                  'profile': {'version': 1, 'projects': {'checks': {
+                      'directory': '.', 'readiness': [['python3', '-c', 'import unittest']]}}}})
+        self.command_text = 'pr-review-check checks python3 -m unittest test_verification_case'
+        self.test_missing_source_identity_collects_candidate_evidence_and_resumes_synthesis()
+        batch = self.last()
+        receipt = issue_verification.index(batch)[0]
+        self.assertEqual(receipt['project'], 'checks')
+        self.assertEqual(receipt['expanded_argv'], ['python3', '-m', 'unittest', 'test_verification_case'])
+        self.assertEqual(len(receipt['environment_profile_hash']), 64)
+
     def test_real_approved_paragraph_collects_without_a_selection_mock(self):
         from pr_review import owner_import
         owner_import.from_issue(self.session,

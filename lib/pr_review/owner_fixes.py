@@ -386,7 +386,12 @@ def _execute(session, state, request):
                 orphaned = [a for a in batch["attempts"] if a["status"] == "running"]
                 for attempt in orphaned:
                     attempt.update(status="interrupted", finished_at=now(), error="Owning operation ended before recording completion.")
-                if batch["remote_head"] != remote or session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip() != batch["baseline"]:
+                local_head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
+                published_baseline = (not is_harness and remote == local_head == batch["baseline"]
+                                      and batch["remote_head"] != remote
+                                      and batch.get('environment_applied_at_remote') == batch["remote_head"]
+                                      and workspace.ancestor(session, batch["remote_head"], remote))
+                if local_head != batch["baseline"] or (batch["remote_head"] != remote and not published_baseline):
                     # A human commit ends execution of this batch, but its accepted
                     # tree remains eligible for subsequent commit association.
                     if batch["status"] == "ready":
@@ -443,6 +448,9 @@ def _execute(session, state, request):
                         for task in batch["tasks"]:
                             if task['status'] != 'skipped' and any(current.get(k) != batch["fingerprints"].get(k) for k in task["items"]):
                                 task["status"] = "queued"
+                if published_baseline:
+                    # The remote now contains the exact local baseline already used for these tasks.
+                    batch["remote_head"] = remote
                 same_settings = (issue_settings(batch["settings"]) == issue_settings(state["settings"]) if is_harness
                                  else batch["settings"] == state["settings"])
                 if not same_settings:
@@ -473,12 +481,20 @@ def _execute(session, state, request):
                     batch.update(execution_kind='issue_harness', harness_phase='implement',
                                  harness_before=copy.deepcopy(snapshot))
                     review_history.initialize(batch, request)
+                from .environment import capture
+                capture(batch, session.repo.project)
                 state["batches"].append(batch)
                 session.save(state)
                 if not is_harness:
                     from . import owner_reports
                     owner_reports.attach(session, state, batch, new=True)
             workspace.trust(session, state, batch["checkpoint"]["tree"], approval=request.get("trusted_snapshot"))
+            if is_harness and request.get('batch') and not request.get('rerun_review') and any(
+                    r.get('environment_setup_failed') and r['tree'] == batch['checkpoint']['tree']
+                    and r.get('epoch') == batch.get('review_reruns', {}).get('synthesis')
+                    for r in batch.get('verification_runs', [])):
+                from .issue_settings import request_rerun
+                request_rerun(session, state, batch, ['synthesis'], uuid.uuid4().hex)
             if is_harness and request.get('rerun_review'):
                 from .issue_settings import request_rerun
                 request_rerun(session, state, batch, request['rerun_review'], request.get('review_rerun_id'))

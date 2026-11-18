@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -10,6 +11,11 @@ from pr_review.common import ApiError
 
 
 class SlotSettingsTest(unittest.TestCase):
+    def saved_directory(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return Path(directory.name)
+
     def test_legacy_artifact_mapping_survives_configuration_upgrade(self):
         from pr_review.reviews import Review
         for pending in (False, True):
@@ -21,7 +27,8 @@ class SlotSettingsTest(unittest.TestCase):
             review.settings = settings.validate(settings.from_manifest(review.manifest))
             review.runtime = SimpleNamespace(permission='default')
             review.tools, review.viewer, review.permission = {}, None, None
-            review.path = Path('/pending' if pending else '/saved')
+            review.root = self.saved_directory()
+            review.path = review.root / ('pending' if pending else 'saved')
             review.scope, review.begin, review.save = Mock(), Mock(), Mock()
             with patch('pr_review.reviews.say'):
                 review.configure('review', [])
@@ -325,7 +332,8 @@ class SlotSettingsTest(unittest.TestCase):
         review.settings = settings.validate(settings.from_manifest(review.manifest))
         review.runtime = SimpleNamespace(permission='default')
         review.tools, review.viewer, review.permission = {}, None, None
-        review.path = Path('/tmp')
+        review.path = review.root = self.saved_directory()
+        review.resuming = True
         review.scope, review.begin, review.save = Mock(), Mock(), Mock()
         with patch('pr_review.reviews.say'):
             review.configure('review', [])
@@ -358,7 +366,8 @@ class SlotSettingsTest(unittest.TestCase):
                 review.settings = config
                 review.runtime = SimpleNamespace(permission='default')
                 review.tools, review.viewer, review.permission = {}, None, None
-                review.path = Path('/unused')
+                review.path = review.root = self.saved_directory()
+                review.resuming = True
                 review.scope, review.begin, review.save = Mock(), Mock(), Mock()
                 with patch('pr_review.reviews.say'):
                     review.configure('full', [])

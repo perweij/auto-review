@@ -114,6 +114,10 @@ class CandidateReview:
             for key in ('stdout_log', 'stderr_log', 'generated_archive', 'artifact', 'failure_reason'):
                 if record.get(key):
                     entry[key] = record[key]
+            if record.get('environment'):
+                entry['environment_report'] = str(Path(record['environment']['logs']) / 'report.json')
+                entry['environment_failures'] = [name for name, project in record['environment']['projects'].items()
+                                                 if project['status'] == 'failed']
             output = self.path / 'reviews' / (f'{stage}.md' if stage != 'synthesis' else 'synthesis.json')
             if record.get('status') == 'completed' and output.is_file():
                 entry['output'] = str(output)

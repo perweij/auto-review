@@ -1281,3 +1281,17 @@ New generations carry a persistent execution-report identity. Replacement and
 snapshot transitions create new identities, while resumes retain the existing
 identity. Report storage is excluded from generation copying. Reviewer views
 expose `execution_report` and `report_warning` metadata.
+
+### Repository environment profiles
+
+The `environment-profiles` capability enables `environment-show`,
+`environment-generate`, `environment-save` and `environment-apply` on either
+forge. Supply a saved `session` (and `batch` for Owner Apply), or `cwd` with an
+optional repository/forge for repository operations. Show returns `profile`
+and editable `profile_text`. Save accepts a `profile` object or its JSON text.
+Generate uses Codex and returns the saved profile with source commit, model
+choice and local generation log directory.
+
+Apply with `preview: true` returns `changed`, `stages` and `profile_hash`.
+Submit `expected_hash` with the subsequent Apply to detect a changed recipe.
+Owner also checks a supplied state revision. Applying does not start a review.

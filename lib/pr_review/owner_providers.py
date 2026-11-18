@@ -274,9 +274,38 @@ def invoke(session, state, batch, role, context):
     session.save(state)
     emit("progress", message=f"Owner {role}: {choice['provider']} / {choice['model']} ({choice['effort']})")
     try:
-        result = run(args, cwd=state["worktree"], env=env, input_bytes=prompt.encode(),
-                     timeout=Runtime.environment().model_timeout, stdout_path=directory / "events.jsonl",
-                     stderr_path=directory / "stderr.log", model_events=True, stage="owner-" + role, usage_call=usage.choice('owner/' + role, choice))
+        from contextlib import ExitStack
+        with ExitStack() as cleanup:
+            cwd = state['worktree']
+            if role == 'review' and batch.get('environment_profile'):
+                import tempfile
+                from types import SimpleNamespace
+                from . import environment as verification_environment
+                from .review_workspace import CandidateReview
+                candidate = owner_git.review_commit(session, before['tree'], batch['baseline'])
+                candidate['baseline_ref'] = batch.get('baseline_ref') or owner_git.pin_commit(session, batch['baseline'])
+                store = CandidateReview(session, state, batch, SimpleNamespace(name='owner-task'), directory,
+                                        candidate, {}, None, {})
+                store.scratch.mkdir(exist_ok=True)
+                store.create_checkout('check')
+                cleanup.callback(store.close)
+                cwd = store.checkout_path('check')
+                store.verify_checkout('check', 'before')
+                private = Path(cleanup.enter_context(tempfile.TemporaryDirectory(dir=scratch)))
+                report = verification_environment.prepare(batch['environment_profile'], session.repo.project, cwd,
+                                             private, directory / 'environment', env)
+                store.verify_checkout('check', 'before')
+                record['environment'] = report
+                prompt = prompt.replace(json.dumps(state['worktree']), json.dumps(str(cwd))) + verification_environment.guidance(report)
+                atomic_bytes(directory / 'prompt.txt', prompt.encode())
+                if '--cd' in args:
+                    args[args.index('--cd') + 1] = str(cwd)
+                session.save(state)
+            result = run(args, cwd=cwd, env=env, input_bytes=prompt.encode(),
+                         timeout=Runtime.environment().model_timeout, stdout_path=directory / "events.jsonl",
+                         stderr_path=directory / "stderr.log", model_events=True, stage="owner-" + role, usage_call=usage.choice('owner/' + role, choice))
+            if role == 'review' and batch.get('environment_profile'):
+                store.verify_checkout('check', 'after')
         after = owner_git.checkpoint(session, state, role + " after")
         record["after"] = after
         batch["checkpoint"] = after

@@ -10,6 +10,8 @@
 (require 'transient)
 (declare-function magit-auto-review-owner-settings-open "magit-auto-review-owner-settings" ())
 
+(autoload 'magit-auto-review-environment-menu "magit-auto-review-actions" nil t)
+(autoload 'magit-auto-review-environment-available-p "magit-auto-review-actions")
 (defface magit-auto-review-owner-heading
   '((t :inherit magit-section-heading :weight bold))
   "Owner group headings; inherit the theme's Magit heading color."
@@ -440,6 +442,15 @@
       (dolist (line (magit-auto-review-owner--settings-lines
                      (or (alist-get 'effective_settings batch) (alist-get 'settings batch)) t))
         (insert line "\n"))
+      (if (alist-get 'environment_profile batch)
+          (dolist (attempt (alist-get 'attempts batch))
+            (dolist (entry (alist-get 'stages attempt))
+              (when-let ((report (alist-get 'environment_report (cdr entry))))
+                (insert (format "%s · " (car entry)))
+                (insert-text-button "Environment report" 'follow-link t
+                                    'action (lambda (_) (find-file report)))
+                (insert "\n"))))
+        (insert "Environment setup unconfigured\n"))
       (magit-auto-review-owner--insert-report (alist-get 'review batch))
       (dolist (association (alist-get 'associations batch))
         (insert (format "Commit association: %s → %s (%s)\n" (car association)
@@ -690,6 +701,7 @@
 (defun magit-auto-review-owner--accept (view)
   "Adopt VIEW and render it."
   (setq magit-auto-review-owner--view view
+        magit-auto-review--capabilities (alist-get 'capabilities view)
         magit-auto-review--repository (alist-get 'repository view)
         magit-auto-review--target (alist-get 'pr view))
   (magit-auto-review-owner--render))
@@ -1309,6 +1321,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
   [:class transient-column :setup-children magit-auto-review-owner--context-help]
   [["Selected item" :class transient-column :setup-children magit-auto-review-owner--context-actions]
    ["Navigation"
+    ("Y" "Verification environment" magit-auto-review-environment-menu :if magit-auto-review-environment-available-p)
     ("J" "Execution report" magit-auto-review-owner-report-menu)
     ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
@@ -1343,6 +1356,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
     ("P" "Preview/publish staged" magit-auto-review-owner-publish)
     ("O" "Recover uncertain publication" magit-auto-review-owner-recover)]
    ["Navigation"
+    ("Y" "Verification environment" magit-auto-review-environment-menu :if magit-auto-review-environment-available-p)
     ("J" "Execution report" magit-auto-review-owner-report-menu)
     ("w" "Open checkout" magit-auto-review-owner-open-checkout)
     ("g" "Reload / check local commits" magit-auto-review-owner-refresh)
