@@ -114,7 +114,7 @@ def mutate(session, state, request):
                 item["triage"] = {"defer": "deferred", "restore": "attention", "handled": "handled"}[action]
                 item["queued"] = action == "restore"
             item["attention"] = item["triage"] == "attention" and bool(item.get("queued") or item["unread"] or item.get("change_requested") or
-                (item["kind"] == "thread" and not item["is_resolved"]))
+                (item["kind"] == "thread" and item.get('resolvable', True) and not item["is_resolved"]))
     elif action == "reply":
         item = session.items(state, [request.get("item")])[0]
         body = require_text(request.get("body"), "reply body")
@@ -140,7 +140,7 @@ def mutate(session, state, request):
                 reply["status"] = "unstaged"
             elif action == "stage":
                 if not state.get("metadata"):
-                    raise ApiError("refresh_required", "Refresh GitHub before staging replies.")
+                    raise ApiError("refresh_required", "Refresh the forge before staging replies.")
                 owner_publication.blockers(session, state, reply, owner_change(state)['source']['head'], allow_unpushed=True)
                 reply["status"] = "staged"
             else:
@@ -159,6 +159,8 @@ def thread_state(session, state, request):
         raise ApiError("invalid_request", "Choose a thread and resolution state.")
     refresh(session, state)
     fresh = session.items(state, [item["key"]])[0]
+    if fresh.get('resolvable') is False:
+        raise ApiError('unsupported_operation', 'This discussion cannot be resolved or reopened.')
     if fresh["is_resolved"] is desired:
         from .conversations import accept_observed
         from .owner_state import reconcile_resolved_feedback
@@ -169,7 +171,7 @@ def thread_state(session, state, request):
     if fresh["fingerprint"] != item["fingerprint"] or fresh["is_resolved"] != item["is_resolved"]:
         raise ApiError("stale_discussion", "Thread changed; inspect refreshed discussion and invoke again.")
     if not fresh.get("can_resolve" if desired else "can_unresolve"):
-        raise ApiError("permission_denied", "GitHub does not permit this thread action.")
+        raise ApiError("permission_denied", "The forge does not permit this thread action.")
     from .conversations import change
     from .owner_state import reconcile_resolved_feedback
     confirmed, _ = change(session, state, fresh, desired, lambda: refresh(session, state),

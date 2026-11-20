@@ -21,7 +21,7 @@ def dispatch(request):
                   "issues" if operation in ("issue-run", "issue-recover") else
                   "owner" if operation in ("owner-publish-report", "owner-publish", "owner-prepare", "owner-recover", "owner-thread-state", "owner-fix", "owner-refresh", "thread-state") else
                   "publication" if operation in ("publish", "prepare", "resolve", "automatic-review") else "review")
-    if forge == 'gitlab' and (str(operation).startswith(('owner-', 'issue-')) or operation in ('toolkit', 'thread-state', 'followup', 'pull-requests', 'adapt', 'verify-suggestions')):
+    if forge == 'gitlab' and (str(operation).startswith('issue-') or operation in ('thread-state', 'followup', 'pull-requests', 'adapt', 'verify-suggestions')):
         raise ApiError('unsupported_operation', 'This operation is not supported by the GitLab review pilot.')
     require(forge, capability)
     if operation in ("review-report", "review-publish-report"):
@@ -37,7 +37,7 @@ def dispatch(request):
         from .owner import dispatch as owner_dispatch
         return owner_dispatch(request)
     if operation == "capabilities":
-        return capabilities(forge)
+        return capabilities(forge, request.get('toolkit'))
     if operation == "settings":
         return settings.resolve(request)
     if operation == "models":

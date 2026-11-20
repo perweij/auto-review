@@ -15,6 +15,10 @@ def from_review(request):
         raise ApiError("invalid_request", "automatic must be a Boolean.")
     source = Session(request)
     repo = Repository.from_manifest(source.manifest)
+    if repo.project.forge == 'gitlab':
+        from types import SimpleNamespace
+        from .owner_state import require_fixing
+        require_fixing(SimpleNamespace(repo=repo), {'change': repo.forge.change(repo)})
     defaults = request.get("defaults") or {}
     if not isinstance(defaults, dict):
         raise ApiError("invalid_request", "Owner defaults must be a settings object.")
@@ -24,7 +28,7 @@ def from_review(request):
     # Owner session keeps its separately configured roles.
     defaults = {**defaults, "processing": validate(from_manifest(source.manifest))["processing"]}
     opened = open_session({"cwd": str(repo.cwd), "repository": repo.identity, "pr": repo.pr,
-                           "defaults": defaults})
+                           "forge": repo.project.forge, "defaults": defaults})
     owner = OwnerSession({"session": opened["session"]})
     # Follow execution -> PR -> state order. Never modify the review's drafts.
     with locked(owner.execution_lock):
@@ -66,6 +70,12 @@ def from_review(request):
                 imported.append(item)
             source.git.pin(source.id)
         state = owner.load()
+        if repo.project.forge == 'gitlab':
+            # Handoff is an explicit network operation. Return usable Owner
+            # capabilities even when this is its first, otherwise local, open.
+            from .owner_state import refresh, require_fixing
+            refresh(owner, state)
+            require_fixing(owner, state)
         if request.get("automatic") and state.get("batches"):
             reconciled = owner_completion.reconcile(owner, state)
             if reconciled["reconciliation"]["status"] != "complete":
@@ -109,6 +119,8 @@ def from_issue(owner, plan, issue, workflow, context=None, document=None):
     copied beside the Owner session and the copy's location is recorded outside the
     item fingerprint: moving or re-verifying a document never restarts execution.
     """
+    if owner.repo.project.forge == 'gitlab':
+        raise ApiError('unsupported_operation', 'GitLab issue workflows are not available.')
     with locked(owner.execution_lock):
         state = owner.load()
         key = "issue:" + digest(workflow)[:32]

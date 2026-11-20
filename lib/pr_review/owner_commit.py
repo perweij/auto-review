@@ -44,6 +44,10 @@ def unverified_reason(batch):
 
 
 def prepare(session, state, request):
+    if session.repo.project.forge == 'gitlab':
+        from .owner_state import refresh, require_fixing
+        refresh(session, state)
+        require_fixing(session, state)
     workspace.validate(session, state)
     workspace.configure_push(session, state)
     result = {"ready": False, "worktree": state["worktree"]}

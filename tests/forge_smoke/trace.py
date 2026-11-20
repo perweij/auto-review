@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Record forge-operation metadata, without logging credentials or request bodies."""
+import fcntl
+import math
+import time
 import json
 import os
 from pathlib import Path
@@ -30,6 +33,20 @@ if endpoint == 'graphql':
     kind = 'unknown' if not isinstance(query, str) else 'mutation' if re.search(r'\bmutation\b', query) else 'read'
 if endpoint is None:
     kind = 'metadata' if any(a in args for a in ('--version', '--help', 'status')) else 'unknown'
+if tool == 'glab' and endpoint is not None and '--help' not in args:
+    interval = float(config.get('gitlab_request_interval', 1.0))
+    if not math.isfinite(interval) or not 0 <= interval <= 60:
+        raise RuntimeError('GitLab smoke interval must be finite and between 0 and 60 seconds')
+    stamp = Path(config['log']).with_name('gitlab-api-start.lock')
+    with stamp.open('a+') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock.seek(0)
+        previous = float(lock.read() or '0')
+        time.sleep(max(0, previous + interval - time.monotonic()))
+        lock.seek(0)
+        lock.truncate()
+        lock.write(str(time.monotonic()))
+        lock.flush()
 result = subprocess.run([config[tool], *args], input=data, capture_output=True)
 record = dict(tool=tool, actor=os.environ.get('SMOKE_ACTOR', 'fixture'), method=method,
               endpoint=endpoint, kind=kind, exit_code=result.returncode)

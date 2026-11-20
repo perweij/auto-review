@@ -81,7 +81,8 @@ class Run:
     def trace_forges(self):
         directory = self.directory / 'trace-bin'
         directory.mkdir(exist_ok=True)
-        config = {'log': str(self.directory / 'forge-calls.jsonl')}
+        config = {'log': str(self.directory / 'forge-calls.jsonl'),
+                  'gitlab_request_interval': float(os.environ.get('PR_REVIEW_SMOKE_GITLAB_INTERVAL', '1'))}
         for tool in ('gh', 'glab'):
             executable = shutil.which(tool)
             if executable is None:

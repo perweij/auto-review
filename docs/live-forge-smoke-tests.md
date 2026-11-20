@@ -335,3 +335,33 @@ limit applies. No paid models were used.
 See the [GitLab validation record](gitlab-pilot.md#emacs-automated-validation--2026-11-16)
 for receipt links and remaining assisted work. Interactive GUI inspection remains
 pending and is separate from the passing automated batch checks.
+
+## GitLab Owner scenarios
+
+```sh
+python3 tests/smoke-forges.py --suite smoke --scenario gitlab-owner
+python3 tests/smoke-forges.py --suite extended --scenario gitlab-owner-emacs
+```
+
+Both use fresh controlled native MRs and scripted providers, with no paid model
+runs. `gitlab-owner` belongs to smoke-fast; batch Emacs belongs to the extended
+suite and remains an explicit dependency. The CLI/API lifecycle covers conversion,
+exact previews, accepted-write response loss and recovery, fixing, verification,
+automatic commits, explicit push, native fixed-in links, resolve/reopen, retained
+sessions and independently checked report/receipt uniqueness. The Emacs scenario
+exercises actual editing, staging, confirmation decline/accept, fixing, publication,
+completion and remembered toolkit reopening. Interactive GUI inspection is separate.
+
+GitLab requests share a process-safe start-time gate across fixture, application
+and Emacs processes. `PR_REVIEW_SMOKE_GITLAB_INTERVAL` configures the interval in
+seconds (default `1`, range `0`–`60`). Run native GitLab scenarios sequentially to
+avoid shared-account burst limits. Retain the run's JSON evidence, source archive,
+commands and failed attempts alongside successful results.
+
+Owner implementation evidence (2026-11-18): `run-j554hzx5` passed the four dedicated
+CLI/API checks, `run-8x3923ks` passed the four dedicated batch Emacs checks, and
+`run-fk3gavcq` passed all **20/20** smoke-fast scenarios. Native Owner evidence is
+retained beside each run's manifest and report; the separate batch Emacs fixture
+is [MR !33](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/33).
+See [GitLab validation notes](gitlab-pilot.md#owner-validation--2026-11-18) for the
+fixture/report links, preserved failed attempts and GUI-inspection boundary.

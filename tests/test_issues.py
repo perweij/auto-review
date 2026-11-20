@@ -135,7 +135,7 @@ class CommentInputTest(unittest.TestCase):
             flow.guard = Mock()
             flow.state.update(plan={**self.state['plan'], 'body': 'Plan'}, remote_branch='feature', configuration={})
             data = {'feedback': [], 'batches': [], 'settings': owner_state.default_settings({})}
-            owner = SimpleNamespace(path=root / 'owner', execution_lock=root / 'owner.lock',
+            owner = SimpleNamespace(repo=repo, path=root / 'owner', execution_lock=root / 'owner.lock',
                                     load=lambda: data, save=lambda value: None)
             with patch('pr_review.issues.owner_state.open_session', return_value={'session': str(owner.path)}), \
                     patch('pr_review.issues.owner_state.OwnerSession', return_value=owner):

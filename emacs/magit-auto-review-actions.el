@@ -49,7 +49,8 @@
 (defun magit-auto-review-send-to-owner ()
   "Send saved comments at point or selected headings to Owner for fixing."
   (interactive)
-  (magit-auto-review--require-feature "owner")
+  (unless (magit-auto-review--owner-handoff-p)
+    (user-error "Owner fixing requires an open same-project MR; refresh or open Owner for conversations"))
   (magit-auto-review--require-current-draft)
   (when (magit-auto-review--can-leave)
     (magit-auto-review--editable)
@@ -914,7 +915,7 @@
   "Inspect, edit, stage, and publish contextual review comments."
   [:class transient-column :setup-children magit-auto-review--context-help]
   [["Comments"
-    ("o" "Send to Owner for fixing" magit-auto-review-send-to-owner :if (lambda () (and (magit-auto-review--supports-p "owner") (magit-auto-review--mutable-p))))
+    ("o" "Send to Owner for fixing" magit-auto-review-send-to-owner :if (lambda () (and (magit-auto-review--owner-handoff-p) (magit-auto-review--mutable-p))))
     ("s" "Move to Staged" magit-auto-review-stage :if (lambda () (magit-auto-review--stage-context-p "unstaged")))
     ("u" "Move to Unstaged" magit-auto-review-unstage :if (lambda () (magit-auto-review--stage-context-p "staged")))
     ("e" "Edit displayed comment" magit-auto-review-edit :if magit-auto-review--draft-p)

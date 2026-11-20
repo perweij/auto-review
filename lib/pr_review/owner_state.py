@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from .common import ApiError, digest, git, locked, now, read_json, require_text, state_root
-from .repository import Repository, normalize_remote, repository_name
+from .repository import Repository, normalize_remote
 from .settings import (derive_final_review, final_review_from, resolve as resolve_reviewer_settings,
                        validate_final_review)
 from .storage import write_json
@@ -64,22 +64,16 @@ def issue_settings(settings):
 
 
 def local_repository(request):
-    cwd = Path(request.get("cwd", ".")).resolve()
-    identity = request.get("repository")
-    target = str(request.get("pr", ""))
-    match = re.fullmatch(r"https://([^/]+/[^/]+/[^/]+)/pull/([1-9][0-9]*)/?", target)
-    if not identity and not match:
-        remotes = git(["config", "--get-regexp", r"^remote\..*\.url$"], cwd=cwd, check=False)
-        candidates = {normalize_remote(line.split(None, 1)[1]) for line in remotes.stdout.splitlines()}
-        candidates.discard("")
-        if len(candidates) != 1:
-            raise ApiError("invalid_request", "Choose a repository from this checkout's remotes.")
-        identity = candidates.pop()
-    return Repository.resolve(target, identity, cwd, request.get("forge"))
+    from .review_target import resolve
+    resolved = resolve(request)
+    if not resolved['forge_project']:
+        raise ApiError('invalid_request', 'Choose a repository from this checkout\'s remotes.')
+    return Repository.resolve(resolved['pr'], resolved['repository'], request.get('cwd', '.'),
+                              resolved['forge_project']['forge'])
 
 
 def open_session(request):
-    repo = local_repository(request)  # Explicit identity: no GitHub read on open.
+    repo = local_repository(request)  # Explicit identity: no remote read on open.
     worktrees = [Path(line[9:]).resolve() for line in repo.git("worktree", "list", "--porcelain").stdout.splitlines()
                  if line.startswith("worktree ")]
     if any(root().is_relative_to(path) for path in worktrees):
@@ -97,18 +91,33 @@ def open_session(request):
 
 
 def discover(request):
+    from .forge import restore
+    from .review_target import target, project_for
+    project, number = (target(request['pr'], request.get('repository'), request.get('forge'))
+                       if request.get('pr') else
+                       (project_for(request['repository'], request.get('forge')) if request.get('repository') else None, None))
     common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=request.get("cwd", ".")).stdout.strip()
     values = []
     for file in root().glob("*/pr-*/session.json"):
-        value = read_json(file, {})
-        if value.get("git_common_dir") != common:
+        try:
+            value = read_json(file, {})
+        except ApiError:
             continue
-        if request.get("repository") and value.get("repository") != repository_name(request["repository"]):
+        if not isinstance(value, dict) or value.get("git_common_dir") != common:
             continue
-        if request.get("pr") and str(value.get("pr")) != str(request["pr"]):
+        try:
+            saved = restore(value)
+        except (ApiError, KeyError):
+            continue
+        if project and saved != project:
+            continue
+        if request.get('forge') and saved.forge != request['forge']:
+            continue
+        if number and value.get('pr') != number:
             continue
         values.append({k: value.get(k) for k in ("repository", "pr", "url", "checked_at", "created_at")})
         values[-1]["session"] = str(file.parent)
+        values[-1]['forge_project'] = saved.saved()
     return {"sessions": values}
 
 
@@ -124,8 +133,8 @@ def toolkit(request):
         elif 'toolkit' in request:
             raise ApiError('invalid_request', 'Choose a repository before saving its toolkit preference.', repositories=sorted(names))
     if identity:
-        from .forge import adapter
-        identity = adapter(request.get("forge")).project(identity).repository
+        from .review_target import project_for
+        identity = project_for(identity, request.get('forge')).repository
     path = state_root() / "toolkits" / (digest([common, identity]) + ".json")
     with locked(path.with_suffix(".lock")):
         if "toolkit" in request:
@@ -139,6 +148,9 @@ def fingerprint(item, viewer=None):
     comments = item.get("comments", [])
     if viewer:
         comments = [c for c in comments if c.get("author", "").lower() != viewer.lower()]
+    if item.get('owner_semantic'):
+        comments = [{key: c.get(key) for key in ('id', 'author', 'body', 'created_at')}
+                    for c in comments if not c.get('system')]
     return digest([item["key"], comments])
 
 
@@ -165,7 +177,7 @@ def feedback_fingerprint(item, state, viewer):
 
 
 def reconcile_resolved_feedback(state, items):
-    """Finish resolved, verified GitHub fixes; reopen them when evidence changes."""
+    """Finish resolved, verified remote fixes; reopen them when evidence changes."""
     from .conversations import pending
     latest = {key: batch for batch in state["batches"] for key in batch["items"]}
     for item in items:
@@ -184,10 +196,11 @@ def reconcile_resolved_feedback(state, items):
                         and r.get("status") == "published" and r.get("commits")
                         and r.get("fingerprint") == item["fingerprint"] for r in state["replies"])):
             proof = {"batch": batch["id"], "fingerprint": item["fingerprint"]}
-        previous = item.pop("github_completion", None)
+        field = 'remote_completion' if item.get('owner_semantic') else 'github_completion'
+        previous = item.pop(field, None)
         override = item.get("completion_override")
         if proof:
-            item["github_completion"] = proof
+            item[field] = proof
             if override != proof:
                 item.update(triage="handled", attention=False, queued=False, unread=False)
         elif previous and override != previous and item["triage"] == "handled":
@@ -195,7 +208,7 @@ def reconcile_resolved_feedback(state, items):
 
 
 def feedback_body(body):
-    """Hide our standalone receipt markers without changing stored GitHub text."""
+    """Hide our standalone receipt markers without changing stored remote text."""
     return re.sub(
         r"(?m)^<!-- (?:pr-review generation=[^\s<>]+ head=[0-9a-f]{40,64}"
         r"|pr-owner session=[0-9a-f]{24}) action=[^\s<>]+ -->[ \t]*(?:\r?\n[ \t]*)*\Z",
@@ -207,6 +220,30 @@ def active_feedback_keys(batch):
     skipped = {key for task in batch.get('tasks', []) if task['status'] == 'skipped' for key in task['items']}
     retained = {key for task in batch.get('tasks', []) if task['status'] != 'skipped' for key in task['items']}
     return [key for key in batch['items'] if key not in skipped or key in retained]
+
+
+def fixing_availability(session, state):
+    if session.repo.project.forge != 'gitlab':
+        return dict(available=True, reason=None)
+    change = state.get('change')
+    reason = None
+    if not change:
+        reason = 'Refresh GitLab to check whether fixing is available.'
+    elif change.get('state') != 'open':
+        reason = 'Fixing requires an open MR.'
+    elif change.get('cross_project'):
+        reason = 'Fork MRs support feedback and conversations; fixing requires a same-project MR.'
+    elif change['source'].get('project') != session.repo.project.saved():
+        reason = 'Fixing requires a known, accessible source project matching the target project.'
+    elif not change['source'].get('branch'):
+        reason = 'Fixing requires a known source branch.'
+    return dict(available=reason is None, reason=reason)
+
+
+def require_fixing(session, state):
+    available = fixing_availability(session, state)
+    if not available['available']:
+        raise ApiError('fixing_unavailable', available['reason'])
 
 
 def superseded_batches(state):
@@ -251,6 +288,10 @@ class OwnerSession:
         self.manifest = self.load()
         from .forge import restore
         project = restore(self.manifest, request.get("forge"))
+        if request.get('repository'):
+            from .review_target import project_for
+            if project_for(request['repository'], project.forge) != project:
+                raise ApiError('invalid_request', 'Repository conflicts with saved Owner session.')
         self.repo = Repository.resolve(self.manifest["pr"], self.manifest["repository"], self.manifest["cwd"], project.forge)
         if str(self.repo.common) != self.manifest["git_common_dir"]:
             raise ApiError("invalid_session", "Owner checkout identity changed.")
@@ -280,7 +321,9 @@ class OwnerSession:
     def view(self, state=None):
         result = copy.deepcopy(state or self.load())
         from .forge import capabilities
-        result['capabilities'] = capabilities(self.repo.project.forge)
+        result['forge_project'] = self.repo.project.saved()
+        result['capabilities'] = capabilities(self.repo.project.forge, 'owner')
+        result['fixing'] = fixing_availability(self, result)
         superseded = superseded_batches(result)
         for batch in result["batches"]:
             batch.pop("superseded_by", None)
@@ -317,16 +360,20 @@ def refresh(session, state):
     metadata = legacy_metadata(change)
     source = change['source']['project']
     target = source['host'] + '/' + source['path'] if source else ''
-    branch = require_text(change['source'].get('branch'), 'head branch')
-    repo.git('check-ref-format', 'refs/heads/' + branch)
+    branch = change['source'].get('branch')
+    if branch:
+        repo.git('check-ref-format', 'refs/heads/' + branch)
+    elif repo.project.forge != 'gitlab':
+        require_text(branch, 'head branch')
     from .forge import check_account
     check_account(state.get("forge_account"), account, state.get("viewer"))
     if state.get("viewer") is None:
         state["forge_account"] = account
     viewer = account["username"]
     if state.get("viewer") and state["viewer"].lower() != viewer.lower():
-        raise ApiError("account_changed", "GitHub account changed; return to the owner session's original account.")
-    discussion, raw_discussion = fetch(repo)
+        raise ApiError("account_changed", "The forge account changed; return to the owner session's original account.")
+    discussion, raw_discussion = (repo.forge.owner_discussion(repo, account)
+                                  if hasattr(repo.forge, 'owner_discussion') else fetch(repo))
     anchors = repo.forge.anchors(raw_discussion)
     previous = {i["key"]: i for i in state["feedback"]}
     latest = {}
@@ -342,8 +389,8 @@ def refresh(session, state):
         old = previous.pop(item["key"], {})
         if item["kind"] == "thread":
             item["diff_hunk"] = anchors.get(item["root_id"], {}).get("diff_hunk", "")
-        incoming = [c for c in item["comments"] if c["author"].lower() != viewer.lower() and feedback_body(c["body"])]
-        actionable = any(feedback_body(c["body"]) for c in item["comments"])
+        incoming = [c for c in item["comments"] if not c.get('system') and c["author"].lower() != viewer.lower() and feedback_body(c["body"])]
+        actionable = any(not c.get('system') and feedback_body(c["body"]) for c in item["comments"])
         own_only = bool(actionable and not incoming)
         notification = fingerprint(item, viewer)
         content = feedback_fingerprint(item, state, viewer)
@@ -353,7 +400,7 @@ def refresh(session, state):
                     triage=old.get("triage", "attention" if incoming else "available" if own_only else "handled"),
                     queued=old.get("queued", False), own_only=own_only,
                     unread=old.get("unread", bool(incoming)))
-        for field in ("github_completion", "completion_override"):
+        for field in ("github_completion", "remote_completion", "completion_override"):
             if field in old:
                 item[field] = old[field]
         # Older sessions kept own-only comments as non-actionable history.
@@ -371,7 +418,7 @@ def refresh(session, state):
             item.update(triage="handled", unread=False, queued=False)
         item["attention"] = item["triage"] == "attention" and bool(
             item["queued"] or item["unread"] or item["change_requested"] or
-            (item["kind"] == "thread" and not item["is_resolved"]))
+            (item["kind"] == "thread" and item.get('resolvable', True) and not item["is_resolved"]))
         items.append(item)
     for old in previous.values():
         if old["kind"] in ("local_review", "issue_plan"):

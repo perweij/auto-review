@@ -1,8 +1,8 @@
 # Auto-review
 
-Review GitHub pull requests and work through incoming feedback from Emacs.
+Review GitHub pull requests and GitLab.com merge requests, and work through incoming feedback from Emacs.
 Auto-review brings Claude and Codex into Magit, with local worktrees, editable
-review drafts, and explicit confirmation before publishing to GitHub.
+review drafts, and explicit confirmation before publishing to the forge.
 A standalone command-line interface uses the same backend and saved reviews.
 
 ## What it does
@@ -16,12 +16,12 @@ A standalone command-line interface uses the same backend and saved reviews.
   automatic committing. Pushing and publication remain explicit actions.
 - **Resumable work:** retain reports, human edits, and publication receipts;
   resume interrupted runs and inspect earlier generations.
-- **Follow-up:** check selected review conversations against updated code without
+- **GitHub follow-up:** check selected review conversations against updated code without
   running another full PR review.
 
 ## Requirements
 
-- Linux, Python 3.9+, Git, and the GitHub CLI (`gh`).
+- Linux, Python 3.9+, Git, and the GitHub CLI (`gh`) or GitLab CLI (`glab`) for the selected forge.
 - A user-managed sandbox container as the execution security boundary.
 - Authenticated Claude Code and/or Codex CLI installations for the providers you
   enable. New reviews default to both. Claude requires its `/code-review` skill

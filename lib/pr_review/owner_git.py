@@ -28,6 +28,8 @@ def fetch_head(session, state):
 
 
 def prepare(session, state):
+    from .owner_state import require_fixing
+    require_fixing(session, state)
     if state["metadata"]["state"] != "OPEN":
         raise ApiError("closed_pr", "Fixes require an open PR.")
     head = fetch_head(session, state)

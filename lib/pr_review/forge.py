@@ -239,10 +239,19 @@ def request_forge(request):
     return explicit or 'github'
 
 
-def capabilities(kind=None):
+def capabilities(kind=None, toolkit=None):
     """The public feature contract, shared by resolution, views and dispatch."""
     forge = adapter(kind)
+    if toolkit not in (None, 'reviewer', 'owner'):
+        raise ApiError('invalid_request', 'Choose Reviewer or Owner capabilities.')
     env_commands = ['environment-' + action for action in ('show', 'save', 'generate', 'apply')]
+    if toolkit == 'owner':
+        from .owner import COMMANDS
+        return dict(protocol=1, features=['environment-profiles', 'owner', 'toolkits', 'replies', 'thread-state',
+                    'fixing', 'operations', 'report-publication'] +
+                    (['pull-requests'] if kind != 'gitlab' else ['prepared-publication-preview']),
+                    commands=[*env_commands, *COMMANDS, 'cancel', 'models', 'capabilities'] + (['pull-requests'] if kind != 'gitlab' else []),
+                    placements=['reply', 'timeline'] if kind != 'gitlab' else ['reply'], verdicts=[])
     features = ['environment-profiles', 'report-publication', 'generations', 'inline-context', 'drafts', 'history',
                 'inline-publication', 'operations', 'conversations', 'automatic-review',
                 'usage-reporting', 'finding-elaboration', 'checkout', 'discovery']
@@ -251,7 +260,8 @@ def capabilities(kind=None):
                 'preview-comment', 'mutate', 'refresh', 'prepare', 'publish', 'resolve', 'run',
                 'automatic-review', 'elaborate', 'cancel']
     if kind == 'gitlab':
-        features += ['prepared-publication-preview']
+        features += ['prepared-publication-preview', 'toolkits', 'owner-handoff']
+        commands += ['toolkit', 'owner-import']
     else:
         from .owner import COMMANDS
         features += ['followup', 'review-status', 'pull-requests', 'toolkits', 'owner',

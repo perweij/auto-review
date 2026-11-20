@@ -137,6 +137,100 @@ class GitLabPublication:
     def __init__(self, forge):
         self.forge = forge
 
+    def prepare_owner_reply(self, session, reply, viewer, identity):
+        from .common import digest
+        repo, actor, destination, _ = context(self.forge, session, command)
+        if actor['username'].lower() != viewer.lower():
+            raise ApiError('account_changed', 'GitLab account changed before reply preparation.')
+        target = reply['target']
+        item = session.items(session.load(), [reply['source']])[0]
+        if target != item.get('reply_target') or not item.get('can_reply'):
+            raise ApiError('permission_denied', 'The native GitLab reply destination is unavailable.')
+        marker = f'<!-- pr-owner session={digest(str(session.path))[:24]} action={identity} -->'
+        return dict(version=1, forge='gitlab', id=identity, reply=reply['id'], source=reply['source'],
+                    kind='reply', target=copy.deepcopy(target), viewer=viewer, marker=marker,
+                    destination=destination, actor=actor, body=reply['body'], status='draft',
+                    creates_thread=item['kind'] == 'comment',
+                    payload={'body': canonical_body(render_body(reply['body']) + '\n\n' + marker)})
+
+    @staticmethod
+    def owner_body(operation):
+        return operation['body']
+
+    @staticmethod
+    def owner_receipt(receipt):
+        note = root_note(receipt)
+        return dict(id=note.get('id'), author=(note.get('author') or {}).get('username', ''),
+                    body=note.get('body'), url=receipt.get('html_url'))
+
+    @staticmethod
+    def owner_preview(operations):
+        rows = []
+        for op in operations:
+            body, suffix = op['payload']['body'], '\n\n' + op['marker']
+            if not body.endswith(suffix):
+                raise ApiError('invalid_state', 'Prepared reply is missing its exact tracking suffix.')
+            rows.append(dict(operation_id=op['id'], kind='reply',
+                             destination={**copy.deepcopy(op['destination']), **copy.deepcopy(op['target'])},
+                             body=body[:-len(suffix)], marker_omitted=True,
+                             creates_thread=op.get('creates_thread', False)))
+        return dict(operations=rows)
+
+    def owner_bound(self, session, op):
+        if op.get('version') != 1 or op.get('forge') != 'gitlab' or op.get('kind') != 'reply':
+            raise ApiError('unsupported_operation', 'Unsupported saved GitLab Owner operation.')
+        repo, actor, destination, raw = context(self.forge, session, command)
+        if actor != op['actor'] or destination != op['destination']:
+            raise ApiError('account_changed', 'Saved reply account or MR identity changed; no write was sent.')
+        return repo, raw, f"projects/{destination['project_id']}/merge_requests/{destination['iid']}"
+
+    def lookup_owner(self, session, operations):
+        # One complete native listing, even when several actions need recovery.
+        if not operations:
+            return {}
+        repo, _, endpoint = self.owner_bound(session, operations[0])
+        for op in operations[1:]:
+            if (op.get('forge'), op.get('version'), op.get('kind'), op.get('actor'), op.get('destination')) != (
+                    'gitlab', 1, 'reply', operations[0]['actor'], operations[0]['destination']):
+                raise ApiError('invalid_state', 'Owner journal contains conflicting destinations or accounts.')
+        discussions = self.forge.pages(repo, endpoint + '/discussions')
+        values = []
+        for discussion in discussions:
+            if (not isinstance(discussion.get('id'), str) or not isinstance(discussion.get('notes'), list)
+                    or not discussion['notes'] or any(not self.valid_note(n) for n in discussion['notes'])):
+                raise ApiError('incomplete_receipts', 'Incomplete GitLab reply lookup; no retry sent.')
+            for note in discussion['notes']:
+                values.append(dict(id=discussion['id'], root_id=discussion['notes'][0]['id'], notes=[note]))
+        result = {}
+        for op in operations:
+            confirmed = root_note(op.get('receipt') or {})
+            receipt_id = confirmed.get('id') if isinstance(confirmed, dict) else None
+            result[op['id']] = [self.annotate(op, v) for v in values
+                                if op['marker'] in root_note(v)['body'] or
+                                (receipt_id is not None and root_note(v)['id'] == receipt_id)]
+        return result
+
+    def submit_owner(self, session, op):
+        from urllib.parse import quote
+        try:
+            repo, raw, endpoint = self.owner_bound(session, op)
+            state = session.load()
+            if raw.get('state') != 'opened' or raw.get('sha') != state['change']['source']['head']:
+                raise ApiError('stale_publication', 'The MR is no longer open at the confirmed head.')
+            discussion, _ = self.forge.owner_discussion(repo, op['actor'])
+            item = next((i for i in discussion['items'] if i['key'] == op['source']), None)
+            if not item or item.get('reply_target') != op['target'] or not item.get('can_reply'):
+                raise ApiError('permission_denied', 'The native GitLab reply destination is unavailable.')
+            from .owner_state import feedback_fingerprint
+            saved = session.items(state, [op['source']])[0]
+            if feedback_fingerprint(item, state, state['viewer']) != saved['fingerprint']:
+                raise ApiError('stale_discussion', 'GitLab feedback changed before reply submission.')
+        except (ApiError, OSError) as exc:
+            exc.write_not_sent = True
+            raise
+        note = post(repo, endpoint + '/discussions/' + quote(op['target']['discussion_id'], safe='') + '/notes', op['payload'], command)
+        return self.annotate(op, dict(id=op['target']['discussion_id'], root_id=op['target']['root_id'], notes=[note]))
+
     def render(self, comment):
         return render_body(comment['body'])
 
@@ -232,6 +326,13 @@ class GitLabPublication:
         if not self.candidate(op, receipt):
             return False
         note = root_note(receipt)
+        if op.get('kind') == 'reply':
+            prior = root_note(op.get('receipt') or {})
+            return (receipt.get('id') == op['target']['discussion_id']
+                    and receipt.get('root_id') == op['target']['root_id']
+                    and note['id'] != op['target']['root_id']
+                    and (not prior.get('id') or prior['id'] == note['id'])
+                    and canonical_body(note['body']) == op['payload']['body'])
         prior = root_note(op.get('result') or op.get('response'))
         if isinstance(prior, dict) and type(prior.get('id')) is int and note['id'] != prior['id']:
             return False
@@ -271,6 +372,8 @@ class GitLabPublication:
         return [self.annotate(op, v) for v in values if self.candidate(op, v)]
 
     def submit(self, session, op):
+        if op.get('kind') == 'reply':
+            return self.submit_owner(session, op)
         try:
             repo, raw, endpoint = self.bound(session, op)
             self.fresh(session, raw)

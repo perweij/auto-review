@@ -1,10 +1,11 @@
-# GitLab.com review, COMMENT publication and execution reports
+# GitLab.com Reviewer and Owner workflows
 
 The pilot validates the shared review engine with GitLab metadata, discussions,
 MR pipeline summaries and Git fetching. `--no-publish` reviews remain read-only.
 COMMENT finding publication and explicit execution reports are supported;
-Emacs Reviewer supports the same workflow. Owner, issue fixing and monitor
-remain separate work.
+Emacs Reviewer supports the same workflow. Owner supports feedback, native replies,
+resolve/reopen and same-project fixing across CLI, API and Emacs. Issue fixing and
+monitor remain separate work.
 
 ## Finding publication
 
@@ -21,8 +22,8 @@ validation; edited or conflicting candidates block resubmission. Unknown deliver
 with no visible receipt remains uncertain. Definite API rejection remains retryable.
 Previews retain Markdown and code while neutralizing executable quick actions.
 
-Only COMMENT is supported. Approvals, request-changes, replies, resolve/reopen and
-code suggestions are unavailable. Suggestion generation is rejected before model
+Reviewer supports COMMENT only. Approvals, request-changes, Reviewer replies,
+Reviewer thread mutations and code suggestions are unavailable. Suggestion generation is rejected before model
 execution. Publication recovery is available through the terminal or Emacs `P r`.
 
 ## Emacs entry and confirmation
@@ -30,7 +31,9 @@ execution. Publication recovery is available through the terminal or Emacs `P r`
 The existing Magit/Forge command opens a selected GitLab MR automatically. With
 no selected MR, choose a saved review or enter an MR number/URL; ambiguous remotes
 require project selection. Identity travels through setup, resume, history and
-child buffers. GitLab always selects Reviewer. Unsupported actions fail locally.
+child buffers. GitLab defaults to Reviewer; `M` selects and remembers Owner per
+project. Saved Owner sessions are offered alongside saved reviews. Unsupported
+actions fail locally.
 
 The confirmation preview projects frozen unsent native operations after retry
 reuse. It shows the exact outgoing prose and positions, omitting only the exact
@@ -74,8 +77,8 @@ installed in this workspace, so an installed Guix build is also unavailable.
 
 - Finding publication builds on completed #21; approval/verdict extensions,
   replies and code suggestions require separate follow-ups.
-- GitLab Owner expansion (building on completed #22) needs reply permissions,
-  resolvability and outdated positions; this increment advertises no thread mutation permissions.
+- GitLab Owner now supplies reply permissions, resolvability, outdated positions
+  and native conversation writes separately from Reviewer. Fork fixing remains deferred.
 - Issue work (#23–#24) needs GitLab eligibility and write contracts separately.
 - Remote MR listing and focused follow-up remain separate follow-ups. Emacs
   uses local target resolution, saved reviews and capability-driven menus.
@@ -207,3 +210,84 @@ were used, and fixtures remain available for inspection.
 
 Interactive GUI inspection remains pending and is separate from the automated
 batch evidence above.
+
+## Owner workflow
+
+Use `pr-review owner MR_URL open --forge gitlab`, then `refresh` explicitly, or
+select Owner with `M` in Emacs. Opening and reading retained sessions use local
+state only. Owner collects authoritative GraphQL permissions separately from
+Reviewer discussion data, so Owner support does not invalidate Reviewer caches.
+
+Compose, edit and stage replies, then inspect `prepare` / Emacs `P` before
+publication. The preview shows the frozen outgoing body, native destination and
+whether replying converts a standalone comment into a thread. Slash quick actions
+are protected while the original editor wording remains intact. Native root-note
+identity preserves local feedback, drafts and verification through conversion.
+Resolve/reopen uses explicit desired state and fresh permission checks, followed
+by native read-back. Models never resolve discussions.
+
+Fixing, verification, commit preparation/association and Reviewer handoff require
+an open same-project MR with a known source branch. Fork MRs retain feedback and
+conversation actions. The existing worktree, verification, repair and optional
+automatic-commit engine is reused. Push and publication remain explicit. Fixed-in
+replies use native GitLab commit links; execution reports keep a separate journal.
+
+Owner reply actions retain `delivery: not_sent | unknown | confirmed`. Definite
+non-delivery is retryable. A lost response requires receipt recovery; an empty
+lookup alone never proves non-delivery. Unresolved delivery blocks further reply
+publication in the session. Edited, conflicting, duplicate or missing confirmed
+receipts require inspection and do not authorize resending.
+
+Validation uses native `gitlab-owner` and `gitlab-owner-emacs` scenarios with
+scripted providers. Interactive GUI inspection is recorded separately. See
+[live smoke instructions](live-forge-smoke-tests.md) for commands and evidence.
+
+## Owner validation — 2026-11-18
+
+- `run-j554hzx5`: all four CLI/API Owner, preflight and integrity checks passed on
+  [MR !29](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/29).
+  Evidence is retained in `state/forge-smoke/run-j554hzx5/`, including native
+  payload/receipt checks, lost-response recovery, fixing and verification,
+  explicit push, commit association, resolution/reopening and the
+  [execution report](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/29#note_4264190455).
+- `run-8x3923ks`: all four native batch Emacs, preflight and integrity checks
+  passed on [MR !33](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/33).
+  `gitlab-owner-emacs-evidence.json` records confirmation previews, the final
+  Owner view and rendered buffer. Actual editing/staging, decline/accept,
+  fixing, explicit push, fixed-in publication, thread-state read-back, reports
+  and remembered Owner reopening were exercised.
+
+The 21 targeted backend tests cover additional failure and permission cases,
+including forks, incomplete pagination/joins, account changes, edited/duplicate
+receipts, definite rejection and unknown delivery. ERT covers capability-driven
+menus, direct-command guards, identity, completion proofs and frozen previews.
+
+Native testing established that standalone conversion changes note GraphQL IDs
+from `Note` to `DiscussionNote`, while retaining the native note/discussion IDs.
+GitLab also updates volatile note metadata on thread operations; semantic Owner
+fingerprints exclude those changes. The fixture waits for REST metadata and the
+MR fetch ref to agree after push; the application retains its stale-head guard.
+
+Earlier failed attempts remain in `run-ghqzpej5` (unrecognized converted note
+class), `run-j4658ynd` (post-push ref convergence), and `run-b4l24w7_` (smoke-script
+syntax error before workflow execution). They are not counted as passing evidence.
+All model providers in these scenarios were scripted doubles. Native API/Git and
+batch Emacs evidence do not constitute interactive GUI inspection; that remains
+separately pending.
+
+The final `make smoke-fast` run, `run-fk3gavcq`, passed **20/20** scenarios,
+including both forges' reviews and reports, finding publication, delivery
+recovery, Owner workflows, issue workflows, stale/foreign commit safeguards and
+original-checkout/default-branch integrity. Its GitLab Owner fixture is
+[MR !37](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/37), with
+[the verified report](https://gitlab.com/perweij/temp-eval-auto-review/-/merge_requests/37#note_4264409642).
+`gitlab-owner-evidence.json` retains the final Owner view, exact previews and
+native note IDs. The earlier full run `run-4_efycla` retained 19 passing scenarios
+and a GitLab GET connection timeout; it is not counted as a complete passing run.
+
+Final local validation passed `make -j3 check-all`: **203 shell tests, 1,391 Python
+tests and 203 ERT cases**, plus the real-process GitLab Reviewer Emacs workflow
+with local transport/model doubles. The latest targeted GitLab Owner run passed
+all **21** tests, including retained-session repository aliases and first-handoff
+fixing availability. All five Emacs runner-isolation tests also passed after
+integrating smoke-script syntax checking into the existing compilation phase.

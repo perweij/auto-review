@@ -8,7 +8,7 @@ from .storage import write_json
 
 
 class GitLab:
-    capabilities = frozenset(('review', 'report-publication', 'publication'))
+    capabilities = frozenset(('review', 'report-publication', 'publication', 'owner'))
     executable = 'glab'
 
     @property
@@ -20,6 +20,27 @@ class GitLab:
     def report_publication(self):
         from .forge_gitlab_reports import GitLabReports
         return GitLabReports(self)
+
+    @property
+    def conversations(self):
+        from .forge_gitlab_owner import GitLabConversations
+        return GitLabConversations()
+
+    def owner_context(self, repo):
+        from .forge_gitlab_owner import check_cli
+        check_cli(repo)
+        return self.change(repo), self.account(repo.project, repo.cwd)
+
+    def owner_discussion(self, repo, account):
+        from .forge_gitlab_owner import discussion
+        return discussion(self, repo, account)
+
+    def anchors(self, diagnostics):
+        from .forge_gitlab_owner import anchors
+        return anchors(diagnostics)
+
+    def commit_url(self, repository, commit):
+        return f'https://{repository}/-/commit/{commit}'
 
     def project(self, value):
         from .forge import Project

@@ -5,24 +5,23 @@ dates. Recently completed work is listed separately for tracking reconciliation.
 Current usage is documented in the [manual](manual.md) and
 [Emacs reference](../emacs/README.md).
 
-## Priority order (2026-11-16)
+## Priority order (2026-11-18)
 
-GitLab Reviewer now connects the existing review, COMMENT publication, recovery,
-checkout and report backend to Emacs. The next GitLab increments extend the
-supported capabilities to Owner and issue execution.
+GitLab Reviewer and Owner now use the shared backend across CLI, API and Emacs.
+Owner supports native conversations and same-project fixing. GitLab issue
+execution is the next forge increment.
 
 | Priority | Work | Tracking and scope |
 | --- | --- | --- |
-| 1 | GitLab Owner | Establish feedback and permission contracts, replies and resolve/reopen, then integrate fixing, verification and publication. Builds on the shared Owner engine and write adapters. No matching open issue. |
-| 2 | GitLab issue fixing | Define eligibility and issue-conversation behavior, then support planning, assignment, draft MR creation and ready transitions using the shared workflow. No matching open issue. |
-| 3 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
-| 4 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
-| 5 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
-| 6 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
+| 1 | GitLab issue fixing | Define eligibility and issue-conversation behavior, then support planning, assignment, draft MR creation and ready transitions using the shared workflow. No matching open issue. |
+| 2 | Compatibility and package validation | Python 3.9 execution, pinned Guix build/installed checks, and packaged LICENSE verification; see below. No matching open issue. |
+| 3 | Label-driven monitor | [#18](https://github.com/perweij/auto-review/issues/18): authorized, serialized, resumable unattended operation using current named settings and saved runtime scopes. |
+| 4 | Proactive repository reviews | See the detailed specification below. No matching open issue; improvement proposals remain a later extension. |
+| 5 | Interactive Owner fixes | Requires the live terminal experiment below before implementation. No matching open issue. |
 
 The GitLab items are follow-ups beyond the completed #19–#25 forge series.
-Current GitLab support covers MR review, COMMENT findings and execution-report
-notes; see [capabilities and native validation evidence](gitlab-pilot.md).
+Current GitLab support covers MR review, COMMENT findings, Owner conversations,
+same-project fixing and execution-report notes; see [capabilities and native validation evidence](gitlab-pilot.md).
 Approvals/request-changes, code suggestions, focused follow-up, MR listing and
 richer CI coverage are separate extensions, not prerequisites for this first
 Emacs increment. Hover tooltips remain deferred pending reliable hosted-renderer
@@ -30,9 +29,14 @@ support; expandable report sections provide the detail today.
 
 ## Completed work and tracking reconciliation
 
-The following implementations are present in local `main`. This records completed
-work without assuming that every local commit has been pushed.
+The following implementations are present in the working tree. This records
+completed work without assuming that every local change has been committed or pushed.
 
+- GitLab Owner across CLI, API and Emacs: isolated permission reads, stable
+  comment-to-thread identity, native replies and resolve/reopen, conservative
+  delivery recovery, same-project fixing/verification and native commit links.
+  Fork MRs retain conversation actions. Native automated evidence and the separate
+  GUI-inspection boundary are recorded in the [GitLab notes](gitlab-pilot.md).
 - GitLab Reviewer in Emacs: local target resolution, structured Forge MR entry,
   saved-review/manual target prompts, project-scoped sessions and operations,
   capability-driven actions and frozen remaining-write previews. Remote MR

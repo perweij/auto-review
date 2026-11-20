@@ -24,7 +24,7 @@
 (declare-function magit-auto-review--insert-review-status "magit-auto-review-conversations" ())
 (declare-function magit-auto-review-pull-requests "magit-auto-review-pulls" (&optional directory))
 (declare-function magit-auto-review-edit-menu "magit-auto-review-actions" ())
-(declare-function magit-auto-review-owner-open "magit-auto-review-owner" (directory number &optional repository))
+(declare-function magit-auto-review-owner-open "magit-auto-review-owner" (directory number &optional repository forge))
 
 (defcustom magit-auto-review-claude-model nil
   "Default Claude model for new reviews; R validates it against CLI choices."
@@ -166,6 +166,12 @@ A different automatic operation makes the saved log current again.")
   "Reject unavailable FEATURE locally, before a backend request."
   (unless (magit-auto-review--supports-p feature)
     (user-error "%s does not support %s" (magit-auto-review--forge-label) feature)))
+
+(defun magit-auto-review--owner-handoff-p ()
+  "Whether local findings can be handed to Owner for fixing."
+  (or (magit-auto-review--supports-p "owner")
+      (and (magit-auto-review--supports-p "owner-handoff")
+           (magit-auto-review--true-p (alist-get 'available (alist-get 'owner_fixing magit-auto-review--review))))))
 
 (defun magit-auto-review--copy-identity (origin)
   "Copy resolved target metadata from ORIGIN into a child buffer."
@@ -571,7 +577,7 @@ A different automatic operation makes the saved log current again.")
                                             "none (limited follow-up)" "unavailable"))
                                     (magit-auto-review--verdict-label)) 'face 'shadow))
         (insert (format "Each item is one draft; its %s discussion is context. s stages; k excludes this draft.\n" (magit-auto-review--forge-label)))
-        (insert (if (magit-auto-review--supports-p "owner")
+        (insert (if (magit-auto-review--owner-handoff-p)
                     "o sends findings to Owner for fixing. a chooses an attachment. P publishes Staged. ? shows actions.\n"
                   "a chooses an attachment. P previews and publishes Staged. ? shows actions.\n"))
         (when-let ((reason (alist-get 'reason (cl-find-if (lambda (v) (not (magit-auto-review--true-p (alist-get 'available v))))
@@ -690,12 +696,20 @@ GitLab offers saved reviews and MR entry; GitHub retains its PR browser."
          (sessions (alist-get 'sessions (magit-auto-review--call
                                          `((command . "discover") (cwd . ,directory)
                                            (forge . "gitlab") (repository . ,repository)))))
+         (owners (alist-get 'sessions (magit-auto-review--call
+                                       `((command . "owner-discover") (cwd . ,directory)
+                                         (forge . "gitlab") (repository . ,repository)))))
          (choices (mapcar (lambda (s) (cons (format "!%s · %s · %s" (alist-get 'pr s)
                                                    repository (alist-get 'created_at s)) s)) sessions))
+         (choices (append choices (mapcar (lambda (s) (cons (format "Owner !%s · %s" (alist-get 'pr s) repository) s)) owners)))
          (answer (completing-read "GitLab MR number, URL, or saved review: " choices nil nil))
          (saved (cdr (assoc answer choices))))
     (if saved
-        (magit-auto-review--open-review-pr directory (alist-get 'pr saved) repository context saved)
+        (if (member saved owners)
+            (progn (require 'magit-auto-review-owner)
+                   (magit-auto-review-owner--show
+                    (magit-auto-review--call `((command . "owner-read") (forge . "gitlab") (session . ,(alist-get 'session saved)))) directory))
+          (magit-auto-review--open-review-pr directory (alist-get 'pr saved) repository context saved))
       (magit-auto-review--open-pr directory answer repository "gitlab"))))
 
 (defun magit-auto-review--find-session (directory number repository &optional forge)
@@ -725,22 +739,18 @@ Ask which session to open when more than one matches.  Discovery is local."
   (let* ((context (when (or (not repository) (equal forge "gitlab")
                             (string-prefix-p "gitlab.com/" (or repository "")))
                     (magit-auto-review--resolve-target directory number repository forge)))
-         (gitlab (equal (alist-get 'forge (alist-get 'forge_project context)) "gitlab")))
-    (if gitlab
-        (magit-auto-review--open-review-pr directory (alist-get 'pr context)
-                                           (alist-get 'repository context) context)
-      (setq number (or (alist-get 'pr context) number)
-            repository
-            (magit-auto-review--toolkit-repository
-             directory (or (alist-get 'repository context) repository
-                           (and (stringp number)
-                                (string-match "\\`https://\\([^/]+/[^/]+/[^/]+\\)/pull/[0-9]+/?\\'" number)
-                                (match-string 1 number)))))
-      (let ((choice (magit-auto-review--call `((command . "toolkit") (forge . "github") (cwd . ,directory) (repository . ,repository)))))
-        (if (equal (alist-get 'toolkit choice) "owner")
-            (progn (require 'magit-auto-review-owner)
-                   (magit-auto-review-owner-open directory number repository))
-          (magit-auto-review--open-review-pr directory number repository context))))))
+         (kind (or (alist-get 'forge (alist-get 'forge_project context)) forge "github")))
+    (setq number (or (alist-get 'pr context) number)
+          repository (or (alist-get 'repository context)
+                         (magit-auto-review--toolkit-repository directory repository)))
+    (let ((choice (magit-auto-review--call `((command . "toolkit") (forge . ,kind)
+                                            (cwd . ,directory) (repository . ,repository)))))
+      (if (equal (alist-get 'toolkit choice) "owner")
+          (progn (require 'magit-auto-review-owner)
+                 (if (equal kind "gitlab")
+                     (magit-auto-review-owner-open directory number repository kind)
+                   (magit-auto-review-owner-open directory number repository)))
+        (magit-auto-review--open-review-pr directory number repository context)))))
 
 (defun magit-auto-review-select-toolkit ()
   "Select and remember a toolkit, retaining existing workflow buffers."
@@ -751,8 +761,8 @@ Ask which session to open when more than one matches.  Discovery is local."
          (repository (magit-auto-review--toolkit-repository directory magit-auto-review--repository))
          (choice (completing-read "Toolkit: " '("Reviewer" "Owner") nil t)))
     (magit-auto-review--call `((command . "toolkit") (cwd . ,directory)
-                              (repository . ,repository) (toolkit . ,(downcase choice))))
-    (if number (magit-auto-review--open-pr directory number repository)
+                              (forge . ,magit-auto-review--forge) (repository . ,repository) (toolkit . ,(downcase choice))))
+    (if number (magit-auto-review--open-pr directory number repository magit-auto-review--forge)
       (let ((magit-auto-review--repository repository))
         (magit-auto-review-pull-requests directory)))))
 

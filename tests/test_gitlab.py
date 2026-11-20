@@ -78,7 +78,7 @@ class GitLabTest(unittest.TestCase):
 
     def test_unsupported_operations_fail_before_session_or_transport(self):
         with patch('pr_review.application.Session', side_effect=AssertionError('Session opened')):
-            for op in ('owner-fix', 'owner-read', 'issue-run', 'issue-eligibility', 'thread-state'):
+            for op in ('issue-run', 'issue-eligibility', 'thread-state', 'followup', 'adapt', 'verify-suggestions', 'pull-requests'):
                 with self.subTest(op=op), self.assertRaises(ApiError) as caught:
                     dispatch(dict(command=op, forge='gitlab'))
                 self.assertEqual('unsupported_operation', caught.exception.code)

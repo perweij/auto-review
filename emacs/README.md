@@ -84,9 +84,9 @@ Partial retries preview and count only the remaining writes. Receipt links open
 GitLab notes. `P r` checks uncertain publication receipts.
 
 Conversations are read-only. History, elaboration (`E`), checkout (`w`), reports
-(`J`), progress (`L`) and cancellation (`K`) are supported. Unsupported Owner,
-replies, thread resolution, focused follow-up, verdict choices and suggestions
-are hidden and direct commands fail locally. GitLab selects Reviewer automatically.
+(`J`), progress (`L`) and cancellation (`K`) are supported. Unsupported Reviewer replies, thread resolution, focused follow-up, verdict
+choices and suggestions are hidden and direct commands fail locally. GitLab
+defaults to Reviewer; `M` selects and remembers Owner for this project.
 Use existing `glab` authentication for explicit network operations. Only
 `gitlab.com` is supported; other hosts retain GitHub Enterprise handling.
 
@@ -735,3 +735,22 @@ creating directories or starting work. Existing `m` and `C-u m` behavior is unch
 CLI review and fix progress prints `Checkout: /absolute/path` when the checkout
 is available, including on resume. This is separate from the session/artifact
 directory. JSON result output remains unchanged.
+
+## GitLab Owner
+
+Select Owner with `M`, use `M-x magit-auto-review-owner` with an MR number/URL, or
+choose a retained Owner session from the GitLab entry prompt. Opening cached
+state does not authenticate or run models. `G` fetches feedback and authoritative
+permissions. `c` / `e` compose/edit, `s` stages, `P` previews and publishes, `O`
+recovers uncertain receipts, and `x` / `X` resolve/reopen supported threads.
+
+The publication preview uses the frozen protected body and native destination.
+It explains when replying converts a standalone comment into a thread; drafts
+and feedback identity survive that conversion. Editor wording stays unchanged.
+An uncertain write is never resent merely because lookup is empty.
+
+`f`, `V`, resume, commit preparation/association and Reviewer handoff require an
+open same-project MR with a known source branch. Fork MRs keep conversation
+actions and display why fixing is unavailable. Existing settings, verification,
+optional automatic commits, explicit push/publication, reports, logs and
+cancellation remain available. Issue fixing is deferred.

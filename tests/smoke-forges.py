@@ -24,7 +24,7 @@ def parser():
     group = result.add_mutually_exclusive_group()
     group.add_argument('--resume', type=Path)
     group.add_argument('--cleanup', type=Path)
-    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report', 'gitlab-publication', 'gitlab-emacs'))
+    result.add_argument('--scenario', choices=('preflight', 'review', 'issue', 'approval-recovery', 'owner-report', 'review-report', 'gitlab-publication', 'gitlab-emacs', 'gitlab-owner', 'gitlab-owner-emacs'))
     return result
 
 
@@ -92,7 +92,7 @@ def review(run, forge):
         calls = [json.loads(line) for line in (run.directory / 'forge-calls.jsonl').read_text().splitlines()]
         if any(c['tool'] == 'glab' and c['actor'] == 'application' and c['kind'] not in ('read', 'metadata') for c in calls):
             raise Failure('GitLab review performed a mutation or unclassified forge operation')
-        for command in ('owner-open', 'issue-run', 'thread-state'):
+        for command in ('issue-run', 'thread-state'):
             try:
                 run.api(dict(command=command, forge='gitlab', cwd=str(forge.cwd), pr=fixture['number']), forge.cwd)
             except Failure as exc:
@@ -108,14 +108,14 @@ def review(run, forge):
 def main():
     os.umask(0o077)
     options = parser().parse_args()
-    if options.scenario == 'gitlab-emacs' and options.suite in ('live', 'all'):
+    if options.scenario in ('gitlab-emacs', 'gitlab-owner', 'gitlab-owner-emacs') and options.suite in ('live', 'all'):
         raise Failure('gitlab-emacs requires scripted providers; use --suite smoke or extended.')
     required = ['git', 'gh', 'glab', 'python3']
     if not options.cleanup:
         required += ['claude', 'codex'] if options.suite == 'live' else ['bash', 'jq']
         if options.suite == 'all':
             required += ['claude', 'codex']
-        if options.suite == 'extended' or options.scenario == 'gitlab-emacs':
+        if options.suite == 'extended' or options.scenario in ('gitlab-emacs', 'gitlab-owner-emacs'):
             required.append('emacs')
     missing = [tool for tool in required if shutil.which(tool) is None]
     if missing:
@@ -193,6 +193,13 @@ def main():
                 passed = run.scenario(forge.kind + '-review-report', lambda forge=forge: review_report(run, forge)) and passed
             passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
             return 0 if passed else 1
+        if options.scenario in ('gitlab-owner', 'gitlab-owner-emacs'):
+            from forge_smoke.gitlab_owner import scenario, emacs_scenario
+            name = options.scenario
+            selected = emacs_scenario if name.endswith('-emacs') else scenario
+            passed = run.scenario(name, lambda: selected(run, forges[1])) and passed
+            passed = run.scenario('integrity', lambda: integrity(run, forges)) and passed
+            return 0 if passed else 1
         if options.scenario == 'gitlab-emacs':
             from forge_smoke.gitlab_emacs import scenario
             passed = run.scenario('gitlab-emacs', lambda: scenario(run, forges[1])) and passed
@@ -229,6 +236,8 @@ def main():
         github = forges[0]
         passed = run.scenario('gitlab-publication', lambda: gitlab_publication(run, forges[1])) and passed
         passed = run.scenario('gitlab-automatic-cli-json', lambda: automatic_cli(run, forges[1])) and passed
+        from forge_smoke.gitlab_owner import scenario as gitlab_owner
+        passed = run.scenario('gitlab-owner', lambda: gitlab_owner(run, forges[1])) and passed
         if any(r['name'] == 'github-review' and r['status'] == 'passed' for r in run.data['results']):
             passed = run.scenario('github-publication', lambda: publication(run, github)) and passed
         if any(r['name'] == 'github-publication' and r['status'] == 'passed' for r in run.data['results']):
@@ -237,6 +246,8 @@ def main():
         if options.suite == 'extended':
             from forge_smoke.gitlab_emacs import scenario
             passed = run.scenario('gitlab-emacs', lambda: scenario(run, forges[1])) and passed
+            from forge_smoke.gitlab_owner import emacs_scenario
+            passed = run.scenario('gitlab-owner-emacs', lambda: emacs_scenario(run, forges[1])) and passed
             passed = run.scenario('gitlab-advance', lambda: gitlab_advance(run, forges[1])) and passed
             passed = run.scenario('owner-reply-recovery', lambda: owner_reply_recovery(run, github)) and passed
             passed = run.scenario('edited-preview', lambda: edited_preview(run, github)) and passed

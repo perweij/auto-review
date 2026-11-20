@@ -59,7 +59,10 @@ class GitLabReportsTest(unittest.TestCase):
     def test_report_capability_remains_separate_from_owner(self):
         result = dispatch({'command': 'capabilities', 'forge': 'gitlab'})
         self.assertIn('review-publish-report', result['commands'])
-        for op in ('owner-publish-report', 'thread-state', 'issue-run'):
+        self.assertNotIn('owner-publish-report', result['commands'])
+        owner = dispatch({'command': 'capabilities', 'forge': 'gitlab', 'toolkit': 'owner'})
+        self.assertIn('owner-publish-report', owner['commands'])
+        for op in ('thread-state', 'issue-run'):
             with self.subTest(op=op), self.assertRaises(ApiError) as caught:
                 dispatch({'command': op, 'forge': 'gitlab'})
             self.assertEqual('unsupported_operation', caught.exception.code)

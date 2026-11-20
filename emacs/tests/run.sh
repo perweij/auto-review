@@ -30,6 +30,9 @@ args+=(-l emacs/tests/bootstrap.el)
                                         (getenv "AUTO_REVIEW_TEST_BYTECODE_DIR"))))
   (mapc (lambda (file) (unless (byte-compile-file file) (error "Byte compilation failed: %s" file)))
         (directory-files "emacs" t "\\.el$"))
+  (when (file-directory-p "tests/forge_smoke")
+    (dolist (file (directory-files "tests/forge_smoke" t "\\.el$"))
+      (with-temp-buffer (insert-file-contents file) (emacs-lisp-mode) (check-parens))))
   (auto-review-test-assert-origin))'
 "${EMACS:-emacs}" "${args[@]}" -l emacs/tests/magit-auto-review-tests.el -l emacs/tests/magit-auto-review-owner-tests.el -l emacs/tests/magit-auto-review-gitlab-tests.el --eval '(auto-review-test-assert-origin)' -f ert-run-tests-batch-and-exit
 python3 tests/helpers/gitlab-emacs-fixture.py "${EMACS:-emacs}" "${args[@]}"

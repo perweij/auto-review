@@ -199,7 +199,7 @@ from. Frontends resolve the repository before reading or saving its preference.
 | `owner-diff` | `session`, `batch`, optional `task` or `unit` | `{diff,before,after}` for a retained task, logical commit, or batch |
 | `owner-prepare-commit` | `session`, `revision`, optional `batch`, `unit`, `item`, `task` | Stage the selected/next logical fix; return `{owner,ready,worktree,batch,unit,position,total,paths,message}` or `{owner,ready:false,worktree,reason}` |
 | `owner-associate` | `session`, `revision`, optional `batch`, `items`, `commits` | Associate verified fixes and generate reachable fixed-in replies |
-| `owner-prepare` | `session`, `revision` | Fresh `{owner,token,replies}` publication preview |
+| `owner-prepare` | `session`, `revision` | Fresh `{owner,token,replies,preview?}` publication preview |
 | `owner-publish` | `session`, `revision`, `token` | Send the explicitly confirmed preview; return owner view |
 | `owner-recover` | `session`, `revision` | Read back uncertain submissions; return owner view |
 | `owner-thread-state` | `session`, `revision`, `item`, boolean `resolved` | Explicit permission-checked resolve/reopen; return owner view |
@@ -1151,7 +1151,8 @@ MR paths accept query strings, fragments and diff/commit tab suffixes. The
 compatibility name `pr` is unchanged. Resume uses the saved `forge_project`. Local review results,
 checkout lookup and artifacts retain the existing protocol format. This adapter
 supports review, COMMENT finding publication and explicit execution-report
-publication. Conversation mutation, Owner and issue workflows remain unavailable.
+publication, plus Owner feedback, conversation writes and same-project fixing.
+Reviewer conversation mutation and GitLab issue workflows remain unavailable.
 GitLab approval state is not converted into review verdicts.
 
 GitLab also advertises local `discover`, finding `elaborate`, and read-only
@@ -1162,7 +1163,7 @@ COMMENT and placements support overall assessments and inline text lines/ranges.
 retains the existing confirmation/revision contract. The CLI preview displays
 the `publication_body` projection. Unsupported replies, verdicts and suggestions
 fail before writing. `resolve` recovers publication receipts; it does not resolve
-GitLab conversations. Thread-state operations remain unsupported.
+GitLab conversations. Reviewer thread-state operations remain unsupported.
 
 GitLab logical reviews contain independently journaled note/discussion operations.
 Receipts retain native IDs and expose canonical `html_url` links. Recovery locates
@@ -1203,7 +1204,8 @@ write; ordinary refresh does not discard it. Pending intent
 prevents Owner automatic completion for that thread; confirmed resolution and
 reopening continue to use the existing `github_completion` rules. GitHub GraphQL
 encoding, reply endpoints, markers and commit URLs belong to the adapter. GitLab
-Owner workflows remain unavailable; execution-report notes are a separate capability.
+Owner uses the same shared intent/read-back contract; execution-report notes keep
+a separate journal.
 
 Issue eligibility reads now use the forge issue adapter. Shared policy consumes
 normalized assignment, change-state and branch facts; Git snapshot verification
@@ -1276,6 +1278,50 @@ New generations carry a persistent execution-report identity. Replacement and
 snapshot transitions create new identities, while resumes retain the existing
 identity. Report storage is excluded from generation copying. Reviewer views
 expose `execution_report` and `report_warning` metadata.
+
+### GitLab Owner capability and delivery contract
+
+`capabilities` accepts optional `toolkit: "owner"`; omission retains Reviewer
+capabilities. GitLab Reviewer advertises `toolkits` and `owner-handoff`, while
+`owner`, `replies` and `thread-state` are confined to Owner capability views.
+Reviewer views expose cached `owner_fixing: {available, reason}` for
+`owner-import` handoff.
+Owner views expose `forge_project`, `capabilities` and `fixing: {available, reason}`.
+Opening/read/discovery and toolkit selection do not authenticate or run models.
+
+Owner entry accepts MR numbers and canonical/legacy GitLab.com URLs, including
+query/fragment and diff/commit tab variants. The `pr` compatibility name and all
+existing Owner commands, revision checks and confirmation tokens are retained.
+Fork MRs support feedback, replies and thread actions; fixing, verification,
+commit preparation/association and Reviewer import require an open same-project
+MR with a known source branch. GitLab issue-to-Owner import remains unsupported.
+
+Owner enriches discussion data with fully paginated GraphQL permissions without
+changing Reviewer normalization or hashes. REST and GraphQL identities are kept
+separate; inconsistent paired reads are retried once and then fail without
+replacing cached state. System notes are context only. Stable root-note identity
+preserves feedback keys and reply targets through standalone-comment conversion.
+GitLab Owner fingerprints exclude volatile timestamps, permissions, thread-state
+metadata, system notes and unchanged confirmed Owner replies; body edits and new
+external replies remain relevant.
+
+`owner-prepare.preview.operations` projects frozen remaining replies with
+`operation_id`, `kind: "reply"`, `destination`, `body`, `marker_omitted: true` and
+`creates_thread`. Destination includes the MR identity, `discussion_id` and
+`root_id`. Only the exact appended tracking suffix is omitted. Bodies include
+slash-command protection. Original reply `body` remains unchanged.
+
+GitLab Owner actions persist `delivery: "not_sent" | "unknown" | "confirmed"`.
+Pre-submit failures and definitive native rejection record `not_sent`; unchanged
+retries reuse the frozen identity and marker. Unknown delivery remains ambiguous
+when complete lookup finds nothing, and blocks reply publication session-wide.
+Identity candidates are validated for exact body, actor and native parent before
+acceptance. Edited/conflicting/duplicate or missing confirmed receipts never
+permit resend. Recovery sends no writes. Existing GitHub recovery is unchanged.
+
+New GitLab completion proofs use `remote_completion`. Refresh, reconciliation and
+Emacs retain legacy `github_completion` compatibility without rewriting existing
+GitHub sessions. GitLab commit links use `/-/commit/SHA`.
 
 ### Repository environment profiles
 

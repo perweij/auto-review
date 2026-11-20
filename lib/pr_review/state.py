@@ -281,6 +281,12 @@ class Session:
         from . import usage
         from .forge import restore, capabilities
         project = restore(self.manifest)
+        owner_fixing = None
+        if project.forge == 'gitlab':
+            from types import SimpleNamespace
+            from .owner_state import fixing_availability
+            cached_change = self.manifest.get('change') or read_json(self.path / 'context/review-context.json', {}).get('change')
+            owner_fixing = fixing_availability(SimpleNamespace(repo=SimpleNamespace(project=project)), {'change': cached_change})
         return {**state, "execution_report": self.manifest.get("execution_report"), "report_warning": self.manifest.get("report_warning"), "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
                 "automation": self.automation_summary(), "analysis": self.analysis_summary(),
                 "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
@@ -290,7 +296,8 @@ class Session:
                 "historical": self.path != current, "current_generation": generation(current, read_json(current / "manifest.json", {})),
                 "pending_generation": generation(pending, read_json(pending / "manifest.json", {})) if pending else None,
                 "repository": self.manifest["repository"], "forge_project": project.saved(), "capabilities": capabilities(project.forge), "pr": self.manifest["pr"], "url": self.manifest.get("url"),
-                "snapshot": self.manifest.get("snapshot"), "verdicts": self.verdicts(state)}
+                "snapshot": self.manifest.get("snapshot"), "verdicts": self.verdicts(state),
+                **({'owner_fixing': owner_fixing} if owner_fixing is not None else {})}
 
     def automation_summary(self):
         from .automation import summary

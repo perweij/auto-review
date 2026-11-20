@@ -78,11 +78,11 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
         repository = state["push_target"]["repository"]
         reason = None
         if not repository:
-            reason = "GitHub no longer identifies the PR head repository; inspect the destination."
+            reason = "The forge no longer identifies the PR head repository; inspect the destination."
         elif item["fingerprint"] != batch["verified_fingerprints"].get(key) or item.get("missing"):
             reason = "Feedback changed; inspect the reply context."
-        elif item["kind"] == "thread" and not item.get("can_reply"):
-            reason = "GitHub does not permit replying to this feedback."
+        elif (item["kind"] == "thread" or item.get('owner_semantic')) and not item.get("can_reply"):
+            reason = "The forge does not permit replying to this feedback."
         existing = next((r for r in state["replies"] if r.get("batch") == batch["id"] and r["source"] == key), None)
         if automatic and not existing and any(r["source"] == key and r["status"] != "published" for r in state["replies"]):
             reason = "An existing reply needs inspection; no duplicate was created."
@@ -92,7 +92,7 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
                 raise ApiError("missing_head_repository", reason)
             continue
         body = "Fixed in " + ", ".join(f"[{sha[:12]}]({session.repo.forge.commit_url(repository, sha)})" for sha in association["commits"]) + "."
-        if item["kind"] != "thread":
+        if item["kind"] != "thread" and not item.get('reply_target'):
             body = f"In response to [this feedback]({item['comments'][0]['url']}):\n\n" + body
         if existing:
             if existing["id"] in pending:
@@ -164,6 +164,8 @@ def draft_verified_threads(session, state, batch, remote, *, latest=None):
 
 def associate(session, state, request):
     refresh(session, state)
+    from .owner_state import require_fixing
+    require_fixing(session, state)
     remote = workspace.fetch_head(session, state)
     workspace.validate(session, state)
     local = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
@@ -202,9 +204,9 @@ def associate(session, state, request):
 
 def new_reply(item, body, **extra):
     if item["kind"] in ("local_review", "issue_plan"):
-        raise ApiError("local_only", "This finding is local; choose a GitHub conversation to compose a reply.")
+        raise ApiError("local_only", "This finding is local; choose a remote conversation to compose a reply.")
     return {"id": uuid.uuid4().hex, "source": item["key"], "fingerprint": item["fingerprint"],
-            "target": {"kind": "reply", "root_id": item["root_id"]} if item["kind"] == "thread" else {"kind": "timeline"},
+            "target": copy.deepcopy(item.get('reply_target') or ({"kind": "reply", "root_id": item["root_id"]} if item["kind"] == "thread" else {"kind": "timeline"})),
             "body": body, "status": "unstaged", "versions": [], "created_at": now(), **extra}
 
 
@@ -255,7 +257,7 @@ def invalidate(session, state, remote):
 def blockers(session, state, reply, remote, allow_unpushed=False):
     item = session.items(state, [reply["source"]])[0]
     if item["kind"] in ("local_review", "issue_plan"):
-        raise ApiError("local_only", "Local findings do not have a GitHub reply destination.")
+        raise ApiError("local_only", "Local findings do not have a remote reply destination.")
     if reply.get("needs_attention") or item["fingerprint"] != reply["fingerprint"]:
         raise ApiError("stale_discussion", "Inspect and acknowledge the changed reply context first.")
     if reply.get("automatic") and not automatic_proof(session, state, reply):
@@ -269,8 +271,8 @@ def blockers(session, state, reply, remote, allow_unpushed=False):
         if not owner_commit_plan.inspect(session, batch, proof_head)["complete"]:
             raise ApiError("unpublished_commit", "The verified integration repair is required before publishing replies. Push the complete series first.")
     require_text(reply["body"], "reply body")
-    if item["kind"] == "thread" and not item.get("can_reply"):
-        raise ApiError("permission_denied", "GitHub does not permit replying to this thread.")
+    if (item["kind"] == "thread" or item.get('owner_semantic')) and not item.get("can_reply"):
+        raise ApiError("permission_denied", "The forge does not permit replying to this thread.")
     if reply.get("commits") and any(not workspace.ancestor(session, sha, remote) for sha in reply["commits"]):
         if not (allow_unpushed and reply.get("automatic") and not reply.get("push_confirmed")):
             raise ApiError("unpublished_commit", "The fix commits are not on the current PR head. Push first, then retry P; no replies were omitted.")
@@ -285,7 +287,11 @@ def prepare(session, state):
     session.save(state)
     if state["metadata"]["state"] != "OPEN":
         raise ApiError("closed_pr", "Publishing owner replies requires an open PR.")
-    if any(a["status"] in ("submitting", "ambiguous") for a in state["actions"]):
+    uncertain = [a for a in state['actions'] if a['status'] in ('submitting', 'ambiguous')]
+    if uncertain and getattr(publication_adapter(session), 'requires_absence_proof', False):
+        raise ApiError('uncertain_publication', 'Reply delivery is unresolved; recover the listed actions before publishing. An empty lookup does not authorize resend.',
+                       actions=[dict(id=a['id'], reply=a['reply'], delivery=a.get('delivery', 'unknown')) for a in uncertain])
+    if uncertain:
         raise ApiError("uncertain_publication", "Recover uncertain replies before publishing again.")
     selected = [r for r in state["replies"] if r["id"] in selected_ids]
     if not selected:
@@ -307,7 +313,11 @@ def prepare(session, state):
     token = digest(payload)
     state["prepared"] = {"token": token, **payload}
     session.save(state)
-    return {"owner": session.view(state), "token": token, "replies": selected}
+    result = {"owner": session.view(state), "token": token, "replies": selected}
+    adapter = publication_adapter(session)
+    if hasattr(adapter, 'owner_preview'):
+        result['preview'] = adapter.owner_preview(operations)
+    return result
 
 
 def recover(session, state, *, statuses=('submitting', 'ambiguous'), clear_prepared=True, refresh_context=True):
@@ -324,7 +334,7 @@ def recover(session, state, *, statuses=('submitting', 'ambiguous'), clear_prepa
             reply = next(r for r in state['replies'] if r['id'] == action['reply'])
             reply['needs_attention'] = 'Multiple remote receipts match this reply; inspect the duplicate replies.'
             session.save(state)
-            raise ApiError("ambiguous_receipt", "Multiple matching receipts; inspect GitHub before retrying.")
+            raise ApiError("ambiguous_receipt", "Multiple matching receipts; inspect the forge before retrying.")
         if action['status'] == 'published' and not matches:
             # Remote deletion does not undo a completed send. Retain its journal
             # and keep auditing for late duplicates without blocking other replies.
@@ -332,13 +342,23 @@ def recover(session, state, *, statuses=('submitting', 'ambiguous'), clear_prepa
         if action.get('receipt') and not matches:
             raise ApiError('ambiguous_receipt', 'A previously confirmed receipt is missing; inspect the remote reply before retrying.')
         if matches:
+            if getattr(publication_adapter(session), 'requires_absence_proof', False) and not publication_adapter(session).matches(session, action, matches[0]):
+                action.update(status='ambiguous', delivery='unknown')
+                session.save(state)
+                raise ApiError('ambiguous_receipt', 'A matching remote reply was edited or its destination conflicts; inspect it before continuing. No retry sent.')
             action.setdefault('body', publication_adapter(session).owner_body(action))
             action['evidence'] = publication_adapter(session).owner_receipt(matches[0])
             reply = next(r for r in state['replies'] if r['id'] == action['reply'])
             if reply.get('receipt') and not reply.get('evidence'):
                 reply['evidence'] = publication_adapter(session).owner_receipt(reply['receipt'])
             finish(state, action, matches[0])
+            if getattr(publication_adapter(session), 'requires_absence_proof', False):
+                action['delivery'] = 'confirmed'
         elif action["status"] != "unsent":
+            if getattr(publication_adapter(session), 'requires_absence_proof', False) and action.get('delivery') != 'not_sent':
+                action.update(status='ambiguous', delivery='unknown')
+                session.save(state)
+                continue
             action["status"] = "unsent"
             for reply in state["replies"]:
                 if reply["id"] == action["reply"] and reply["status"] != "published":
@@ -375,7 +395,7 @@ def publish(session, state, request):
     prepared = copy.deepcopy(state.get("prepared"))
     if not prepared or request.get("token") != prepared["token"]:
         raise ApiError("confirmation_required", "Prepare and inspect the exact staged replies before publishing.")
-    # A second prepare rereads GitHub and verifies the exact confirmation, not merely the count.
+    # A second prepare rereads the forge and verifies the exact confirmation, not merely the count.
     fresh = prepare(session, state)
     if fresh["token"] != prepared["token"]:
         state.pop("prepared", None)
@@ -393,6 +413,8 @@ def publish(session, state, request):
         blockers(session, state, reply, remote)
         action = copy.deepcopy(next(op for op in prepared['operations'] if op['reply'] == reply['id']))
         action['status'] = 'submitting'
+        if getattr(publication_adapter(session), 'requires_absence_proof', False):
+            action['delivery'] = 'unknown'
         previous = next((a for a in state['actions'] if a['id'] == action['id']), None)
         if previous is not None:
             action['attempt_count'] = previous.get('attempt_count', 1) + 1
@@ -409,10 +431,16 @@ def publish(session, state, request):
                 raise ApiError('uncertain_publication', 'Reply response could not be verified; recover before retrying.')
             action['receipt'] = receipt
             action['evidence'] = publication_adapter(session).owner_receipt(receipt)
+            if getattr(publication_adapter(session), 'requires_absence_proof', False):
+                action['delivery'] = 'confirmed'
             session.save(state)
             finish(state, action, receipt)
-        except BaseException:
-            action["status"] = "ambiguous"
+        except BaseException as exc:
+            not_sent = (getattr(publication_adapter(session), 'requires_absence_proof', False)
+                        and getattr(exc, 'write_not_sent', False) and not action.get('receipt'))
+            action["status"] = 'unsent' if not_sent else "ambiguous"
+            if getattr(publication_adapter(session), 'requires_absence_proof', False):
+                action['delivery'] = 'not_sent' if not_sent else ('confirmed' if action.get('receipt') else 'unknown')
             session.save(state)
             raise
         session.save(state)

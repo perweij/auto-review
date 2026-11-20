@@ -1550,10 +1550,11 @@ directory. JSON result output remains unchanged.
 
 Review, Owner and fix-issue commands accept `--forge github`. GitHub is the
 default, including enterprise hosts; GitLab.com supports MR reviews, COMMENT
-finding publication and explicit execution-report publication.
+finding publication, Owner conversations and same-project fixing, plus explicit
+execution-report publication. GitLab issue fixing remains unavailable.
 Unknown selections fail before starting work. Existing repository selectors,
-GitHub URLs and saved session locations remain supported; this option does not
-enable other GitLab workflows; the GitLab.com pilot is described below.
+GitHub URLs and saved session locations remain supported; the GitLab.com
+capabilities and remaining limits are described below.
 
 New sessions record forge, host and full project path separately, and retain the
 existing repository and viewer fields for compatibility. Legacy sessions are
@@ -1619,10 +1620,10 @@ forge. Interactive runs open the existing draft/publication menu; `--no-publish`
 retains a local review. `--auto-publish --json` uses the same guarded, unattended
 COMMENT workflow as GitHub and returns native note receipt URLs.
 
-Only GitLab.com is supported. Owner operations, issue fixing, approvals,
-request-changes verdicts, replies, resolve/reopen, code suggestions,
-focused follow-up, repository MR listing, monitor
-integration and full Emacs integration are outside this pilot. Explicit unsupported
+Only GitLab.com is supported. Owner supports native conversations and same-project
+fixing across CLI, API and Emacs. Issue fixing, approvals, request-changes verdicts,
+Reviewer replies/thread mutations, code suggestions, focused follow-up, repository
+MR listing and monitor integration remain unavailable. Explicit unsupported
 operations fail before remote writes. Explicit execution-report publication is
 available separately through `pr-review publish-report SESSION`. GitLab approvals are not GitHub verdicts;
 review status is reported unavailable. CI covers MR pipelines matching the reviewed
@@ -1652,7 +1653,8 @@ Resolution reads local data and preserves GitHub Enterprise behavior for other
 hosts. Self-hosted GitLab and remote MR browsing are deferred.
 
 Forge/project identity and capabilities remain attached through setup, resume,
-history, conversations and async completion. GitLab selects Reviewer. Existing
+history, conversations and async completion. GitLab defaults to Reviewer; `M`
+selects and remembers Owner per project. Existing
 Reviewer edit/stage, history, read-only conversations, elaboration, checkout,
 reports, logs and cancellation commands remain available. Unsupported actions
 are hidden; direct invocation fails locally. Fresh GitLab reviews ignore GitHub
@@ -1791,7 +1793,7 @@ Paused batches can be shared for diagnosis. The CLI equivalents are
 optional `--batch ID`. Repeating the same snapshot publication is idempotent;
 subsequent execution can produce a new comment. Unknown write outcomes are
 recovered before further publication. Historical untraced batches remain runnable
-but have no execution report. GitLab Owner execution is outside the current pilot.
+but have no execution report. GitLab Owner execution supports open same-project MRs; fork MRs support conversations only.
 
 ### Plain review execution reports
 
@@ -1826,6 +1828,35 @@ write failed. Retrying checks for the receipt without sending another note.
 Definitive API rejections, such as permission denial or rate limiting, remain
 retryable after the underlying problem is resolved.
 Local reports and review results remain available after publication failure.
+
+### GitLab Owner in the terminal and Emacs
+
+Authenticate `glab` for explicit network operations. Open a GitLab.com MR with
+`pr-review owner MR_URL open --forge gitlab`; use the returned session with
+`--session SESSION` for subsequent commands. `refresh` collects feedback and native
+permissions. `reply --item KEY --body-file FILE`, `triage --operation stage
+--reply ID`, `prepare`, and `publish --confirm TOKEN` retain the normal Owner flow.
+Resolve/reopen uses `resolve` / `reopen --item KEY`. Replies to standalone comments
+create native threads; local feedback identity and drafts survive conversion.
+
+In Emacs, `M` selects Owner and remembers the choice. Direct Owner entry accepts
+MR numbers/URLs; the GitLab entry prompt also offers retained Owner sessions.
+`G` fetches feedback, `c` composes, `e` edits, `s` stages, `P` previews/publishes,
+`O` recovers receipts, and `x` / `X` resolves/reopens permitted threads. Preview
+shows the exact protected outgoing body and native destination. Declining sends
+nothing. Original editor wording is retained.
+
+`f`, `V`, resume and commit/association actions require an open same-project MR
+with a known source branch. Fork MRs keep feedback and conversation actions,
+with fixing availability explained in the buffer. Shared verification, optional
+automatic commits, Magit inspection/push, reports, logs and cancellation behave
+as in GitHub Owner. Reviewer handoff is available for eligible same-project MRs.
+Push and publication stay explicit; models never mutate conversation state.
+
+After unknown delivery, `O` searches for the frozen receipt without sending again.
+An empty lookup does not permit retry; the session remains blocked for reply
+publication until delivery is established. Definite non-delivery remains
+retryable. Edited, duplicate or conflicting receipts require inspection.
 
 ### Preparing the verification environment
 

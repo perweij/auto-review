@@ -258,6 +258,8 @@ def final_review(session, state, batch):
 
 def check_fresh(session, state, batch):
     refresh(session, state)
+    from .owner_state import require_fixing
+    require_fixing(session, state)
     if owner_change(state)['source']['head'] != batch["remote_head"]:
         raise ApiError("stale_source", "GitHub head changed during the batch; reconcile in Magit before continuing.")
     if batch.get("discussion_stale"):
@@ -341,6 +343,8 @@ def _execute(session, state, request):
         try:
             # Refresh before creating a worktree; failure leaves existing source untouched.
             refresh(session, state)
+            from .owner_state import require_fixing
+            require_fixing(session, state)
             remote = workspace.prepare(session, state)
             if request.get("batch"):
                 batch = next((b for b in state["batches"] if b["id"] == request["batch"]), None)

@@ -2,7 +2,7 @@
 
 Run review and issue commands from a checkout of the target repository. Replace
 PR `123` and issue `42` with your numbers. Use `bin/pr-review` and `bin/fix-issue`
-for this checkout's version. Authenticate `gh` (or `glab` for GitLab reviews) and
+for this checkout's version. Authenticate `gh` (or `glab` for GitLab workflows) and
 the providers used by your active roles. Model names and efforts must be supported by your installed CLI
 and account.
 
@@ -302,8 +302,8 @@ pr-review --forge gitlab https://gitlab.com/GROUP/PROJECT/-/merge_requests/123 -
 
 The automatic workflow stops before writing if any finding needs attention.
 Native inline lines/ranges and overall assessments are supported. Approvals,
-request-changes, replies, suggestions, Owner operations and `fix-issue` remain
-unsupported. Saved suggestion settings can be disabled with
+request-changes, Reviewer replies, suggestions and `fix-issue` remain unsupported.
+Owner supports native conversations and same-project fixing. Saved suggestion settings can be disabled with
 `--no-suggested-changes`. See the
 [pilot capability and evidence notes](gitlab-pilot.md).
 
@@ -313,8 +313,8 @@ In Emacs, select the MR in Forge and press `V`, or run
 and run, edit with `e`, stage with `s`, and use `P p` to inspect frozen outgoing
 notes/positions and confirm. `P r` recovers uncertain receipts. `C` reads saved
 conversations, `w` opens the checkout and `J` opens report actions. Unsupported
-actions are omitted. GitLab uses Reviewer automatically; remote MR browsing,
-Owner and issue fixing remain deferred.
+actions are omitted. GitLab defaults to Reviewer; `M` remembers Owner per project. Remote MR browsing,
+and issue fixing remain deferred.
 
 ## Compatibility
 
@@ -414,3 +414,24 @@ reports as MR timeline notes. Repeating a command recovers its receipt; an
 uncertain send without a visible receipt stops rather than risking a duplicate.
 `--auto-publish` publishes findings, not execution reports. Historical generations
 without traces remain runnable but cannot be reconstructed into reports.
+
+## Address GitLab MR feedback with Owner
+
+```sh
+pr-review owner https://gitlab.com/GROUP/PROJECT/-/merge_requests/7 open --forge gitlab
+pr-review owner refresh --session SESSION --forge gitlab
+pr-review owner reply --session SESSION --item KEY --body-file reply.md
+pr-review owner triage --session SESSION --operation stage --reply REPLY_ID
+pr-review owner prepare --session SESSION
+pr-review owner publish --session SESSION --confirm TOKEN
+```
+
+Read `KEY` and `REPLY_ID` from the returned Owner view. Inspect the frozen preview
+before using its token. Native standalone replies create threads. `resolve` and
+`reopen` take `--item KEY`; permission checks and read-back are explicit.
+
+For an open same-project MR, `fix --item KEY` runs the shared fixing and
+verification workflow. `--auto-commit` optionally commits verified changes; push
+explicitly, then `associate` and preview/publish the fixed-in replies. Fork MRs
+support conversations only. In Emacs select Owner with `M` and use the same Owner
+keys as for GitHub. `O` recovers uncertain receipt delivery without resending.

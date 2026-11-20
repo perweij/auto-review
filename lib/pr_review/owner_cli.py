@@ -8,7 +8,6 @@ from .application import dispatch
 from .common import ApiError
 from .events import event_sink
 from .processes import cancellation_scope
-from .repository import repository_name
 
 
 def main(argv):
@@ -63,19 +62,24 @@ def main(argv):
         elif kind == "started":
             print("Operation: " + fields["operation_id"], file=sys.stderr, flush=True)
     def check_target(view):
-        if args["pr"] and args["pr"].rstrip("/").lower() not in (str(view["pr"]), view["url"].lower()):
-            raise ApiError("invalid_request", "The requested PR differs from the selected owner session.")
-        if args["repository"] and repository_name(args["repository"]) != view["repository"]:
+        from .forge import restore
+        from .review_target import target, project_for
+        project = restore(view, args.get('forge'))
+        if args['pr']:
+            requested, number = target(args['pr'], args.get('repository'), project.forge)
+            if number != view['pr'] or (requested and requested != project):
+                raise ApiError('invalid_request', 'The requested change differs from the selected owner session.')
+        if args["repository"] and project_for(args['repository'], project.forge) != project:
             raise ApiError("invalid_request", "The requested repository differs from the selected owner session.")
     try:
         with event_sink(progress), cancellation_scope():
             if args["action"] == "import":
                 if not args["review_session"] or args["session"]:
                     raise ApiError("invalid_request", "Use --review-session for import; its PR determines the owner destination.")
-                source = dispatch({"command": "read", "session": args["review_session"], "generation": args["generation"]})
+                source = dispatch({"command": "read", "session": args["review_session"], "generation": args["generation"], 'forge': args.get('forge')})
                 check_target(source)
                 result = dispatch({"command": "owner-import", "session": source["session"], "generation": source["generation"],
-                                   "revision": args["revision"] or source["revision"], "comments": args["comments"]})
+                                   "revision": args["revision"] or source["revision"], "comments": args["comments"], 'forge': args.get('forge')})
                 print(json.dumps(result, indent=2))
                 return 0
             if args["action"] in ("discover", "cancel"):
@@ -83,10 +87,10 @@ def main(argv):
                 print(json.dumps(dispatch({"command": command, **{k: v for k, v in args.items() if v is not None}}), indent=2))
                 return 0
             if args["session"]:
-                view = dispatch({"command": "owner-read", "session": args["session"]})
+                view = dispatch({"command": "owner-read", "session": args["session"], 'forge': args.get('forge')})
                 check_target(view)
             else:
-                view = dispatch({"command": "owner-open", "pr": args["pr"], "repository": args["repository"]})
+                view = dispatch({"command": "owner-open", "pr": args["pr"], "repository": args["repository"], 'forge': args.get('forge')})
             action = args.pop("action")
             if args.get("auto_commit") is not None and action not in ("fix", "resume"):
                 raise ApiError("invalid_request", "Commit mode flags apply only to fix or resume.")
