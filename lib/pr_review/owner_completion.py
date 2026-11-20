@@ -102,6 +102,10 @@ def reconcile(session, state):
                 result["handled_items"].append(item["key"])
             elif proof and item.get("local_completion"):
                 item["local_completion"] = proof
+        from .owner_publication import draft_verified_threads
+        for batch in reversed(updated['batches']):
+            if batch.get('auto_commit') and execution_complete(batch):
+                draft_verified_threads(session, updated, batch, owner_change(updated)['source']['head'], latest=latest)
         # A concurrent Magit commit/rewrite must not install stale conclusions.
         if session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip() != head:
             raise ApiError("head_changed", "HEAD changed during the commit check; refresh again.")

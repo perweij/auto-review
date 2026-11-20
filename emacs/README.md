@@ -332,8 +332,7 @@ replies before `P`; publishing does not resolve threads or change review verdict
 
 `a` reports the saved commit associations, or explicitly says when none matched.
 Linked hashes appear on the finding and batch headings even when folded. These
-are provenance links; local findings still have no GitHub reply destination, and
-association does not mark feedback handled or resolve a thread.
+identify the verified commits. For an imported finding published inline on GitHub, Owner can stage its reply on the thread identified by the publication receipt.
 
 After committing, return to Owner and press `g`. It checks reachable local commits
 for a unique exact group commit or a recorded sequence of reviewed task trees

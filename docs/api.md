@@ -322,14 +322,13 @@ unexpected changes additionally set `inspection_required`. Intent is saved befor
 launching Git. Resuming scans for exact commits before retrying and bypasses
 provider execution for a ready batch. An already pushed recognized prefix is
 accepted; unrelated remote changes pause recovery. Replanning/adoption after
-HEAD advances requires a new batch. `g`/`owner-reconcile` remains local and never
-creates commits or replies.
+HEAD advances requires a new batch. `g`/`owner-reconcile` checks local state and restores missing reply drafts for completed automatic batches.
 
 Confirmed automatic commits create exact associations and idempotent generated
 replies, then reconcile local findings. `batch.reply_issues` contains item/reason
 entries for missing destinations or drafts needing inspection. These can pause
 completion after all commits exist; `r` retries drafting without another commit.
-Local findings and outcomes without a verified code fix generate no reply.
+A verified unchanged PR head can support an already-addressed thread reply. An imported GitHub finding can support a reply to its published inline thread when its receipt matches the cached root comment.
 
 Automatic replies add `automatic`, `commit_repository`, `awaiting_push`, and
 `push_confirmed` fields. Their `status: staged` records publication selection;
@@ -401,11 +400,7 @@ needed without pretending that a new incoming message arrived. `handled` and
 Imported items have `kind: "local_review"`, `source` provenance (reviewer session,
 generation, comment, revision, snapshot, and original findings), `review_context`,
 and `versions`. They survive GitHub refresh and participate in the same fix,
-replan, checkpoint, and association flow as GitHub feedback. They have no reply
-destination: composing/publishing replies fails with `local_only`, and association
-never generates an automatic reply for them. A later publication of the reviewer
-draft does not silently retarget the local copy; select its actual GitHub feedback
-explicitly for any reply or thread action.
+replan, checkpoint, and association flow as GitHub feedback. Manual composition on the local copy returns `local_only`. Automatic completion and local reconciliation can stage a draft on the original GitHub thread using its publication receipt. The draft records the thread as its source and, for a code fix, the imported key as `verified_source`.
 
 Owner mutation operations:
 

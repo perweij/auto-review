@@ -2,9 +2,9 @@
 import copy
 import uuid
 
-from .common import ApiError, digest, now, require_text
+from .common import ApiError, digest, now, read_json, require_text
 from .publication import publication_adapter
-from .owner_state import refresh
+from .owner_state import feedback_body, refresh
 from . import owner_git as workspace, owner_commit_plan, owner_contracts
 
 
@@ -24,6 +24,36 @@ def bind_exact(batch, progress):
     for key, commits in progress["items"].items():
         if key in fixed_items(batch) and (key not in associations or associations[key]["method"] in ("exact", "task")):
             associations[key] = {"commits": commits, "method": "exact" if progress["method"] == "exact" else "task", "at": now()}
+
+
+def published_thread(session, state, item):
+    """Resolve an imported GitHub inline comment by its original generation and publication receipt."""
+    from .state import Session
+    source = item.get('source', {})
+    if session.repo.project.forge != 'github' or not all(source.get(k) for k in ('session', 'generation', 'comment')):
+        return None
+    try:
+        review = Session({'session': source['session'], 'generation': source['generation']})
+        if (review.manifest.get('repository'), review.manifest.get('pr'), review.manifest.get('git_common_dir')) != (
+                session.repo.identity, session.repo.pr, str(session.repo.common)):
+            return None
+        ledger = read_json(review.file, {})
+    except (ApiError, OSError):
+        return None  # An unavailable Reviewer archive must not block unrelated Owner work.
+    if ledger.get('generation') != source['generation']:
+        return None
+    comment = next((c for c in ledger.get('comments', []) if c['id'] == source['comment']), {})
+    receipt = comment.get('receipt') or {}
+    if comment.get('status') != 'published' or comment.get('placement', {}).get('kind') != 'inline' or not receipt.get('id'):
+        return None
+    for thread in state['feedback']:
+        if thread['kind'] != 'thread' or thread.get('root_id') != receipt['id'] or len(thread['comments']) != 1:
+            continue
+        root = thread['comments'][0]
+        if (root.get('url') == receipt.get('html_url') and root.get('url')
+                and feedback_body(root['body']) == feedback_body(item['comments'][0]['body'])):
+            return thread
+    return None
 
 
 def draft_fixed(session, state, batch, remote=None, automatic=False):
@@ -84,9 +114,52 @@ def draft_fixed(session, state, batch, remote=None, automatic=False):
         extra = {"automatic": True, "awaiting_push": True, "push_confirmed": False,
                  "commit_repository": repository} if automatic else {}
         state["replies"].append(new_reply(item, body, batch=batch["id"], commits=association["commits"], status="staged", **extra))
+    draft_verified_threads(session, state, batch, remote)
     batch["reply_issues"] = issues
     state.pop("prepared", None)
     return issues
+
+
+def draft_verified_threads(session, state, batch, remote, *, latest=None):
+    """Rebuild missing thread drafts from completed verification without modifying existing drafts."""
+    repository = state.get('push_target', {}).get('repository')
+    if not repository or batch.get('discussion_stale') or batch.get('integrity_failure'):
+        return
+    for outcome in (batch.get('review') or {}).get('outcomes', []):
+        key = outcome['item']
+        if latest is not None and latest.get(key) is not batch:
+            continue
+        item = next((i for i in state['feedback'] if i['key'] == key), None)
+        if (not item or item.get('missing') or key not in batch.get('verified_items', [])
+                or item['fingerprint'] != batch['verified_fingerprints'].get(key)):
+            continue
+        thread = published_thread(session, state, item) if item['kind'] == 'local_review' else item
+        if (not thread or thread['kind'] != 'thread' or thread.get('missing') or thread.get('is_resolved')
+                or not thread.get('can_reply') or any(r['source'] == thread['key'] for r in state['replies'])):
+            continue
+        extra = {}
+        if outcome['status'] == 'already_addressed':
+            baseline = batch.get('baseline')
+            if (not baseline or baseline != batch.get('remote_head')
+                    or session.repo.git('rev-parse', baseline + '^{tree}').stdout.strip() != batch.get('final_tree')
+                    or (remote and not workspace.ancestor(session, baseline, remote))):
+                continue
+            commits = [baseline]
+            prefix = 'Verified that this concern was already addressed at '
+        elif outcome['status'] == 'fixed' and item['kind'] == 'local_review':
+            commits = batch.get('commit_progress', {}).get('items', {}).get(key)
+            if not commits or commits != batch.get('associations', {}).get(key, {}).get('commits'):
+                continue
+            pushed = bool(remote and all(workspace.ancestor(session, sha, remote) for sha in commits))
+            extra = dict(automatic=True, verified_source=key, commit_repository=repository,
+                         awaiting_push=not pushed, push_confirmed=pushed)
+            prefix = 'Fixed in '
+        else:
+            continue
+        links = ', '.join(f'[{sha[:12]}]({session.repo.forge.commit_url(repository, sha)})' for sha in commits)
+        state['replies'].append(new_reply(thread, prefix + links + '.', batch=batch['id'], commits=commits,
+                                          status='staged', **extra))
+        state.pop('prepared', None)
 
 
 def associate(session, state, request):
@@ -138,16 +211,23 @@ def new_reply(item, body, **extra):
 def automatic_proof(session, state, reply):
     """A staged-before-push claim must still have its exact local proof."""
     batch = next((b for b in state["batches"] if b["id"] == reply.get("batch")), None)
+    key = reply.get('verified_source', reply['source'])
+    if key != reply['source']:
+        local = next((i for i in state['feedback'] if i['key'] == key and not i.get('missing')), None)
+        thread = published_thread(session, state, local) if local else None
+        if (not batch or not thread or thread['key'] != reply['source']
+                or local['fingerprint'] != batch.get('verified_fingerprints', {}).get(key)):
+            return False
     if (not batch or batch["status"] != "ready" or not owner_contracts.current(batch) or batch.get("integrity_failure")
             or batch.get("commit_execution", {}).get("inspection_required")
-            or reply["source"] not in fixed_items(batch)
-            or batch.get("verified_fingerprints", {}).get(reply["source"]) != reply["fingerprint"]
+            or key not in fixed_items(batch)
+            or (key == reply["source"] and batch.get("verified_fingerprints", {}).get(key) != reply["fingerprint"])
             or reply.get("commit_repository") != state.get("push_target", {}).get("repository")):
         return False
     workspace.validate(session, state)
     head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
     progress = owner_commit_plan.inspect(session, batch, head)
-    return progress["items"].get(reply["source"]) == reply.get("commits")
+    return progress["items"].get(key) == reply.get("commits")
 
 
 def invalidate(session, state, remote):

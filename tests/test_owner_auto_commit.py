@@ -456,6 +456,91 @@ class AutoCommitTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=view["worktree"]), head)
         self.assertFalse(view["replies"])
 
+    def test_auto_commit_stages_imported_finding_on_its_published_thread(self):
+        from pr_review.state import Session
+        from pr_review.common import atomic_json
+        local = next(i for i in self.request("owner-read")["feedback"] if i["key"] == self.keys[0])
+        review = Session(local["source"])
+        ledger = review.load()
+        proposal = next(c for c in ledger["comments"] if c["id"] == local["source"]["comment"])
+        thread = self.fixture.feedback[0]
+        thread["comments"][0]["body"] = local["comments"][0]["body"]
+        proposal.update(status="published", placement={"kind": "inline"},
+                        receipt={"id": thread["root_id"], "html_url": thread["url"]})
+        atomic_json(review.file, ledger)
+        with patch("pr_review.owner_providers.invoke", side_effect=self.fixture.model):
+            view = self.request("owner-fix", items=[self.keys[0]], auto_commit=True)
+        reply, = view["replies"]
+        self.assertEqual((reply["source"], reply["verified_source"], reply["status"]),
+                         (thread["key"], local["key"], "staged"))
+        self.assertEqual(reply["commits"], view["batches"][-1]["commit_progress"]["commits"])
+        self.assertFalse(self.fixture.posts)
+
+    def test_refresh_recovers_published_import_after_auto_commit(self):
+        from pr_review.state import Session
+        from pr_review.common import atomic_json
+        local = next(i for i in self.request("owner-read")["feedback"] if i["key"] == self.keys[0])
+        review = Session(local["source"])
+        ledger = review.load()
+        proposal = next(c for c in ledger["comments"] if c["id"] == local["source"]["comment"])
+        target = self.fixture.feedback[1]
+        # Identical wording in two threads must never select the wrong destination.
+        for thread in self.fixture.feedback:
+            thread["comments"][0]["body"] = local["comments"][0]["body"]
+        self.request("owner-refresh")
+        with patch("pr_review.owner_providers.invoke", side_effect=self.fixture.model):
+            complete = self.request("owner-fix", items=[self.keys[0]], auto_commit=True)
+        self.assertFalse(complete["replies"])
+        batch = complete["batches"][-1]
+        sha, = batch["commit_progress"]["commits"]
+        proposal.update(status="published", placement={"kind": "inline"},
+                        receipt={"id": target["root_id"], "html_url": target["url"]})
+        proposal["receipt"]["html_url"] = self.fixture.feedback[0]["url"]
+        atomic_json(review.file, ledger)
+        self.assertFalse(self.request("owner-reconcile")["replies"])
+        proposal["receipt"]["html_url"] = target["url"]
+        atomic_json(review.file, ledger)
+        reply, = self.request("owner-reconcile")["replies"]
+        self.assertEqual((reply["source"], reply["target"]["root_id"], reply["commits"]),
+                         (target["key"], target["root_id"], [sha]))
+        self.assertEqual(reply["status"], "staged")
+        self.assertTrue(reply["awaiting_push"])
+        self.request("owner-mutate", operation="unstage", reply=reply["id"])
+        kept, = self.request("owner-reconcile")["replies"]
+        self.assertEqual((kept["id"], kept["status"]), (reply["id"], "unstaged"))
+        self.push(sha)
+        self.request("owner-refresh")
+        self.request("owner-mutate", operation="stage", reply=reply["id"])
+        self.assertEqual(self.request("owner-prepare")["replies"][0]["id"], reply["id"])
+        self.assertFalse(self.fixture.posts)
+
+    def test_already_addressed_thread_gets_one_baseline_reply_without_a_commit(self):
+        def addressed(session, state, batch, role, context):
+            if role == "plan":
+                return self.fixture.model(session, state, batch, role, context)
+            return {"summary": "Baseline passes", "complete": True, "checks": ["Regression passed"], "blocking": [],
+                    "outcomes": [{"item": "thread:T1", "status": "already_addressed", "evidence": "Verified"}]}
+
+        with patch("pr_review.owner_providers.invoke", side_effect=addressed):
+            view = self.request("owner-fix", items=["thread:T1"], auto_commit=True)
+        batch = view["batches"][-1]
+        self.assertEqual(batch["commit_progress"]["total"], 0)
+        reply, = view["replies"]
+        self.assertEqual(reply["status"], "staged")
+        self.assertEqual(reply["commits"], [batch["baseline"]])
+        self.assertEqual(reply["target"]["root_id"], 101)
+        self.assertEqual(self.resume()["replies"], [reply])
+        # Previously completed versions saved the verification but skipped this draft.
+        session = OwnerSession({"session": self.fixture.path})
+        state = session.load()
+        state["replies"] = []
+        session.save(state)
+        restored, = self.request("owner-reconcile")["replies"]
+        self.assertEqual((restored["status"], restored["target"], restored["commits"]),
+                         ("staged", reply["target"], reply["commits"]))
+        self.assertEqual(self.request("owner-reconcile")["replies"], [restored])
+        self.assertFalse(self.fixture.posts)
+
     def test_timeline_destination_and_uncertain_reply_are_preserved(self):
         self.fixture.feedback[0]["kind"] = "comment"
         self.fixture.feedback[0].pop("can_reply")  # Timeline feedback has no thread permission field.

@@ -530,7 +530,7 @@ matching local findings, and stages **Fixed in HASH** replies to the original
 GitHub conversations. Replies show **Awaiting push** until their commits reach
 the PR. Push with Magit, then use `P` to check and preview all staged replies and
 confirm publication; no separate `a` step is needed. Nothing is pushed, published,
-or resolved automatically. Local findings have no GitHub reply destination.
+or resolved automatically. For imported GitHub findings, Owner uses the Reviewer publication receipt to find the original inline thread. Press `G` to fetch newly published threads and `g` to recover missing drafts for completed automatic batches.
 
 The batch remembers **Auto commit**; `r` resumes it without repeating successful
 provider work. `C-u r` selects automatic or manual completion, including enabling
