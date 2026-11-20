@@ -345,6 +345,8 @@
      ((cl-some (lambda (r) (equal (alist-get 'status r) "staged")) replies)
       "Next: inspect the staged replies, then P previews publication. They are already staged; no s is needed.")
      ((not replies) "Commit linked locally. Push with C-u m, then a checks GitHub and creates staged replies; P previews publication.")
+     ((magit-auto-review-owner--finishable-replies replies "published")
+      "Replies published. P finishes the open threads together.")
      ((cl-some (lambda (item) (and (equal (alist-get 'kind item) "thread")
                                     (magit-auto-review--true-p (alist-get 'can_resolve item))
                                     (not (magit-auto-review--true-p (alist-get 'is_resolved item))))) items)
@@ -503,6 +505,11 @@
          (outcome (cl-find key (alist-get 'outcomes (alist-get 'review batch))
                            :key (lambda (value) (alist-get 'item value)) :test #'equal)))
     (cond
+     ((cl-find-if (lambda (r) (and (equal key (alist-get 'source r))
+                                   (equal (alist-get 'fingerprint r) (alist-get 'fingerprint item))
+                                   (equal "published" (alist-get 'status r))))
+                  (alist-get 'replies magit-auto-review-owner--view))
+      "Reply published")
      ((not batch)
       (unless (or (equal (alist-get 'triage item) "handled")
                   (magit-auto-review--true-p (alist-get 'is_resolved item)))
@@ -610,6 +617,23 @@
       (magit-auto-review-owner--heading (format "PR Owner · #%s · %s" (or (alist-get 'pr view) "?") (or (alist-get 'repository view) "")))
       (insert "f fix · C-u f selected fix/commit/replies · g check commits · h finish locally · m commit/status · C-u m inspect · ? actions · M toolkit\n")
       (insert (format "GitHub last checked: %s\n" (or (alist-get 'checked_at view) "never; G fetches feedback")))
+      (let* ((replies (alist-get 'replies view))
+             (staged (cl-count "staged" replies :key (lambda (r) (alist-get 'status r)) :test #'equal))
+             (open (magit-auto-review-owner--finishable-replies replies "published"))
+             (published-threads
+              (delete-dups (cl-loop for r in replies
+                                    when (and (equal (alist-get 'status r) "published") (alist-get 'commits r)
+                                              (equal (alist-get 'kind (alist-get 'target r)) "reply"))
+                                    collect (alist-get 'source r)))))
+        (cond ((> staged 0) (insert (format "Next: P previews %d staged %s.\n" staged (if (= staged 1) "reply" "replies"))))
+              (open (insert (format "Next: P resolves open threads with published fix replies (%s).\n"
+                                    (magit-auto-review-owner--thread-list open))))
+              ((and published-threads
+                    (cl-every (lambda (key) (magit-auto-review--true-p
+                                             (alist-get 'is_resolved (magit-auto-review-owner--feedback key))))
+                              published-threads))
+               (insert (format "Fix replies published · %d %s resolved.\n" (length published-threads)
+                               (if (= (length published-threads) 1) "thread" "threads"))))))
       (dolist (line (magit-auto-review-owner--settings-lines
                      (or (alist-get 'effective_settings view) (alist-get 'settings view))))
         (insert line "\n"))
@@ -1117,7 +1141,68 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
               (alist-get 'commits request) (vconcat (split-string (read-string "Fix commit SHA(s), separated by spaces: ") " +" t)))))
     (magit-auto-review-owner--start request
       (lambda (view) (magit-auto-review-owner--association-result view (alist-get 'batch request))))))
-(defun magit-auto-review-owner-publish () "Inspect exact staged replies and explicitly publish." (interactive)
+(defun magit-auto-review-owner--finishable-replies (replies status)
+  "Find commit-linked replies whose original open thread still matches."
+  (cl-loop for reply in replies
+           for item = (magit-auto-review-owner--feedback (alist-get 'source reply))
+           for target = (alist-get 'target reply)
+           when (and (equal (alist-get 'status reply) status)
+                     (alist-get 'commits reply)
+                     (not (alist-get 'needs_attention reply))
+                     (or (equal status "staged") (alist-get 'receipt reply))
+                     (equal (alist-get 'kind item) "thread")
+                     (equal (alist-get 'kind target) "reply")
+                     (alist-get 'root_id target)
+                     (equal (alist-get 'root_id target) (alist-get 'root_id item))
+                     (alist-get 'fingerprint reply)
+                     (equal (alist-get 'fingerprint reply) (alist-get 'fingerprint item))
+                     (magit-auto-review--true-p (alist-get 'can_resolve item))
+                     (not (magit-auto-review--true-p (alist-get 'is_resolved item)))
+                     (not (magit-auto-review--true-p (alist-get 'missing item)))
+                     (not (cl-some (lambda (other)
+                                     (and (equal (alist-get 'source other) (alist-get 'source reply))
+                                          (not (member (alist-get 'status other) (list "published" status)))))
+                                   (alist-get 'replies magit-auto-review-owner--view))))
+           collect reply))
+
+(defun magit-auto-review-owner--resolve-published (confirmed)
+  "Resolve the exact CONFIRMED replies' eligible threads in sequence."
+  (let* ((eligible (magit-auto-review-owner--finishable-replies
+                    (alist-get 'replies magit-auto-review-owner--view) "published"))
+         (reply (cl-find-if (lambda (r)
+                              (let ((old (cl-find (alist-get 'id r) confirmed
+                                                  :key (lambda (v) (alist-get 'id v)) :test #'equal)))
+                                (and old (equal (alist-get 'fingerprint old) (alist-get 'fingerprint r))
+                                     (equal (alist-get 'source old) (alist-get 'source r)))))
+                            eligible)))
+    (if (not reply)
+        (when confirmed
+          (message "Review the remaining threads in Owner. Their state changed after confirmation."))
+      (let ((key (alist-get 'source reply)))
+        (magit-auto-review-owner--start
+         (magit-auto-review-owner--request "owner-thread-state" `(item . ,key) '(resolved . t))
+         (lambda (view)
+           (magit-auto-review-owner--accept view)
+           (magit-auto-review-owner--resolve-published
+            (cl-remove key confirmed :key (lambda (r) (alist-get 'source r)) :test #'equal))))))))
+
+(defun magit-auto-review-owner--thread-list (replies)
+  "Identify the exact threads in a resolution confirmation."
+  (string-join (delete-dups (mapcar (lambda (r) (format "#%s" (alist-get 'root_id (alist-get 'target r)))) replies)) ", "))
+
+(defun magit-auto-review-owner-publish ()
+  "Publish staged replies or resolve threads with published fix replies."
+  (interactive)
+  (let* ((replies (alist-get 'replies magit-auto-review-owner--view))
+         (pending (magit-auto-review-owner--finishable-replies replies "published")))
+    (if (and pending (not (cl-find "staged" replies :key (lambda (r) (alist-get 'status r)) :test #'equal)))
+        (when (yes-or-no-p (format "Resolve the published fix threads %s on %s? "
+                                   (magit-auto-review-owner--thread-list pending) (magit-auto-review--forge-label)))
+          (magit-auto-review-owner--resolve-published pending))
+      (magit-auto-review-owner--preview-publication))))
+
+(defun magit-auto-review-owner--preview-publication ()
+  "Preview and confirm the staged publication."
   (magit-auto-review-owner--start
    (magit-auto-review-owner--request "owner-prepare")
    (lambda (result)
@@ -1128,11 +1213,30 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
            (erase-buffer)
            (dolist (reply (alist-get 'replies result))
              (insert (format "Destination: %s\n%s\n\n" (alist-get 'source reply) (alist-get 'body reply))))
+           (dolist (r (with-current-buffer origin
+                        (magit-auto-review-owner--finishable-replies (alist-get 'replies result) "staged")))
+             (insert (format "Eligible for resolution: %s\n"
+                             (alist-get 'url (with-current-buffer origin
+                                               (magit-auto-review-owner--feedback (alist-get 'source r)))))))
            (special-mode))
          (display-buffer (current-buffer)))
        (with-current-buffer origin
-         (when (yes-or-no-p (format "Publish these %d replies to GitHub? " (length (alist-get 'replies result))))
-           (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-publish" `(token . ,(alist-get 'token result))))))))))
+         (let* ((replies (alist-get 'replies result))
+                (threads (magit-auto-review-owner--finishable-replies replies "staged"))
+                (choice (if threads
+                            (car (read-multiple-choice
+                                  (format "Publish %d replies to %s and resolve threads %s?"
+                                          (length replies) (magit-auto-review--forge-label)
+                                          (magit-auto-review-owner--thread-list threads))
+                                  '((?r "publish and resolve") (?p "publish only") (?q "cancel"))))
+                          (when (yes-or-no-p (format "Publish these %d replies to %s? "
+                                                     (length replies) (magit-auto-review--forge-label))) ?p))))
+           (when (memq choice '(?r ?p))
+             (magit-auto-review-owner--start
+              (magit-auto-review-owner--request "owner-publish" `(token . ,(alist-get 'token result)))
+              (lambda (view)
+                (magit-auto-review-owner--accept view)
+                (when (eq choice ?r) (magit-auto-review-owner--resolve-published threads)))))))))))
 (defun magit-auto-review-owner-recover () "Recover uncertain publication through read-back." (interactive)
   (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-recover")))
 (defun magit-auto-review-owner--thread (resolved)
@@ -1363,7 +1467,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
     ("e" "Edit reply" magit-auto-review-owner-edit)
     ("s" "Stage" magit-auto-review-owner-stage)
     ("u" "Unstage" magit-auto-review-owner-unstage)
-    ("P" "Preview/publish staged" magit-auto-review-owner-publish)
+    ("P" "Publish replies / finish threads" magit-auto-review-owner-publish)
     ("O" "Recover uncertain publication" magit-auto-review-owner-recover)]
    ["Navigation"
     ("Y" "Verification environment" magit-auto-review-environment-menu :if magit-auto-review-environment-available-p)

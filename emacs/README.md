@@ -328,7 +328,7 @@ only when exact verified commits have reached the fresh PR head. For a recorded
 sequence, each reply links to its own logical fix commit; already committed
 prefixes can be associated independently. `C-u a` supports explicit associations
 for arbitrary splits or extra changes. Inspect/edit those
-replies before `P`; publishing does not resolve threads or change review verdicts.
+replies with `P`. For eligible commit-linked replies, choose **publish and resolve** to finish their threads in one pass, or **publish only** to keep the discussions open.
 
 `a` reports the saved commit associations, or explicitly says when none matched.
 Linked hashes appear on the finding and batch headings even when folded. These
@@ -355,7 +355,7 @@ commit links stay available after completion.
 On a batch or task, `h` handles only its verified feedback; skipped and unrelated
 items stay as they were. Paused or stale fix results must be inspected before
 using this shortcut. Direct feedback triage remains available independently.
-GitHub replies, thread resolution, and review verdicts remain separate actions.
+With no staged replies, `P` offers to finish open threads with eligible published fix replies. `x` resolves an individual thread.
 Select a particular fix or its feedback before `r`: pressing it on the Fixes
 header gives a selection hint and never silently resumes the latest batch.
 

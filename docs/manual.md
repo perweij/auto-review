@@ -532,6 +532,11 @@ the PR. Push with Magit, then use `P` to check and preview all staged replies an
 confirm publication; no separate `a` step is needed. Nothing is pushed, published,
 or resolved automatically. For imported GitHub findings, Owner uses the Reviewer publication receipt to find the original inline thread. Press `G` to fetch newly published threads and `g` to recover missing drafts for completed automatic batches.
 
+In Owner, `P` previews the staged replies. For commit-linked replies to open,
+unchanged threads, choose **publish and resolve** to finish those threads in
+the same operation, or **publish only** to leave them open. If the replies
+are already published, the Owner buffer shows which threads `P` can finish.
+
 The batch remembers **Auto commit**; `r` resumes it without repeating successful
 provider work. `C-u r` selects automatic or manual completion, including enabling
 it for an already verified batch. Commit failures retain verification and report
