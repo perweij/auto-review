@@ -1833,6 +1833,8 @@ From a Reviewer or Owner buffer, open the command menu with `?` and choose
 **Y → Generate with Codex**. Select the relevant batch first when its candidate
 includes local fixes. Generation inspects the candidate and saves its recipe
 under the repository’s forge identity in the persistent pr-review state volume.
+If the recipe fails validation, Generate sends the diagnostic to Codex for one
+correction. Both calls appear in the generation usage record.
 **Inspect/Edit** opens the saved JSON. Use `C-c C-c` to save edits.
 
 New reviews use the saved profile. For an existing stopped fix, select its

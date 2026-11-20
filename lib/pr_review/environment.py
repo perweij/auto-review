@@ -46,10 +46,15 @@ def validate(value):
             require(isinstance(cmd, list) and cmd and all(isinstance(s, str) and '\0' not in s for s in cmd)
                     and cmd[0], 'Commands must be argument arrays.')
         env = spec.get('environment', {})
-        require(isinstance(env, dict) and all(re.fullmatch('[A-Z_][A-Z_0-9]*', k) and not RESERVED.search(k)
-                and isinstance(v, str) and '\0' not in v for k, v in env.items()), 'Invalid environment override.')
+        require(isinstance(env, dict), f'{name}.environment must be an object.')
+        for key, value_text in env.items():
+            require(isinstance(key, str) and re.fullmatch('[A-Z_][A-Z_0-9]*', key),
+                    f'{name}.environment contains an invalid variable name.')
+            require(not RESERVED.search(key), f'{name}.environment.{key} is reserved. Omit this override.')
+            require(isinstance(value_text, str) and '\0' not in value_text,
+                    f'{name}.environment.{key} must be a string without NUL characters.')
         for s in [*env.values(), *(s for cmd in commands for s in cmd)]:
-            require(all(k in ('scratch', 'checkout', 'cache') for k in re.findall(r'\{(\w+)\}', s)), 'Unknown placeholder.')
+            require(all(k in ('scratch', 'checkout', 'cache') for k in re.findall(r'\{(\w+)\}', s)), f'{name}: only {{scratch}}, {{cache}} and {{checkout}} are supported placeholders. Avoid other brace-delimited names in command arguments.')
     return value
 
 

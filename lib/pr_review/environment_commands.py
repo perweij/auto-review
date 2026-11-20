@@ -50,7 +50,13 @@ Return profile_json containing one JSON object with version 1 and projects keyed
 Each project has directory (checkout-relative), setup (array of argv arrays), environment (string map),
 prefix (argv prepended to each test), readiness (array of argv arrays run with prefix).
 Use locked project tools and declared development dependencies. Put virtual environments in {scratch}
-and downloads in {cache}. For uv use UV_LINK_MODE=copy and uv run --no-sync as prefix.
+and downloads in {cache}. Only those two placeholders and {checkout} are allowed. Avoid Python f-string
+placeholders in command arguments. Environment keys must be uppercase shell identifiers. Omit reserved
+controller and credential variables (including PATH, HOME, TMPDIR, PYTHONPATH and all XDG_* variables).
+For uv use UV_PROJECT_ENVIRONMENT={scratch}/venv, UV_CACHE_DIR={cache}, UV_LINK_MODE=copy and
+uv run --no-sync as prefix. Install each package with its project manager so source imports work.
+Enumerate tracked lockfiles, including nested ones, and inspect their manifests and tests. Prefer
+focused development dependencies. Avoid making optional integration services a prerequisite for unit tests.
 Include nested projects with documented test requirements and readiness checks that import their test dependencies.
 Do not install, execute project commands, run tests, or edit files. Do not include credentials."""
     env, _ = providers.environment('codex')
@@ -66,18 +72,35 @@ Do not install, execute project commands, run tests, or edit files. Do not inclu
         argv = ['codex', 'exec', '--ephemeral', '--json', *providers.codex_settings(), '-m', choice['model'],
                 '-c', 'model_reasoning_effort=' + choice['effort'], '--output-schema', str(directory / 'schema.json'),
                 '-o', str(directory / 'result.json'), '-']
-        result = run(argv, cwd=checkout, env=env, input_bytes=prompt.encode(), timeout=providers.Runtime.environment().model_timeout,
-                     model_events=True, stage='environment-generate', usage_call=usage.choice('environment/generate', choice),
-                     stdout_path=directory / 'events.jsonl', stderr_path=directory / 'stderr.log')
-        if result.returncode or result.reason:
-            raise ApiError('environment_generation_failed', f'Codex generation failed. See {directory}')
-        isolation.verify_checkout(checkout, verifier, sha, base_ref, sha)
-        if isolation._git(checkout, 'ls-files', '--others').stdout:
-            raise ApiError('integrity_failed', 'Generation created files inside the source checkout.')
-    output = read_json(directory / 'result.json')
-    if not isinstance(output, dict) or not isinstance(output.get('profile_json'), str):
-        raise ApiError('environment_generation_failed', f'Codex returned no structured profile. See {directory}')
-    profile = environment.validate(json.loads(output['profile_json']))
+        lockfiles = isolation._git(checkout, 'ls-files', '-z', '*lock', '*lock.json', '*lock.yaml').stdout
+        prompt += '\nReserved environment key pattern (regex search): ' + environment.RESERVED.pattern
+        prompt += '\nTracked lockfile paths (repository data): ' + json.dumps([p for p in lockfiles.split('\0') if p])
+        for attempt in range(2):
+            output_dir = directory if attempt == 0 else directory / 'correction'
+            output_dir.mkdir(exist_ok=True)
+            output_path = output_dir / 'result.json'
+            argv[argv.index('-o') + 1] = str(output_path)
+            result = run(argv, cwd=checkout, env=env, input_bytes=prompt.encode(), timeout=providers.Runtime.environment().model_timeout,
+                         model_events=True, stage='environment-generate', usage_call=usage.choice('environment/generate', choice),
+                         stdout_path=output_dir / 'events.jsonl', stderr_path=output_dir / 'stderr.log')
+            if result.returncode or result.reason:
+                raise ApiError('environment_generation_failed', f'Codex generation failed. See {output_dir}')
+            isolation.verify_checkout(checkout, verifier, sha, base_ref, sha)
+            if isolation._git(checkout, 'ls-files', '--others').stdout:
+                raise ApiError('integrity_failed', 'Generation created files inside the source checkout.')
+            output = read_json(output_path)
+            if not isinstance(output, dict) or not isinstance(output.get('profile_json'), str):
+                raise ApiError('environment_generation_failed', f'Codex returned no structured profile. See {output_dir}')
+            try:
+                profile = environment.validate(json.loads(output['profile_json']))
+                break
+            except (ValueError, ApiError) as exc:
+                if attempt:
+                    raise ApiError('environment_generation_failed', f'Corrected profile is invalid: {exc} See {output_dir}') from exc
+                from .events import emit
+                emit('progress', message=f'Generated profile failed validation: {exc} Requesting one correction.')
+                prompt += ('\nReturn a corrected complete profile. Validator diagnostic: ' + str(exc)
+                           + '\nPrior profile (data): ' + json.dumps(output['profile_json']))
     return dict(profile=profile, source=sha, choice=choice, logs=str(directory))
 
 

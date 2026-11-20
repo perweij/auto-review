@@ -156,10 +156,16 @@ echo '{"assessment":"accepted"}' > "$1"
         profile = {'version': 1, 'projects': {'root': {'directory': '.', 'readiness': [['git', 'status', '--short']]}}}
         with tempfile.TemporaryDirectory() as temp:
             tool = Path(temp) / 'codex'
+            invalid = {'version': 1, 'projects': {'root': {'directory': '.', 'environment': {'XDG_CACHE_HOME': '{cache}'}}}}
             tool.write_text('#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
                             'assert "local edit" in Path("source.txt").read_text()\n'
-                            'Path(sys.argv[sys.argv.index("-o")+1]).write_text('
-                            + repr(json.dumps({'profile_json': json.dumps(profile)})) + ')\n')
+                            'out = Path(sys.argv[sys.argv.index("-o") + 1])\n'
+                            'prompt = sys.stdin.read()\n'
+                            'assert "PYTHONPATH" in prompt and "Tracked lockfile paths" in prompt\n'
+                            'correcting = out.parent.name == "correction"\n'
+                            'assert not correcting or "root.environment.XDG_CACHE_HOME is reserved" in prompt\n'
+                            f'profile = {profile!r} if correcting else {invalid!r}\n'
+                            'out.write_text(json.dumps({"profile_json": json.dumps(profile)}))\n')
             tool.chmod(0o700)
             target = ['--session', str(self.session.path), '--batch', self.batch['id']]
             env = dict(os.environ, PATH=temp + os.pathsep + os.environ['PATH'])
