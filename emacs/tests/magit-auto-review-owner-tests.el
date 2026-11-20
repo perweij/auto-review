@@ -1371,6 +1371,47 @@
       (should (eq (lookup-key magit-auto-review-owner-mode-map (kbd "E"))
                   #'magit-auto-review-owner-report-menu)))))
 
+(ert-deftest owner/final-verification-pause-keeps-the-full-reason-in-buffer-and-log ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (batch (car (alist-get 'batches view)))
+          (reason (concat (make-string 240 ?x)
+                          " Independent runtime verification remains incomplete because pytest and dotenv are absent; no regression tests ran."))
+          result)
+     (setf (alist-get 'status batch) "paused"
+           (alist-get 'auto_commit batch) t
+           (alist-get 'review batch) `((assessment . "incomplete") (complete . :false)
+                                      (summary . ,reason) (blocking . (,reason)))
+           (alist-get 'batches view) (list batch))
+     (cl-letf (((symbol-function 'magit-auto-review--async)
+                (lambda (_request _on-event on-result _on-error) (setq result on-result) nil)))
+       (magit-auto-review-owner--start (magit-auto-review-owner--request "owner-fix")))
+     (funcall result view)
+     (should (equal (magit-auto-review-owner--batch-label batch) "Verification incomplete"))
+     (should (string-search reason header-line-format))
+     (magit-section-show (owner-test-goto 'owner-batch "b1"))
+     (let ((text (owner-test-visible-text)))
+       (should (string-search (concat "Result: " reason) text))
+       (should (string-search "Task work is complete; final verification is incomplete" text))
+       (should (string-search "Automatic commits and replies wait" text)))
+     (with-current-buffer "*PR Owner progress*"
+       (should (string-search (concat "Fix paused · 1/1 tasks complete · " reason "\n") (buffer-string)))))))
+
+(ert-deftest owner/long-stop-and-automatic-commit-errors-remain-readable ()
+  (owner-test-buffer
+   (let* ((view (owner-test-auto-view))
+          (batch (car (alist-get 'batches view)))
+          (reason (concat (make-string 240 ?x) " Signing failed: inspect the complete diagnostic.")))
+     (setf (alist-get 'error (alist-get 'commit_execution batch)) reason)
+     (magit-auto-review-owner--accept view)
+     (should (string-search reason (magit-auto-review-owner--auto-summary batch)))
+     (setf (alist-get 'status batch) "paused"
+           (alist-get 'error batch) reason)
+     (setf (alist-get 'batches view) (list batch))
+     (magit-auto-review-owner--accept view)
+     (should (string-search (concat "Last stop: " reason) (buffer-string)))
+     (should (string-search reason (magit-auto-review-owner--fix-conclusion batch))))))
+
 (ert-deftest owner/apply-environment-then-resume-uses-new-revision ()
   (require 'magit-auto-review-actions)
   (owner-test-buffer

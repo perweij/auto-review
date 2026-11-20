@@ -15,9 +15,20 @@ For a source checkout:
 
 ```elisp
 (add-to-list 'load-path "/path/to/auto-review/emacs")
+(setq load-prefer-newer t)
 (setq magit-auto-review-executable "/path/to/auto-review/bin/pr-review")
 (require 'magit-auto-review)
 ```
+
+For a source checkout, `load-prefer-newer` prevents old `.elc` files from hiding
+updated source. After updating an already loaded package, restart Emacs to load
+the new definitions; saved reviews and Owner fixes remain on disk.
+
+If an update does not take effect, evaluate
+`(symbol-file 'magit-auto-review-owner--insert-report)` in the affected Emacs.
+A system installation can preload a different copy, such as `/opt/auto-review`.
+Update that copy or select the checkout at startup; changing `load-path` does
+not replace definitions already loaded from another installation.
 
 Open a Git repository or a Forge pull request and run `M-x magit-auto-review`.
 Forge dispatch/topic menus use `V`; Magit dispatch uses `C-c r`, leaving its
@@ -86,6 +97,14 @@ The choice is remembered per repository. Existing installations default to
 Reviewer. Switching leaves the previous buffer, folds, editor, and running
 operation available. `M-x magit-auto-review-owner` opens an owner buffer directly.
 Owner mode does not require a reviewer session and has its own keymap and menus.
+
+Task completion and final verification are separate. If every task finished but
+the independent final review could not complete its checks, the batch shows
+**Verification incomplete**. Its full blocking reason and Result remain visible;
+the progress log also retains the full conclusion. Resolve the reported
+prerequisites before resuming with `r`. Earlier **Done locally** batches retain
+their verified commits; pushing those commits and publishing replies are separate
+explicit actions.
 
 The owner buffer groups incoming discussions and queued local findings under
 **Attention needed**, followed by **Your GitHub comments** when available,

@@ -235,11 +235,22 @@
               (concat "automatic completion " (or (alist-get 'status phase) "pending"))) (or (alist-get 'completed progress) 0)
             (or (alist-get 'total progress) 0) (length replies)
             (if (cl-some (lambda (reply) (magit-auto-review--true-p (alist-get 'awaiting_push reply))) replies) " (awaiting push)" "")
-            (if (alist-get 'error phase) (concat " · " (magit-auto-review-owner--brief (alist-get 'error phase) 200)) ""))))
+            (if (alist-get 'error phase) (concat " · " (alist-get 'error phase)) ""))))
 
 (defun magit-auto-review-owner--verified-keys (batch)
   "Return BATCH's verified feedback, retaining compatibility with older saves."
   (if (assq 'verified_items batch) (alist-get 'verified_items batch) (alist-get 'items batch)))
+
+(defun magit-auto-review-owner--final-verification-incomplete-p (batch)
+  "Whether task work finished but BATCH lacks complete final verification."
+  (let ((review (alist-get 'review batch))
+        (tasks (alist-get 'tasks batch)))
+    (and (member (alist-get 'status batch) '("paused" "needs_attention" "interrupted"))
+         tasks
+         (cl-every (lambda (task) (member (alist-get 'status task) '("complete" "skipped"))) tasks)
+         (listp review)
+         (or (equal (alist-get 'assessment review) "incomplete")
+             (eq (alist-get 'complete review) :false)))))
 
 (defun magit-auto-review-owner--batch-label (batch)
   "Describe BATCH's user-facing state without changing its saved status."
@@ -251,6 +262,7 @@
               (equal (alist-get 'total (alist-get 'commit_progress batch)) 0))
          "Verified · No commit needed")
         ((equal (alist-get 'status batch) "ready") "Verified")
+        ((magit-auto-review-owner--final-verification-incomplete-p batch) "Verification incomplete")
         ((member (alist-get 'status batch) '("paused" "needs_attention" "interrupted")) "Needs attention")
         (t (capitalize (or (alist-get 'status batch) "Pending")))))
 
@@ -278,7 +290,7 @@
    (t (format "Fix %s · %d/%d tasks complete · %s"
             (or (alist-get 'status batch) "stopped")
             (cl-count "complete" (alist-get 'tasks batch) :key (lambda (task) (alist-get 'status task)) :test #'equal)
-            (length (alist-get 'tasks batch)) (magit-auto-review-owner--brief (magit-auto-review-owner--pause-reason batch) 200)))))
+            (length (alist-get 'tasks batch)) (magit-auto-review-owner--pause-reason batch)))))
 
 (defun magit-auto-review-owner--next-step (batch)
   "Explain the next useful action for BATCH using saved state only."
@@ -299,11 +311,13 @@
      ((magit-auto-review-owner--batch-history-p batch)
       (if (magit-auto-review-owner--batch-resolved-p batch)
           "Finished: replies published and threads resolved. Saved reports and commit links remain available below."
-        "Finished locally. Saved reports and commit links remain available below."))
+        "Finished locally. Pushing commits and publishing remote replies are separate actions; saved reports and commit links remain below."))
      ((magit-auto-review--true-p (alist-get 'discussion_stale batch)) "Next: inspect the changed feedback, then p replans unfinished work.")
      ((and (not (equal (alist-get 'status batch) "ready"))
            (not (alist-get 'attempts batch)) (not (alist-get 'plans batch)) (not (alist-get 'tasks batch)))
       "No model work has started. R changes provider/model/effort; r resumes with those settings. T applies only to agent-configuration trust requests.")
+     ((magit-auto-review-owner--final-verification-incomplete-p batch)
+      "Task work is complete; final verification is incomplete. Inspect the full blocking reason below and fix its prerequisites, then r resumes verification. Automatic commits and replies wait for final verification; m inspects the worktree.")
      ((not (equal (alist-get 'status batch) "ready")) "Next: inspect with d; r resumes, or A adopts manual edits. m opens status only until verification succeeds.")
      ((magit-auto-review-owner--auto-pending-p batch)
       (concat (magit-auto-review-owner--auto-summary batch) "\n"
@@ -437,10 +451,10 @@
       (insert (format "Verified %d of %d feedback items; h on this fix handles only the verified items.\n"
                       (length (magit-auto-review-owner--verified-keys batch)) (length (alist-get 'items batch)))))
     (when-let ((summary (alist-get 'summary (alist-get 'review batch))))
-      (insert "Result: " (magit-auto-review-owner--brief summary 160) "\n"))
+      (insert "Result: " summary "\n"))
     (when (alist-get 'error batch)
       (insert (if (alist-get 'superseded_by batch) "Original stop (historical): " "Last stop: ")
-              (magit-auto-review-owner--brief (alist-get 'error batch) 160) "\n"))
+              (alist-get 'error batch) "\n"))
     (dolist (attempt (alist-get 'attempts (alist-get 'commit_execution batch)))
       (insert (format "Commit %s · %s%s · artifacts: %s\n" (alist-get 'unit attempt) (alist-get 'status attempt)
                       (if (alist-get 'commit attempt) (concat " · " (alist-get 'commit attempt)) "")
