@@ -14,6 +14,7 @@
 
 (declare-function magit-auto-review-owner-show-import "magit-auto-review-owner" (result directory))
 
+(declare-function magit-auto-review-owner--accept "magit-auto-review-owner" (view))
 (declare-function magit-auto-review-owner--start "magit-auto-review-owner" (request &optional callback))
 (declare-function magit-auto-review-owner--request "magit-auto-review-owner" (command &rest fields))
 (declare-function magit-auto-review-owner--batch-at-point "magit-auto-review-owner" ())
@@ -897,6 +898,9 @@
       (when (yes-or-no-p (format "Apply profile and reverify %s on resume? "
                                  (mapconcat #'identity (alist-get 'stages preview) ", ")))
         (magit-auto-review--call (append request `((expected_hash . ,(alist-get 'profile_hash preview)))))
+        (when (derived-mode-p 'magit-auto-review-owner-mode)
+          (magit-auto-review-owner--accept
+           (magit-auto-review--call (magit-auto-review-owner--request "owner-read"))))
         (message "Profile applied. Resume the selected review.")))))
 
 (transient-define-prefix magit-auto-review-environment-menu ()

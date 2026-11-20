@@ -1371,6 +1371,33 @@
       (should (eq (lookup-key magit-auto-review-owner-mode-map (kbd "E"))
                   #'magit-auto-review-owner-report-menu)))))
 
+(ert-deftest owner/apply-environment-then-resume-uses-new-revision ()
+  (require 'magit-auto-review-actions)
+  (owner-test-buffer
+   (let ((view (owner-test-view)) resume)
+     (setf (alist-get 'status (car (alist-get 'batches view))) "paused")
+     (magit-auto-review-owner--accept view)
+     (owner-test-goto 'owner-batch "b1")
+     (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+               ((symbol-function 'magit-auto-review--call)
+                (lambda (request)
+                  (pcase (alist-get 'command request)
+                    ("environment-apply"
+                     (should (= 3 (alist-get 'revision request)))
+                     (unless (alist-get 'preview request)
+                       (should (equal "hash" (alist-get 'expected_hash request)))
+                       (setq view (copy-tree view))
+                       (setf (alist-get 'revision view) 4))
+                     '((changed . t) (stages . ("synthesis")) (profile_hash . "hash")))
+                    ("owner-read" view)
+                    (_ (ert-fail request)))))
+               ((symbol-function 'magit-auto-review-owner--start)
+                (lambda (request &rest _) (setq resume request))))
+       (magit-auto-review-environment-apply)
+       (magit-auto-review-owner-resume)
+       (should (equal "b1" (alist-get 'batch resume)))
+       (should (= 4 (alist-get 'revision resume)))))))
+
 (ert-deftest owner/publish-and-finish-uses-confirmed-threads-and-current-revisions ()
   (dolist (choice '(?r ?p ?q published))
     (owner-test-buffer
