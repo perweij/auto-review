@@ -1106,6 +1106,13 @@ It supports saved historical generations, checks the supplied draft revision,
 and never modifies draft or publication state. The explicit processing-model call
 uses existing operation progress and cancellation. Capability: `finding-elaboration`.
 
+The initial response includes a `conversation` ID and `turn` of zero. To continue,
+send `elaborate` with the same `session`, `generation`, and `comment`, the
+`conversation` ID, the last returned `turn`, and a `question`. Each answer
+uses the original evidence, wording, explanation, and prior turns. The response
+includes the answer in `body` and the updated `turn`. Repeating the last
+completed request returns its recorded answer.
+
 ### Reviewed planning roles and regeneration
 
 `issue-run` accepts nullable `planning_review` and `planning_synthesis` model

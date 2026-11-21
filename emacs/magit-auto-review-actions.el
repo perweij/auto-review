@@ -517,6 +517,25 @@
     (magit-auto-review-file-mode 1)
     (goto-char (point-min))))
 
+(defvar-local magit-auto-review--elaboration-request nil)
+(defvar-local magit-auto-review--elaboration-turn 0)
+(defvar magit-auto-review--question-history nil)
+
+(defun magit-auto-review-elaboration-ask (question)
+  "Ask QUESTION about this finding and append the model's answer."
+  (interactive (list (read-string "Ask about this finding: " nil 'magit-auto-review--question-history)))
+  (when (string-blank-p question) (user-error "Enter a follow-up question"))
+  (magit-auto-review--start
+   (append magit-auto-review--elaboration-request
+           `((turn . ,magit-auto-review--elaboration-turn) (question . ,question)))
+   (lambda (result)
+     (let ((inhibit-read-only t))
+       (goto-char (point-max))
+       (let ((start (point)))
+         (insert "\n\nYou: " question "\n\n" (alist-get 'body result))
+         (setq magit-auto-review--elaboration-turn (alist-get 'turn result))
+         (goto-char start))))))
+
 (defun magit-auto-review-elaborate ()
   "Explain the selected finding using the configured processing model."
   (interactive)
@@ -532,13 +551,25 @@
     (magit-auto-review--start
      (magit-auto-review--request "elaborate" `(comment . ,id) `(body . ,body))
      (lambda (result)
-       (let ((buffer (generate-new-buffer "*Finding elaboration*")))
+       (let ((buffer (generate-new-buffer "*Finding elaboration*"))
+             (session magit-auto-review--session))
          (with-current-buffer buffer
-           (insert (format "Finding %s · generation %s\nExplanation of wording captured when requested.\n\n"
-                           id (alist-get 'generation result))
-                   (alist-get 'body result))
+           (insert (format "Finding %s · %s\n" (string-join (alist-get 'finding_ids comment) ", ")
+                           (or (alist-get 'title comment) id))
+                   (if (alist-get 'conversation result) "a ask a follow-up · K cancel · q return to draft\n\n" "\n")
+                   "Draft wording used for this explanation:\n" body "\n\n" (alist-get 'body result))
+           (goto-char (point-min))
            (special-mode)
+           (magit-auto-review--copy-identity (marker-buffer origin))
+           (setq-local magit-auto-review--session session
+                       magit-auto-review--generation (alist-get 'generation result))
            (use-local-map (copy-keymap (current-local-map)))
+           (when-let ((conversation (alist-get 'conversation result)))
+             (setq-local magit-auto-review--elaboration-request
+                         (magit-auto-review--request "elaborate" `(conversation . ,conversation) `(comment . ,id)))
+             (local-set-key (kbd "a") #'magit-auto-review-elaboration-ask)
+             (local-set-key (kbd "L") #'magit-auto-review-log)
+             (local-set-key (kbd "K") #'magit-auto-review-cancel-operation))
            (local-set-key (kbd "q")
                           (lambda () (interactive)
                             (quit-window)

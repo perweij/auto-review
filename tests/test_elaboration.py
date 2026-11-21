@@ -71,3 +71,25 @@ class ElaborationTest(unittest.TestCase):
             with self.assertRaises(Cancelled):
                 elaboration.explain(self.session, self.request)
         self.assertEqual(before, self.state)
+
+    def test_followup_uses_original_evidence_and_previous_turns_after_draft_changes(self):
+        with patch('pr_review.operations.processing_text', side_effect=[
+                {'body': 'First explanation'}, {'body': 'First answer'}, {'body': 'Second answer'}]) as call:
+            first = elaboration.explain(self.session, {**self.request, 'body': 'Unsaved wording'})
+            self.state['comments'][0]['body'] = 'Changed after elaboration'
+            question = dict(self.request, conversation=first['conversation'], question='What is uncertain?', turn=0)
+            result = elaboration.explain(self.session, question)
+            self.assertEqual(result['turn'], 1)
+            self.assertEqual(elaboration.explain(self.session, question), result)
+            with self.assertRaises(ApiError):
+                elaboration.explain(self.session, dict(question, question='Different question'))
+            with self.assertRaises(ApiError):
+                elaboration.explain(self.session, dict(question, comment='p2'))
+            result = elaboration.explain(self.session, dict(question, turn=1, question='What evidence would settle it?'))
+            self.assertEqual((result['body'], result['turn']), ('Second answer', 2))
+            prompt = call.call_args.args[2]
+            for text in ('Unsaved wording', 'First explanation', 'What is uncertain?', 'First answer',
+                         'What evidence would settle it?', 'reviewed-sha'):
+                self.assertIn(text, prompt)
+            self.assertNotIn('Changed after elaboration', prompt)
+            self.assertEqual(call.call_count, 3)

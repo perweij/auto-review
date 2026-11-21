@@ -63,6 +63,15 @@ does not copy tokens into authinfo or change credential storage. Existing `gh`,
 Claude, and Codex credentials/environment remain under the caller's control.
 Model CLI programs are required only for an explicit model operation.
 
+## Discuss a finding
+
+Press `E` on a finding to explain it, or `C-c C-l` while editing its draft. The
+explanation shows the exact wording sent to the model, including unsaved edits.
+In the explanation buffer, press `a`, enter a question, and press `RET`. The
+answer appears below the explanation. Press `a` again to continue with the
+same review evidence and earlier answers. `K` cancels a running request and
+`q` returns to the draft. The discussion is private to this review session.
+
 ## GitLab Reviewer
 
 Open a selected Forge GitLab MR with the same `V` or `M-x magit-auto-review`

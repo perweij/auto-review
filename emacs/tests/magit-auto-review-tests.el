@@ -1257,6 +1257,7 @@
 (ert-deftest auto-review/severity-is-visible-when-collapsed-and-not-part-of-comment-wording ()
   (auto-review-test-buffer
    (let ((comment (magit-auto-review--comment "p1")))
+     (nconc comment '((finding_ids . ("F1"))))
      (setf (alist-get 'severity comment) "Medium"
            (alist-get 'finding_assessments comment)
            '(((id . "F1") (severity . "Medium") (severity_source . "report") (blocking . t)))))
@@ -1266,6 +1267,7 @@
    (should (looking-at "Medium · source.txt: Finding 1"))
    (magit-section-show (magit-current-section))
    (search-forward "Model assessment: F1: Medium · blocking")
+   (search-forward "E asks the review model to explain this finding.")
    (should-not (invisible-p (1- (point))))
    (magit-auto-review-edit)
    (should (equal (buffer-substring-no-properties (plist-get magit-auto-review--editor :start)
@@ -2034,3 +2036,33 @@
       (should (equal (alist-get 'revision request) "revision"))
       (should (eq (lookup-key magit-auto-review-mode-map (kbd "E")) #'magit-auto-review-elaborate))
       (should (eq (lookup-key magit-auto-review-mode-map (kbd "J")) #'magit-auto-review-execution-report-menu)))))
+
+(ert-deftest auto-review/elaboration-buffer-continues-the-captured-finding ()
+  (let (discussion requests)
+    (unwind-protect
+        (with-temp-buffer
+          (setq magit-auto-review--session "/saved/review"
+                magit-auto-review--generation "gen"
+                magit-auto-review--review '((revision . "rev")
+                    (comments . (((id . "p1") (finding_ids . ("F11")) (body . "Exact wording"))))))
+          (cl-letf (((symbol-function 'magit-auto-review--id) (lambda () "p1"))
+                    ((symbol-function 'display-buffer) (lambda (buffer &rest _) (setq discussion buffer)))
+                    ((symbol-function 'magit-auto-review--start)
+                     (lambda (request done)
+                       (push request requests)
+                       (funcall done (if (assq 'question request)
+                                         `((turn . ,(1+ (alist-get 'turn request))) (body . "Answer"))
+                                       '((conversation . "token") (generation . "gen") (body . "Explanation")))))))
+            (magit-auto-review-elaborate)
+            (with-current-buffer discussion
+              (should (string-search "Finding F11" (buffer-string)))
+              (should (string-search "Exact wording" (buffer-string)))
+              (should (eq (key-binding "a") #'magit-auto-review-elaboration-ask))
+              (magit-auto-review-elaboration-ask "Why?")
+              (magit-auto-review-elaboration-ask "How would I check?")
+              (should (string-search "You: Why?\n\nAnswer" (buffer-string)))
+              (should (equal (alist-get 'conversation (car requests)) "token"))
+              (should (equal (alist-get 'session (car requests)) "/saved/review"))
+              (should (equal (alist-get 'generation (car requests)) "gen"))
+              (should (= (alist-get 'turn (car requests)) 1)))))
+      (when (buffer-live-p discussion) (kill-buffer discussion)))))
