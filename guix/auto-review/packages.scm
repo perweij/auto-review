@@ -120,13 +120,14 @@ by the caller; local draft operations do not require them.")
            #:test-command #~(list "bash" "../emacs/tests/run.sh")
            #:phases
            #~(modify-phases %standard-phases
-               (add-after 'patch-source-shebangs 'patch-test-backend
+               (add-after 'patch-source-shebangs 'patch-test-executables
                  (lambda _
-                   ;; emacs-build-system changes into emacs/ before the
-                   ;; standard shebang scan.  The integration tests launch
-                   ;; this sibling source script, outside that scan; the
-                   ;; build sandbox has no /usr/bin/env.
-                   (patch-shebang "../bin/pr-review")))
+                   ;; The standard scan starts in emacs/.  The smoke fixture
+                   ;; executes these sibling scripts directly via symlinks or path.
+                   (for-each patch-shebang
+                             '("../bin/pr-review"
+                               "../tests/helpers/mock-cli"
+                               "../tests/helpers/mock-glab.py"))))
                (add-after 'unpack 'pair-backend
                  (lambda _
                    (let ((backend-patches 0))
@@ -146,7 +147,7 @@ by the caller; local draft operations do not require them.")
                       (string-append #$output "/share/doc/emacs-magit-auto-review")))))
                (add-before 'install 'remove-test-lisp
                  (lambda _ (delete-file-recursively "tests"))))))
-    (native-inputs (map specification->package '("bash" "git" "python")))
+    (native-inputs (map specification->package '("bash" "git" "jq" "python")))
     (propagated-inputs
      (list (specification->package "emacs-magit")
            (specification->package "emacs-forge")

@@ -28,8 +28,10 @@ args+=(-l emacs/tests/bootstrap.el)
   (setq byte-compile-dest-file-function
         (lambda (file) (expand-file-name (concat (file-name-base file) ".elc")
                                         (getenv "AUTO_REVIEW_TEST_BYTECODE_DIR"))))
-  (mapc (lambda (file) (unless (byte-compile-file file) (error "Byte compilation failed: %s" file)))
-        (directory-files "emacs" t "\\.el$"))
+  (dolist (file (directory-files "emacs" t "\\.el$"))
+    ;; Guix generates this package descriptor during the build.
+    (unless (equal (file-name-nondirectory file) "magit-auto-review-pkg.el")
+      (unless (byte-compile-file file) (error "Byte compilation failed: %s" file))))
   (when (file-directory-p "tests/forge_smoke")
     (dolist (file (directory-files "tests/forge_smoke" t "\\.el$"))
       (with-temp-buffer (insert-file-contents file) (emacs-lisp-mode) (check-parens))))
