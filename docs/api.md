@@ -1340,6 +1340,12 @@ and editable `profile_text`. Save accepts a `profile` object or its JSON text.
 Generate uses Codex and returns the saved profile with source commit, model
 choice and local generation log directory.
 
+In a version 1 profile, a project may supply `uv_sync` in place of `setup`,
+`prefix`, and `environment`. Its optional `groups` is an array of group
+names or `"all"`, and `extras` is an array of extra names. An empty object
+uses uv's defaults. Setup uses the project's own manifest and lockfile in
+the reviewed checkout. Explicit `readiness` checks still run after setup.
+
 Apply with `preview: true` returns `changed`, `stages` and `profile_hash`.
 Submit `expected_hash` with the subsequent Apply to detect a changed recipe.
 Owner also checks a supplied state revision. Applying does not start a review.

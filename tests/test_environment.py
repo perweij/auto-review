@@ -2,10 +2,12 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from pr_review import environment
@@ -51,8 +53,52 @@ class VerificationEnvironmentTest(unittest.TestCase):
         self.profile['projects']['z'] = dict(directory='.')
         report = self.prepare()
         self.assertIn('dependency missing', report['projects']['quality']['reason'])
-        self.assertEqual(report['projects']['z']['status'], 'unprepared')
-        self.assertEqual(json.loads((self.root/'private/bin/projects.json').read_text()), {})
+        self.assertEqual(report['projects']['z']['status'], 'ready')
+        self.assertEqual(list(json.loads((self.root/'private/bin/projects.json').read_text())), ['z'])
+
+    @unittest.skipUnless(shutil.which('uv'), 'requires uv')
+    def test_same_profile_installs_dependencies_of_each_reviewed_revision(self):
+        self.profile['projects']['quality'] = {'directory': 'tools/quality', 'uv_sync': {'groups': ['dev']}}
+        # Local wheel and offline lock generation keep both revisions self-contained.
+        wheel = self.quality / 'probe_dep-1.0-py3-none-any.whl'
+        metadata = 'probe_dep-1.0.dist-info/'
+        with zipfile.ZipFile(wheel, 'w') as archive:
+            archive.writestr('probe_dep.py', 'VALUE = 42')
+            archive.writestr(metadata + 'METADATA', 'Metadata-Version: 2.1\nName: probe-dep\nVersion: 1.0\n')
+            archive.writestr(metadata + 'WHEEL', 'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n')
+            archive.writestr(metadata + 'RECORD', '')
+        for revision, deps in enumerate(('["probe-dep"]', '[]')):
+            (self.quality / 'pyproject.toml').write_text(
+                '[project]\nname="quality"\nversion="1"\nrequires-python=">=3.9"\n'
+                f'[dependency-groups]\ndev={deps}\n'
+                f'[tool.uv.sources]\nprobe-dep={{path="{wheel.name}"}}\n')
+            subprocess.run(['uv', 'lock', '--offline', '--python', sys.executable], cwd=self.quality, check=True)
+            private = self.root / str(revision)
+            private.mkdir()
+            env = dict(self.env)
+            report = environment.prepare(self.profile, self.project, self.checkout, private, private / 'logs', env)
+            self.assertEqual(report['projects']['quality']['status'], 'ready', report)
+            subprocess.run(['pr-review-check', 'quality', 'python', '-c',
+                            f'import importlib.util; assert bool(importlib.util.find_spec("probe_dep")) == {revision == 0}'],
+                           env=env, check=True)
+        self.assertFalse((self.quality / '.venv').exists())
+
+    def test_uv_install_flags_and_invalid_recipes(self):
+        spec = {'directory': '.', 'uv_sync': {'groups': 'all', 'extras': ['search-sync']}}
+        self.assertEqual(environment.uv_project(spec)['setup'],
+                         [['uv', 'sync', '--locked', '--all-groups', '--extra', 'search-sync']])
+        for change in ({'prefix': ['python']}, {'uv_sync': {'extras': 'all'}},
+                       {'uv_sync': {'groups': ['--offline']}}, {'uv_sync': {'lock': False}}):
+            with self.subTest(change=change), self.assertRaises(ApiError):
+                environment.validate({'version': 1, 'projects': {'root': {**spec, **change}}})
+
+    def test_uv_project_without_own_lock_cannot_use_parent(self):
+        (self.checkout / 'uv.lock').touch()
+        (self.quality / 'pyproject.toml').touch()
+        self.profile['projects']['quality'] = {'directory': 'tools/quality', 'uv_sync': {}}
+        result = self.prepare()['projects']['quality']
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('uv.lock', result['reason'])
 
     def test_missing_setup_executable_leaves_review_available(self):
         self.spec['setup'] = [['absent-environment-bootstrap-fixture']]
@@ -73,10 +119,12 @@ class VerificationEnvironmentTest(unittest.TestCase):
     def test_output_and_time_limits_leave_diagnostics(self):
         from time import monotonic
         self.spec['setup'] = [[sys.executable, '-c', 'print("x" * 12000)']]
+        self.profile['projects']['z'] = dict(directory='.')
         with patch.object(environment, 'LIMIT', 4096):
             result = self.prepare()
         self.assertEqual(result['projects']['quality']['status'], 'failed')
         self.assertIn('limit', result['projects']['quality']['reason'])
+        self.assertEqual(result['projects']['z']['status'], 'unprepared')
         self.profile['timeout'] = 1
         self.spec['setup'] = [[sys.executable, '-c', 'import time; time.sleep(30)']]
         other = self.root / 'other'

@@ -1886,18 +1886,22 @@ for a nested uv package:
   "projects": {
     "quality": {
       "directory": "tools/quality",
-      "setup": [["uv", "sync", "--locked", "--group", "dev"]],
-      "environment": {
-        "UV_PROJECT_ENVIRONMENT": "{scratch}/venv",
-        "UV_CACHE_DIR": "{cache}",
-        "UV_LINK_MODE": "copy"
-      },
-      "prefix": ["uv", "run", "--no-sync"],
-      "readiness": [["python", "-c", "import pytest, dotenv"]]
+      "uv_sync": {"groups": ["dev"]}
     }
   }
 }
 ```
+
+For an independent locked uv project, `uv_sync` creates a private virtual
+environment with `uv sync --locked` in that project's directory. The
+reviewed revision supplies both `pyproject.toml` and `uv.lock`. Use
+`"uv_sync": {}` for default groups, `"groups": "all"` for all groups,
+and `"extras": ["name"]` for extras needed by the tests. Match the project's
+CI install options. A successful sync prepares the environment; explicit
+`readiness` commands may check additional prerequisites. Older custom recipes
+retain their explicit checks. To migrate a locked uv recipe replace its
+`setup`, `environment`, `prefix`, and redundant import checks with `uv_sync`.
+A failed project leaves independent projects available within the shared budget.
 
 Reviewers run `pr-review-check quality pytest tests/test_source_collection.py`
 in the prepared checkout. Setup and readiness share a 600-second allowance

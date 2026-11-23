@@ -53,11 +53,13 @@ Use locked project tools and declared development dependencies. Put virtual envi
 and downloads in {cache}. Only those two placeholders and {checkout} are allowed. Avoid Python f-string
 placeholders in command arguments. Environment keys must be uppercase shell identifiers. Omit reserved
 controller and credential variables (including PATH, HOME, TMPDIR, PYTHONPATH and all XDG_* variables).
-For uv use UV_PROJECT_ENVIRONMENT={scratch}/venv, UV_CACHE_DIR={cache}, UV_LINK_MODE=copy and
-uv run --no-sync as prefix. Install each package with its project manager so source imports work.
+For independent locked uv projects use directory and uv_sync instead of setup, prefix and environment.
+uv_sync is an object: groups may be "all" or a list of group names, extras a list of extra names.
+Match the project's test or CI install selections, including dependencies used during test collection.
+The controller installs from each reviewed checkout's own lockfile. Omit redundant package-import probes.
 Enumerate tracked lockfiles, including nested ones, and inspect their manifests and tests. Prefer
 focused development dependencies. Avoid making optional integration services a prerequisite for unit tests.
-Include nested projects with documented test requirements and readiness checks that import their test dependencies.
+Include nested projects with documented test requirements. Preserve explicit external prerequisites for required checks.
 Do not install, execute project commands, run tests, or edit files. Do not include credentials."""
     env, _ = providers.environment('codex')
     with tempfile.TemporaryDirectory(dir=directory) as tmp:

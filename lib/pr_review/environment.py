@@ -31,10 +31,22 @@ def validate(value):
     require(isinstance(projects, dict) and projects, 'Specify at least one named project.')
     for name, spec in projects.items():
         require(isinstance(name, str) and NAME.fullmatch(name) and isinstance(spec, dict), 'Invalid project.')
-        require(set(spec) <= {'directory', 'setup', 'prefix', 'environment', 'readiness'}, 'Unknown project field.')
+        require(set(spec) <= {'directory', 'setup', 'prefix', 'environment', 'readiness', 'uv_sync'}, 'Unknown project field.')
         directory = spec.get('directory')
         require(isinstance(directory, str) and directory and not Path(directory).is_absolute()
                 and '..' not in Path(directory).parts, 'Project directory must be checkout-relative.')
+        if 'uv_sync' in spec:
+            options = spec['uv_sync']
+            require(isinstance(options, dict) and set(options) <= {'groups', 'extras'},
+                    f'{name}.uv_sync accepts groups and extras.')
+            for field in ('groups', 'extras'):
+                names = options.get(field, [])
+                if field == 'groups' and names == 'all':
+                    continue
+                require(isinstance(names, list) and all(isinstance(n, str) and NAME.fullmatch(n) for n in names),
+                        f'{name}.uv_sync.{field} must list dependency names.')
+            require(not any(k in spec for k in ('prefix', 'setup', 'environment')),
+                    f'{name}.uv_sync supplies its own setup, environment and prefix.')
         commands = []
         for key in ('setup', 'readiness'):
             values = spec.get(key, [])
@@ -67,6 +79,8 @@ def identity(profile):
         projects[name] = dict(directory=str(Path(spec['directory'])), setup=spec.get('setup', []),
                               environment=spec.get('environment', {}), prefix=spec.get('prefix', []),
                               readiness=spec.get('readiness', []))
+        if 'uv_sync' in spec:
+            projects[name]['uv_sync'] = spec['uv_sync']
     return digest(dict(version=profile['version'], timeout=profile.get('timeout', 600), projects=projects))
 
 
@@ -103,6 +117,23 @@ os.execvpe(args[0], args, project['env'])
 """
 
 
+def uv_project(spec):
+    """Install dependencies from this project's reviewed manifest and lockfile."""
+    options = spec['uv_sync']
+    groups = options.get('groups', [])
+    command = ['uv', 'sync', '--locked']
+    if groups == 'all':
+        command.append('--all-groups')
+    else:
+        for group in groups:
+            command.extend(['--group', group])
+    for extra in options.get('extras', []):
+        command.extend(['--extra', extra])
+    return dict(spec, setup=[command], prefix=['uv', 'run', '--no-sync'],
+                environment={'UV_PROJECT_ENVIRONMENT': '{scratch}/venv',
+                             'UV_CACHE_DIR': '{cache}', 'UV_LINK_MODE': 'copy'})
+
+
 def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=None, test_overrides=None):
     """Prepare projects in declaration-independent order. Keep partial successes usable."""
     from .isolation import _safe_path
@@ -118,13 +149,21 @@ def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=N
     timeout = profile.get('timeout', 600)
     deadline = time.monotonic() + min(timeout, timeout if remaining is None else remaining)
     budget = LIMIT
-    stopped = False
     for name, spec in sorted(profile['projects'].items()):
-        if stopped:
-            report['projects'][name] = {'status': 'unprepared'}
+        if time.monotonic() >= deadline or budget <= 0:
+            report['projects'][name] = {'status': 'unprepared', 'reason': 'Setup budget exhausted'}
             continue
         cwd = (checkout / spec['directory']).resolve()
         require(cwd.is_relative_to(checkout), 'Project directory escapes the candidate.')
+        record = report['projects'][name] = {'status': 'ready', 'directory': spec['directory']}
+        if not cwd.is_dir():
+            record.update(status='failed', reason=f'Missing project directory: {spec["directory"]}')
+            continue
+        if 'uv_sync' in spec:
+            if not all((cwd / file).is_file() for file in ('uv.lock', 'pyproject.toml')):
+                record.update(status='failed', reason='Locked uv project requires pyproject.toml and uv.lock in its directory.')
+                continue
+            spec = uv_project(spec)
         scratch = private / ('project-' + name)
         scratch.mkdir()
         cache = location(project).parent / 'cache' / report['profile'] / name
@@ -136,11 +175,6 @@ def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=N
         env = {**base, **{k: expand(v) for k, v in spec.get('environment', {}).items()}}
         prefix = [expand(s) for s in spec.get('prefix', [])]
         steps = [*spec.get('setup', []), *[prefix + cmd for cmd in spec.get('readiness', [])]]
-        record = report['projects'][name] = {'status': 'ready', 'directory': spec['directory']}
-        if not cwd.is_dir():
-            record.update(status='failed', reason=f'Missing project directory: {spec["directory"]}')
-            stopped = True
-            continue
         for i, cmd in enumerate(steps):
             argv = [expand(s) for s in cmd]
             out, err = (logs / f'{name}-{i}.{ext}' for ext in ('stdout','stderr'))
@@ -157,11 +191,12 @@ def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=N
             except (OSError, ValueError, ApiError) as exc:
                 if isinstance(exc, ApiError) and exc.code not in ('output_limit', 'command_failed'):
                     raise
+                if isinstance(exc, ApiError) and exc.code == 'output_limit':
+                    budget = 0
                 record.update(status='failed', command=argv, reason=str(exc), stderr=str(err))
                 emit('progress', message=f'Environment preparation failed for {name}: {exc}. Logs: {logs}')
-                stopped = True
                 break
-        if not stopped:
+        else:
             ready[name] = dict(cwd=str(cwd), env={**env, **(test_overrides or {})}, prefix=prefix)
     bindir = private / 'bin'
     bindir.mkdir()
