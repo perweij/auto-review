@@ -323,8 +323,22 @@ class AutomationTest(unittest.TestCase):
         self.assertEqual(result['outcome'], 'noop')
         self.assertFalse(posts)
 
+    def test_uncertain_peer_is_left_unstaged_across_publication_and_retry(self):
+        state = self.session.load()
+        state['comments'][1]['classification'] = 'UNCERTAIN'
+        self.session.save(state)
+        first, posts = self.publish()
+        self.assertEqual(first['outcome'], 'published')
+        self.assertTrue(posts)
+        self.assertEqual([item['id'] for item in first['deferred']], ['p2'])
+        self.assertEqual([c['status'] for c in self.session.load()['comments']], ['published', 'unstaged'])
+        second, posts = self.publish()
+        self.assertEqual(second['outcome'], 'noop')
+        self.assertIn('p2', second['reason'])
+        self.assertFalse(posts)
+
     def test_each_blocker_stops_all_before_staging(self):
-        changes = [dict(classification='UNCERTAIN'), dict(classification='REVISIT'),
+        changes = [dict(classification='UNCERTAIN', body=''), dict(classification='REVISIT'),
                    dict(body=''), dict(placement={'kind': 'unplaced'}),
                    dict(placement={'kind': 'inline', 'path': 'missing', 'side': 'RIGHT', 'line': 2}),
                    dict(partial_coverage=True), dict(needs_attention='Discussion changed')]
@@ -508,7 +522,8 @@ class AutomationTest(unittest.TestCase):
         second = dispatch({'command': 'read', 'session': str(self.session.root)})
         self.assertEqual(first, second)
         self.assertEqual(first['analysis']['displayed']['status'], 'complete')
-        self.assertEqual(first['automation']['outcome'], 'needs_attention')
+        self.assertEqual(first['automation']['outcome'], 'published')
+        self.assertEqual([item['id'] for item in first['automation']['deferred']], ['p1'])
         self.assertEqual(before, {p: p.read_bytes() for p in files})
 
     def test_lost_response_is_read_back_without_resending(self):

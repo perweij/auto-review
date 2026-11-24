@@ -112,8 +112,8 @@ For explicit unattended review and publication:
 pr-review 123 --auto-publish --reviewers codex-1 --processing codex-1 --codex-1-model gpt-6-luna --codex-1-effort medium --json
 ```
 
-Automatic mode posts COMMENT feedback only. If any finding needs judgment or
-correction, the whole batch stops before posting; analysis and drafts remain
+Automatic mode posts COMMENT feedback only. Uncertain findings stay unstaged while eligible
+findings publish. Other blockers stop the batch before posting; analysis and drafts remain
 available in Emacs with reasons and recovery actions. No new findings means no
 GitHub post. The JSON result and exit status distinguish completion, attention,
 partial publication, and uncertainty. See [automatic reviews](docs/manual.md#automatic-reviews).

@@ -116,7 +116,9 @@ completed analysis.
 selected historical generation), or null. Discovery descriptors also expose it.
 It includes outcome, reason, timestamps, operation/log identifiers, associated
 session/generation, affected comment IDs with reasons, receipt URLs, exit code,
-and guidance when finished. Dead running operations are reported as `interrupted`
+and guidance when finished. Publication records may also include `deferred`, an
+array of uncertain draft IDs and reasons left unstaged during automatic selection.
+Dead running operations are reported as `interrupted`
 without rewriting saved data. Outcomes are `running`, `published`, `noop`,
 `needs_attention`, `partial`, `uncertain`, `failed`, and `interrupted`.
 When completed manual analysis supersedes the record, the current view adds

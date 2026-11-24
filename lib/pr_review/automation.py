@@ -8,7 +8,7 @@ import re
 
 from .common import ApiError, atomic_json, digest, locked, now, read_json, state_root
 from . import publication
-from .state import Session, generation, has_manual_versions
+from .state import UNCERTAIN_REASON, Session, generation, has_manual_versions
 
 _active = ContextVar('automatic_review', default=None)
 OUTSTANDING = {'draft', 'failed', 'submitting', 'ambiguous'}
@@ -196,6 +196,9 @@ class AutomaticRun:
             for field in ('execution_report', 'report_warning'):
                 if self.store.manifest.get(field):
                     self.record[field] = self.store.manifest[field]
+        if outcome in ('published', 'noop') and self.record.get('deferred'):
+            ids = ', '.join(item['id'] for item in self.record['deferred'])
+            reason += f' Left uncertain drafts unstaged: {ids}.'
         self.record.update(outcome=outcome, exit_code=fields.pop('exit_code', EXIT_CODES[outcome]), reason=reason,
                            finished_at=now(), receipts=sorted({u for u in receipts if u}),
                            guidance='Open this PR in Emacs. Inspect attention items; R r resumes analysis, P opens publication and recovery, L shows the saved log.', **fields)
@@ -281,12 +284,23 @@ class AutomaticRun:
                 return self.finish('needs_attention', reason, state)
             candidates = [c for c in state['comments'] if c['status'] != 'published'
                           and not (c['status'] == 'suppressed' and c['classification'] == 'DUPLICATE')]
-            blocked = [{'id': c['id'], 'reasons': session.blockers(c, state, bulk=True)} for c in candidates]
-            blocked = [b for b in blocked if b['reasons']]
+            blocked = []
+            deferred = []
+            ids = []
+            for comment in candidates:
+                reasons = session.blockers(comment, state, bulk=True)
+                if not reasons:
+                    ids.append(comment['id'])
+                elif (comment['status'] == 'unstaged' and comment['classification'] == 'UNCERTAIN'
+                      and reasons == [UNCERTAIN_REASON]):
+                    deferred.append({'id': comment['id'], 'reasons': reasons})
+                else:
+                    blocked.append({'id': comment['id'], 'reasons': reasons})
+            self.record['deferred'] = deferred
             if blocked:
                 return self.finish('needs_attention', f"Automatic publication stopped: {len(blocked)} finding(s) need attention. No comments were published by this invocation. Analysis is saved.",
                                    state, affected=blocked)
-            if not candidates:
+            if not ids:
                 # prepare's 'nothing staged' answer alone cannot prove a no-op.
                 prior_discussion = state.get('discussion_hash')
                 affected = publication.refresh(session, state)
@@ -298,9 +312,8 @@ class AutomaticRun:
                     if exc.code == 'cancelled':
                         raise
                     return self.finish('needs_attention', str(exc), state)
-                return self.finish('noop', 'Analysis completed; no new comments to publish.', state)
+                return self.finish('noop', 'Analysis completed; no eligible comments to publish.', state)
             from .commands import mutate
-            ids = [c['id'] for c in candidates]
             staged = mutate(session, state, {'operation': 'stage', 'comments': ids, 'bulk': True}, actor='automatic')
             if staged['skipped']:
                 return self.finish('needs_attention', 'Draft eligibility changed; inspect the review in Emacs.', state, affected=staged['skipped'])

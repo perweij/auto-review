@@ -34,15 +34,16 @@ anchored_findings() {
     jq -e '.result.automation.outcome=="needs_attention" and .result.analysis.displayed.status=="complete"' <<< "$state"
 }
 
-@test "automatic uncertain finding blocks an otherwise eligible batch" {
+@test "automatic review publishes eligible findings and leaves an uncertain draft unstaged" {
     discussion_fixture UNCERTAIN
     add_new_finding
     jq 'map(.primary_location={path:"source.txt",side:"RIGHT",start_line:2,line:2}|.locations=[])' "$FIXTURE/findings.json" > "$FIXTURE/findings.tmp"
     mv "$FIXTURE/findings.tmp" "$FIXTURE/findings.json"
     auto_review
-    [ "$status" = 3 ]
-    draft_is 'all(.comments[]; .status=="unstaged")'
-    [ ! -e "$FIXTURE/post-count" ]
+    assert_success
+    jq -e '.outcome=="published" and (.deferred|length)==1' <<< "$output"
+    draft_is '([.comments[]|select(.classification=="UNCERTAIN")|.status]==["unstaged"]) and ([.comments[]|select(.classification=="NEW")|.status]==["published"])'
+    [ "$(cat "$FIXTURE/post-count")" = 1 ]
     [ ! -e "$FIXTURE/reply-count" ]
 }
 

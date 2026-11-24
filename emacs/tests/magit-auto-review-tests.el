@@ -1789,6 +1789,20 @@
   (should (transient-get-suffix 'magit-auto-review-setup-menu "s"))
   (should (transient-get-suffix 'magit-auto-review-setup-menu "P")))
 
+(ert-deftest auto-review/automatic-progress-link-opens-the-originating-pr ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((origin (current-buffer))
+            (magit-auto-review--session "/saved/417")
+            (magit-auto-review--target 417)
+            (magit-auto-review--repository "org/athena"))
+        (magit-auto-review--log-review-link magit-auto-review--session)
+        (with-current-buffer (get-buffer "*Auto-review progress*")
+          (goto-char (point-max))
+          (search-backward "Open review org/athena #417")
+          (button-activate (button-at (point)))
+          (should (eq (window-buffer (selected-window)) origin)))))))
+
 (ert-deftest auto-review/automatic-action-uses-shared-controller ()
   (auto-review-test-buffer
    (let (request notified)

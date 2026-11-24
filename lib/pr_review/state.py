@@ -9,6 +9,9 @@ from . import workflow
 from .receipts import import_legacy
 
 
+UNCERTAIN_REASON = "This finding is uncertain; inspect and stage individually or exclude it."
+
+
 def has_manual_versions(comment):
     """Only explicitly automatic snapshots are exempt from manual/unknown history."""
     return any(not isinstance(v, dict) or v.get('actor') != 'automatic' for v in comment.get('versions', []))
@@ -234,7 +237,7 @@ class Session:
             reasons.append("Choose a code location, thread, or explicit overall assessment.")
         if bulk and comment.get("classification") in ("REVISIT", "UNCERTAIN", "DUPLICATE"):
             reasons.append({"REVISIT": "This finding revisits an existing discussion; inspect and stage individually or exclude it.",
-                            "UNCERTAIN": "This finding is uncertain; inspect and stage individually or exclude it.",
+                            "UNCERTAIN": UNCERTAIN_REASON,
                             "DUPLICATE": "This finding duplicates existing discussion; inspect it before restoring and staging individually."}[comment['classification']])
         if comment.get("needs_attention"):
             reasons.append(comment["needs_attention"])

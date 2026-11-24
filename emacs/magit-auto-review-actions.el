@@ -128,6 +128,27 @@
             "Review completed. g or N opens the latest results; previous drafts remain in h (history)."))
        (t "Review completed; this saved generation remains current."))))))
 
+(defun magit-auto-review--log-review-link (session)
+  "Link the shared progress log to the dashboard for SESSION."
+  (let ((origin (current-buffer))
+        (directory default-directory)
+        (repository magit-auto-review--repository)
+        (number magit-auto-review--target)
+        (project magit-auto-review--project))
+    (with-current-buffer (get-buffer-create "*Auto-review progress*")
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert-text-button
+         (format "Open review %s #%s" repository number) 'follow-link t
+         'action (lambda (_)
+                   (if (and (buffer-live-p origin)
+                            (equal (buffer-local-value 'magit-auto-review--session origin) session))
+                       (pop-to-buffer origin)
+                     (magit-auto-review--open-review-pr
+                      directory number repository nil
+                      `((session . ,session) (forge_project . ,project))))))
+        (insert "\n")))))
+
 (defun magit-auto-review--launch-automatic-review (settings catalogs)
   "Run the shared automatic controller with explicit SETTINGS and CATALOGS."
   (setq magit-auto-review--run-settings nil magit-auto-review--followup-request nil)
@@ -144,7 +165,9 @@
          (magit-auto-review-refresh)))
      (magit-auto-review--notify
       (format "Automatic review %s: %s%s" (alist-get 'outcome result) (alist-get 'reason result)
-              (if (alist-get 'guidance result) (concat " " (alist-get 'guidance result)) ""))))))
+              (if (alist-get 'guidance result) (concat " " (alist-get 'guidance result)) "")))
+     (when-let ((session (alist-get 'session result)))
+       (magit-auto-review--log-review-link session)))))
 
 (defun magit-auto-review--analysis-completed (result)
   "Retire trust requests consumed by a successful analysis RESULT."
