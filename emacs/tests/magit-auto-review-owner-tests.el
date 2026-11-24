@@ -352,7 +352,7 @@
                (alist-get 'status staged-reply) "staged")
          (dolist (replies (list (list staged-reply reply) (list reply staged-reply)))
            (setf (alist-get 'replies view) replies)
-           (should (string-match-p "stage those you want with s" (magit-auto-review-owner--next-step batch)))
+           (should (string-match-p "G checks the push" (magit-auto-review-owner--next-step batch)))
            (should-not (string-match-p "No a or s is needed" (magit-auto-review-owner--next-step batch)))))
        (setf (alist-get 'replies view) (list reply)
              (alist-get 'status reply) "staged")
@@ -367,13 +367,50 @@
              (alist-get 'reply_issues batch) '(((kind . "awaiting_push") (reason . "Push required"))))
        (should (string-match-p "push required before creating" (magit-auto-review-owner--next-step batch)))))))
 
+(ert-deftest owner/dashboard-shows-push-before-preview-for-mixed-staged-replies ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (waiting (car (alist-get 'replies view)))
+          (ready (cadr (alist-get 'replies view))))
+     (setf (alist-get 'awaiting_push waiting) t
+           (alist-get 'status ready) "staged"
+           (alist-get 'awaiting_push ready) :false
+           (alist-get 'push_target view) '((branch . "feat/inventory") (remotes . ("origin")))
+           (alist-get 'replies view) (list ready waiting))
+     (magit-auto-review-owner--accept view)
+     (let ((header (car (split-string (buffer-string) "Fix: "))))
+       (dolist (action '("Next: C-u m" "origin/feat/inventory" "P u" "complete series" "G checks the push"))
+         (should (string-search action header)))
+       (should-not (string-search "Next: P previews" header)))
+     (setf (alist-get 'actions view) '(((status . "ambiguous"))))
+     (magit-auto-review-owner--accept view)
+     (should (string-search "Next: O checks delivery" (owner-test-visible-text)))
+     (setf (alist-get 'actions view) nil (alist-get 'awaiting_push waiting) :false)
+     (magit-auto-review-owner--accept view)
+     (should (string-search "Next: P previews 2 staged replies" (owner-test-visible-text))))))
+
+(ert-deftest owner/dashboard-guides-unstaged-paused-and-empty-views ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (batch (car (alist-get 'batches view)))
+          (reply (car (alist-get 'replies view))))
+     (setf (alist-get 'status reply) "unstaged")
+     (should (string-search "s stages" (magit-auto-review-owner--dashboard-step view batch)))
+     (setf (alist-get 'needs_attention (car (alist-get 'replies view))) "Discussion changed")
+     (should (string-search "inspect the flagged reply" (magit-auto-review-owner--dashboard-step view batch)))
+     (setf (alist-get 'replies view) nil (alist-get 'status batch) "paused")
+     (should (string-search "r resumes" (magit-auto-review-owner--dashboard-step view batch)))
+     (should (string-search "select feedback" (magit-auto-review-owner--dashboard-step view nil)))
+     (setf (alist-get 'feedback view) nil)
+     (should (string-search "G fetches" (magit-auto-review-owner--dashboard-step view nil))))))
+
 (ert-deftest owner/refresh-reports-confirmed-push-without-publishing ()
   (owner-test-buffer
    (setf (alist-get 'replies magit-auto-review-owner--view)
          '(((id . "r1") (status . "staged") (awaiting_push . t))))
    (let ((result '((replies . (((id . "r1") (status . "staged") (awaiting_push . :false) (push_confirmed . t)))))))
      (should (string-match-p "Push confirmed for 1 reply(s)" (magit-auto-review-owner--refresh-summary result)))
-     (should (string-match-p "P previews publication. No s" (magit-auto-review-owner--refresh-summary result))))))
+     (should (string-match-p "P previews 1 staged reply" (magit-auto-review-owner--refresh-summary result))))))
 
 (ert-deftest owner/preflight-stop-explains-settings-recovery ()
   (owner-test-buffer
@@ -398,9 +435,11 @@
                      (setf (alist-get 'triage item) "handled" (alist-get 'attention item) :false)
                      item)
                    (alist-get 'feedback view)))
-     (setf (alist-get 'batches view) (list unused completed))
+     (setf (alist-get 'batches view) (list unused completed)
+           (alist-get 'replies view) nil)
      (magit-auto-review-owner--accept view)
      (should (string-match-p "Fixes (0)" (buffer-string)))
+     (should (string-search "No pending action in the saved view" (owner-test-visible-text)))
      (let ((section (owner-test-goto 'owner-batch "unused")))
        (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history"))
        (should (looking-at "Superseded ·"))
@@ -491,13 +530,15 @@
      (magit-auto-review-owner-refresh))
    (should (equal header-line-format " Running review"))))
 
-(ert-deftest owner/resume-requires-one-selected-fix-and-refuses-committed-history ()
+(ert-deftest owner/resume-accepts-the-sole-group-fix-and-refuses-committed-history ()
   (owner-test-buffer
    (owner-test-goto 'owner-group "fixes")
    (let (sent)
      (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (request) (setq sent request))))
-       (should-error (magit-auto-review-owner-resume) :type 'user-error)
-       (should-not sent)
+       (should (assoc "r" (magit-auto-review-owner--menu-actions)))
+       (magit-auto-review-owner-resume)
+       (should (equal (alist-get 'batch sent) "b1"))
+       (should-not (assq 'auto_commit sent))
        (owner-test-goto 'owner-batch "b1")
        (magit-auto-review-owner-resume)
        (should (equal (alist-get 'batch sent) "b1"))
@@ -505,6 +546,25 @@
        (setf (alist-get 'commit_match (car (alist-get 'batches magit-auto-review-owner--view))) '((commit . "abc")))
        (should-error (magit-auto-review-owner-resume) :type 'user-error)
        (should-not sent)))))
+
+(ert-deftest owner/group-resume-chooses-an-explicit-batch-and-keeps-automatic-mode ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (paused (car (alist-get 'batches view)))
+          (interrupted '((id . "earlier") (status . "interrupted") (items . ("thread:T1"))))
+          sent)
+     (setf (alist-get 'status paused) "paused" (alist-get 'auto_commit paused) t
+           (alist-get 'batches view) (list paused interrupted))
+     (magit-auto-review-owner--accept view)
+     (owner-test-goto 'owner-group "attention")
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (_prompt choices &rest _)
+                  (should (= 2 (length choices)))
+                  (caar (cl-member-if (lambda (c) (string-prefix-p "Paused · 1/1 tasks complete" (car c))) choices))))
+               ((symbol-function 'magit-auto-review-owner--start) (lambda (request) (setq sent request))))
+       (magit-auto-review-owner-resume)
+       (should (equal (alist-get 'batch sent) "b1"))
+       (should-not (assq 'auto_commit sent))))))
 
 (ert-deftest owner/group-fix-shows-its-included-feedback-without-unfolding-reports ()
   (owner-test-buffer
@@ -1483,6 +1543,16 @@
         (magit-auto-review--open-pr "/checkout/" 7 "gitlab.com/g/p" "gitlab"))
       (should (equal opened '("/checkout/" 7 "gitlab.com/g/p" "gitlab"))))))
 
+(ert-deftest owner/automatic-recovery-stop-explains-the-required-change ()
+  (owner-test-buffer
+   (let* ((batch (car (alist-get 'batches (owner-test-view))))
+          (reason "Repair loop after alternative plan: rollback test still fails"))
+     (setf (alist-get 'status batch) "paused"
+           (alist-get 'recovery_stop batch) reason
+           (alist-get 'error batch) reason)
+     (should (string-search reason (magit-auto-review-owner--fix-conclusion batch)))
+     (should (string-search "Address the blocker" (magit-auto-review-owner--next-step batch))))))
+
 (ert-deftest owner/final-verification-pause-keeps-the-full-reason-in-buffer-and-log ()
   (owner-test-buffer
    (let* ((view (owner-test-view))
@@ -1617,3 +1687,39 @@
          (setf (alist-get (car field) item) previous)))
      (push '((source . "thread:T1") (status . "unstaged")) (alist-get 'replies magit-auto-review-owner--view))
      (should-not (magit-auto-review-owner--finishable-replies (list reply) "published")))))
+
+(ert-deftest owner/automatic-retry-shows-one-finding-per-phase-and-explains-stop ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (previous (car (alist-get 'batches view)))
+          (current (copy-tree previous)))
+     (setf (alist-get 'status previous) "interrupted"
+           (alist-get 'error previous) "Operation cancelled."
+           (alist-get 'id current) "retry"
+           (alist-get 'auto_commit current) t
+           (alist-get 'status current) "paused"
+           (alist-get 'error current) "Final check requires a fixture."
+           (alist-get 'items current) '("thread:T1" "thread:T2" "comment:3")
+           (alist-get 'tasks current)
+           '(((items . ("thread:T1" "thread:T2")) (status . "complete"))
+             ((items . ("thread:T2")) (status . "reviewing"))
+             ((items . ("comment:3")) (status . "queued")))
+           (alist-get 'batches view) (list previous current))
+     (magit-auto-review-owner--accept view)
+     (let ((text (owner-test-visible-text)))
+       (dolist (label '("Current automatic fix round · 3 findings" "Earlier round: Operation cancelled."
+                        "Stopped because: Final check requires a fixture." "r resumes"
+                        "Fix replies: 0 drafted · 0 staged · 0 published"
+                        "Task checks passed (1)" "Paused (1)" "Queued (1)"))
+         (should (string-match-p (regexp-quote label) text))))
+     (dolist (key (alist-get 'items current))
+       (should (= 1 (cl-count-if (lambda (s) (and (eq (oref s type) 'owner-feedback)
+                                                 (equal (oref s value) key)))
+                                 magit-auto-review-owner--sections))))
+     (owner-test-goto 'owner-batch "b1")
+     (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history"))
+     (setf (alist-get 'status current) "running"
+           (alist-get 'status (cadr (alist-get 'tasks current))) "repairing")
+     (magit-auto-review-owner--accept view)
+     (should (string-match-p "In progress (1)" (owner-test-visible-text)))
+     (should-not (string-match-p "Stopped because:" (owner-test-visible-text))))))

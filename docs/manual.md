@@ -535,6 +535,14 @@ the PR. Push with Magit, then use `P` to check and preview all staged replies an
 confirm publication; no separate `a` step is needed. Nothing is pushed, published,
 or resolved automatically. For imported GitHub findings, Owner uses the Reviewer publication receipt to find the original inline thread. Press `G` to fetch newly published threads and `g` to recover missing drafts for completed automatic batches.
 
+During an automatic round, **Fix progress** lists each selected finding once
+under its current status. **Task checks passed** means its individual tasks are
+complete; combined verification and commit preparation can still be pending.
+The top of the buffer shows the current round, its saved stop reason when
+paused, the next action, and counts of drafted, staged and published fix replies.
+An earlier stopped round fully covered by the current selection is available
+under **History → Earlier fix rounds for these findings**.
+
 In Owner, `P` previews the staged replies. For commit-linked replies to open,
 unchanged threads, choose **publish and resolve** to finish those threads in
 the same operation, or **publish only** to leave them open. If the replies
@@ -561,8 +569,14 @@ Review explicitly distinguishes passing verification, concrete defects requiring
 changes, and verification that could not finish. A failing regression test proving
 a defect enters the bounded repair pass; an unavailable test environment pauses
 for verification to be retried. Resuming an unchanged rejection passes the saved
-findings to the fixer if a repair remains. Resume does not reset an
-exhausted repair budget: inspect/adopt manual corrections or replan unfinished work.
+findings to the fixer if a repair remains. With **Auto commit**, Owner retries an incomplete check on the saved candidate and
+requests an alternative plan when direct repairs run out. It records the approaches
+tried. If a failure recurs after replanning, verification remains unavailable, or
+the planner needs a decision from you, the log shows the reason. Owner keeps the
+blocked candidate in a Git checkpoint and continues independent tasks. Automatic
+commits and replies wait until combined verification succeeds. Inspect the diagnosis,
+address the blocker, then use `p` to replan unfinished work. Plain `r` shows the
+saved diagnosis when nothing has changed.
 
 After committing, return to Owner and press `g`. An exact match to a verified
 fix automatically finishes its local findings and moves the completed fix under
@@ -572,14 +586,22 @@ own entries. Postponed work stays under **Deferred findings**. Group fixes list 
 feedback when expanded. For manual fixes, push and use `a` to associate commits
 and prepare replies. Automatic fixes already have their replies staged. `h` remains available for manual
 completion; arbitrary splits/rebases outside the recorded sequence require inspection. `U` and explicit re-import
-keep a finding queued until you finish it or make a new fix. `r` requires selecting
-one fix or its feedback; the Fixes header never resumes a group.
+keep a finding queued until you finish it or make a new fix. Press `r` on **Fixes**
+to resume an existing batch. When several fixes match, choose by status and
+completed-task count. On an Attention or own-comments heading, the choices are
+limited to batches containing feedback in that group. Plain `r` keeps the
+completion mode chosen with `C-u f`.
 The dashboard's **Latest fix** line shows how many feedback items were selected
 and the resulting verification/commit state. Each finding heading shows whether
 it was **Not run**, **Fixed and verified**, needs attention, or was verified without
 a code change. Commit hashes and local handled status remain separate. `C-u f`
 uses the same selection as `f`: on one finding it fixes only that finding; on the
 Attention needed heading it fixes the actionable items in that group.
+The Owner dashboard shows the next action above the provider settings. When a staged
+reply still awaits a push, `C-u m` opens Magit. Check the **Push PR** header,
+then use `P u` for the matching upstream. Back in Owner, `G` checks the forge;
+`P` previews all staged replies once the complete fix series is on the PR branch.
+
 Fix results show their next step, with verification details and earlier attempts folded separately.
 `?` shows actions for the current selection; `+` opens the complete command list.
 
@@ -657,8 +679,8 @@ the engine's final verification. An Owner task can receive two automatic repairs
 The second requires a changed source tree and independent review evidence of progress:
 fewer distinct blockers, additional original feedback addressed while retaining previous
 successes, or a previously failed or unavailable case now verified. Merely rewriting
-a blocker does not count. The combined patch retains its one-repair limit. A repair changes the tree, which is a new candidate. Incomplete checks,
-clarification, or remaining blocking findings pause the batch. Owner checks use
+a blocker does not count. The combined patch gets one direct repair before automatic replanning. A repair changes the tree, which is a new candidate. Incomplete checks,
+clarification, or remaining blocking findings pause a manual batch. Owner checks use
 the focused 60-second-per-check/five-minute cumulative instruction limits.
 
 Use native Magit, or ordinary Git in the displayed owner worktree, to inspect,

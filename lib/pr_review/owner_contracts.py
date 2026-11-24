@@ -12,7 +12,11 @@ MAX_CASES = 8
 
 def cases(value, *, code='invalid_result'):
     if not isinstance(value, list) or len(value) > MAX_CASES:
-        raise ApiError(code, 'Supply at most eight focused verification cases per task.')
+        raise ApiError(code, 'Supply at most eight focused verification cases in one proposal.')
+    return _definitions(value, code)
+
+
+def _definitions(value, code):
     seen = set()
     for case in value:
         if (not isinstance(case, dict) or not isinstance(case.get('id'), str)
@@ -58,14 +62,16 @@ def bind(report, required, tree):
 
 def implementation(task, report, tree):
     """A fixer may add cases, never rewrite existing requirements during a repair."""
-    previous = task_cases(task)
+    previous = _definitions(task_cases(task), 'invalid_result')
     proposed = cases(report.get('verification_cases', []))
     by_id = {c['id']: c for c in previous}
     for case in proposed:
         if case['id'] in by_id and by_id[case['id']] != case:
             raise ApiError('invalid_result', 'Repair changed an existing verification case; clarify or explicitly replan.')
         by_id[case['id']] = case
-    required = cases(list(by_id.values()))
+    # Plans and individual proposals are bounded. The accumulated contract can
+    # grow across repairs, and every retained case still requires evidence.
+    required = list(by_id.values())
     bind(report, required, tree)
     if required:
         task['verification_cases'] = required

@@ -158,6 +158,14 @@ def apply(session, profile, request):
                 validate_rerun(record, record['settings'], ['synthesis'])
             if request.get('preview'):
                 return result
+            for target in [record, *record.get('tasks', [])]:
+                if target.pop('verification_blocked', False):
+                    target.pop('verification_retry_tree', None)
+                    target.pop('recovery_stop', None)
+                    target.pop('held_checkpoint', None)
+                    # A new profile is a material change. Re-enter the scheduler;
+                    # other held tasks retain their own decisions and evidence.
+                    record.pop('recovery_stop', None)
             record['environment_profile'] = profile
             record['environment_applied_at_remote'] = record['remote_head']
             if record.get('execution_kind') == 'issue_harness':

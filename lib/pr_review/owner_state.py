@@ -246,16 +246,27 @@ def require_fixing(session, state):
         raise ApiError('fixing_unavailable', available['reason'])
 
 
+def _cancelled_planner(attempt, baseline_tree):
+    """A cancelled read-only planning call produced no plan or candidate."""
+    before = attempt.get("before") or {}
+    after = attempt.get("after")
+    return (attempt.get("role") == "plan" and attempt.get("status") == "interrupted"
+            and not attempt.get("result") and baseline_tree and before.get("tree") == baseline_tree
+            and (after is None or after.get("tree") == baseline_tree))
+
+
 def superseded_batches(state):
     """Identify unused batches whose unchanged feedback has newer verification."""
     feedback = {i["key"]: i for i in state.get("feedback", [])}
     batches = state["batches"]
     result = {}
     for index, batch in enumerate(batches):
+        checkpoint = batch.get("checkpoint", {})
         if (batch.get("status") not in ("paused", "interrupted") or not batch.get("items")
-                or any(batch.get(k) for k in ("attempts", "tasks", "plans", "plan_rejections",
+                or any(batch.get(k) for k in ("tasks", "plans", "plan_rejections",
                                                "commit_execution", "integrity_failure"))
-                or batch.get("checkpoint", {}).get("label") != "batch baseline"):
+                or checkpoint.get("label") != "batch baseline"
+                or any(not _cancelled_planner(a, checkpoint.get("tree")) for a in batch.get("attempts", []))):
             continue
         replacements = []
         for key in batch["items"]:

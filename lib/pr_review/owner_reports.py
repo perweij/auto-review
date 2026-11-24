@@ -117,7 +117,7 @@ def invoke(session, state, batch, role, context):
         value = owner_providers.invoke(session, state, batch, role, context)
         if role == 'plan':
             try:
-                owner_fixes.validate_plan(value, context['feedback'])
+                owner_fixes.validate_plan(value, context['feedback'], recovery='automatic_recovery' in context)
             except ApiError as exc:
                 exc.rejected_plan = value
                 raise

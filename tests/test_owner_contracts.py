@@ -89,7 +89,17 @@ class ContractTest(unittest.TestCase):
                 self.assertIn('verification_cases',schema['properties']['tasks']['items']['required'])
             else:
                 self.assertIn('case_results',schema['required'])
-        self.assertEqual(['issue:key'],owner_providers.output_schema('fix',['issue:key'])['properties']['outcomes']['items']['properties']['item']['enum'])
+        keys = ['thread:one', 'thread:two']
+        for role in ('fix', 'review'):
+            outcomes = owner_providers.output_schema(role, keys)['properties']['outcomes']
+            self.assertEqual(keys, outcomes['required'])
+            self.assertFalse(outcomes['additionalProperties'])
+            self.assertEqual(set(keys), set(outcomes['properties']))
+        values = {k: dict(status='fixed', evidence=k) for k in reversed(keys)}
+        rows = owner_providers.normalize_outcomes({'outcomes': values}, keys)['outcomes']
+        self.assertEqual([(row['item'], row['evidence']) for row in rows], [(k, k) for k in keys])
+        with self.assertRaises(ApiError):
+            owner_providers.normalize_outcomes({'outcomes': {keys[0]: values[keys[0]]}}, keys)
 
 
 class ContractWorkflowTest(unittest.TestCase):
@@ -109,6 +119,48 @@ class ContractWorkflowTest(unittest.TestCase):
             return report
         p=patch('pr_review.owner_providers.invoke',side_effect=model)
         self.provider=p.start();self.addCleanup(p.stop)
+
+    def test_resume_rechecks_ninth_case_without_repeating_the_completed_repair(self):
+        original = self.provider.side_effect
+        eight = [case(f'case-{i}') for i in range(8)]
+        extra = case('invalid-page-retry')
+        repairs = []
+        checks = []
+
+        def model(session, state, batch, role, context):
+            before = batch['checkpoint']
+            report = original(session, state, batch, role, context)
+            if role == 'plan':
+                report['tasks'][0]['verification_cases'] = eight
+            elif role == 'review' and context.get('verification_cases') == eight:
+                report['blocking'] = ['Invalid page retry fails']
+            elif role == 'fix' and context.get('review_findings'):
+                repairs.append(True)
+                report.update(result(eight + [extra]), verification_cases=[extra])
+                batch['attempts'].append(dict(role='fix', status='complete', before=before,
+                                              after=batch['checkpoint'], git_admin_before=batch['git_admin'],
+                                              result=copy.deepcopy(report)))
+            elif role == 'review':
+                checks.append(context['verification_cases'])
+            return report
+
+        self.provider.side_effect = model
+        implementation = contracts.implementation
+        def old_limit(task, report, tree):
+            if report.get('verification_cases') == [extra]:
+                raise ApiError('invalid_result', 'Supply at most eight focused verification cases per task.')
+            return implementation(task, report, tree)
+
+        with patch.object(contracts, 'implementation', side_effect=old_limit), self.assertRaises(ApiError):
+            self.fixture.start(auto_commit=True)
+        batch = self.fixture.owner.load()['batches'][-1]
+        self.assertEqual('repairing', batch['tasks'][0]['status'])
+        resumed = self.fixture.start(batch=batch['id'])['batches'][-1]
+        self.assertEqual('ready', resumed['status'])
+        self.assertEqual([True], repairs)
+        self.assertIn(eight + [extra], checks)
+        self.assertTrue(contracts.current(resumed))
+        self.assertEqual(10, len(resumed['review']['case_results']))
 
     def test_evidence_flows_to_final_verification_and_changed_cases_block_commit(self):
         view=self.fixture.start()
@@ -160,6 +212,8 @@ class ContractWorkflowTest(unittest.TestCase):
         seen=[]
         def rejection(session,state,batch,role,context):
             value=original(session,state,batch,role,context)
+            if role == 'plan' and 'automatic_recovery' in context:
+                value.update(decision='repair', basis='Check the failed scenario independently')
             if role=='review':
                 value['blocking']=['Concrete regression remains']
                 value['case_results'][0]['status']='failed'
@@ -170,8 +224,11 @@ class ContractWorkflowTest(unittest.TestCase):
         view=self.fixture.start(auto_commit=True)
         batch=view['batches'][-1]
         self.assertEqual('paused',batch['status'])
-        self.assertEqual(1,batch['tasks'][0]['repairs'])
-        self.assertEqual(1,len(seen))
+        self.assertEqual(2,batch['tasks'][0]['repairs'])
+        self.assertIn('Repair loop', batch['error'])
+        self.assertEqual(2,len(seen))
+        self.assertIn('recovery_plan', seen[-1])
+        self.assertEqual([case()], seen[-1]['verification_cases'])
         self.assertEqual([case()],seen[0]['verification_cases'])
         self.assertEqual('failed',seen[0]['review_findings']['case_results'][0]['status'])
         self.assertEqual(batch['baseline'],self.fixture.fixture.git('rev-parse','HEAD',cwd=view['worktree']))

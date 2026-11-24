@@ -25,12 +25,12 @@ if 'tasks' in props:
     keys = props['tasks']['items']['properties']['items']['items']['enum']
     value = dict(tasks=[dict(id='multiply', items=keys, depends_on=[], rationale='Fix multiplication', verification_cases=[], expected=[dict(item=k, outcome='total returns product') for k in keys])])
 elif 'outcomes' in props and 'blocking' in props:
-    keys = props['outcomes']['items']['properties']['item']['enum']
+    keys = props['outcomes']['required']
     if 'complete' in props:
         if not Path.cwd().resolve().is_relative_to(fixture.parent.resolve()):
             raise RuntimeError('Refusing to edit outside smoke checkout')
         Path('price.py').write_text('def total(price, quantity):\n    return price * quantity\n')
-    value = dict(summary='Multiplication checked', outcomes=[dict(item=k, status='fixed', evidence='Product returned') for k in keys], checks=['source inspected'], case_results=[], blocking=[])
+    value = dict(summary='Multiplication checked', outcomes={k: dict(status='fixed', evidence='Product returned') for k in keys}, checks=['source inspected'], case_results=[], blocking=[])
     if 'complete' in props:
         value.update(complete=True, verification_cases=[])
     else:

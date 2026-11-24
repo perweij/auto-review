@@ -426,3 +426,25 @@ def trust(session, state, tree, approval=None):
                        trusted_snapshot=token, paths=sorted(set(paths) | set(config_paths)), diff=patch)
     state.update(trusted_snapshot=token, trusted_configuration=configuration)
     session.save(state)
+
+
+def restore_checkpoint(session, state, batch, accepted):
+    """Set aside an owned task's edits while preserving its pinned candidate."""
+    current = batch['checkpoint']['tree']
+    if admin(session, state, batch['git_admin']) != batch['git_admin']:
+        raise ApiError('integrity_failed', 'Protected Git state changed while setting aside this task.')
+    unstaged_index(session, state)
+    if checkpoint(session, state, 'before setting aside task')['tree'] != current:
+        raise ApiError('worktree_changed', 'External edits found while setting aside task. Inspect the worktree.')
+    if current != accepted['tree']:
+        with tempfile.TemporaryDirectory(dir=session.path) as directory:
+            env = {**os.environ, 'GIT_INDEX_FILE': str(Path(directory) / 'index')}
+            for args in [('read-tree', current), ('update-index', '--refresh'),
+                         ('read-tree', '-u', '-m', current, accepted['tree'])]:
+                result = run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', *args],
+                             env=env, cwd=state['worktree'])
+                if result.returncode:
+                    raise ApiError('worktree_changed', 'Cannot safely set aside this task. ' + result.stderr)
+        if checkpoint(session, state, 'accepted task base')['tree'] != accepted['tree']:
+            raise ApiError('worktree_changed', 'Worktree differs from the accepted checkpoint. Inspect before continuing.')
+    batch['checkpoint'] = accepted

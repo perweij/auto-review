@@ -259,8 +259,7 @@ retries the review, preserving the original before/after scope and providing the
 previous verification blocker. Source, Git state, settings, and feedback checks
 still apply. Incomplete implementation requires the fixer again.
 On resume, an unchanged completed rejection supplies its saved findings to the
-next eligible task repair. Resuming does not reset an exhausted repair
-budget; inspect/adopt manual corrections or explicitly replan unfinished work.
+next eligible task repair. Manual completion retains the task repair limit. With automatic completion, Owner obtains an alternative plan and checks the resulting candidate.
 Existing staged paths must be exact versions from this fix;
 unrelated staging and partial/manual variants are retained without alteration.
 Preparation installs only the changed paths' saved blobs through a temporary
@@ -437,8 +436,10 @@ without discarding the batch or its selected feedback.
 
 Owner views derive `superseded_by: [BATCH_ID,…]` for unused paused/interrupted
 batches whose unchanged feedback is entirely covered by newer verified work.
-This does not rewrite saved status or errors. Batches with attempts, plans,
-tasks, adopted checkpoints, or integrity/commit recovery state are not retired.
+A planning attempt cancelled at the batch baseline before producing a plan
+can also move to History. Its cancellation and execution report stay available.
+Executed fixes, saved plans or tasks, changed checkpoints, and integrity or commit
+recovery state keep the batch available for inspection.
 Resuming a superseded batch returns `superseded_batch` with the replacement IDs.
 
 Owner feedback comments include `display_body`, which omits standalone
@@ -459,7 +460,7 @@ Optional `verify_only: true` performs planning and review without fixing or
 repairing. Plans cover every item exactly once, can combine items, and include
 per-item expected outcomes and an acyclic dependency graph. Tasks run sequentially
 in topological order with selection order breaking ties. Each task and the final
-combined patch receive review; a task permits a second automatic repair only after verified progress on a changed tree. The combined patch permits one repair.
+combined patch receive review; a task permits a second automatic repair only after verified progress on a changed tree. The combined patch permits one direct repair before automatic completion requests an alternative plan.
 Each saved result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
 `complete`, and `blocking`. New review-model results use `assessment` instead of
 `complete`: `passed` means a completed nonblocking assessment; `changes_requested`
@@ -498,8 +499,11 @@ failures persist across retries until explicit adoption; records are retained.
 Skips must cover every interrupted task unless changes are adopted. A failed
 combined repair (`combined_repair_pending`) requires adoption, because no single
 task owns its partial changes. Adoption rechecks started work and preserves queued
-tasks' initial fixer stage. `clarify` outcomes never authorize an automatic repair,
-including legacy reports without an explicit assessment.
+tasks' initial fixer stage. A `clarify` outcome requires an answer before further
+repairs. In automatic completion mode, the planner can cite an existing requirement
+that answers the question. Otherwise the task records the decision needed. A batch
+with outstanding work exposes its diagnosis in `recovery_stop` and `error`.
+Independent tasks can finish locally while commits await combined verification.
 
 Skipped tasks remain history across replanning and no longer invalidate active
 feedback freshness. Missing selected feedback must be explicitly skipped before
@@ -1085,7 +1089,7 @@ not to issue-harness execution.
 
 New Owner tasks carry up to eight `verification_cases`, each with a stable `id`,
 `scenario`, `expected`, supporting `basis`, and `intent` (`preserve` or `change`).
-Fixers may add cases but cannot rewrite existing expectations. Reports carry
+A fixer may propose up to eight cases per call. Repairs accumulate cases and preserve every existing expectation. Reports carry
 `case_results` covering each required ID exactly once: `tested`, `source_traced`,
 `failed`, or `unavailable`, with concrete `evidence`. These are provider claims;
 the coordinator never executes commands from reports. Independent review checks

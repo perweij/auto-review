@@ -376,6 +376,8 @@ class AutoCommitTest(unittest.TestCase):
         original = self.group.model
         def rejecting(*args):
             result = original(*args)
+            if args[3] == 'plan' and args[4].get('automatic_recovery'):
+                result.update(decision='repair', basis='Try an alternative integration fix')
             if args[3] == 'review' and args[4].get('scope'):
                 result['blocking'] = ['Integration remains broken']
             return result
@@ -567,7 +569,7 @@ class AutoCommitTest(unittest.TestCase):
                 self.start()
         self.assertEqual(owner_providers.invoke.call_count, 0)
 
-    def test_provider_pause_retains_auto_mode_and_resume_does_not_repeat_successful_fix(self):
+    def test_automatic_verification_retry_does_not_repeat_successful_fix(self):
         original = self.group.model
         incomplete = True
         roles = []
@@ -581,10 +583,9 @@ class AutoCommitTest(unittest.TestCase):
             return value
         with patch("pr_review.owner_providers.invoke", side_effect=model):
             view = self.start()
-            self.assertEqual(view["batches"][-1]["status"], "paused")
+            self.assertEqual(view["batches"][-1]["status"], "ready")
             self.assertTrue(view["batches"][-1]["auto_commit"])
-            self.assertFalse(view["replies"])
-            view = self.resume()
+            self.assertEqual(len(view["replies"]), 2)
         self.assertEqual(roles.count("fix"), 2)
         self.assertEqual(view["batches"][-1]["commit_execution"]["status"], "complete")
 

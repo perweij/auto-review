@@ -636,6 +636,27 @@ class OwnerTest(unittest.TestCase):
                 change(state)
                 self.assertNotIn(old_id, superseded_batches(state))
 
+    def test_cancelled_planning_is_history_once_replacement_covers_all_feedback(self):
+        def cancel(session, state, batch, role, context):
+            self.assertEqual(role, "plan")
+            batch["attempts"].append(dict(role=role, status="interrupted", before=batch["checkpoint"]))
+            raise ApiError("cancelled", "Planning cancelled")
+
+        with patch("pr_review.owner_providers.invoke", side_effect=cancel), self.assertRaises(ApiError):
+            self.fix()
+        view = self.request("owner-read")
+        old = view["batches"][0]
+        self.assertNotIn("superseded_by", old)
+        view = self.fix()
+        self.assertEqual(view["batches"][0]["superseded_by"], [view["batches"][1]["id"]])
+        self.assertEqual(view["batches"][0]["error"], "Planning cancelled")
+        for update in (dict(role="fix"), dict(after={"tree": "other"}), dict(before={}),
+                       dict(status="running"), dict(result={"tasks": []})):
+            with self.subTest(update=update):
+                changed = copy.deepcopy(view)
+                changed["batches"][0]["attempts"][0].update(update)
+                self.assertNotIn(old["id"], superseded_batches(changed))
+
     def test_separate_replacement_batches_must_cover_every_original_item(self):
         with patch("pr_review.owner_providers.preflight", side_effect=ApiError("unsupported_model", "Unsupported")), self.assertRaises(ApiError):
             self.fix()

@@ -100,6 +100,18 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         context = json.loads((self.workspace() / 'context/approved_issue_plan.json').read_text())
         self.assertEqual(['Both work together'], context['plan']['acceptance'])
 
+    def test_automatic_incomplete_final_retries_synthesis_on_same_tree(self):
+        self.use(final_review={'reviewer_slots': [{'id': slot, **self.SYNTHESIS}
+                                                  for slot in ('reviewer-1', 'reviewer-2')],
+                               'synthesis': dict(self.SYNTHESIS), 'synthesis_tests': 'focused'})
+        self.verdict('incomplete', summary='Required check could not run')
+        batch = self.f.start(auto_commit=True)['batches'][-1]
+        self.assertEqual(batch['status'], 'paused')
+        self.assertIn('Required check could not run', batch['recovery_stop'])
+        self.assertEqual(2, self.counts()['synthesis'])
+        self.assertEqual(1, self.counts()['reviewer-1'])
+        self.assertNotIn('commit_execution', batch)
+
     def test_unrelated_description_reuses_completed_engine_results(self):
         batch = self.f.start()['batches'][-1]
         counts = self.counts()

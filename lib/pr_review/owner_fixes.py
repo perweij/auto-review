@@ -13,7 +13,15 @@ from . import acceptance, owner_git as workspace, owner_providers as models, own
 from .owner_state import refresh, superseded_batches, active_feedback_keys, issue_settings
 
 
-def validate_plan(value, items):
+def validate_plan(value, items, *, recovery=False):
+    if recovery:
+        decision = value.get('decision') if isinstance(value, dict) else None
+        if (decision not in ('repair', 'clarify', 'repeated_failure')
+                or not isinstance(value.get('basis'), str) or not value['basis'].strip()):
+            raise ApiError('invalid_plan', 'Recovery needs a decision and its supporting evidence.')
+        if decision != 'repair' and value.get('tasks') == []:
+            return []
+
     tasks = value.get("tasks") if isinstance(value, dict) else None
     keys = [i["key"] for i in items]
     if not isinstance(tasks, list) or not tasks:
@@ -89,7 +97,9 @@ def validate_result(value, keys):
            or not isinstance(o.get("evidence"), str) or not o["evidence"].strip() for o in outcomes):
         raise ApiError("invalid_result", "Every feedback outcome requires a status and evidence.")
     if sorted(o["item"] for o in outcomes) != sorted(keys):
-        raise ApiError("invalid_result", "Verification must assess each selected item exactly once.")
+        reported = [o["item"] for o in outcomes]
+        raise ApiError("invalid_result", f"Expected one outcome for each of {keys}; received {reported}.",
+                       outcome_coverage=True)
     if value.get('assessment') == 'passed' and (value['blocking'] or any(o['status'] == 'clarify' for o in outcomes)):
         raise ApiError('invalid_result', 'A passed owner review cannot contain blockers or unanswered questions.')
     if value.get('assessment') == 'changes_requested' and (not value['blocking'] or any(o['status'] == 'clarify' for o in outcomes)):
@@ -156,8 +166,52 @@ def repair_stop_reason(batch, task, review, tree):
     return 'The last repair showed no verified progress on the remaining defects.'
 
 
+def recover_case_overflow(batch, snapshot, last):
+    """Resume independent review of a completed repair rejected by the old cumulative cap."""
+    active = [t for t in batch['tasks'] if t['status'] in ('repairing', 'fixing')]
+    if (batch.get('error') not in ('Supply at most eight focused verification cases per task.',
+                                   'Inspect retained changes, then adopt and reverify; task skips must cover every interrupted task. A failed combined repair requires adoption.')
+            or len(active) != 1 or active[0]['status'] != 'repairing' or last.get('role') != 'fix'
+            or last.get('status') != 'complete' or last.get('after') != batch['checkpoint']
+            or last.get('git_admin_before') != batch.get('git_admin')
+            or snapshot['tree'] != batch['checkpoint']['tree'] or batch.get('combined_repair_pending')):
+        return
+    task = active[0]
+    if last.get('before', {}).get('tree') != task.get('after', {}).get('tree'):
+        return
+    # A unique checkpoint ref also distinguishes a fresh attempt that happened
+    # to produce the same tree. Match both ends to this task's reviewed repair.
+    if not last['after'].get('ref') or not isinstance(last.get('result'), dict):
+        return
+    candidate = copy.deepcopy(task)
+    try:
+        report = validate_result(copy.deepcopy(last['result']), task['items'])
+        if not successful(report):
+            return
+        owner_contracts.implementation(candidate, report, snapshot['tree'])
+    except ApiError:
+        return
+    if not (len(owner_contracts.task_cases(task)) <= owner_contracts.MAX_CASES
+            < len(owner_contracts.task_cases(candidate))):
+        return
+    task.update(verification_cases=candidate['verification_cases'], case_contract_version=1,
+                implementation=report, status='reviewing')
+    emit('progress', message=f"Owner task {task['id']}: recovered completed repair; verifying all saved cases.")
+
+
 def implementation_ready(session, state, batch, task):
     report = task["implementation"]
+    while automatic(batch) and (not report['complete'] or any(o['status'] == 'clarify' for o in report['outcomes'])):
+        data = context(session, state, batch, task['items'], task['before']['tree'])
+        data.update(task={k: task[k] for k in ('id', 'rationale', 'expected')},
+                    verification_cases=owner_contracts.task_cases(task), implementation_report=report)
+        if not recovery_plan(session, state, batch, task, data, report):
+            break
+        task['status'] = 'repairing'
+        session.save(state)
+        report = validate_result(dispatch_repair(session, state, batch, task, data), task['items'])
+        owner_contracts.implementation(task, report, batch['checkpoint']['tree'])
+        task['implementation'] = report
     if not report["complete"] or any(o["status"] == "clarify" for o in report["outcomes"]):
         task["status"] = "needs_attention"
         session.save(state)
@@ -183,13 +237,102 @@ def context(session, state, batch, keys, before):
             "completed_tasks": completed}
 
 
+def automatic(batch):
+    return batch.get('auto_commit') and not batch.get('verify_only')
+
+
+def diagnosis(report):
+    questions = [o['evidence'] for o in report['outcomes'] if o['status'] == 'clarify']
+    return ' · '.join(dict.fromkeys([*report['blocking'], *questions, report['summary']]))
+
+
+def recovery_plan(session, state, batch, target, data, report):
+    """Persist alternate approaches against the original contract across resume."""
+    cases = sorted((r['id'], r['status']) for r in report.get('case_results', []))
+    questions = [o for o in report['outcomes'] if o['status'] == 'clarify']
+    failures = sorted(set(report['blocking']))
+    signature = digest([sorted((o['item'], o['status']) for o in report['outcomes']), cases, failures,
+                        sorted(o['evidence'] for o in questions)])
+    history = target.setdefault('recovery_attempts', [])
+    prior = next((entry for entry in history if entry['signature'] == signature), None)
+    if prior and prior.get('pending') and prior['tree'] == batch['checkpoint']['tree']:
+        data['recovery_plan'] = prior['plan']
+        return True
+    if prior:
+        approach = ' / '.join(t['rationale'] for t in prior['plan']['tasks'])
+        reason = 'Human decision required' if questions else 'Repair loop after alternative plan'
+        target['recovery_stop'] = f'{reason}: {diagnosis(report)}. Attempted: {approach}'
+        return False
+    check_fresh(session, state, batch)
+    emit('progress', message='Automatically replanning: ' + diagnosis(report))
+    recovery = dict(findings=report, verification_cases=data['verification_cases'],
+                    previous_approaches=history,
+                    instruction='Choose a different approach within the original contract. For repair, explain '
+                                'the approach and cite the source that answers any clarification. Choose clarify '
+                                'if a human decision is needed. Choose repeated_failure only if earlier attempts '
+                                'show the same failing behavior without a lasting gain. Cite those attempts.')
+    batch['recovery_planning'] = target.get('id')
+    session.save(state)
+    plan, _ = plan_tasks(session, state, batch, [i['key'] for i in data['feedback']], recovery)
+    decision = plan['decision']
+    basis = plan['basis']
+    if decision == 'clarify':
+        target['recovery_stop'] = 'Human decision required: ' + diagnosis(report) + ' · ' + basis
+        return False
+    if decision == 'repeated_failure':
+        target['recovery_stop'] = 'Repair loop: ' + diagnosis(report) + ' · ' + basis
+        return False
+    history.append(dict(signature=signature, plan=plan, evidence=report, tree=batch['checkpoint']['tree'], pending=True))
+    data['recovery_plan'] = plan
+    session.save(state)
+    return True
+
+
+def dispatch_repair(session, state, batch, target, data):
+    if data.get('recovery_plan'):
+        batch.pop('recovery_planning', None)
+        target['recovery_attempts'][-1]['pending'] = False
+        session.save(state)
+    return owner_reports.invoke(session, state, batch, 'fix', data)
+
+
+def retry_verification(session, state, batch, target, report):
+    tree = batch['checkpoint']['tree']
+    if target.get('verification_retry_tree') == tree:
+        target['verification_blocked'] = True
+        target['recovery_stop'] = 'Verification still unavailable after retry: ' + diagnosis(report)
+        return False
+    check_fresh(session, state, batch)
+    target['verification_retry_tree'] = tree
+    if target is batch:
+        batch.setdefault('review_reruns', {})['synthesis'] = uuid.uuid4().hex
+    session.save(state)
+    emit('progress', message='Retrying verification on the saved candidate: ' + diagnosis(report))
+    return True
+
+
+def task_review(session, state, batch, task, data):
+    for attempt in range(2):
+        try:
+            report = owner_reports.invoke(session, state, batch, 'review', data)
+            return validate_result(report, task['items'])
+        except ApiError as exc:
+            if attempt or not automatic(batch) or not exc.details.get('outcome_coverage'):
+                raise
+            check_fresh(session, state, batch)
+            data['report_correction'] = str(exc)
+            emit('progress', message=f"Retrying task {task['id']} verification: {exc}")
+
+
 def run_task(session, state, batch, task):
     # execute() has already checked source, Git state, feedback, and settings.
     # An unfinished assessment retries review. A completed rejection instead
     # supplies the existing findings to the bounded repair path below.
     saved_review = None
     task.pop('repair_stop_reason', None)
-    if (task["status"] == "needs_attention" and task.get('review')
+    resuming_plan = automatic(batch) and batch.get('recovery_planning') == task['id']
+    if ((task["status"] == 'needs_attention' or (resuming_plan and task['status'] == 'reviewing'))
+            and task.get('review')
             and task.get("implementation", {}).get("complete") is True
             and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]
             and owner_contracts.matches(task["review"], owner_contracts.task_cases(task), batch["checkpoint"]["tree"])):
@@ -198,6 +341,19 @@ def run_task(session, state, batch, task):
             saved_review = task['review']
     if batch.get("verify_only") and task["status"] != "reviewing":
         task.update(before=batch["checkpoint"], status="reviewing", implementation={"summary": "Read-only verification requested"})
+    if resuming_plan and task['status'] in ('fixing', 'repairing'):
+        pending = next((e for e in task.get('recovery_attempts', []) if e.get('pending')), None)
+        if pending:
+            data = context(session, state, batch, task['items'], task['before']['tree'])
+            data.update(task={k: task[k] for k in ('id', 'rationale', 'expected')},
+                        verification_cases=owner_contracts.task_cases(task), recovery_plan=pending['plan'],
+                        review_findings=pending['evidence'], implementation_report=task['implementation'])
+            task['implementation'] = validate_result(dispatch_repair(session, state, batch, task, data), task['items'])
+            owner_contracts.implementation(task, task['implementation'], batch['checkpoint']['tree'])
+        if not implementation_ready(session, state, batch, task):
+            return False
+        task['status'] = 'reviewing'
+        session.save(state)
     if task["status"] != "reviewing":
         task["before"] = batch["checkpoint"]
         task["status"] = "fixing"
@@ -205,7 +361,7 @@ def run_task(session, state, batch, task):
         data = context(session, state, batch, task["items"], task["before"]["tree"])
         data["task"] = {k: task[k] for k in ("id", "rationale", "expected")}
         data["verification_cases"] = owner_contracts.task_cases(task)
-        task["implementation"] = validate_result(owner_reports.invoke(session, state, batch, "fix", data), task["items"])
+        task["implementation"] = validate_result(dispatch_repair(session, state, batch, task, data), task["items"])
         owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
         if not implementation_ready(session, state, batch, task):
             return False
@@ -218,7 +374,7 @@ def run_task(session, state, batch, task):
         data["implementation_report"] = task["implementation"]
         if task.get("review", {}).get("complete") is False:
             data["previous_incomplete_review"] = task["review"]
-        review = saved_review if saved_review is not None else validate_result(owner_reports.invoke(session, state, batch, "review", data), task["items"])
+        review = saved_review if saved_review is not None else task_review(session, state, batch, task, data)
         saved_review = None
         owner_contracts.bind(review, owner_contracts.task_cases(task), batch["checkpoint"]["tree"])
         task["review"] = review
@@ -231,23 +387,30 @@ def run_task(session, state, batch, task):
         can_repair = not batch.get('verify_only') and repairable(review)
         tree = batch['checkpoint']['tree']
         stop_reason = repair_stop_reason(batch, task, review, tree) if can_repair else None
-        if can_repair and not stop_reason:
+        alternate = False
+        if automatic(batch):
+            clarify = any(o['status'] == 'clarify' for o in review['outcomes'])
+            if clarify or stop_reason:
+                alternate = recovery_plan(session, state, batch, task, data, review)
+            elif not review['complete'] and retry_verification(session, state, batch, task, review):
+                continue
+        if alternate or (can_repair and not stop_reason):
             task['repair_evidence'] = repair_evidence(review, tree)
-            emit('progress', message=f"Owner task {task['id']}: automatic repair {task['repairs'] + 1}/{MAX_TASK_REPAIRS}.")
+            emit('progress', message=f"Owner task {task['id']}: automatic repair {task['repairs'] + 1}.")
             task['trace_result'] = session_trace.decision('repair_allocated', sources=[task.get('trace_result')], key=f"{batch['id']}:{task['id']}:{task['repairs']}")
             task["repairs"] += 1  # Persist before launching; crashes do not grant extra repairs.
             task["status"] = "repairing"
             session.save(state)
             data["review_findings"] = review
             data["verification_cases"] = owner_contracts.task_cases(task)
-            task["implementation"] = validate_result(owner_reports.invoke(session, state, batch, "fix", data), task["items"])
+            task["implementation"] = validate_result(dispatch_repair(session, state, batch, task, data), task["items"])
             owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
             if not implementation_ready(session, state, batch, task):
                 return False
             task["status"] = "reviewing"
             session.save(state)
             continue
-        if stop_reason:
+        if stop_reason and not automatic(batch):
             task['repair_stop_reason'] = stop_reason
             emit('progress', message=stop_reason + ' Inspect and adopt corrections, or replan unfinished work.')
         task["status"] = "needs_attention"
@@ -293,16 +456,35 @@ def final_review(session, state, batch):
                     task["verification_superseded"] = True
             owner_commit_plan.update(session, batch, batch["baseline"])
             return
-        if not batch.get("verify_only") and repairable(review) and batch["repairs"] < 1:
+        repair = not batch.get("verify_only") and repairable(review) and batch["repairs"] < 1
+        if automatic(batch) and not repair:
+            if repairable(review) or any(o['status'] == 'clarify' for o in review['outcomes']):
+                repair = recovery_plan(session, state, batch, batch, data, review)
+            elif not review['complete'] and retry_verification(session, state, batch, batch, review):
+                continue
+            if batch.get('recovery_stop'):
+                batch.pop('recovery_planning', None)
+                batch['error'] = batch['recovery_stop']
+        if repair:
             batch['trace_candidate'] = session_trace.decision('repair_allocated', sources=[session_trace.marked('acceptance_result')], key=f"{batch['id']}:combined:{batch['repairs']}")
             batch["repairs"] += 1
             batch['combined_repair_pending'] = True
             session.save(state)
             data["review_findings"] = review
-            result = validate_result(owner_reports.invoke(session, state, batch, "fix", data), keys)
+            result = validate_result(dispatch_repair(session, state, batch, batch, data), keys)
             if result.get('verification_cases'):
                 raise ApiError('invalid_result', 'Integration repair must preserve the completed task contracts; explicitly replan new requirements.')
             owner_contracts.bind(result, data["verification_cases"], batch["checkpoint"]["tree"])
+            while automatic(batch) and (not result['complete'] or any(o['status'] == 'clarify' for o in result['outcomes'])):
+                if not recovery_plan(session, state, batch, batch, data, result):
+                    batch['error'] = batch['recovery_stop']
+                    batch.pop('combined_repair_pending', None)
+                    break
+                data['implementation_report'] = result
+                result = validate_result(dispatch_repair(session, state, batch, batch, data), keys)
+                if result.get('verification_cases'):
+                    raise ApiError('invalid_result', 'Integration repair must preserve completed task contracts.')
+                owner_contracts.bind(result, data['verification_cases'], batch['checkpoint']['tree'])
             if not result["complete"] or any(o["status"] == "clarify" for o in result["outcomes"]):
                 batch["status"] = "paused"
                 return
@@ -326,18 +508,20 @@ def check_fresh(session, state, batch):
         raise ApiError("stale_discussion", message)
 
 
-def plan_tasks(session, state, batch, keys):
+def plan_tasks(session, state, batch, keys, recovery=None):
     items = session.items(state, keys)
-    rejected = batch.get("plan_rejections", [])
-    correction = {k: rejected[-1][k] for k in ("plan", "error")} if rejected else None
-    # Resume also explains a previous rejected plan, including pre-upgrade runs.
-    for attempt in reversed(batch["attempts"]):
-        if attempt.get("role") == "plan" and isinstance(attempt.get("result"), dict):
-            try:
-                validate_plan(attempt["result"], items)
-            except ApiError as exc:
-                correction = {"plan": attempt["result"], "error": str(exc)}
-            break
+    correction = None
+    if recovery is None:
+        rejected = batch.get("plan_rejections", [])
+        correction = {k: rejected[-1][k] for k in ("plan", "error")} if rejected else None
+        # Resume also explains a previous rejected plan, including pre-upgrade runs.
+        for attempt in reversed(batch["attempts"]):
+            if attempt.get("role") == "plan" and isinstance(attempt.get("result"), dict):
+                try:
+                    validate_plan(attempt["result"], items)
+                except ApiError as exc:
+                    correction = {"plan": attempt["result"], "error": str(exc)}
+                break
     fingerprints = {i["key"]: i["fingerprint"] for i in items}
     for number in range(3):
         # Re-fetch context before every call; a correction cannot bypass freshness.
@@ -355,11 +539,15 @@ def plan_tasks(session, state, batch, keys):
              if field in task}
             for task in batch.get('tasks', [])
             if task['status'] not in ('complete', 'skipped') and set(task['items']) & set(keys)]
+        if recovery:
+            data['automatic_recovery'] = recovery
         if correction:
             data["plan_correction"] = correction
         try:
             plan = owner_reports.invoke(session, state, batch, "plan", data)
-            tasks = validate_plan(plan, items)
+            tasks = validate_plan(plan, items, recovery=recovery is not None)
+            if recovery and plan['decision'] == 'repeated_failure' and not recovery['previous_approaches']:
+                raise ApiError('invalid_plan', 'Try an alternative plan before declaring a repeated failure.')
             return plan, tasks
         except ApiError as exc:
             if exc.code != "invalid_plan":
@@ -373,6 +561,23 @@ def plan_tasks(session, state, batch, keys):
             if number == 2:
                 raise ApiError("invalid_plan", "Planning stopped after 3 invalid plans. " + str(exc)) from exc
             emit("progress", message=f"Plan rejected: {exc} Requesting correction {number + 1}/2.")
+
+
+def hold_task(session, state, batch, task, remaining):
+    """Keep the rejected candidate pinned; run independent work from accepted edits."""
+    if task.get('held_checkpoint'):
+        return
+    batch.pop('recovery_planning', None)
+    unavailable = {t['id'] for t in batch['tasks'] if t.get('recovery_stop') or t['status'] == 'skipped'}
+    for later in remaining:
+        if unavailable.intersection(later['depends_on']):
+            unavailable.add(later['id'])
+    rejected = batch['checkpoint']
+    if any(t['id'] not in unavailable and t['status'] != 'complete' for t in remaining):
+        workspace.restore_checkpoint(session, state, batch, task['before'])
+    task['held_checkpoint'] = rejected
+    task['after'] = rejected
+    session.save(state)
 
 
 def execute(session, state, request):
@@ -470,15 +675,26 @@ def _execute(session, state, request):
                     skip = request.get('skip', [])
                     if not isinstance(skip, list) or any(t not in {x['id'] for x in batch['tasks']} for t in skip):
                         raise ApiError('invalid_request', 'Choose existing tasks to skip.')
-                    interrupted = {t['id'] for t in batch['tasks'] if t['status'] in ('fixing', 'repairing')}
                     # Older versions did not persist a combined-repair marker.
                     last = batch['attempts'][-1] if batch['attempts'] else {}
+                    if not orphaned and not controls and not batch.get('integrity_failure'):
+                        recover_case_overflow(batch, snapshot, last)
+                    interrupted = {t['id'] for t in batch['tasks'] if t['status'] in ('fixing', 'repairing')}
                     if (last.get('role') == 'fix' and last.get('status') in ('failed', 'interrupted') and not last.get('adopted_at')
                             and batch['tasks'] and all(t['status'] in ('complete', 'skipped') for t in batch['tasks'])):
                         batch['combined_repair_pending'] = True
                     # An orphaned engine stage never forces adoption: the tree and Git
                     # admin checks above and below still require it after source changes.
-                    if ([a for a in orphaned if a.get('kind') != 'review_engine'] or batch.get('combined_repair_pending')
+                    safe_plan = (automatic(batch) and batch.get('recovery_planning')
+                                 and all(a['role'] == 'plan' for a in orphaned)
+                                 and snapshot['tree'] == batch['checkpoint']['tree'])
+                    safe_review = (automatic(batch) and not interrupted and not batch.get('combined_repair_pending')
+                                   and all(a['role'] in ('review', 'final_review') for a in orphaned)
+                                   and snapshot['tree'] == batch['checkpoint']['tree']
+                                   and any(t['status'] == 'reviewing' or
+                                           any(e.get('pending') for e in t.get('recovery_attempts', []))
+                                           for t in batch['tasks']))
+                    if not (safe_plan or safe_review) and ([a for a in orphaned if a.get('kind') != 'review_engine'] or batch.get('combined_repair_pending')
                             or batch.get("status") == "running" or interrupted):
                         batch["status"] = "interrupted"
                         if not request.get('adopt') and (batch.get('combined_repair_pending') or not interrupted or not interrupted <= set(skip)):
@@ -564,6 +780,21 @@ def _execute(session, state, request):
             preserve_ready = batch['status'] == 'ready' and not any(request.get(k) for k in ('adopt', 'replan', 'skip'))
             if is_harness:
                 review_history.resume_guard(session, state, batch, request)
+            if any(request.get(k) for k in ('adopt', 'replan', 'skip')):
+                batch.pop('recovery_planning', None)
+                targets = batch['tasks'] if request.get('adopt') or request.get('replan') else [
+                    t for t in batch['tasks'] if t['id'] in request['skip']]
+                for target in [batch, *targets]:
+                    if request.get('adopt'):
+                        target.pop('held_checkpoint', None)
+                    target.pop('recovery_stop', None)
+                    target.pop('verification_blocked', None)
+                    target.pop('verification_retry_tree', None)
+                    attempts = target.pop('recovery_attempts', None)
+                    if attempts:
+                        target.setdefault('previous_recoveries', []).append(attempts)
+            elif batch.get('recovery_stop'):
+                return session.view(state)
             if batch.get('harness_phase') != 'adjudication':
                 models.preflight(session, state, issue_harness=is_harness)
             preserve_ready = False
@@ -611,7 +842,7 @@ def _execute(session, state, request):
             batch["status"] = "running"
             batch.pop("error", None)
             session.save(state)
-            for task in batch["tasks"]:
+            for index, task in enumerate(batch["tasks"]):
                 if task["status"] in ("complete", "skipped"):
                     continue
                 statuses = {t["id"]: t["status"] for t in batch["tasks"]}
@@ -621,11 +852,23 @@ def _execute(session, state, request):
                     continue
                 check_fresh(session, state, batch)
                 emit("progress", message=f"Owner task {task['id']}: {task['rationale']}")
+                if task.get('recovery_stop'):
+                    hold_task(session, state, batch, task, batch['tasks'][index + 1:])
+                    continue
                 if not run_task(session, state, batch, task):
+                    if automatic(batch):
+                        task.setdefault('recovery_stop', 'Implementation needs attention: ' + diagnosis(task['implementation']))
+                        hold_task(session, state, batch, task, batch['tasks'][index + 1:])
+                        continue
                     batch["status"] = "paused"
                     session.save(state)
                     return session.view(state)
             check_fresh(session, state, batch)
+            stops = [t['id'] + ' · ' + t['recovery_stop'] for t in batch['tasks'] if t.get('recovery_stop')]
+            if stops:
+                batch.update(status='paused', recovery_stop='\n'.join(stops), error='\n'.join(stops))
+                session.save(state)
+                return session.view(state)
             final_review(session, state, batch)
             check_fresh(session, state, batch)
             session.save(state)
@@ -638,6 +881,12 @@ def _execute(session, state, request):
                 if preserve_ready:
                     batch['preflight_error'] = str(exc)
                 else:
-                    batch.update(status="interrupted" if getattr(exc, "code", None) == "cancelled" else "paused", error=str(exc))
+                    code = getattr(exc, "code", None)
+                    message = str(exc)
+                    if automatic(batch) and not is_harness and (code == 'invalid_state' or
+                            isinstance(exc, (AssertionError, KeyError, TypeError, ValueError))):
+                        message = f'Internal Owner error ({type(exc).__name__}): {exc}. Inspect the operation log.'
+                        emit('progress', message=message)
+                    batch.update(status="interrupted" if code == "cancelled" else "paused", error=message)
                 session.save(state)
             raise

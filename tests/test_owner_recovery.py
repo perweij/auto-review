@@ -21,10 +21,197 @@ class RecoveryTest(unittest.TestCase):
 
     def split(self, *args):
         if args[3] == 'plan':
-            return {'tasks': [dict(id='t' + str(i), items=[item['key']], depends_on=[],
+            return {'decision': 'repair', 'basis': 'Use a targeted fix', 'tasks': [dict(id='t' + str(i), items=[item['key']], depends_on=[],
                                    rationale='Independent fix', expected=[dict(item=item['key'], outcome='fixed')])
                               for i, item in enumerate(args[4]['feedback'])]}
         return self.t.model(*args)
+
+    def test_exhausted_saved_group_finishes_in_one_automatic_resume(self):
+        self.t.feedback = [self.t.item(f'thread:T{i}', 100+i) for i in range(1, 8)]
+        def model(session, state, batch, role, data):
+            if role == 'plan':
+                return self.split(session, state, batch, role, data)
+            result = self.t.model(session, state, batch, role, data)
+            if role == 'fix':
+                path = Path(state['worktree']) / data['feedback'][0]['key'].replace(':', '-')
+                path.write_text('fixed')
+                batch['checkpoint'] = owner_git.checkpoint(session, state, 'group fix')
+            if role == 'review' and data.get('task', {}).get('id') == 'p1-t2' and not batch.get('auto_commit'):
+                result['blocking'] = ['foreign inventory', 'retry invalid page']
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix()['batches'][-1]
+            owner = OwnerSession({'session': self.t.path})
+            state = owner.load()
+            task = state['batches'][-1]['tasks'][2]
+            self.assertEqual(task['status'], 'needs_attention')
+            task['repairs'] = 2
+            owner.save(state)
+            batch = self.t.request('owner-fix', batch=batch['id'], auto_commit=True)['batches'][-1]
+        self.assertEqual(batch['commit_execution']['status'], 'complete')
+        self.assertEqual([t['status'] for t in batch['tasks']], ['complete'] * 7)
+        evidence = batch['tasks'][2]['recovery_attempts'][0]['evidence']
+        self.assertEqual(evidence['blocking'], ['foreign inventory', 'retry invalid page'])
+
+    def test_repeated_failure_is_set_aside_before_independent_task(self):
+        def model(session, state, batch, role, data):
+            if role == 'plan':
+                return self.split(session, state, batch, role, data)
+            first = data['feedback'][0]['key'] == 'thread:T1'
+            if role == 'fix' and not first:
+                self.assertFalse(Path(state['worktree'], 'new.txt').exists())
+            result = self.t.model(session, state, batch, role, data)
+            if role == 'review' and first:
+                result['blocking'] = ['Same failing behavior']
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            view = self.t.fix(auto_commit=True)
+        batch = view['batches'][-1]
+        self.assertIn('Repair loop', batch['error'])
+        self.assertEqual([t['status'] for t in batch['tasks']], ['needs_attention', 'complete'])
+        self.assertFalse(view['replies'])
+        self.t.calls.clear()
+        self.t.request('owner-fix', batch=batch['id'])
+        self.assertFalse(self.t.calls)
+
+    def test_incomplete_verification_retries_same_candidate(self):
+        for stage in ('task', 'combined'):
+            with self.subTest(stage=stage):
+                reviews = []
+                def model(session, state, batch, role, data):
+                    result = self.t.model(session, state, batch, role, data)
+                    if role == 'review' and bool(data.get('scope')) == (stage == 'combined'):
+                        reviews.append(batch['checkpoint']['tree'])
+                        if len(reviews) == 1:
+                            result.update(complete=False, blocking=['Transient environment failure'])
+                    return result
+                with patch('pr_review.owner_providers.invoke', side_effect=model):
+                    result = self.t.fix(auto_commit=True)
+                self.assertEqual(result['batches'][-1]['status'], 'ready')
+                self.assertEqual(len(reviews), 2)
+                self.assertEqual(reviews[0], reviews[1])
+                if stage == 'task':
+                    self.t = fixtures.OwnerTest()
+                    self.addCleanup(self.t.doCleanups)
+                    self.t.setUp()
+
+    def test_clarification_holds_dependents_and_preserves_independent_fix(self):
+        self.t.feedback.append(self.t.item('thread:T3', 103))
+        def model(session, state, batch, role, data):
+            if role == 'plan':
+                result = self.split(session, state, batch, role, data)
+                if data.get('automatic_recovery'):
+                    return {'tasks': [], 'decision': 'clarify', 'basis': 'Choose a retention period.'}
+                result['tasks'][1]['depends_on'] = ['t0']
+                return result
+            result = self.t.model(session, state, batch, role, data)
+            if role == 'fix' and data['task']['id'] == 'p1-t0':
+                result['outcomes'][0].update(status='clarify', evidence='Which retention period?')
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        self.assertEqual([t['status'] for t in batch['tasks']], ['needs_attention', 'blocked', 'complete'])
+        self.assertIn('Which retention period?', batch['error'])
+        self.assertNotIn('commit_execution', batch)
+
+    def test_persistent_final_prerequisite_retries_once_and_explains_stop(self):
+        def model(*args):
+            result = self.t.model(*args)
+            if args[4].get('scope'):
+                result.update(complete=False, blocking=['Missing project environment'])
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+            self.assertIn('Missing project environment', batch['recovery_stop'])
+            self.assertEqual(sum(bool(data.get('scope')) for _, data in self.t.calls), 2)
+            self.t.calls.clear()
+            self.t.request('owner-fix', batch=batch['id'])
+            self.assertFalse(self.t.calls)
+
+    def test_restart_before_alternate_fixer_uses_saved_plan(self):
+        original = owner_fixes.dispatch_repair
+        replans = []
+        def model(*args):
+            value = self.t.model(*args)
+            role, data = args[3:]
+            if role == 'plan' and data.get('automatic_recovery'):
+                replans.append(data)
+                value.update(decision='repair', basis='Use the saved failure')
+            if role == 'review' and not replans:
+                value['blocking'] = ['Regression remains']
+            return value
+        def interrupt(session, state, batch, target, data):
+            if data.get('recovery_plan'):
+                raise ApiError('cancelled', 'Stopped before dispatch')
+            return original(session, state, batch, target, data)
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            with patch.object(owner_fixes, 'dispatch_repair', side_effect=interrupt), self.assertRaises(ApiError):
+                self.t.fix(auto_commit=True)
+            batch = self.t.request('owner-read')['batches'][-1]
+            final = self.t.request('owner-fix', batch=batch['id'])['batches'][-1]
+        self.assertEqual(len(replans), 1)
+        self.assertEqual(final['commit_execution']['status'], 'complete')
+        self.assertEqual(sum(role == 'fix' and bool(data.get('recovery_plan'))
+                             for role, data in self.t.calls), 1)
+
+    def test_alternating_final_regressions_stop_after_replanned_attempts(self):
+        findings = iter(['rollback', 'retry', 'rollback', 'retry'])
+        def model(*args):
+            value = self.t.model(*args)
+            if args[3] == 'plan' and args[4].get('automatic_recovery'):
+                value.update(decision='repair', basis='Reconcile both scenarios')
+            if args[3] == 'review' and args[4].get('scope'):
+                value['blocking'] = [next(findings)]
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        self.assertIn('Repair loop', batch['error'])
+        self.assertEqual(len(batch['recovery_attempts']), 2)
+        self.assertNotIn('commit_execution', batch)
+
+    def test_external_edit_before_setting_aside_a_candidate_is_preserved(self):
+        def model(*args):
+            result = self.split(*args)
+            if args[3] == 'review':
+                result.update(complete=False, blocking=['Missing tool'])
+            return result
+        restore = owner_git.restore_checkpoint
+        def edit(session, state, batch, accepted):
+            Path(state['worktree'], 'external.txt').write_text('keep this change')
+            return restore(session, state, batch, accepted)
+        with patch('pr_review.owner_providers.invoke', side_effect=model), patch.object(
+                owner_git, 'restore_checkpoint', side_effect=edit), self.assertRaises(ApiError) as caught:
+            self.t.fix(auto_commit=True)
+        self.assertEqual(caught.exception.code, 'worktree_changed')
+        view = self.t.request('owner-read')
+        self.assertEqual(Path(view['worktree'], 'external.txt').read_text(), 'keep this change')
+        self.assertNotIn('commit_execution', view['batches'][-1])
+
+    def test_internal_error_is_identified_in_automatic_batch(self):
+        with patch('pr_review.owner_providers.invoke', side_effect=KeyError('broken invariant')), self.assertRaises(KeyError):
+            self.t.fix(auto_commit=True)
+        batch = self.t.request('owner-read')['batches'][-1]
+        self.assertIn('Internal Owner error', batch['error'])
+        self.assertIn('broken invariant', batch['error'])
+
+    def test_duplicate_outcome_retries_only_task_verification(self):
+        checked = []
+        def model(*args):
+            report = self.t.model(*args)
+            role, context = args[3:]
+            if role == 'review' and context.get('task'):
+                checked.append(args[2]['checkpoint']['tree'])
+                if len(checked) == 1:
+                    report['outcomes'][0]['item'] = report['outcomes'][1]['item']
+                else:
+                    self.assertIn('report_correction', context)
+            return report
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        self.assertEqual('complete', batch['commit_execution']['status'])
+        self.assertEqual(2, len(checked))
+        self.assertEqual(checked[0], checked[1])
+        self.assertEqual(1, sum(role == 'fix' for role, _ in self.t.calls))
 
     def interrupted(self):
         def model(*args):
