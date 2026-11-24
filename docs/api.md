@@ -258,8 +258,8 @@ Resuming an unchanged task with successful implementation and incomplete review
 retries the review, preserving the original before/after scope and providing the
 previous verification blocker. Source, Git state, settings, and feedback checks
 still apply. Incomplete implementation requires the fixer again.
-An unchanged completed rejection supplies its saved findings to the remaining
-automatic repair attempt on resume. Resuming does not reset an exhausted repair
+On resume, an unchanged completed rejection supplies its saved findings to the
+next eligible task repair. Resuming does not reset an exhausted repair
 budget; inspect/adopt manual corrections or explicitly replan unfinished work.
 Existing staged paths must be exact versions from this fix;
 unrelated staging and partial/manual variants are retained without alteration.
@@ -459,7 +459,7 @@ Optional `verify_only: true` performs planning and review without fixing or
 repairing. Plans cover every item exactly once, can combine items, and include
 per-item expected outcomes and an acyclic dependency graph. Tasks run sequentially
 in topological order with selection order breaking ties. Each task and the final
-combined patch receive review; a checkpoint permits at most one automatic repair.
+combined patch receive review; a task permits a second automatic repair only after verified progress on a changed tree. The combined patch permits one repair.
 Each saved result has `summary`, `outcomes: [{item,status,evidence}]`, `checks`,
 `complete`, and `blocking`. New review-model results use `assessment` instead of
 `complete`: `passed` means a completed nonblocking assessment; `changes_requested`

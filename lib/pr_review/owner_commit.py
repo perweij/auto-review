@@ -39,8 +39,11 @@ def unverified_reason(batch):
     pending = next((task for task in tasks if task.get("status") not in ("complete", "skipped", "blocked")), {})
     report = pending.get("review") or pending.get("implementation") or batch.get("review") or {}
     reason = batch.get("error") or "; ".join(report.get("blocking", [])) or report.get("summary") or "Combined verification has not passed."
-    return (f"Selected fix is {batch['status']} ({completed}/{len(tasks)} tasks complete). {reason} "
-            "Changes remain unstaged. Inspect this batch under Fixes and resume with r before preparing a commit.")
+    action = "Inspect this batch under Fixes and resume with r before preparing a commit."
+    if pending.get("repair_stop_reason") and not batch.get("error"):
+        reason = f"{pending['repair_stop_reason']} {reason}"
+        action = "Inspect the blockers, then adopt manual corrections with A or replan unfinished work with p."
+    return f"Selected fix is {batch['status']} ({completed}/{len(tasks)} tasks complete). {reason} Changes remain unstaged. {action}"
 
 
 def prepare(session, state, request):

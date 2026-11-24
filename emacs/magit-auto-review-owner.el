@@ -286,7 +286,9 @@
                                (alist-get 'tasks batch)))
          (report (or (alist-get 'review pending) (alist-get 'implementation pending) (alist-get 'review batch))))
     (or (alist-get 'error batch)
-        (and (alist-get 'blocking report) (string-join (alist-get 'blocking report) "; "))
+        (and (alist-get 'blocking report)
+             (string-join (append (when-let ((reason (alist-get 'repair_stop_reason pending))) (list reason))
+                                  (alist-get 'blocking report)) " · "))
         (alist-get 'summary report)
         "Combined verification has not passed.")))
 
@@ -332,6 +334,10 @@
       "No model work has started. R changes provider/model/effort; r resumes with those settings. T applies only to agent-configuration trust requests.")
      ((magit-auto-review-owner--final-verification-incomplete-p batch)
       "Task work is complete; final verification is incomplete. Inspect the full blocking reason below and fix its prerequisites, then r resumes verification. Automatic commits and replies wait for final verification; m inspects the worktree.")
+     ((cl-some (lambda (task) (and (equal (alist-get 'status task) "needs_attention")
+                                      (alist-get 'repair_stop_reason task)))
+               (alist-get 'tasks batch))
+      "Next: d inspects the blockers. A adopts manual corrections, or p replans unfinished work.")
      ((not (equal (alist-get 'status batch) "ready")) "Next: inspect with d; r resumes, or A adopts manual edits. m opens status only until verification succeeds.")
      ((magit-auto-review-owner--auto-pending-p batch)
       (concat (magit-auto-review-owner--auto-summary batch) "\n"

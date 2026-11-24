@@ -913,6 +913,15 @@
                         (blocking . ("Real-Git snapshot verification is missing.")))))))
     view))
 
+(ert-deftest owner/repair-stop-shows-policy-reason-blocker-and-recovery ()
+  (let* ((task '((status . "needs_attention")
+                 (repair_stop_reason . "Automatic task repair limit reached (2 repairs).")
+                 (review . ((blocking . ("Still reproduces."))))))
+         (batch `((status . "paused") (tasks . (,task)))))
+    (should (string-search "limit reached" (magit-auto-review-owner--fix-conclusion batch)))
+    (should (string-search "Still reproduces" (magit-auto-review-owner--fix-conclusion batch)))
+    (should (string-search "p replans" (magit-auto-review-owner--next-step batch)))))
+
 (ert-deftest owner/paused-fix-is-not-announced-as-complete-and-shows-its-reason ()
   (owner-test-buffer
    (let (event result)

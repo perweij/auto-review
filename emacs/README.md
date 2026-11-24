@@ -214,7 +214,8 @@ unchanged work retries that review and the combined check, without rerunning the
 successful fixer. Review can use disposable Git fixtures outside the checkout.
 Concrete defects, including failing regression tests, request changes and enter
 the bounded repair pass instead. An unchanged completed rejection resumes with
-its saved findings if a repair attempt remains. An exhausted repair budget needs
+its saved findings if a repair remains. A second task repair requires a changed
+tree and independently reviewed progress on blockers, feedback items, or existing cases. An exhausted repair budget needs
 inspected/adopted corrections or explicit replanning; `r` does not reset it.
 Other operations retain explicit completion and stopped/error messages.
 

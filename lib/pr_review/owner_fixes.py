@@ -105,6 +105,57 @@ def repairable(value):
     return value['complete'] and value['blocking'] and all(o['status'] != 'clarify' for o in value['outcomes'])
 
 
+MAX_TASK_REPAIRS = 2
+
+
+def repair_evidence(review, tree):
+    """Comparable independent review evidence at the candidate before a repair."""
+    return {
+        'tree': tree,
+        'blockers': len(set(review['blocking'])),
+        'addressed': sorted(o['item'] for o in review['outcomes']
+                            if o['status'] in ('fixed', 'already_addressed')),
+        'unverified_cases': sorted(r['id'] for r in review.get('case_results', [])
+                                   if r['status'] in ('failed', 'unavailable')),
+    }
+
+
+def legacy_repair_evidence(batch, task, review, tree):
+    """Recover the baseline only from a matching review/fix/review sequence."""
+    attempts = batch.get('attempts', [])[-3:]
+    if ([a.get('role') for a in attempts] != ['review', 'fix', 'review']
+            or any(a.get('status') != 'complete' for a in attempts)):
+        return None
+    first, fix, last = attempts
+    before = first.get('after', {}).get('tree')
+    prior = first.get('result') or {}
+    latest = last.get('result') or {}
+    if (not before or before != first.get('before', {}).get('tree') or before != fix.get('before', {}).get('tree')
+            or tree != fix.get('after', {}).get('tree') or tree != last.get('before', {}).get('tree')
+            or tree != last.get('after', {}).get('tree')
+            or not prior.get('blocking') or {o['item'] for o in prior.get('outcomes', [])} != set(task['items'])
+            or any(latest.get(k) != review.get(k) for k in ('blocking', 'outcomes', 'case_results'))):
+        return None
+    return repair_evidence(prior, before)
+
+
+def repair_stop_reason(batch, task, review, tree):
+    if task['repairs'] == 0:
+        return None
+    if task['repairs'] >= MAX_TASK_REPAIRS:
+        return f'Automatic task repair limit reached ({MAX_TASK_REPAIRS} repairs).'
+    prior = task.get('repair_evidence') or legacy_repair_evidence(batch, task, review, tree)
+    passing_cases = {r['id'] for r in review.get('case_results', [])
+                     if r['status'] in ('tested', 'source_traced')}
+    current = repair_evidence(review, tree)
+    if prior and tree != prior['tree'] and (
+            current['blockers'] < prior['blockers']
+            or set(current['addressed']) > set(prior['addressed'])
+            or passing_cases.intersection(prior['unverified_cases'])):
+        return None
+    return 'The last repair showed no verified progress on the remaining defects.'
+
+
 def implementation_ready(session, state, batch, task):
     report = task["implementation"]
     if not report["complete"] or any(o["status"] == "clarify" for o in report["outcomes"]):
@@ -137,6 +188,7 @@ def run_task(session, state, batch, task):
     # An unfinished assessment retries review. A completed rejection instead
     # supplies the existing findings to the bounded repair path below.
     saved_review = None
+    task.pop('repair_stop_reason', None)
     if (task["status"] == "needs_attention" and task.get('review')
             and task.get("implementation", {}).get("complete") is True
             and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]
@@ -177,7 +229,11 @@ def run_task(session, state, batch, task):
             session.save(state)
             return True
         can_repair = not batch.get('verify_only') and repairable(review)
-        if can_repair and task['repairs'] < 1:
+        tree = batch['checkpoint']['tree']
+        stop_reason = repair_stop_reason(batch, task, review, tree) if can_repair else None
+        if can_repair and not stop_reason:
+            task['repair_evidence'] = repair_evidence(review, tree)
+            emit('progress', message=f"Owner task {task['id']}: automatic repair {task['repairs'] + 1}/{MAX_TASK_REPAIRS}.")
             task['trace_result'] = session_trace.decision('repair_allocated', sources=[task.get('trace_result')], key=f"{batch['id']}:{task['id']}:{task['repairs']}")
             task["repairs"] += 1  # Persist before launching; crashes do not grant extra repairs.
             task["status"] = "repairing"
@@ -191,8 +247,9 @@ def run_task(session, state, batch, task):
             task["status"] = "reviewing"
             session.save(state)
             continue
-        if not batch.get('verify_only') and review['complete'] and review['blocking'] and task['repairs'] >= 1:
-            emit('progress', message='Automatic task repair limit reached. Inspect and adopt manual corrections, or explicitly replan unfinished work.')
+        if stop_reason:
+            task['repair_stop_reason'] = stop_reason
+            emit('progress', message=stop_reason + ' Inspect and adopt corrections, or replan unfinished work.')
         task["status"] = "needs_attention"
         session.save(state)
         return False

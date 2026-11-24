@@ -561,7 +561,7 @@ Review explicitly distinguishes passing verification, concrete defects requiring
 changes, and verification that could not finish. A failing regression test proving
 a defect enters the bounded repair pass; an unavailable test environment pauses
 for verification to be retried. Resuming an unchanged rejection passes the saved
-findings to the fixer if its repair attempt remains. Resume does not reset an
+findings to the fixer if a repair remains. Resume does not reset an
 exhausted repair budget: inspect/adopt manual corrections or replan unfinished work.
 
 After committing, return to Owner and press `g`. An exact match to a verified
@@ -653,8 +653,11 @@ every original feedback destination. The fixer may edit source; the planner and
 reviewer are instructed not to edit source. For Codex this is a workflow rule,
 not an OS-enforced read-only sandbox; the backend also checks repository
 integrity. Each task gets one lightweight focused check and the combined patch gets
-the engine's final verification, with at most one automatic repair at each
-checkpoint. A repair changes the tree, which is a new candidate. Incomplete checks,
+the engine's final verification. An Owner task can receive two automatic repairs.
+The second requires a changed source tree and independent review evidence of progress:
+fewer distinct blockers, additional original feedback addressed while retaining previous
+successes, or a previously failed or unavailable case now verified. Merely rewriting
+a blocker does not count. The combined patch retains its one-repair limit. A repair changes the tree, which is a new candidate. Incomplete checks,
 clarification, or remaining blocking findings pause the batch. Owner checks use
 the focused 60-second-per-check/five-minute cumulative instruction limits.
 

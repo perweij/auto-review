@@ -1689,6 +1689,72 @@ class OwnerTest(unittest.TestCase):
         self.assertIn('buffer-local', repair['blocking'][0])
         self.assertFalse(self.posts)
 
+    def test_second_task_repair_uses_progress_and_latest_blocker_then_verifies(self):
+        repairs = []
+        reviews = 0
+
+        def model(session, state, batch, role, context):
+            nonlocal reviews
+            result = self.model(session, state, batch, role, context)
+            if role == 'fix' and 'review_findings' in context:
+                repairs.append(context['review_findings']['blocking'])
+                Path(state['worktree'], 'source.txt').write_text(f'repair {len(repairs)}\n')
+                batch['checkpoint'] = owner_git.checkpoint(session, state, 'repair')
+            if role == 'review' and not context.get('scope'):
+                reviews += 1
+                if reviews < 3:
+                    result.update(assessment='changes_requested', blocking=['rollback', 'URI'] if reviews == 1 else ['URI'])
+            return result
+
+        with patch.object(owner_providers, 'invoke', side_effect=model):
+            batch = self.fix()['batches'][-1]
+        self.assertEqual(repairs, [['rollback', 'URI'], ['URI']])
+        self.assertEqual((reviews, batch['tasks'][0]['repairs'], batch['status']), (3, 2, 'ready'))
+
+    def test_second_task_repair_requires_progress_and_cannot_exceed_budget(self):
+        review = dict(blocking=['different wording'], outcomes=[dict(item='a', status='no_change')],
+                      case_results=[dict(id='case', status='failed')])
+        task = dict(repairs=1, repair_evidence=owner_fixes.repair_evidence(review, 'old'))
+        self.assertIsNotNone(owner_fixes.repair_stop_reason({}, task, review, 'new'))
+        review['case_results'][0]['status'] = 'tested'
+        self.assertIsNotNone(owner_fixes.repair_stop_reason({}, task, review, 'old'))
+        self.assertIsNone(owner_fixes.repair_stop_reason({}, task, review, 'new'))
+        task['repairs'] = 2
+        self.assertIn('limit reached', owner_fixes.repair_stop_reason({}, task, review, 'new'))
+
+    def test_paused_legacy_task_resumes_from_matching_repair_history(self):
+        def model(*args):
+            result = self.model(*args)
+            if args[3] == 'review':
+                result.update(assessment='changes_requested', blocking=['first defect'])
+                result['outcomes'][0]['status'] = 'no_change'
+            return result
+        with patch.object(owner_providers, 'invoke', side_effect=model):
+            paused = self.fix()['batches'][-1]
+        session = OwnerSession({'session': self.path})
+        state = session.load()
+        batch = state['batches'][-1]
+        task = batch['tasks'][0]
+        task.pop('repair_evidence')
+        task.pop('repair_stop_reason')
+        review = task['review']
+        previous = copy.deepcopy(review)
+        review['outcomes'][0]['status'] = 'fixed'
+        review['blocking'] = ['new defect']
+        old, new = task['before'], task['after']
+        batch['attempts'] = [
+            dict(role='review', status='complete', before=old, after=old, result=previous),
+            dict(role='fix', status='complete', before=old, after=new),
+            dict(role='review', status='complete', before=new, after=new, result=review)]
+        self.assertIsNotNone(owner_fixes.repair_stop_reason(batch, task, review, 'unrelated'))
+        session.save(state)
+        self.calls.clear()
+        completed = self.request('owner-fix', batch=paused['id'])['batches'][-1]
+        self.assertEqual([role for role, _ in self.calls], ['fix', 'review', 'review'])
+        self.assertEqual(self.calls[0][1]['review_findings']['blocking'], ['new defect'])
+        self.assertEqual(completed['status'], 'ready')
+        self.assertEqual(completed['tasks'][0]['repairs'], 2)
+
     def test_explicit_incomplete_assessment_retries_only_review(self):
         original = self.model
         def incomplete(*args):
