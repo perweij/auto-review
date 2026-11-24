@@ -300,7 +300,7 @@ publication. Run without `--no-publish` for the interactive draft menu, or use:
 pr-review --forge gitlab https://gitlab.com/GROUP/PROJECT/-/merge_requests/123 --economical --auto-publish --json
 ```
 
-The automatic workflow leaves uncertain findings unstaged and publishes eligible peers.
+The automatic workflow leaves uncertain findings and revisits unstaged and publishes eligible peers.
 Other publication blockers still stop the batch.
 Native inline lines/ranges and overall assessments are supported. Approvals,
 request-changes, Reviewer replies, suggestions and `fix-issue` remain unsupported.

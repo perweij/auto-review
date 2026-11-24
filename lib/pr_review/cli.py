@@ -17,7 +17,7 @@ def parser():
     result.add_argument('--forge', default=None, help='github (default) or gitlab (GitLab.com COMMENT reviews)')
     result.add_argument('-R', '--repo', dest='repository')
     result.add_argument('--no-publish', action='store_true', help='generate and retain reviews without opening the publication menu')
-    result.add_argument('--auto-publish', action='store_true', help='analyse and publish COMMENT feedback without prompts; leave uncertain findings unstaged and publish eligible peers')
+    result.add_argument('--auto-publish', action='store_true', help='analyse and publish COMMENT feedback without prompts; leave uncertain findings, revisits and resolved/outdated replies unstaged and publish eligible peers')
     result.add_argument('--suggested-changes', action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS,
                         help='generate and separately verify self-contained GitHub code suggestions (default: off)')
     result.add_argument('--json', action='store_true', help='with --auto-publish, emit one JSON result on stdout and progress on stderr')

@@ -8,7 +8,7 @@ import re
 
 from .common import ApiError, atomic_json, digest, locked, now, read_json, state_root
 from . import publication
-from .state import UNCERTAIN_REASON, Session, generation, has_manual_versions
+from .state import OLD_THREAD_REASON, REVISIT_REASON, UNCERTAIN_REASON, Session, generation, has_manual_versions
 
 _active = ContextVar('automatic_review', default=None)
 OUTSTANDING = {'draft', 'failed', 'submitting', 'ambiguous'}
@@ -198,7 +198,7 @@ class AutomaticRun:
                     self.record[field] = self.store.manifest[field]
         if outcome in ('published', 'noop') and self.record.get('deferred'):
             ids = ', '.join(item['id'] for item in self.record['deferred'])
-            reason += f' Left uncertain drafts unstaged: {ids}.'
+            reason += f' Left drafts unstaged for individual review: {ids}.'
         self.record.update(outcome=outcome, exit_code=fields.pop('exit_code', EXIT_CODES[outcome]), reason=reason,
                            finished_at=now(), receipts=sorted({u for u in receipts if u}),
                            guidance='Open this PR in Emacs. Inspect attention items; R r resumes analysis, P opens publication and recovery, L shows the saved log.', **fields)
@@ -291,8 +291,8 @@ class AutomaticRun:
                 reasons = session.blockers(comment, state, bulk=True)
                 if not reasons:
                     ids.append(comment['id'])
-                elif (comment['status'] == 'unstaged' and comment['classification'] == 'UNCERTAIN'
-                      and reasons == [UNCERTAIN_REASON]):
+                elif (comment['status'] == 'unstaged' and not comment.get('needs_attention')
+                      and set(reasons) <= {UNCERTAIN_REASON, REVISIT_REASON, OLD_THREAD_REASON}):
                     deferred.append({'id': comment['id'], 'reasons': reasons})
                 else:
                     blocked.append({'id': comment['id'], 'reasons': reasons})

@@ -9,6 +9,8 @@ from . import workflow
 from .receipts import import_legacy
 
 
+OLD_THREAD_REASON = "Stage this resolved/outdated thread reply individually after inspecting it."
+REVISIT_REASON = "This finding revisits an existing discussion; inspect and stage individually or exclude it."
 UNCERTAIN_REASON = "This finding is uncertain; inspect and stage individually or exclude it."
 
 
@@ -245,11 +247,11 @@ class Session:
             if not thread or not thread.get("can_reply"):
                 reasons.append("The selected thread is missing or no longer accepts replies.")
             elif bulk and (thread.get("is_resolved") or thread.get("is_outdated")):
-                reasons.append("Stage this resolved/outdated thread reply individually after inspecting it.")
+                reasons.append(OLD_THREAD_REASON)
         elif placement.get("kind") != "review":
             reasons.append("Choose a code location, thread, or explicit overall assessment.")
         if bulk and comment.get("classification") in ("REVISIT", "UNCERTAIN", "DUPLICATE"):
-            reasons.append({"REVISIT": "This finding revisits an existing discussion; inspect and stage individually or exclude it.",
+            reasons.append({"REVISIT": REVISIT_REASON,
                             "UNCERTAIN": UNCERTAIN_REASON,
                             "DUPLICATE": "This finding duplicates existing discussion; inspect it before restoring and staging individually."}[comment['classification']])
         if comment.get("needs_attention"):

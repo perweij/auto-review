@@ -338,7 +338,7 @@ class AutomationTest(unittest.TestCase):
         self.assertFalse(posts)
 
     def test_each_blocker_stops_all_before_staging(self):
-        changes = [dict(classification='UNCERTAIN', body=''), dict(classification='REVISIT'),
+        changes = [dict(classification='UNCERTAIN', body=''), dict(classification='REVISIT', body=''),
                    dict(body=''), dict(placement={'kind': 'unplaced'}),
                    dict(placement={'kind': 'inline', 'path': 'missing', 'side': 'RIGHT', 'line': 2}),
                    dict(partial_coverage=True), dict(needs_attention='Discussion changed')]
@@ -356,15 +356,25 @@ class AutomationTest(unittest.TestCase):
                 self.assertEqual(before, self.session.file.read_bytes())
 
     def test_outdated_and_resolved_replies_need_judgment(self):
+        initial = self.session.load()
         for key in ('is_outdated', 'is_resolved'):
-            state = self.session.load()
-            state['discussion']['items'] = [dict(key='thread:T', kind='thread', root_id=9, can_reply=True,
-                                                **{key: True})]
-            state['comments'][0]['placement'] = dict(kind='reply', key='thread:T', root_id=9)
-            self.session.save(state)
-            result, posts = self.publish()
-            self.assertEqual(result['exit_code'], 3)
-            self.assertFalse(posts)
+            for classification in ('NEW', 'REVISIT'):
+                with self.subTest(key=key, classification=classification):
+                    state = copy.deepcopy(initial)
+                    state['discussion']['items'] = [dict(key='thread:T', kind='thread', root_id=9,
+                                                        can_reply=True, **{key: True})]
+                    atomic_json(self.f.path / "discussion/snapshot-a/discussion.json", state["discussion"])
+                    state['comments'][0].update(classification=classification,
+                                                placement=dict(kind='reply', key='thread:T', root_id=9))
+                    self.session.save(state)
+                    result, posts = self.publish()
+                    self.assertEqual(result['outcome'], 'published')
+                    self.assertTrue(posts)
+                    self.assertEqual([x['id'] for x in result['deferred']], ['p1'])
+                    self.assertEqual([c['status'] for c in self.session.load()['comments']], ['unstaged', 'published'])
+                    result, posts = self.publish()
+                    self.assertEqual(result['outcome'], 'noop')
+                    self.assertFalse(posts)
 
     def test_automatic_duplicates_and_empty_findings_are_noops(self):
         self.generated_duplicates('p1', 'p2')

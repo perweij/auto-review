@@ -184,12 +184,11 @@ Settings use the same defaults, preset, saved settings, complete file, and expli
 flag precedence as direct execution. Enabled providers' model/effort choices are validated from fresh metadata.
 
 The completed analysis must be current. Automatically suppressed duplicates and
-confirmed published comments are excluded. An unstaged finding whose only blocker is
-its UNCERTAIN classification stays unstaged for individual inspection. Eligible
-peers publish, and the result lists the deferred draft IDs. If only uncertain
-findings remain, the run checks freshness and finishes without posting.
-A revisit finding, resolved/outdated thread reply,
-missing/invalid placement, empty comment, partially covered finding, or changed
+confirmed published comments are excluded. Unstaged uncertain findings, revisits, and replies to
+resolved or outdated threads stay unstaged for individual inspection when these
+are their only blockers. Eligible peers publish, and the result lists the deferred
+draft IDs. If only deferred findings remain, the run checks freshness and finishes
+without posting. A missing/invalid placement, empty comment, partially covered finding, or changed
 discussion needing inspection stops the entire batch before staging. No findings,
 or only duplicates/already published findings, produces a successful no-op after
 freshness validation. No completion comment is posted.

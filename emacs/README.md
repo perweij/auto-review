@@ -458,7 +458,7 @@ the preset values. Either action refreshes model choices. It does not
 launch work or save changes until you run; individual settings remain editable,
 and testing/suggestion options are preserved. `s` toggles suggested changes.
 `r` runs analysis for inspection;
-`P` explicitly runs and publishes automatically as COMMENT, leaving uncertain drafts
+`P` explicitly runs and publishes automatically as COMMENT, leaving uncertain findings, revisits and resolved/outdated replies
 unstaged while eligible peers publish. Other publication blockers stop the batch.
 The shared progress log links back to the originating review. This publication
 choice is not saved as a default.
