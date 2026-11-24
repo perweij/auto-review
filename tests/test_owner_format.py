@@ -24,7 +24,7 @@ class OwnerFormatTest(unittest.TestCase):
         (self.root / '.pre-commit-config.yaml').write_text('rev: v0.16.4\n')
         (self.root / 'new file.py').write_text('a=1\n')
         (self.root / 'alias.py').symlink_to(self.root / 'new file.py')
-        self.state = {'worktree': str(self.root)}
+        self.state = {'worktree': str(self.root), 'change': {'target': {'head': 'target'}, 'source': {'head': 'source'}}}
         self.session = SimpleNamespace(repo=Mock())
         self.session.repo.git.return_value.stdout = 'new file.py\0alias.py\0removed.py\0'
         self.batch = {}
@@ -34,6 +34,12 @@ class OwnerFormatTest(unittest.TestCase):
 
     def gate(self, final=True):
         return owner_format.gate(self.session, self.state, self.batch, 'base', {'tree': 'raw'}, final=final)
+
+    def test_legacy_passed_check_supplies_constraint_without_inventing_edit_history(self):
+        self.assertEqual(owner_format.review_context({}), {})
+        info = owner_format.review_context({'ruff_check': {'tree': 'accepted', 'version': '0.16.6'}})
+        self.assertEqual(info['formatting_requirement']['last_passed']['tree'], 'accepted')
+        self.assertIsNone(info['formatting_requirement']['last_controller_edit'])
 
     def test_only_root_steps_enable_formatting(self):
         workflow = self.workflow.read_text()
@@ -52,6 +58,19 @@ class OwnerFormatTest(unittest.TestCase):
         self.assertTrue(all('ruff==0.16.6' in cmd for cmd in args))
         self.assertEqual(args[1][-3:], ['--force-exclude', '--', 'new file.py'])
         self.assertEqual(args[0][-2:], args[2][-2:])
+
+    @patch.object(owner_format.owner_git, 'checkpoint')
+    @patch.object(owner_format, 'run')
+    def test_final_check_repairs_drift_from_an_earlier_pr_commit(self, run, checkpoint):
+        checkpoint.side_effect = [{'tree': t} for t in ('raw', 'formatted', 'formatted')]
+        run.side_effect = [Result(1, 'Would reformat: new file.py', ''), Result(0, '', ''), Result(0, '', '')]
+        self.session.repo.git.side_effect = [
+            SimpleNamespace(stdout='README.md\0'), SimpleNamespace(stdout='new file.py\0'),
+            SimpleNamespace(stdout='new file.py\0')]
+        self.assertEqual(self.gate()['tree'], 'formatted')
+        self.assertIn('target...source', self.session.repo.git.call_args_list[1].args)
+        self.assertEqual(run.call_args_list[1].args[0][-3:], ['--force-exclude', '--', 'new file.py'])
+        self.assertEqual(self.batch['ruff_check']['tree'], 'formatted')
 
     @patch.object(owner_format.owner_git, 'checkpoint', return_value={'tree': 'raw'})
     @patch.object(owner_format, 'run', return_value=Result(1, 'Would reformat: untouched.py', ''))

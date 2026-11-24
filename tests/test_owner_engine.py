@@ -239,6 +239,9 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         with patch('pr_review.owner_format.run', side_effect=format_file):
             batch = self.f.start(batch=paused['id'])['batches'][-1]
         tree = self.session.repo.git('rev-parse', 'HEAD^{tree}', cwd=batch_path(self)).stdout.strip()
+        constraint = json.loads((self.workspace() / 'context/formatting_requirement.json').read_text())
+        self.assertEqual(constraint['last_controller_edit']['paths'], ['repair.py'])
+        self.assertEqual(constraint['last_passed']['tree'], tree)
         self.assertEqual(tree, batch['ruff_check']['tree'])
         self.assertEqual(tree, batch['review_tree'])
         self.assertEqual('value = 1', self.session.repo.git('show', tree + ':repair.py').stdout.strip())

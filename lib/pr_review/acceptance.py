@@ -544,7 +544,9 @@ class OwnerAdapter(AcceptanceAdapter):
         return copy.deepcopy(self.data.get('verification_cases', []))
 
     def reviewer_context(self):
-        return {'selected_feedback': self.data['feedback'],
+        return {**({'formatting_requirement': self.data['formatting_requirement']}
+                   if 'formatting_requirement' in self.data else {}),
+                'selected_feedback': self.data['feedback'],
                 'approved_issue_plan': self.data.get('approved_issue_plan'),
                 'scope': self.data.get('scope', '')}
 

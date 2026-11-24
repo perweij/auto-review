@@ -1810,8 +1810,10 @@ sessions, tooltips and expansion of GitLab's issue-workflow pilot are excluded.
 Owner recognizes a root GitHub Actions step running `uv run --no-sync ruff format --check .`.
 It uses uv to run the Ruff version pinned in the root `uv.lock`. After each fix it
 formats changed Python files and notebooks. It also checks the full combined tree
-before final review, including integration repairs. Read-only verification runs
-the check without applying edits. If unchanged files fail or the locked formatter
+before final review, including integration repairs. If that check finds formatting
+drift, Owner can also format files changed by earlier commits on the PR or MR.
+Read-only verification runs
+the check without applying edits. If files outside the batch and PR changes fail or the locked formatter
 cannot run, the Owner dashboard shows the blocker and how to resume.
 
 ### Owner execution reports

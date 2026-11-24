@@ -7,6 +7,7 @@ import tempfile
 
 from .common import ApiError
 from .events import emit
+from .forge_context import owner_change
 from .isolation import _git, _safe_path
 from .processes import run
 from . import owner_git
@@ -133,17 +134,44 @@ def gate(session, state, batch, before, snapshot, *, final=False):
             return snapshot
         if batch.get('verify_only') or check.returncode != 1 or check.reason:
             require_success(check)
-    names = session.repo.git('diff', '--name-only', '--diff-filter=ACMRT', '-z',
-                             before, snapshot['tree'], '--').stdout.split('\0')
-    paths = [name for name in names if Path(name).suffix in ('.py', '.pyi', '.ipynb')
+    diff = ('diff', '--name-only', '--no-renames', '--diff-filter=ACMT', '-z')
+    names = session.repo.git(*diff, before, snapshot['tree'], '--').stdout.split('\0')
+    if final:
+        # A resumed or follow-on batch can inherit formatting drift from an
+        # earlier PR commit even when none of this batch's tasks edits the file.
+        change = owner_change(state)
+        pr_range = change['target']['head'] + '...' + change['source']['head']
+        names.extend(session.repo.git(*diff, pr_range, '--').stdout.split('\0'))
+    paths = [name for name in sorted(set(names)) if Path(name).suffix in ('.py', '.pyi', '.ipynb')
              and (root / name).is_file() and (root / name).resolve() == root / name]
     if final and not paths:
         require_success(check)
     if paths:
         emit('progress', message=f'Formatting {len(paths)} changed files with Ruff {release}')
         require_success(invoke(['--force-exclude', '--', *paths]))
+        raw_tree = snapshot['tree']
         snapshot = owner_git.checkpoint(session, state, 'Ruff formatted candidate')
+        if snapshot['tree'] != raw_tree:
+            changed = session.repo.git('diff', '--name-only', '--no-renames', '-z',
+                                       raw_tree, snapshot['tree'], '--').stdout.split('\0')
+            batch['last_ruff_edit'] = dict(version=release, before=raw_tree, after=snapshot['tree'],
+                                           paths=[path for path in changed if path])
         batch['checkpoint'] = snapshot
     if final:
         require_success(check_candidate())
     return snapshot
+
+
+def review_context(batch):
+    check = batch.get('ruff_check')
+    edit = batch.get('last_ruff_edit')
+    if not (check or edit):
+        return {}
+    return {'formatting_requirement': {
+        'check': 'ruff format --check .', 'last_passed': check, 'last_controller_edit': edit,
+        'instruction': 'Owner applies locked Ruff after edits and requires the combined candidate to pass '
+                       'formatting before final verification. Reverting to unformatted bytes will be undone. '
+                       'A previous attempt undone by formatting did not test a formatter-compatible repair. '
+                       'When proposing or assessing a repair, satisfy CI and behavioral compatibility together. '
+                       'For byte-sensitive consumers, verify old artifacts still work and genuinely incompatible '
+                       'artifacts are still rejected. Preserve integrity checks.'}}

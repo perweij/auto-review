@@ -234,7 +234,7 @@ def context(session, state, batch, keys, before):
     return {**({"approved_issue_plan": approved} if approved and state.get("issue_workflow") else {}),
             "feedback": session.items(state, keys), "baseline": batch["baseline"],
             "batch_diff": batch_diff, **({'task_diff': task_diff} if task_diff != batch_diff else {}),
-            "completed_tasks": completed}
+            "completed_tasks": completed, **owner_format.review_context(batch)}
 
 
 def automatic(batch):
@@ -265,8 +265,9 @@ def recovery_plan(session, state, batch, target, data, report):
         return False
     check_fresh(session, state, batch)
     emit('progress', message='Automatically replanning: ' + diagnosis(report))
+    earlier = [entry for group in target.get('previous_recoveries', []) for entry in group]
     recovery = dict(findings=report, verification_cases=data['verification_cases'],
-                    previous_approaches=history,
+                    previous_approaches=history, earlier_replanned_approaches=earlier,
                     instruction='Choose a different approach within the original contract. For repair, explain '
                                 'the approach and cite the source that answers any clarification. Choose clarify '
                                 'if a human decision is needed. Choose repeated_failure only if earlier attempts '
