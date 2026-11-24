@@ -35,6 +35,8 @@ Forge dispatch/topic menus use `V`; Magit dispatch uses `C-c r`, leaving its
 native `V` (Revert) binding intact. From a repository, Auto-review opens a PR list
 using saved local data. Press `g` there to fetch open PRs from GitHub, including
 ones with no saved review. Saved closed/merged reviews remain in a separate group.
+If sibling clones share a review worktree, opening the PR finds the saved Reviewer
+session belonging to that worktree.
 Select a PR with `RET`, or use `R` to open its setup and `r` to run it. The setup
 menu shows the target PR. A sole old saved review is never selected automatically.
 

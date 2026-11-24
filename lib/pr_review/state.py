@@ -57,9 +57,22 @@ def discover(request):
             continue
         session = Session({"session": str(file.parent)})
         sessions.append({"session": str(session.root), "repository": m["repository"], "forge_project": saved_project.saved(), "pr": m["pr"],
-                         "url": m.get("url"), "generation": session.id,
+                         "url": m.get("url"), "worktree": m.get("worktree"), "generation": session.id,
                          "head": session.manifest.get("snapshot", {}).get("head"), "created_at": m.get("created_at"),
                          "automation": session.automation_summary()})
+    if not sessions and project and number and request.get('include_worktree_owner') is True:
+        # A sibling clone may share the conventional worktree pathname. Only
+        # follow a registered worktree with a matching saved project and PR.
+        from .sessions import review_worktree
+        main = git(['worktree', 'list', '--porcelain'], cwd=request.get('cwd', '.')).stdout.splitlines()[0]
+        worktree = review_worktree(Path(main.removeprefix('worktree ')), project.path, number)
+        if worktree.is_dir():
+            owner = git(['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel'],
+                        cwd=worktree, check=False)
+            paths = owner.stdout.splitlines()
+            if owner.returncode == 0 and len(paths) == 2 and paths[0] != common and paths[1] == str(worktree):
+                matches = discover({**request, 'cwd': str(worktree), 'include_worktree_owner': False})['sessions']
+                sessions = [s for s in matches if s['worktree'] == str(worktree)]
     return {"sessions": sorted(sessions, key=lambda x: x.get("created_at") or "", reverse=True)}
 
 

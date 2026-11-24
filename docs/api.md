@@ -33,7 +33,7 @@ API settings objects.
 | --- | --- | --- |
 | `capabilities` | optional `forge`, `session` | Protocol version, features, command names, supported `placements` and `verdicts` |
 | `review-target` | `cwd`, optional `pr`, `repository`, `forge` | Local normalized `forge_project`, `repository`, numeric `pr`, canonical `url`, capabilities and `projects` candidates |
-| `discover` | `cwd`, optional `pr`, `repository`, `forge` | Matching saved sessions in this Git common directory |
+| `discover` | `cwd`, optional `pr`, `repository`, `forge`, `include_worktree_owner` | Matching saved sessions in this Git common directory. For an exact project and PR, `include_worktree_owner: true` also searches the existing review worktree’s owning checkout when the caller has no match. |
 | `pull-requests` | `cwd`, optional `repository` | Repository choices, cached PR list, last-check time, and matching saved sessions |
 | `read` | `session`, optional `generation` | Saved review, comments, contextual rows/threads, staging, last check, operations |
 | `review-log` | `session`, `operation_id` | Saved automatic-operation log as `{operation_id,text}`; operation must belong to the session |

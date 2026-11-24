@@ -1789,6 +1789,27 @@
   (should (transient-get-suffix 'magit-auto-review-setup-menu "s"))
   (should (transient-get-suffix 'magit-auto-review-setup-menu "P")))
 
+(ert-deftest auto-review/reopen-placeholder-adopts-the-owning-worktrees-session ()
+  (save-window-excursion
+    (let* ((directory default-directory)
+           (repository "github.com/org/athena")
+           (buffer (get-buffer-create (format "*Auto-review %s #417 (%s)*"
+                                              repository (abbreviate-file-name directory))))
+           request refreshed)
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer (magit-auto-review-mode))
+            (cl-letf (((symbol-function 'magit-auto-review--call)
+                       (lambda (query)
+                         (setq request query)
+                         '((sessions . (((session . "/saved/417") (generation . "generation-417")))))))
+                      ((symbol-function 'magit-auto-review-refresh)
+                       (lambda () (setq refreshed magit-auto-review--session))))
+              (magit-auto-review--open-review-pr directory 417 repository))
+            (should (alist-get 'include_worktree_owner request))
+            (should (equal refreshed "/saved/417")))
+        (kill-buffer buffer)))))
+
 (ert-deftest auto-review/automatic-progress-link-opens-the-originating-pr ()
   (save-window-excursion
     (with-temp-buffer

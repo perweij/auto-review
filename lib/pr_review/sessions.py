@@ -27,9 +27,13 @@ def selected(root):
     return root
 
 
+def review_worktree(main, repository, number):
+    return main.parent / (repository.rsplit('/', 1)[-1] + f'-review-pr-{number}')
+
+
 def locate(repo, resume=None):
     main = Path(repo.git('worktree', 'list', '--porcelain').stdout.splitlines()[0].removeprefix('worktree '))
-    worktree = main.parent / (repo.name.split('/')[-1] + f'-review-pr-{repo.pr}')
+    worktree = review_worktree(main, repo.name, repo.pr)
     if resume:
         root = Path(resume).resolve(strict=True)
         manifest = read_json(root / 'manifest.json', {})
@@ -46,7 +50,7 @@ def locate(repo, resume=None):
         common = result.stdout.strip()
         top = repo.git('rev-parse', '--show-toplevel', cwd=worktree).stdout.strip()
         if common != str(repo.common) or top != str(worktree):
-            raise ApiError('invalid_session', f'Existing worktree belongs to a different checkout: {worktree}')
+            raise ApiError('invalid_session', f'Existing worktree belongs to a different checkout: {worktree} (Git directory: {common}). Open the review from its owning checkout.')
         head = repo.git('rev-parse', 'HEAD', cwd=worktree).stdout.strip()
     for file in parent.glob('*/manifest.json'):
         try:

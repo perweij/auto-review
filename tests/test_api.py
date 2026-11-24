@@ -102,6 +102,26 @@ class ApiTest(unittest.TestCase):
             found = dispatch({"protocol": 1, "command": "discover", "cwd": str(self.repo), "pr": 7})
             self.assertEqual(found["sessions"][0]["generation"], first["generation"])
 
+    def test_reviewer_discovery_can_resume_the_worktrees_owning_clone(self):
+        sibling = self.root / 'sibling'
+        self.git('clone', '-q', str(self.repo), str(sibling))
+        review = self.root / 'repo-review-pr-7'
+        self.git('worktree', 'add', '-q', '--detach', str(review), 'HEAD')
+        request = dict(protocol=1, command='discover', cwd=str(sibling), repository=self.manifest['repository'], pr=7)
+        self.assertFalse(dispatch(request)['sessions'])
+        request['include_worktree_owner'] = True
+        # Even an exact repository and PR match must name the existing worktree.
+        self.assertFalse(dispatch(request)['sessions'])
+        self.manifest['worktree'] = str(review)
+        atomic_json(self.path / 'manifest.json', self.manifest)
+        matches = dispatch(request)['sessions']
+        self.assertEqual([s['session'] for s in matches], [str(self.path)])
+        self.assertFalse(dispatch(dict(request, repository='github.com/another/repo'))['sessions'])
+        with patch('pr_review.automation.run') as run:
+            dispatch(dict(protocol=1, command='automatic-review', session=matches[0]['session']))
+            self.assertEqual(Path(run.call_args.args[0]['cwd']), self.repo)
+            self.assertEqual(run.call_args.args[0]['pr'], 7)
+
     def test_edit_unstages_entire_comment_and_preserves_original_version(self):
         self.change("stage", comment="p1")
         self.change("edit", comment="p1", body="Comment 1")

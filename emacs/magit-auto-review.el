@@ -721,7 +721,8 @@ Ask which session to open when more than one matches.  Discovery is local."
   (let* ((default-directory directory)
          (sessions (alist-get 'sessions
                              (magit-auto-review--call `((command . "discover") (cwd . ,directory)
-                                                       (pr . ,number) (repository . ,repository) (forge . ,forge))))))
+                                                       (pr . ,number) (repository . ,repository) (forge . ,forge)
+                                                       (include_worktree_owner . t))))))
     (if (= (length sessions) 1) (car sessions)
       (when sessions
         (let* ((choices (mapcar (lambda (s) (cons (format "#%s · %s · %s" (alist-get 'pr s) (alist-get 'repository s) (alist-get 'created_at s)) s)) sessions))
@@ -780,7 +781,9 @@ Ask which session to open when more than one matches.  Discovery is local."
                                                    (file-name-nondirectory (directory-file-name directory)))
                                                number (abbreviate-file-name directory))))
     ;; Re-entering from Forge must not reset a live editor or jump generations.
-    (unless (derived-mode-p 'magit-auto-review-mode)
+    (when (or (not (derived-mode-p 'magit-auto-review-mode))
+              (and selected (not magit-auto-review--session)
+                   (not magit-auto-review--editor) (not (process-live-p magit-auto-review--process))))
       (magit-auto-review-mode)
       (setq default-directory directory magit-auto-review--target number
             magit-auto-review--repository (or repository (alist-get 'repository selected))
