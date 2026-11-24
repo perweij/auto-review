@@ -355,6 +355,13 @@
      ((and (not (equal (alist-get 'status batch) "ready"))
            (not (alist-get 'attempts batch)) (not (alist-get 'plans batch)) (not (alist-get 'tasks batch)))
       "No model work has started. R changes provider/model/effort; r resumes with those settings. T applies only to agent-configuration trust requests.")
+     ((alist-get 'formatter_error batch)
+      (concat (alist-get 'formatter_error batch)
+              (if (or (magit-auto-review--true-p (alist-get 'combined_repair_pending batch))
+                      (cl-some (lambda (task) (member (alist-get 'status task) '("fixing" "repairing")))
+                               (alist-get 'tasks batch)))
+                  "\nCorrect the reported blocker, inspect the retained fix with d, then A adopts it for verification."
+                "\nCorrect the reported blocker. A adopts manual edits; r retries verification after a tool setup change.")))
      ((alist-get 'recovery_stop batch) "Next: inspect the recovery diagnosis below. Address the blocker before replanning with p.")
      ((magit-auto-review-owner--final-verification-incomplete-p batch)
       "Task work is complete; final verification is incomplete. Inspect the full blocking reason below and fix its prerequisites, then r resumes verification. Automatic commits and replies wait for final verification; m inspects the worktree.")
@@ -428,9 +435,18 @@
     (magit-auto-review-owner-refresh)
     (message "Execution report: %s" (alist-get 'report_url result))))
 
+(defun magit-auto-review-owner--report-batch ()
+  (or (magit-auto-review-owner--batch-at-point)
+      (car (last (alist-get 'batches magit-auto-review-owner--view)))))
+
+(defun magit-auto-review-owner--report-label (batch)
+  (magit-auto-review--report-label
+   (alist-get 'execution_report batch)
+   (if (magit-auto-review--true-p (alist-get 'verify_only batch)) "Owner verification" "Owner fix")))
+
 (transient-define-prefix magit-auto-review-owner-report-menu ()
   "Execution reports for the selected fixing batch."
-  [["Execution report"
+  [[:description (lambda () (magit-auto-review-owner--report-label (magit-auto-review-owner--report-batch)))
     ("o" "Open local report" magit-auto-review-owner-report)
     ("p" "Publish snapshot to PR" magit-auto-review-owner-publish-report)]])
 
@@ -449,7 +465,7 @@
     (unless (alist-get 'superseded_by batch)
       (insert (if (magit-auto-review--true-p (alist-get 'auto_commit batch)) "Auto commit" "Manual commit") " · C-u r chooses completion mode\n"))
     (when (alist-get 'execution_report batch)
-      (insert-text-button "Execution report"
+      (insert-text-button (magit-auto-review-owner--report-label batch)
                           'follow-link t
                           'action (lambda (_button)
                                     (find-file (alist-get 'report_path (alist-get 'execution_report batch)))))
@@ -1090,8 +1106,7 @@ With AUTOMATIC, also commit and stage replies."
 
 (defun magit-auto-review-owner--batch-id ()
   "Return the selected or related batch, or the latest saved batch."
-  (or (alist-get 'id (magit-auto-review-owner--batch-at-point))
-      (alist-get 'id (car (last (alist-get 'batches magit-auto-review-owner--view))))
+  (or (alist-get 'id (magit-auto-review-owner--report-batch))
       (user-error "No saved fix batch")))
 (defun magit-auto-review-owner--resume (&rest fields)
   "Resume the selected batch with FIELDS."

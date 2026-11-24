@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pr_review.common import ApiError, atomic_json
-from pr_review import review_reports, session_trace
+from pr_review import review_reports, session_trace, session_report
 
 
 class ReviewReportsTest(unittest.TestCase):
@@ -44,6 +44,10 @@ class ReviewReportsTest(unittest.TestCase):
                 'selected': {'usage': {'total_tokens': 12}, 'coverage': 'reported'},
                 'other-generation': {'usage': {'total_tokens': 900}, 'coverage': 'reported'}}})
             fields, body = review_reports.generate(SimpleNamespace(root=root, manifest=manifest, id='selected-generation'))
+            self.assertIn('## Reviewer execution report', body)
+            self.assertEqual('Reviewer', fields['report_kind'])
+            legacy = {'report_data_path': fields['report_data_path']}
+            self.assertEqual(fields['processing_seconds'], session_report.saved_summary(legacy)['processing_seconds'])
             self.assertEqual('complete', fields['report_coverage'])
             self.assertIn('Reported tokens: 12;', body)
             self.assertEqual('selected-generation', fields['generation'])

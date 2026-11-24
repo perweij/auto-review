@@ -12,7 +12,7 @@ from .models import discover
 from .processes import run
 from .providers import DENIED_TOOLS, Runtime, environment, probe_command, claude_settings, codex_settings
 from .storage import atomic_bytes, write_json
-from . import owner_git
+from . import owner_git, owner_format
 
 
 def obj(properties):
@@ -338,6 +338,8 @@ def invoke(session, state, batch, role, context):
         if choice["provider"] == "claude":
             events = [e for e in result.events if e.get("type") == "result"]
             record["permission_denials"] = events[-1].get("permission_denials", [])
+        if role == "fix":
+            record["after"] = owner_format.gate(session, state, batch, before["tree"], after)
         write_json(directory / "result.json", value)
         record.update(status="complete", result=value)
         return value

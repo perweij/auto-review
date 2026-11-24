@@ -207,6 +207,42 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual(2, self.synthesis_runs())
         self.assertTrue((Path(batch_path(self)) / 'integration.txt').exists())
 
+    def test_final_formatter_repair_reaches_review_and_auto_commit(self):
+        from pr_review.processes import Result
+        self.verdict('changes_requested', findings=[finding('F1', blocking=True, source='new')])
+        class Repairs(list):
+            def append(inner, value):
+                super().append(value)
+                root = Path(batch_path(self))
+                workflows = root / '.github/workflows'
+                workflows.mkdir(parents=True)
+                (workflows / 'ci.yml').write_text('jobs:\n  test:\n    steps:\n      - run: uv run --no-sync ruff format --check .\n')
+                (root / 'uv.lock').write_text('[[package]]\nname = "ruff"\nversion = "0.16.6"\n')
+                (root / 'pyproject.toml').touch()
+                (root / 'repair.py').write_text('value=1\n')
+                self.verdict('passed')
+        self.repairs = Repairs()
+
+        def format_file(argv, *, cwd, **kwargs):
+            path = cwd / 'repair.py'
+            if '--check' in argv:
+                return Result(int(path.read_text() != 'value = 1\n'), 'repair.py', '')
+            self.assertEqual(argv[-1], 'repair.py')
+            path.write_text('value = 1\n')
+            return Result(0, '', '')
+        with patch('pr_review.owner_format.run', side_effect=FileNotFoundError('uv unavailable')):
+            with self.assertRaisesRegex(ApiError, 'uv unavailable'):
+                self.f.start(auto_commit=True)
+        paused = self.sync()
+        self.assertEqual('paused', paused['status'])
+        self.assertNotIn('commit_execution', paused)
+        with patch('pr_review.owner_format.run', side_effect=format_file):
+            batch = self.f.start(batch=paused['id'])['batches'][-1]
+        tree = self.session.repo.git('rev-parse', 'HEAD^{tree}', cwd=batch_path(self)).stdout.strip()
+        self.assertEqual(tree, batch['ruff_check']['tree'])
+        self.assertEqual(tree, batch['review_tree'])
+        self.assertEqual('value = 1', self.session.repo.git('show', tree + ':repair.py').stdout.strip())
+
     def test_verify_only_uses_the_engine_but_never_repairs(self):
         self.verdict('changes_requested', findings=[finding('F1', blocking=True, source='new')])
         view = self.f.start(verify_only=True)

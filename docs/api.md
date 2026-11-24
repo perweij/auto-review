@@ -1270,7 +1270,9 @@ standalone batches, not issue-harness batches or historical untraced batches.
 Publication is explicit, uses a frozen snapshot and retained receipts, and recovers
 uncertain writes before sending any further snapshot. Report receipts are separate
 from feedback reply receipts. Batch views expose saved `execution_report` metadata
-and any `report_warning`.
+and any `report_warning`. Owner and Reviewer report metadata includes
+`report_kind` and `processing_seconds` when available. The latter sums recorded
+processing across invocations and excludes user waiting time.
 
 ### Plain review execution reports
 

@@ -1806,6 +1806,15 @@ normal resume reconciles the frozen report payload.
 The initial feature supports issue workflows. Standalone Owner and PR-review
 sessions, tooltips and expansion of GitLab's issue-workflow pilot are excluded.
 
+### Owner formatting before verification
+
+Owner recognizes a root GitHub Actions step running `uv run --no-sync ruff format --check .`.
+It uses uv to run the Ruff version pinned in the root `uv.lock`. After each fix it
+formats changed Python files and notebooks. It also checks the full combined tree
+before final review, including integration repairs. Read-only verification runs
+the check without applying edits. If unchanged files fail or the locked formatter
+cannot run, the Owner dashboard shows the blocker and how to resume.
+
 ### Owner execution reports
 
 New standalone fixing and verification batches automatically record execution
@@ -1813,6 +1822,10 @@ traces and local Markdown reports across resumes. Reports include model settings
 measured time, reported tokens and stage outcomes; time waiting for user input is
 excluded. A report describes local execution, not proof that changes were pushed
 or replies published.
+
+Emacs shows the report scope and recorded processing minutes, for example
+`Owner fix report · 196 min` for a fixing batch and `Reviewer report · 15 min`
+for a review generation on the same PR.
 
 In Owner mode, `E` opens execution report actions for the batch at point (otherwise
 the latest batch): `o` opens the local report and `p` publishes a snapshot explicitly.

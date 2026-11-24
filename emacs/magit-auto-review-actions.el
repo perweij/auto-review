@@ -35,7 +35,7 @@
 
 (transient-define-prefix magit-auto-review-execution-report-menu ()
   "Execution report for the displayed generation."
-  [["Execution report"
+  [[:description (lambda () (magit-auto-review--report-label (alist-get 'execution_report magit-auto-review--review) "Reviewer"))
     ("o" "Open local report" magit-auto-review-execution-report)
     ("p" (lambda () (concat "Publish snapshot to " (magit-auto-review--change-label))) magit-auto-review-publish-execution-report)]])
 

@@ -9,7 +9,7 @@ from . import usage, owner_reports, session_trace
 from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
-from . import acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts, review_history
+from . import owner_format, acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts, review_history
 from .owner_state import refresh, superseded_batches, active_feedback_keys, issue_settings
 
 
@@ -431,6 +431,7 @@ def final_review(session, state, batch):
     while True:
         batch["status"] = "reviewing"
         session.save(state)
+        batch["checkpoint"] = owner_format.gate(session, state, batch, batch["baseline"], batch["checkpoint"], final=True)
         data = context(session, state, batch, keys, batch["baseline"])
         data["verification_cases"] = owner_contracts.combined(batch["tasks"])
         data["scope"] = "Review the combined diff and all completed outcomes, including interactions between tasks. For approved issues, verify the entire approved plan and every acceptance criterion, not just individual step outcomes."
@@ -627,7 +628,6 @@ def _execute(session, state, request):
                                    or request.get('retry_review_adjudication') and batch['status'] == 'ready'):
                     raise ApiError('invalid_request', 'Review controls require a versioned batch with a retryable saved conflict.')
                 from . import owner_reports
-                owner_reports.attach(session, state, batch)
                 replacements = superseded_batches(state).get(batch["id"])
                 if replacements:
                     batch = None  # Preserve the original stop reason and artifacts.
@@ -646,6 +646,7 @@ def _execute(session, state, request):
                         raise ApiError("stale_source", "This batch has entered committing; reconcile and start a new batch before replanning or adopting changes.")
                 if batch["status"] == "ready" and not controls and (batch.get("auto_commit") or "auto_commit" in request or batch.get("commit_execution")):
                     if batch.get("auto_commit"):
+                        owner_reports.attach(session, state, batch)
                         completing = True
                         return owner_auto_commit.execute(session, state, batch, remote)
                     return session.view(state)
@@ -663,6 +664,7 @@ def _execute(session, state, request):
                     if batch["status"] == "ready":
                         batch = None
                     raise ApiError("stale_source", "HEAD changed; reconcile in Magit and start a new batch.")
+                owner_reports.attach(session, state, batch)
                 workspace.unstaged_index(session, state)
                 identity = workspace.admin(session, state, None if request.get("adopt") else batch.get("git_admin"))
                 if (batch.get("integrity_failure") or batch.get("git_admin", identity) != identity) and not request.get("adopt"):
@@ -702,6 +704,9 @@ def _execute(session, state, request):
                     if snapshot["tree"] != batch["checkpoint"]["tree"] and not request.get("adopt"):
                         raise ApiError("worktree_changed", "Inspect partial/manual changes, then explicitly adopt and reverify.")
                     if request.get("adopt"):
+                        if not batch.get("verify_only"):
+                            previous = batch["baseline"] if batch.get("formatter_error") else batch["checkpoint"]["tree"]
+                            snapshot = owner_format.gate(session, state, batch, previous, snapshot)
                         batch["checkpoint"] = snapshot
                         batch["git_admin"] = identity
                         batch.pop("integrity_failure", None)
@@ -840,6 +845,7 @@ def _execute(session, state, request):
                 active = active_feedback_keys(batch)
                 batch["fingerprints"] = {i["key"]: i["fingerprint"] for i in session.items(state, active)} if active else {}
             batch["status"] = "running"
+            batch.pop("formatter_error", None)
             batch.pop("error", None)
             session.save(state)
             for index, task in enumerate(batch["tasks"]):
@@ -883,6 +889,8 @@ def _execute(session, state, request):
                 else:
                     code = getattr(exc, "code", None)
                     message = str(exc)
+                    if code == "formatter_failed":
+                        batch["formatter_error"] = message
                     if automatic(batch) and not is_harness and (code == 'invalid_state' or
                             isinstance(exc, (AssertionError, KeyError, TypeError, ValueError))):
                         message = f'Internal Owner error ({type(exc).__name__}): {exc}. Inspect the operation log.'

@@ -336,7 +336,10 @@ class OwnerSession:
         result['capabilities'] = capabilities(self.repo.project.forge, 'owner')
         result['fixing'] = fixing_availability(self, result)
         superseded = superseded_batches(result)
+        from .session_report import saved_summary
         for batch in result["batches"]:
+            if batch.get("execution_report"):
+                batch["execution_report"] = saved_summary(batch["execution_report"])
             batch.pop("superseded_by", None)
             if batch["id"] in superseded:
                 batch["superseded_by"] = superseded[batch["id"]]

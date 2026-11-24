@@ -105,6 +105,23 @@ def token_text(rows):
     return str(sum(known)) + (' (partial)' if partial else '')
 
 
+def report_title(data):
+    if data.get('owner'):
+        return 'Owner verification' if data['owner'].get('verify_only') else 'Owner fix'
+    return 'Reviewer' if data.get('review') else 'Session'
+
+
+def saved_summary(fields):
+    if not fields or 'processing_seconds' in fields or not fields.get('report_data_path'):
+        return fields
+    try:
+        data = read_json(fields['report_data_path'])
+        return {**fields, 'processing_seconds': sum(row['seconds'] for row in data['activities']),
+                'report_kind': report_title(data)}
+    except (ApiError, KeyError, TypeError):
+        return fields
+
+
 def render(data, bounded=False):
     rows = data['activities']
     totals = {}
@@ -113,7 +130,7 @@ def render(data, bounded=False):
         total[0] += row['seconds']
         total[1] += row['tokens'] or 0
     waiting = data.get('waiting_seconds')
-    text = ['## Session execution report', '', f"Outcome: **{safe(data['outcome'])}**", '',
+    text = [f'## {report_title(data)} execution report', '', f"Outcome: **{safe(data['outcome'])}**", '',
             f"Recorded processing: **{sum(r['seconds'] for r in rows)/60:.1f} minutes**. User pauses are excluded.", '',
             f"Trace coverage: {data['coverage']}. Unmeasured work remains unknown.",
             f"Reported tokens: {token_text(rows)}; observations for {data['reported_calls']}/{data['total_calls']} calls. Tokens are not monetary cost.",
@@ -247,7 +264,8 @@ def write_report(output, data):
     atomic_json(output / 'session.json', data)
     path = output / 'session.md'
     atomic_bytes(path, render(data).encode())
-    return {'report_path': str(path), 'report_data_path': str(output / 'session.json')}, render(data, bounded=True)
+    return {'report_kind': report_title(data), 'processing_seconds': sum(r['seconds'] for r in data['activities']),
+            'report_path': str(path), 'report_data_path': str(output / 'session.json')}, render(data, bounded=True)
 
 
 def finish(flow, result):

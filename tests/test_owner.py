@@ -1577,6 +1577,37 @@ class OwnerTest(unittest.TestCase):
         view = self.request("owner-associate")
         self.assertEqual(view["replies"], [])
 
+    def test_fix_attempt_checkpoints_formatted_new_files_before_task_review(self):
+        from pr_review.processes import Result
+        self.fix()
+        session = OwnerSession({"session": self.path})
+        state = session.load()
+        batch = state["batches"][-1]
+        batch["settings"]["fix"] = dict(provider="claude", model="opus", effort="high")
+        root = Path(state["worktree"])
+        path = root / "new file.py"
+
+        def provider(*args, **kwargs):
+            workflows = root / ".github/workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "ci.yml").write_text("jobs:\n  test:\n    steps:\n      - run: uv run --no-sync ruff format --check .\n")
+            (root / "uv.lock").write_text('[[package]]\nname = "ruff"\nversion = "0.16.6"\n')
+            (root / "pyproject.toml").touch()
+            path.write_text("value=1\n")
+            result = {"summary": "Edited", "complete": True, "checks": [], "blocking": [], "outcomes": []}
+            return SimpleNamespace(returncode=0, events=[{"type": "result", "subtype": "success", "structured_output": result}])
+
+        def format_file(argv, **kwargs):
+            self.assertEqual(argv[-3:], ["--force-exclude", "--", path.name])
+            path.write_text("value = 1\n")
+            return Result(0, "", "")
+
+        with patch("pr_review.owner_providers.run", side_effect=provider), patch("pr_review.owner_format.run", side_effect=format_file):
+            REAL_INVOKE(session, state, batch, "fix", {"feedback": []})
+        checkpoint = batch["checkpoint"]["tree"]
+        self.assertEqual(checkpoint, batch["attempts"][-1]["after"]["tree"])
+        self.assertEqual(self.git("show", checkpoint + ":" + path.name), "value = 1")
+
     def test_actual_provider_adapter_captures_edits_and_blocks_review_writes(self):
         settings = self.request("owner-read")["settings"]
         settings["review"] = dict(provider="claude", model="opus", effort="high")

@@ -544,6 +544,11 @@ A different automatic operation makes the saved log current again.")
     (dolist (child (oref section children))
       (when (eq (oref child type) 'review-body) (magit-section-show child)))))
 
+(defun magit-auto-review--report-label (report fallback)
+  (concat (or (alist-get 'report_kind report) fallback) " report"
+          (when-let ((seconds (alist-get 'processing_seconds report)))
+            (format " · %.0f min" (/ seconds 60.0)))))
+
 (defun magit-auto-review--render (&optional target)
   "Render the active view, optionally visiting draft TARGET."
   (if (derived-mode-p 'magit-auto-review-conversations-mode)
@@ -566,7 +571,7 @@ A different automatic operation makes the saved log current again.")
           (insert-text-button url 'follow-link t 'action (lambda (_) (browse-url url)))
           (insert "\n\n"))
         (when-let ((report (alist-get 'execution_report magit-auto-review--review)))
-          (insert-text-button "Execution report" 'follow-link t
+          (insert-text-button (magit-auto-review--report-label report "Reviewer") 'follow-link t
                               'action (lambda (_) (find-file (alist-get 'report_path report))))
           (insert " · J opens report actions"
                   (if (alist-get 'report_url report) " · Published snapshot\n" " · Local\n")))

@@ -2054,6 +2054,15 @@
                  (should (equal generation "first")))))
       (magit-auto-review-open-checkout))))
 
+(ert-deftest review/execution-report-label-shows-scope-and-recorded-minutes ()
+  (should (equal (magit-auto-review--report-label '((report_kind . "Owner fix")
+                                                    (processing_seconds . 11742)) "Owner fix")
+                 "Owner fix report · 196 min"))
+  (should (equal (magit-auto-review--report-label '((processing_seconds . 900)) "Reviewer")
+                 "Reviewer report · 15 min"))
+  (should (equal (magit-auto-review--report-label nil "Owner verification")
+                 "Owner verification report")))
+
 (ert-deftest review/execution-report-keeps-displayed-generation-and-elaboration-key ()
   (let ((magit-auto-review--session "/saved/review")
         (magit-auto-review--generation "historical")

@@ -303,7 +303,8 @@ class Session:
             from .owner_state import fixing_availability
             cached_change = self.manifest.get('change') or read_json(self.path / 'context/review-context.json', {}).get('change')
             owner_fixing = fixing_availability(SimpleNamespace(repo=SimpleNamespace(project=project)), {'change': cached_change})
-        return {**state, "execution_report": self.manifest.get("execution_report"), "report_warning": self.manifest.get("report_warning"), "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
+        from .session_report import saved_summary
+        return {**state, "execution_report": saved_summary(self.manifest.get("execution_report")), "report_warning": self.manifest.get("report_warning"), "usage": usage.summary(self.root), "comments": comments, "thread_contexts": thread_contexts, "operations": active,
                 "automation": self.automation_summary(), "analysis": self.analysis_summary(),
                 "coverage": {"kind": self.manifest.get("analysis_kind", "full"),
                              "threads": self.manifest.get("followup_threads", [])},

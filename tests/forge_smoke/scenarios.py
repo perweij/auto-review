@@ -801,7 +801,7 @@ def review_report(run, forge):
     referenced_before = forge.pages('/merge_requests/1/notes') if forge.kind == 'gitlab' else []
     with fault(run, forge.kind + '-report', tool='gh' if forge.kind == 'github' else 'glab',
                endpoint_suffix='/comments' if forge.kind == 'github' else '/notes',
-               body_contains='Session execution report') as evidence:
+               body_contains='Reviewer execution report') as evidence:
         try:
             run.api(request, forge.cwd)
         except Failure:
@@ -817,7 +817,7 @@ def review_report(run, forge):
         raise Failure('Execution report was duplicated')
     after = forge.pages(suffix)
     created = [n for n in after if n['id'] not in {n['id'] for n in before}]
-    if len(created) != 1 or 'Session execution report' not in created[0]['body']:
+    if len(created) != 1 or 'Reviewer execution report' not in created[0]['body']:
         raise Failure('Expected exactly one execution-report note')
     folder = Path(published['report_path']).parents[1]
     journal = json.loads((folder / 'publication.json').read_text())
