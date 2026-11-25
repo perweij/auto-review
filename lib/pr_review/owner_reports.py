@@ -39,6 +39,8 @@ def generate(session, state, batch):
     data = session_report.report_data(journal, calls, outcome=batch['status'], shared_ledger=True)
     data['owner'] = dict(batch=batch['id'], url=state.get('url'),
                          candidate=batch['checkpoint']['tree'], verify_only=batch.get('verify_only', False))
+    if batch.get('scope_observations'):
+        data['owner']['observations'] = batch['scope_observations']
     fields, body = session_report.write_report(root(session, batch) / 'reports', data)
     fields.update(report_coverage=data['coverage'], report_publication='local-only')
     previous = batch.get('execution_report', {})

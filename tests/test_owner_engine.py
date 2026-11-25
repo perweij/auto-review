@@ -134,6 +134,9 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         self.verdict(findings=[finding('F1', blocking=False, source='new')])
         batch = self.f.start(auto_commit=True)['batches'][-1]
         self.assertEqual([], batch['review']['blocking'])
+        self.assertEqual(batch['review']['observations'], batch['scope_observations'])
+        self.assertIn('Finding F1', batch['scope_observations'][0])
+        self.assertEqual(0, batch['repairs'])
         self.assertTrue(owner_contracts.current(batch))
         artifact = json.loads((self.workspace() / 'reviews/synthesis.json').read_text())
         self.assertEqual(['F1'], [f['id'] for f in artifact['findings']])

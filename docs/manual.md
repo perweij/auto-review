@@ -712,6 +712,15 @@ another baseline gives another commit, ref and evidence. It is an internal revie
 artifact: never an implementation commit, never on the Owner branch, never in the
 index and never pushed. Acceptance still binds to the checkpoint tree.
 
+Owner repair decisions use the selected feedback, original PR or approved plan,
+and supported behavior at the batch's starting revisions. Every blocking review
+finding identifies its authority, the affected scenario and its consequence.
+The controller checks references before dispatching another repair. Optional
+improvements remain observations in the local report. A material unresolved
+product choice leaves the batch needing attention. This policy applies across
+successive repairs, including the first one. Older batches can use their saved
+baseline and selected feedback when other original context is unavailable.
+
 Each independent Owner or issue acceptance reviewer reports the full baseline and
 candidate commit IDs on the first line of its assessment. The engine records both
 expected and reported IDs in the slot's manifest phase. If the header is missing

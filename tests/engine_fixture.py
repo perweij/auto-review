@@ -61,6 +61,11 @@ import json, pathlib, sys
 value = json.load(open(sys.argv[1]))
 root = pathlib.Path(sys.argv[2])
 schema = json.load(open(root / 'prompts/synthesis.schema.json')) if (root / 'prompts/synthesis.schema.json').exists() else {}
+if 'repair_basis' in schema.get('required', []) and 'repair_basis' not in value:
+    keys = [o['item'] for o in value.get('outcomes', [])]
+    value['repair_basis'] = [dict(blocker=f['id'], kind='feedback', reference=keys[0], source='Selected feedback',
+                                  scenario=f['title'], impact=f['evidence']) for f in value.get('findings', [])
+                             if isinstance(f, dict) and f.get('blocking') and keys]
 if 'finding_lineage' in schema.get('required', []) and 'finding_lineage' not in value:
     history = json.load(open(root / 'context/review_history.json'))
     prior = history['findings']

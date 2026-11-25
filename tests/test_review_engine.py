@@ -547,6 +547,23 @@ class NonBlockingObservationTest(EngineFixture):
         self.assertTrue(owner_contracts.verified(review, [], batch['final_tree']))
         self.assertTrue(owner_contracts.current(batch))
 
+    def test_blocker_citing_candidate_only_promise_gets_correction(self):
+        self.verdict('changes_requested', findings=[finding('F1', blocking=True, source='new')])
+        value = json.loads(self.result_file.read_text())
+        value['repair_basis'] = [dict(blocker='F1', kind='requirement', reference='pr',
+            source='Support live replacement', scenario='Rename an active archive', impact='Reader fails')]
+        self.result_file.write_text(json.dumps(value))
+        with self.assertRaises(ApiError) as error:
+            self.review()
+        self.assertEqual('invalid_result', error.exception.code)
+        self.assertEqual({'synthesis': 2}, self.counts())
+
+    def test_migration_product_decision_does_not_allocate_a_repair(self):
+        self.verdict('needs_input', questions=['Should the migration keep conflicting user edits?'])
+        _, review = acceptance.review_owner(self.session, self.state, self.batch, KEYS, self.data)
+        self.assertFalse(owner_fixes_repairable(review))
+        self.assertIn('clarify', [o['status'] for o in review['outcomes']])
+
     def test_mixed_result_projects_only_the_blocking_finding(self):
         self.verdict('changes_requested', findings=[
             finding('F1', blocking=True, source='new', severity='High'), finding('F2', blocking=False, source='new')])

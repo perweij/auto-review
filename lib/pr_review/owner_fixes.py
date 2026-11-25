@@ -3,6 +3,7 @@ import copy
 import re
 import uuid
 
+from . import owner_scope
 from .forge_context import owner_change
 
 from . import usage, owner_reports, session_trace
@@ -232,6 +233,7 @@ def context(session, state, batch, keys, before):
                 snapshot['ignored'] = snapshot['ignored'][:20]
     approved = next((i["source"] for i in state["feedback"] if i["kind"] == "issue_plan" and not i.get("missing")), None)
     return {**({"approved_issue_plan": approved} if approved and state.get("issue_workflow") else {}),
+            **({'repair_scope': owner_scope.contract(batch)} if batch.get('execution_kind') != 'issue_harness' else {}),
             "feedback": session.items(state, keys), "baseline": batch["baseline"],
             "batch_diff": batch_diff, **({'task_diff': task_diff} if task_diff != batch_diff else {}),
             "completed_tasks": completed, **owner_format.review_context(batch)}
@@ -275,10 +277,11 @@ def recovery_plan(session, state, batch, target, data, report):
     check_fresh(session, state, batch)
     emit('progress', message='Automatically replanning: ' + diagnosis(report))
     earlier = [entry for group in target.get('previous_recoveries', []) for entry in group]
-    recovery = dict(findings=report, verification_cases=data['verification_cases'],
+    recovery = dict(findings={k: v for k, v in report.items() if k != 'observations'}, verification_cases=data['verification_cases'],
                     previous_approaches=history, earlier_replanned_approaches=earlier,
                     instruction='Choose a different approach within the original contract. For repair, explain '
-                                'the approach and cite the source that answers any clarification. Choose clarify '
+                                'the approach and cite the source that answers any clarification. Consider simplifying '
+                                'a previous repair that introduced a new obligation. Choose clarify '
                                 'if a human decision is needed. Choose repeated_failure only if earlier attempts '
                                 'show the same failing behavior without a lasting gain. Cite those attempts.')
     batch['recovery_planning'] = target.get('id')
@@ -327,7 +330,8 @@ def task_review(session, state, batch, task, data):
             report = owner_reports.invoke(session, state, batch, 'review', data)
             return validate_result(report, task['items'])
         except ApiError as exc:
-            if attempt or not automatic(batch) or not exc.details.get('outcome_coverage'):
+            correctable = exc.details.get('repair_scope') or (automatic(batch) and exc.details.get('outcome_coverage'))
+            if attempt or not correctable:
                 raise
             check_fresh(session, state, batch)
             data['report_correction'] = str(exc)
@@ -347,13 +351,19 @@ def run_task(session, state, batch, task):
             and task.get("after", {}).get("tree") == batch["checkpoint"]["tree"]
             and owner_contracts.matches(task["review"], owner_contracts.task_cases(task), batch["checkpoint"]["tree"])):
         task["status"] = "reviewing"
-        if task['review']['complete'] and task['review']['blocking']:
-            saved_review = task['review']
+        prior = task['review']
+        if prior['complete'] and prior['blocking'] and 'repair_basis' in prior:
+            owner_scope.validate(prior['repair_basis'], prior['blocking'], owner_scope.contract(batch), task['items'])
+            saved_review = prior
     if batch.get("verify_only") and task["status"] != "reviewing":
         task.update(before=batch["checkpoint"], status="reviewing", implementation={"summary": "Read-only verification requested"})
     if resuming_plan and task['status'] in ('fixing', 'repairing'):
         pending = next((e for e in task.get('recovery_attempts', []) if e.get('pending')), None)
-        if pending:
+        if pending and pending['evidence'].get('assessment') == 'changes_requested' and 'repair_basis' not in pending['evidence']:
+            # Reclassify a pre-upgrade review before dispatching its old plan.
+            reset_recovery(task)
+            batch.pop('recovery_planning', None)
+        elif pending:
             data = context(session, state, batch, task['items'], task['before']['tree'])
             data.update(task={k: task[k] for k in ('id', 'rationale', 'expected')},
                         verification_cases=owner_contracts.task_cases(task), recovery_plan=pending['plan'],
@@ -387,6 +397,7 @@ def run_task(session, state, batch, task):
         review = saved_review if saved_review is not None else task_review(session, state, batch, task, data)
         saved_review = None
         owner_contracts.bind(review, owner_contracts.task_cases(task), batch["checkpoint"]["tree"])
+        owner_scope.remember_observations(batch, review)
         task["review"] = review
         task["after"] = batch["checkpoint"]
         session.save(state)
@@ -398,6 +409,10 @@ def run_task(session, state, batch, task):
         tree = batch['checkpoint']['tree']
         stop_reason = repair_stop_reason(batch, task, review, tree) if can_repair else None
         alternate = False
+        if review.get('repair_basis') is not None and any(o['status'] == 'clarify' for o in review['outcomes']):
+            task.update(status='needs_attention', recovery_stop=diagnosis(review))
+            session.save(state)
+            return False
         if automatic(batch):
             clarify = any(o['status'] == 'clarify' for o in review['outcomes'])
             if clarify or stop_reason:
@@ -411,7 +426,7 @@ def run_task(session, state, batch, task):
             task["repairs"] += 1  # Persist before launching; crashes do not grant extra repairs.
             task["status"] = "repairing"
             session.save(state)
-            data["review_findings"] = review
+            data["review_findings"] = {k: v for k, v in review.items() if k != "observations"}
             data["verification_cases"] = owner_contracts.task_cases(task)
             task["implementation"] = validate_result(dispatch_repair(session, state, batch, task, data), task["items"])
             owner_contracts.implementation(task, task["implementation"], batch["checkpoint"]["tree"])
@@ -456,6 +471,7 @@ def final_review(session, state, batch):
         _, review = acceptance.review_owner(session, state, batch, keys, data)
         review = validate_result(review, keys)
         owner_contracts.bind(review, data["verification_cases"], batch["checkpoint"]["tree"])
+        owner_scope.remember_observations(batch, review)
         batch["review"] = review
         batch['review_tree'] = batch['checkpoint']['tree']
         if successful(review):
@@ -466,6 +482,9 @@ def final_review(session, state, batch):
                 if task.get("after") and task["after"]["tree"] != batch["final_tree"]:
                     task["verification_superseded"] = True
             owner_commit_plan.update(session, batch, batch["baseline"])
+            return
+        if 'repair_basis' in review and any(o['status'] == 'clarify' for o in review['outcomes']):
+            batch.update(status='paused', recovery_stop=diagnosis(review), error=diagnosis(review))
             return
         repair = not batch.get("verify_only") and repairable(review) and batch["repairs"] < 1
         if automatic(batch) and not repair:
@@ -481,7 +500,7 @@ def final_review(session, state, batch):
             batch["repairs"] += 1
             batch['combined_repair_pending'] = True
             session.save(state)
-            data["review_findings"] = review
+            data["review_findings"] = {k: v for k, v in review.items() if k != "observations"}
             result = validate_result(dispatch_repair(session, state, batch, batch, data), keys)
             if result.get('verification_cases'):
                 raise ApiError('invalid_result', 'Integration repair must preserve the completed task contracts; explicitly replan new requirements.')
@@ -782,6 +801,12 @@ def _execute(session, state, request):
                          "verify_only": bool(request.get("verify_only")),
                          "auto_commit": request.get("auto_commit", False),
                          "plans": [], "attempts": [], "repairs": 0, "status": "planning"}
+                if not is_harness:
+                    change = owner_change(state)
+                    batch['repair_scope'] = dict(version=1, baseline=baseline, head=remote,
+                        base=change['target']['head'], pr=state.get('metadata', {}).get('body', ''),
+                        feedback=dict(batch['fingerprints']),
+                        plan=next((i.get('source') for i in items if i['kind'] == 'issue_plan'), None))
                 if is_harness:
                     batch.update(execution_kind='issue_harness', harness_phase='implement',
                                  harness_before=copy.deepcopy(snapshot))

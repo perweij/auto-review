@@ -27,6 +27,12 @@ class RecoveryTest(unittest.TestCase):
         return self.t.model(*args)
 
     def test_exhausted_saved_group_finishes_in_one_automatic_resume(self):
+        self.resume_exhausted_group(legacy=False)
+
+    def test_resume_reclassifies_legacy_blockers_before_another_fix(self):
+        self.resume_exhausted_group(legacy=True)
+
+    def resume_exhausted_group(self, *, legacy):
         self.t.feedback = [self.t.item(f'thread:T{i}', 100+i) for i in range(1, 8)]
         def model(session, state, batch, role, data):
             if role == 'plan':
@@ -38,6 +44,10 @@ class RecoveryTest(unittest.TestCase):
                 batch['checkpoint'] = owner_git.checkpoint(session, state, 'group fix')
             if role == 'review' and data.get('task', {}).get('id') == 'p1-t2' and not batch.get('auto_commit'):
                 result['blocking'] = ['foreign inventory', 'retry invalid page']
+                if not legacy:
+                    result['repair_basis'] = [dict(blocker=b, kind='feedback', reference=data['feedback'][0]['key'],
+                        source='Selected inventory concern', scenario='Retry a saved page', impact=b)
+                        for b in result['blocking']]
             return result
         with patch('pr_review.owner_providers.invoke', side_effect=model):
             batch = self.t.fix()['batches'][-1]
@@ -50,6 +60,10 @@ class RecoveryTest(unittest.TestCase):
             batch = self.t.request('owner-fix', batch=batch['id'], auto_commit=True)['batches'][-1]
         self.assertEqual(batch['commit_execution']['status'], 'complete')
         self.assertEqual([t['status'] for t in batch['tasks']], ['complete'] * 7)
+        if legacy:
+            self.assertFalse(batch['tasks'][2].get('recovery_attempts'))
+            self.assertEqual([], batch['tasks'][2]['review']['blocking'])
+            return
         evidence = batch['tasks'][2]['recovery_attempts'][0]['evidence']
         self.assertEqual(evidence['blocking'], ['foreign inventory', 'retry invalid page'])
 

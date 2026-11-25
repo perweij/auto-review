@@ -150,6 +150,9 @@ def render(data, bounded=False):
                      ('Read-only verification.' if owner.get('verify_only') else 'Fixing round.'),
                      'This is a local execution snapshot; it does not establish that changes were pushed or replies published.', '']
     text += [f"- {safe(r['role'])}: {r['seconds']/60:.1f} minutes" for r in sorted(rows, key=lambda r: r['seconds'], reverse=True)[:3]]
+    if not bounded and data.get('owner', {}).get('observations'):
+        text += ['', 'Owner review observations:', '']
+        text += ['- ' + safe(item) for item in data['owner']['observations']]
     text += ['', '<details><summary>Time and token breakdown</summary>', '']
     for index, label in enumerate(('Recorded processing minutes', 'Reported tokens')):
         values = [(name, value[index] / (60 if index == 0 else 1)) for name, value in totals.items() if value[index] > 0]
