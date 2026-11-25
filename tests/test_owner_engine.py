@@ -112,6 +112,14 @@ class OwnerEngineTest(ScriptedProviders, unittest.TestCase):
         self.assertEqual(1, self.counts()['reviewer-1'])
         self.assertNotIn('commit_execution', batch)
 
+        self.verdict()
+        calls = len(self.f.calls)
+        resumed = self.base.request('owner-fix', batch=batch['id'], retry_final_recovery=True)['batches'][-1]
+        self.assertEqual('ready', resumed['status'])
+        self.assertEqual(batch['checkpoint']['tree'], resumed['checkpoint']['tree'])
+        self.assertEqual(3, self.counts()['synthesis'])
+        self.assertEqual(calls, len(self.f.calls))
+
     def test_unrelated_description_reuses_completed_engine_results(self):
         batch = self.f.start()['batches'][-1]
         counts = self.counts()

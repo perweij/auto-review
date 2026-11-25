@@ -362,6 +362,8 @@
                                (alist-get 'tasks batch)))
                   "\nCorrect the reported blocker, inspect the retained fix with d, then A adopts it for verification."
                 "\nCorrect the reported blocker. A adopts manual edits; r retries verification after a tool setup change.")))
+     ((magit-auto-review--true-p (alist-get 'can_retry_final_recovery batch))
+      "Final recovery stopped. Address the blocker described below, then r retries final recovery and keeps all completed tasks.")
      ((alist-get 'recovery_stop batch) "Next: inspect the recovery diagnosis below. Address the blocker before replanning with p.")
      ((magit-auto-review-owner--final-verification-incomplete-p batch)
       "Task work is complete; final verification is incomplete. Inspect the full blocking reason below and fix its prerequisites, then r resumes verification. Automatic commits and replies wait for final verification; m inspects the worktree.")
@@ -1039,6 +1041,8 @@
   (deactivate-mark)
   (setq magit-auto-review-owner--retry request header-line-format " Owner operation running…")
   (let ((scope (cond ((alist-get 'items request) (format " · %d feedback item(s)" (length (alist-get 'items request))))
+                     ((alist-get 'retry_final_recovery request) " · retrying final recovery")
+                     ((alist-get 'replan request) " · replanning selected batch")
                      ((alist-get 'batch request) " · resuming selected batch")
                      (t ""))))
     (setq header-line-format (format " Starting %s%s…" (alist-get 'command request) scope))
@@ -1167,6 +1171,8 @@ With AUTOMATIC, also commit and stage replies."
                (not (magit-auto-review-owner--auto-pending-p batch)))
       (user-error "This fix is already committed; m inspects it in Magit"))
     (let ((request (magit-auto-review-owner--request "owner-fix" `(batch . ,(alist-get 'id batch)))))
+      (when (magit-auto-review--true-p (alist-get 'can_retry_final_recovery batch))
+        (setf (alist-get 'retry_final_recovery request) t))
       (when choose-mode
         (let ((choice (completing-read "Resume with: " '("Automatic commits and staged replies" "Manual commits") nil t nil nil
                                        (if (magit-auto-review--true-p (alist-get 'auto_commit batch))

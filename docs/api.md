@@ -492,6 +492,11 @@ To resume, provide `batch` instead of `items`. Optional controls are `adopt: tru
 for explicitly inspected manual/partial changes, `replan: true` for unfinished
 or changed discussion, `skip: [TASK_ID,…]`, and `trusted_snapshot` from an exact
 `trust_required` error. That error also carries `paths` and `diff` for inspection.
+When the batch view reports `can_retry_final_recovery: true`, send
+`retry_final_recovery: true` with the batch ID to retry a stopped final recovery.
+It preserves completed and skipped tasks. Newly changed feedback returns
+`stale_discussion` and requires explicit replanning after inspection. A plain
+resume returns the saved recovery stop.
 Resume keeps the original baseline and, once model work starts, settings; changed HEAD requires
 reconciliation and a new batch. Commit-only recovery instead recognizes its own
 recorded sequence. Unstaging code is a human operation. Integrity

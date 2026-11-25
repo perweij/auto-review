@@ -686,6 +686,27 @@
        (should (eq (alist-get 'auto_commit sent) t))
        (should (equal (alist-get 'items sent) ["thread:T1" "thread:T2"]))))))
 
+(ert-deftest owner/resume-retries-final-recovery-and-replan-stays-explicit ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (batch (car (alist-get 'batches view)))
+          sent)
+     (setf (alist-get 'status batch) "paused"
+           (alist-get 'can_retry_final_recovery batch) t
+           (alist-get 'recovery_stop batch) "Repair loop"
+           (car (alist-get 'batches view)) batch)
+     (magit-auto-review-owner--accept view)
+     (owner-test-goto 'owner-batch (alist-get 'id batch))
+     (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (req &optional _) (setq sent req))))
+       (magit-auto-review-owner-resume)
+       (should (eq t (alist-get 'retry_final_recovery sent)))
+       (should-not (assq 'replan sent))
+       (should (equal (alist-get 'id batch) (alist-get 'batch sent)))
+       (magit-auto-review-owner-replan)
+       (should-not (assq 'retry_final_recovery sent))
+       (should (eq t (alist-get 'replan sent)))
+       (should (equal (alist-get 'id batch) (alist-get 'batch sent)))))))
+
 (ert-deftest owner/resume-inherits-automatic-choice-and-prefix-can-change-it ()
   (owner-test-buffer
    (magit-auto-review-owner--accept (owner-test-auto-view))

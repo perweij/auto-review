@@ -216,7 +216,9 @@ Concrete defects, including failing regression tests, request changes and enter
 the bounded repair pass instead. An unchanged completed rejection resumes with
 its saved findings if a repair remains. A second task repair requires a changed
 tree and independently reviewed progress on blockers, feedback items, or existing cases. An exhausted repair budget needs
-inspected/adopted corrections or explicit replanning; `r` does not reset it.
+inspected/adopted corrections or explicit replanning. After final recovery stops,
+`r` retries it while preserving completed and skipped tasks. If selected feedback
+changed, inspect it and use `p` to replan.
 Other operations retain explicit completion and stopped/error messages.
 
 Owner `F` is unbound; interactive provider handoff is deferred. Reviewer `F`

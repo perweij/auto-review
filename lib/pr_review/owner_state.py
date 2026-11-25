@@ -255,6 +255,14 @@ def _cancelled_planner(attempt, baseline_tree):
             and (after is None or after.get("tree") == baseline_tree))
 
 
+def can_retry_final_recovery(batch):
+    statuses = {task.get('status') for task in batch.get('tasks', [])}
+    return (batch.get('status') == 'paused' and bool(batch.get('recovery_stop'))
+            and batch.get('execution_kind') != 'issue_harness' and not batch.get('discussion_stale')
+            and 'complete' in statuses and statuses <= {'complete', 'skipped'}
+            and not any(task.get('recovery_stop') for task in batch['tasks']))
+
+
 def superseded_batches(state):
     """Identify unused batches whose unchanged feedback has newer verification."""
     feedback = {i["key"]: i for i in state.get("feedback", [])}
@@ -338,6 +346,7 @@ class OwnerSession:
         superseded = superseded_batches(result)
         from .session_report import saved_summary
         for batch in result["batches"]:
+            batch['can_retry_final_recovery'] = batch['id'] not in superseded and can_retry_final_recovery(batch)
             if batch.get("execution_report"):
                 batch["execution_report"] = saved_summary(batch["execution_report"])
             batch.pop("superseded_by", None)

@@ -10,7 +10,7 @@ from .common import ApiError, digest, now
 from .events import emit
 from .operations import operation
 from . import owner_format, acceptance, owner_git as workspace, owner_providers as models, owner_commit_plan, owner_auto_commit, owner_contracts, review_history
-from .owner_state import refresh, superseded_batches, active_feedback_keys, issue_settings
+from .owner_state import refresh, superseded_batches, active_feedback_keys, issue_settings, can_retry_final_recovery
 
 
 def validate_plan(value, items, *, recovery=False):
@@ -244,6 +244,15 @@ def automatic(batch):
 def diagnosis(report):
     questions = [o['evidence'] for o in report['outcomes'] if o['status'] == 'clarify']
     return ' · '.join(dict.fromkeys([*report['blocking'], *questions, report['summary']]))
+
+
+def reset_recovery(target):
+    target.pop('recovery_stop', None)
+    target.pop('verification_blocked', None)
+    target.pop('verification_retry_tree', None)
+    attempts = target.pop('recovery_attempts', None)
+    if attempts:
+        target.setdefault('previous_recoveries', []).append(attempts)
 
 
 def recovery_plan(session, state, batch, target, data, report):
@@ -589,6 +598,12 @@ def execute(session, state, request):
 
 def _execute(session, state, request):
     """Caller holds only the owner execution lock throughout inference."""
+    retry_final = request.get('retry_final_recovery', False)
+    if type(retry_final) is not bool:
+        raise ApiError('invalid_request', 'retry_final_recovery must be a Boolean.')
+    if retry_final and (not request.get('batch') or any(request.get(k) for k in
+            ('adopt', 'replan', 'skip', 'items', 'verify_only', 'issue_harness', 'rerun_review'))):
+        raise ApiError('invalid_request', 'Retry final recovery on an existing batch as a separate operation.')
     review_history.controls(request)
     if "auto_commit" in request and type(request["auto_commit"]) is not bool:
         raise ApiError("invalid_request", "auto_commit must be a Boolean.")
@@ -634,12 +649,19 @@ def _execute(session, state, request):
                     batch = None  # Preserve the original stop reason and artifacts.
                     raise ApiError("superseded_batch", "This unused batch was superseded by newer verified fixes; no resume is needed.",
                                    superseded_by=replacements)
+                if retry_final:
+                    if batch.get('discussion_stale'):
+                        batch = None  # Refresh saved the change. Keep the original recovery diagnosis.
+                        raise ApiError('stale_discussion', 'Feedback changed; inspect it and explicitly replan unfinished work.')
+                    if not can_retry_final_recovery(batch):
+                        batch = None  # A rejected retry must preserve the saved batch.
+                        raise ApiError('invalid_request', 'Choose a batch with stopped final recovery.')
                 if request.get("auto_commit") and batch.get("verify_only"):
                     raise ApiError("invalid_request", "Read-only verification cannot automatically commit.")
                 if "auto_commit" in request:
                     batch["auto_commit"] = request["auto_commit"]
                     session.save(state)
-                controls = any(request.get(k) for k in ("adopt", "replan", "skip", "rerun_review"))
+                controls = retry_final or any(request.get(k) for k in ("adopt", "replan", "skip", "rerun_review"))
                 if batch.get("commit_execution") and controls:
                     head = session.repo.git("rev-parse", "HEAD", cwd=state["worktree"]).stdout.strip()
                     if head != batch["baseline"]:
@@ -793,16 +815,16 @@ def _execute(session, state, request):
                 for target in [batch, *targets]:
                     if request.get('adopt'):
                         target.pop('held_checkpoint', None)
-                    target.pop('recovery_stop', None)
-                    target.pop('verification_blocked', None)
-                    target.pop('verification_retry_tree', None)
-                    attempts = target.pop('recovery_attempts', None)
-                    if attempts:
-                        target.setdefault('previous_recoveries', []).append(attempts)
-            elif batch.get('recovery_stop'):
+                    reset_recovery(target)
+            elif batch.get('recovery_stop') and not retry_final:
+                emit('progress', message='Returned the saved recovery stop. No new repair ran. '
+                     'Inspect the recovery diagnosis before retrying or replanning.')
                 return session.view(state)
             if batch.get('harness_phase') != 'adjudication':
                 models.preflight(session, state, issue_harness=is_harness)
+            if retry_final:
+                batch.pop('recovery_planning', None)
+                reset_recovery(batch)
             preserve_ready = False
             batch.pop('preflight_error', None)
             if is_harness:
@@ -811,7 +833,7 @@ def _execute(session, state, request):
                     return issue_harness.execute(session, state, batch, remote)
                 finally:
                     completing = bool(batch.get('commit_execution'))
-            for control in ('adopt', 'replan', 'skip'):
+            for control in ('adopt', 'replan', 'skip', 'retry_final_recovery'):
                 if request.get(control) and batch.get('execution_trace_version') == 2:
                     batch['trace_candidate'] = session_trace.decision(control, sources=[batch.get('trace_candidate')],
                         summary=str(request[control]), key=batch['checkpoint']['tree'])

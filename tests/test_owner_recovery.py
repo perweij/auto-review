@@ -128,6 +128,52 @@ class RecoveryTest(unittest.TestCase):
             self.t.request('owner-fix', batch=batch['id'])
             self.assertFalse(self.t.calls)
 
+    def test_final_retry_rejects_feedback_changed_since_view(self):
+        def model(*args):
+            report = self.t.model(*args)
+            if args[4].get('scope'):
+                report.update(complete=False, blocking=['Missing environment'])
+            return report
+
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            view = self.t.fix(auto_commit=True)
+            batch = view['batches'][-1]
+            self.assertTrue(batch['can_retry_final_recovery'])
+            self.t.feedback[0]['comments'][0]['body'] = 'Revised concern'
+            self.t.calls.clear()
+            with self.assertRaises(ApiError) as caught:
+                dispatch(dict(protocol=1, command='owner-fix', session=self.t.path,
+                              revision=view['revision'], batch=batch['id'], retry_final_recovery=True))
+        self.assertEqual('stale_discussion', caught.exception.code)
+        current = self.t.request('owner-read')['batches'][-1]
+        self.assertFalse(current['can_retry_final_recovery'])
+        self.assertEqual(batch['tasks'], current['tasks'])
+        self.assertEqual(batch['recovery_stop'], current['recovery_stop'])
+        self.assertEqual(batch['error'], current['error'])
+        self.assertNotIn('commit_execution', current)
+        self.assertFalse(self.t.calls)
+
+    def test_final_retry_preserves_skipped_and_completed_tasks(self):
+        def incomplete(*args):
+            report = self.split(*args)
+            if args[4].get('scope'):
+                report.update(complete=False, blocking=['Missing environment'])
+            return report
+
+        with patch('pr_review.owner_providers.invoke', side_effect=self.split):
+            initial = self.t.fix()['batches'][-1]
+        with patch('pr_review.owner_providers.invoke', side_effect=incomplete):
+            batch = self.t.request('owner-fix', batch=initial['id'], auto_commit=True,
+                                   skip=[initial['tasks'][0]['id']])['batches'][-1]
+        self.assertTrue(batch['can_retry_final_recovery'])
+        self.t.calls.clear()
+        current = self.t.request('owner-fix', batch=batch['id'], retry_final_recovery=True)['batches'][-1]
+        self.assertEqual('ready', current['status'])
+        self.assertEqual([t['id'] for t in batch['tasks']], [t['id'] for t in current['tasks']])
+        self.assertEqual(['skipped', 'complete'], [t['status'] for t in current['tasks']])
+        self.assertEqual(['review'], [role for role, _ in self.t.calls])
+        self.assertTrue(self.t.calls[0][1].get('scope'))
+
     def test_restart_before_alternate_fixer_uses_saved_plan(self):
         original = owner_fixes.dispatch_repair
         replans = []
