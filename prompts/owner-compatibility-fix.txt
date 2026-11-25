@@ -10,3 +10,6 @@ case_results must cover each supplied case and proposed addition exactly once.
 Use tested with the actual command and result, source_traced with specific code
 reasoning, failed with the observed mismatch, or unavailable with the limitation.
 Missing material evidence requires complete=false; explain what remains unverified.
+During recovery, run or trace the sibling checks named in the repair plan and
+record their results in checks. In combined repairs these are supporting evidence
+for the frozen task contracts.

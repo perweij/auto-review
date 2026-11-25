@@ -142,7 +142,7 @@ class CandidateReview:
         slot = review_engine.slot_of(self, stage)
         if slot:
             return providers.review_command(self.settings, self.runtime, stage, self.path,
-                                            self.candidate['baseline_ref'],
+                                            self.candidate['baseline'],
                                             self.adapter.reviewer_instructions(self, slot))
         return self.adapter.synthesis_command(self)
 

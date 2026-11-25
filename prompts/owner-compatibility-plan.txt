@@ -10,3 +10,7 @@ When replanning, inspect unfinished_tasks and their saved review findings. Retai
 known failing cases and already-passing requirements where still applicable;
 previous findings are evidence to check, not additional requirements. Describe the
 remaining repair rather than making the next attempt rediscover it.
+For each recovery blocker, use prior repair evidence to identify the failed
+behavior and supported formats, entry points or fixtures sharing its assumptions.
+Name the applicable sibling checks in the task rationale and verification cases.
+Ground each in the original feedback, supported callers or existing contract.

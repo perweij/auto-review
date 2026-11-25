@@ -280,7 +280,7 @@ class AcceptanceAdapter(review_engine.Adapter):
     def reviewer_instructions(self, run, slot):
         names = [f'../context/{name}.json' for name in self.reviewer_context()]
         return (prompt(f'acceptance-reviewer-{self.kind_group}.txt').rstrip('\n') + '\n' + '\n'.join(names) + '\n'
-                + prompt('acceptance-reviewer.txt'))
+                + prompt('acceptance-reviewer.txt').format(**run.candidate))
 
     # ---- synthesis ----------------------------------------------------------------------------------------
     def sources(self, run):

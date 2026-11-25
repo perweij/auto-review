@@ -244,6 +244,61 @@ def claude_result(run, stage, result):
 
 
 # ---- isolated independent runs --------------------------------------------------------------
+def independent_report(run, stage, argv, provider, output):
+    result, _ = run.model(stage, argv)
+    if provider == 'claude':
+        body = claude_result(run, stage, result).get('result')
+        report = ((body + '\n').encode() if isinstance(body, str) and body.strip() else b'')
+    else:
+        temp = output.with_suffix('.md.tmp')
+        report = temp.read_bytes() if temp.is_file() else b''
+        temp.unlink(missing_ok=True)
+    return report
+
+
+def valid_comparison(record, candidate, report):
+    expected = [candidate['baseline'], candidate['sha']]
+    header, _, assessment = report.partition(b'\n')
+    match = re.fullmatch(rb'Reviewed comparison: ([0-9a-f]+) ([0-9a-f]+)', header.rstrip(b'\r'))
+    reported = [sha.decode() for sha in match.groups()] if match else None
+    record.update(expected_comparison=expected, reported_comparison=reported)
+    return reported == expected and bool(assessment.strip())
+
+
+def candidate_report(run, stage, provider, output, trace_handle):
+    from . import environment, session_trace
+    # Slot preparation archives incomplete phases on resume. Track the pending
+    # correction outside the phase, scoped to the same reviewer and inputs.
+    retries = run.manifest.setdefault('comparison_retries', {})
+    fingerprint = cache.fingerprint(cache.inputs(run, stage))
+    correcting = retries.get(stage) == fingerprint
+    while True:
+        argv = run.command(stage)
+        if correcting:
+            argv, _ = environment.provider_guidance(argv, b'', 'The previous report failed comparison validation. '
+                'Resolve the supplied endpoints, review that diff, and include the header and assessment.')
+        report = independent_report(run, stage, argv, provider, output)
+        record = run.manifest['phases'][stage]
+        if valid_comparison(record, run.candidate, report):
+            retries.pop(stage, None)
+            return report
+        with tempfile.NamedTemporaryFile(dir=run.path / 'attempts', prefix=stage + '-rejected-',
+                                         suffix='.md', delete=False) as rejected:
+            rejected.write(report)
+        record.update(status='failed', failure_reason='invalid_review_comparison', rejected_report=rejected.name)
+        run.active = None
+        if correcting:
+            retries.pop(stage, None)
+            run.save()
+            base, head = record['expected_comparison']
+            raise ApiError('invalid_review_comparison', f'{stage} failed to report the reviewed comparison '
+                           f'{base} {head}. Resume to retry the slot.')
+        retries[stage] = fingerprint
+        run.save()
+        session_trace.restart(trace_handle, 'comparison_correction', 'Retry reviewer with the pinned comparison.')
+        correcting = True
+
+
 def independent(run, stage):
     adapter = adapter_of(run)
     slot = slot_of(run, stage)
@@ -266,18 +321,13 @@ def independent(run, stage):
             raise ApiError('independence_failed', 'Independent Claude inputs/output changed after Codex ran; start a new run to preserve independence')
         output.with_suffix(output.suffix + '.tmp').unlink(missing_ok=True)
         say(f'[{stage}] Running independent {stage.title()} review')
-        result, _ = run.model(stage, run.command(stage))
-        if provider == 'claude':
-            body = claude_result(run, stage, result).get('result')
-            if not isinstance(body, str) or not body.strip():
-                raise ApiError('model_failed', 'Claude returned an empty independent review')
-            atomic_bytes(output, (body + '\n').encode())
+        if hasattr(run, 'candidate'):
+            report = candidate_report(run, stage, provider, output, trace_handle)
         else:
-            temp = output.with_suffix('.md.tmp')
-            if not temp.is_file() or not temp.stat().st_size:
-                raise ApiError('model_failed', 'Codex returned an empty review')
-            atomic_bytes(output, temp.read_bytes())
-            temp.unlink()
+            report = independent_report(run, stage, run.command(stage), provider, output)
+        if not report:
+            raise ApiError('model_failed', f'{stage} returned an empty independent review')
+        atomic_bytes(output, report)
         run.complete(stage, output)
         session_trace.complete(trace_handle, {'status': 'evidence_available', 'summary': output.read_text()[:1200]}, output)
 

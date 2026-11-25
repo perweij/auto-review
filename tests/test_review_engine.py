@@ -20,7 +20,28 @@ from pr_review.processes import Cancelled
 from pr_review.repository import Repository
 
 
+CANDIDATE_COMMAND = review_workspace.CandidateReview.command
+
+
 class SlotTest(EngineFixture):
+    def test_report_requires_full_endpoints_and_an_assessment(self):
+        candidate = dict(baseline='a' * 40, sha='b' * 40)
+        header = f"Reviewed comparison: {candidate['baseline']} {candidate['sha']}".encode()
+        for report in (b'', b'No findings', b'Reviewed comparison: aaa bbb\nClean', header):
+            self.assertFalse(review_engine.valid_comparison({}, candidate, report))
+        self.assertTrue(review_engine.valid_comparison({}, candidate, header + b'\nNo findings'))
+
+    def test_acceptance_commands_select_the_local_diff(self):
+        run = review_workspace.CandidateReview.open(self.session, self.state, self.batch, self.adapter(),
+                                                   tree=self.batch['checkpoint']['tree'], runtime=providers.Runtime())
+        base, head = run.candidate['baseline'], run.candidate['sha']
+        claude = CANDIDATE_COMMAND(run, 'reviewer-1')
+        codex = CANDIDATE_COMMAND(run, 'reviewer-2')
+        for argv in (claude, codex):
+            self.assertIn(f'git diff {base} {head}', ' '.join(argv))
+        self.assertFalse(claude[-1].startswith('/code-review'))
+        self.assertEqual(base, codex[codex.index('--base') + 1])
+
     def test_cleanup_permission_error_preserves_completed_reviews(self):
         from pr_review.isolation import IndependentWorkspace
         close = IndependentWorkspace.close
@@ -293,6 +314,40 @@ class ReuseTest(EngineFixture):
 
     def test_unchanged_evidence_is_reused_in_full(self):
         self.expect(set())
+
+    def test_stale_comparison_retries_only_affected_slot_before_resume(self):
+        with patch.dict(os.environ, {'BAD_COMPARISON': 'reviewer-2'}), self.assertRaises(ApiError) as error:
+            self.review()
+        self.assertEqual(error.exception.code, 'invalid_review_comparison')
+        self.assertEqual({'reviewer-1': 1, 'reviewer-2': 2}, self.counts())
+        phase = self.manifest()['phases']['reviewer-2']
+        self.assertEqual(phase['reported_comparison'], phase['expected_comparison'][::-1])
+        self.assertTrue(Path(phase['rejected_report']).is_file())
+        self.assertEqual({'reviewer-2', 'synthesis'}, self.reran(self.review))
+
+    def test_corrected_report_reaches_synthesis(self):
+        original = review_engine.independent_report
+        def missing_header(run, stage, argv, provider, output):
+            report = original(run, stage, argv, provider, output)
+            if stage == 'reviewer-2' and stage not in run.manifest.get('comparison_retries', {}):
+                return b'Reviewed the published branch instead'
+            return report
+        with patch.object(review_engine, 'independent_report', side_effect=missing_header):
+            self.review()
+        self.assertEqual({'reviewer-1': 1, 'reviewer-2': 2, 'synthesis': 1}, self.counts())
+        phase = self.manifest()['phases']['reviewer-2']
+        self.assertEqual(phase['reported_comparison'], phase['expected_comparison'])
+        self.assertEqual(set(), self.reran(self.review))
+
+    def test_interrupted_correction_keeps_one_remaining_attempt(self):
+        from pr_review import environment
+        with patch.dict(os.environ, {'BAD_COMPARISON': 'reviewer-2'}):
+            with patch.object(environment, 'provider_guidance', side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+                self.review()
+            with self.assertRaises(ApiError) as error:
+                self.review()
+        self.assertEqual(error.exception.code, 'invalid_review_comparison')
+        self.assertEqual({'reviewer-1': 1, 'reviewer-2': 2}, self.counts())
 
     def test_resume_after_a_failed_slot_reruns_only_incomplete_stages(self):
         with patch.dict(os.environ, {'FAIL_STAGES': 'reviewer-2'}), self.assertRaises(ApiError):

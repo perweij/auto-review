@@ -31,8 +31,10 @@ case " ${FAIL_STAGES:-} " in *" $stage "*) exit 7 ;; esac
 case " ${EDIT_STAGES:-} " in *" $stage "*) echo hacked >> source.txt ;; esac
 ctx=$(cat ../context/selected_feedback.json 2>/dev/null | tr -d '"\\\n' | head -c 40)
 body="stage=$stage head=$(git rev-parse HEAD 2>/dev/null | head -c 12) source=$(tr '\n' , < source.txt) new=$(tr '\n' , < new.txt 2>/dev/null) context=$ctx root=$(ls .. 2>/dev/null | tr '\n' ,) files=$(ls ../context 2>/dev/null | tr '\n' ,)"
-if [ -n "$out" ]; then printf '%s\n' "$body" > "$out"; printf '%s\n' '{"type":"review.completed"}'
-else printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$body"; fi
+header="Reviewed comparison: $(git rev-parse HEAD^) $(git rev-parse HEAD)"
+if [ "${BAD_COMPARISON:-}" = "$stage" ]; then header="Reviewed comparison: $(git rev-parse HEAD) $(git rev-parse HEAD^)"; fi
+if [ -n "$out" ]; then printf '%s\n' "$header" > "$out"; printf '%s\n' "$body" >> "$out"; printf '%s\n' '{"type":"review.completed"}'
+else printf '{"type":"result","subtype":"success","is_error":false,"result":"%s\\n%s"}\n' "$header" "$body"; fi
 '''
 
 # Synthesis. It runs in a fresh checkout of the candidate on the host.

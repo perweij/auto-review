@@ -200,6 +200,40 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(sum(role == 'fix' and bool(data.get('recovery_plan'))
                              for role, data in self.t.calls), 1)
 
+    def test_combined_recovery_carries_sibling_checks_with_frozen_contract(self):
+        failures = iter(['Invalid request', 'Invalid v1 retry interval',
+                         'Invalid legacy retry interval', None])
+        plans, fixes = [], []
+        sibling_check = 'Check retry intervals in both v1 and legacy inventories'
+        def model(*args):
+            value = self.t.model(*args)
+            role, data = args[3:]
+            if role == 'plan':
+                value['tasks'][0]['verification_cases'] = [dict(id='interval', scenario='Read a saved page',
+                    expected='Retries fall within the interval', basis='Inventory contract', intent='preserve')]
+            else:
+                value['case_results'] = [dict(id=case['id'], status='tested', evidence='Interval check passed')
+                                         for case in data.get('verification_cases', [])]
+            if role == 'review' and data.get('scope'):
+                failure = next(failures)
+                value['blocking'] = [failure] if failure else []
+            if role == 'plan' and data.get('automatic_recovery'):
+                plans.append(copy.deepcopy(data['automatic_recovery']))
+                value.update(decision='repair', basis='Both formats certify retry intervals')
+                value['tasks'][0]['rationale'] = sibling_check
+            if role == 'fix' and data.get('recovery_plan'):
+                fixes.append(copy.deepcopy(data))
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        self.assertEqual('ready', batch['status'])
+        prior = plans[-1]['previous_approaches'][-1]['evidence']
+        self.assertEqual(['Invalid v1 retry interval'], prior['blocking'])
+        self.assertEqual(['Invalid legacy retry interval'], plans[-1]['findings']['blocking'])
+        self.assertEqual(sibling_check, fixes[-1]['recovery_plan']['tasks'][0]['rationale'])
+        self.assertEqual(1, len(fixes[0]['verification_cases']))
+        self.assertEqual(fixes[0]['verification_cases'], fixes[-1]['verification_cases'])
+
     def test_alternating_final_regressions_stop_after_replanned_attempts(self):
         findings = iter(['rollback', 'retry', 'rollback', 'retry'])
         def model(*args):

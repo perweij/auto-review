@@ -712,6 +712,13 @@ another baseline gives another commit, ref and evidence. It is an internal revie
 artifact: never an implementation commit, never on the Owner branch, never in the
 index and never pushed. Acceptance still binds to the checkpoint tree.
 
+Each independent Owner or issue acceptance reviewer reports the full baseline and
+candidate commit IDs on the first line of its assessment. The engine records both
+expected and reported IDs in the slot's manifest phase. If the header is missing
+or incorrect, it saves the report under `attempts/` and retries that slot once.
+A second invalid report stops synthesis. Inspect the rejected report and resume
+the operation to retry the failed slot with valid peer evidence retained.
+
 **Reviewer independence is input/session separation.** Each slot gets a fresh
 disposable clone, private home, scratch directory and explicitly selected context
 files. Peer reports, implementation sessions and Owner state are not supplied to

@@ -94,8 +94,10 @@ def review_command(settings, runtime, stage, directory, base_ref, instructions="
     if runtime.budget:
         args += ["--max-budget-usd", runtime.budget]
     if independent:
+        request = ("Review the local candidate using the supplied comparison and report format."
+                   if instructions else f"/code-review {effort} --max-findings default {base_ref}")
         return args + ["--output-format", "stream-json", "--verbose", "--append-system-prompt", independent_text(),
-                       "--disallowed-tools", *DENIED_TOOLS, "--", f"/code-review {effort} --max-findings default {base_ref}"]
+                       "--disallowed-tools", *DENIED_TOOLS, "--", request]
     if stage in ("synthesis", "followup"):
         policy = "focused" if stage == "followup" else settings["synthesis_tests"]
         args += ["--append-system-prompt", text(f"synthesis-testing-{policy}.txt")]
