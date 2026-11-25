@@ -83,9 +83,16 @@ def review_command(settings, runtime, stage, directory, base_ref, instructions="
              "-c", "model_reasoning_effort=" + (effort if provider == "codex" else settings["codex_effort"]),
              *codex_settings()]
     if independent and provider == "codex":
-        codex.insert(2, "review")
+        # Native review renders its own findings summary. Candidate acceptance
+        # needs the model's final message verbatim, including the comparison header.
+        target = ["--base", base_ref]
+        if instructions:
+            target = ["Perform an independent acceptance review of the specified local Git comparison. "
+                      "Return the comparison header and assessment in the requested format."]
+        else:
+            codex.insert(2, "review")
         return codex + ["-c", "developer_instructions=" + json.dumps((ROOT / "prompts/independent.txt").read_text() + (("\n" + instructions.strip() + "\n") if instructions else ""), ensure_ascii=False),
-                        "--ephemeral", "--json", "-o", str(directory / f"reviews/{stage if slot else 'codex'}.md.tmp"), "--base", base_ref]
+                        "--ephemeral", "--json", "-o", str(directory / f"reviews/{stage if slot else 'codex'}.md.tmp"), *target]
     if not independent and provider == "codex":
         return codex + ["--ephemeral", "--json", "--output-schema", str(ROOT / f"prompts/{stage}.schema.json"),
                         "-o", str(directory / f"reviews/{stage}.codex.tmp"), "-"]

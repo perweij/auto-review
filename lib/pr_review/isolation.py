@@ -179,7 +179,7 @@ class IndependentWorkspace:
         self.verifier = self.root / 'verification.git'
         shutil.copytree(self.checkout / '.git', self.verifier)
         # Specification and feedback reach a reviewer only through files in its
-        # private root; no prompt argument exists for ``codex exec review --base``.
+        # private root so each slot receives only its own inputs.
         for name, content in inputs.context.items():
             if Path(name).is_absolute() or ".." in Path(name).parts:
                 raise ApiError("independence_failed", "Invalid reviewer context path")

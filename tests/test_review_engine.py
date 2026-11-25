@@ -40,7 +40,13 @@ class SlotTest(EngineFixture):
         for argv in (claude, codex):
             self.assertIn(f'git diff {base} {head}', ' '.join(argv))
         self.assertFalse(claude[-1].startswith('/code-review'))
-        self.assertEqual(base, codex[codex.index('--base') + 1])
+        self.assertEqual(['codex', 'exec'], codex[:2])
+        self.assertNotIn('review', codex)
+        self.assertNotIn('--base', codex)
+        self.assertIn('comparison header', codex[-1])
+        pr_command = providers.review_command(run.settings, run.runtime, 'reviewer-2', run.path, base)
+        self.assertEqual(['codex', 'exec', 'review'], pr_command[:3])
+        self.assertEqual(base, pr_command[pr_command.index('--base') + 1])
 
     def test_cleanup_permission_error_preserves_completed_reviews(self):
         from pr_review.isolation import IndependentWorkspace
