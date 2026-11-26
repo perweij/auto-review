@@ -258,7 +258,7 @@ def invoke(session, state, batch, role, context):
                          "If plan_correction is supplied, correct its rejected plan using the validation error and return a complete replacement plan. "
                          "Do not add unselected feedback. Existing completed tasks are context, not new work.\n")
     elif role == "fix":
-        instructions += ("Implement the assigned task, including source changes and focused regression tests. Inspection alone "
+        instructions += ("Implement the assigned task and verify the affected behavior. Inspection alone "
                          "is not completion when the requested behavior is still missing. For issue steps, implement this task's "
                          "expected outcomes without requiring later steps to be finished. "
                          "Inspect whether earlier changes already satisfy each concern before editing. Make only justified "
