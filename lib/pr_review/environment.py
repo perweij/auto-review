@@ -134,7 +134,7 @@ def uv_project(spec):
                              'UV_CACHE_DIR': '{cache}', 'UV_LINK_MODE': 'copy'})
 
 
-def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=None, test_overrides=None):
+def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=None, test_overrides=None, selected_projects=None):
     """Prepare projects in declaration-independent order. Keep partial successes usable."""
     from .isolation import _safe_path
     checkout = Path(checkout).resolve()
@@ -150,6 +150,8 @@ def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=N
     deadline = time.monotonic() + min(timeout, timeout if remaining is None else remaining)
     budget = LIMIT
     for name, spec in sorted(profile['projects'].items()):
+        if selected_projects is not None and name not in selected_projects:
+            continue
         if time.monotonic() >= deadline or budget <= 0:
             report['projects'][name] = {'status': 'unprepared', 'reason': 'Setup budget exhausted'}
             continue

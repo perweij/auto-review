@@ -1935,6 +1935,20 @@ Use `--session PATH --batch ID` for an Owner batch or `--session PATH` for a PR
 review, `save --file profile.json` to import a recipe, and `apply --preview`
 to see what applying it will change.
 
+External tools such as `sync-pr --repair` can run selected checks against a disposable checkout:
+
+```sh
+pr-review environment run-checks --cwd CHECKOUT --file REQUEST.json --logs LOG_DIRECTORY
+```
+
+Use the `project` and `profile` from `environment show` in the request and add a
+`checks` array. Each check supplies a project name, an `argv` array, and a
+`reason`. Only selected projects are prepared. With a null profile, use a
+checkout-relative directory as the project and supply the documentation
+`source` for each command. The runner records each command's exit status and
+output paths. Exit 0 means all checks passed, 3 means a check failed, and 1
+means verification could not run to completion.
+
 For example, the following project uses the checked-in development dependencies
 for a nested uv package:
 

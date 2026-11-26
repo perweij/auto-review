@@ -1,6 +1,7 @@
 """CLI and protocol operations for persistent repository environment profiles."""
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 import tempfile
@@ -210,7 +211,70 @@ def dispatch(request):
         return result
 
 
+def run_checks(argv):
+    """Run selected checks in a disposable candidate using a captured profile."""
+    parser = argparse.ArgumentParser(prog='pr-review environment run-checks')
+    parser.add_argument('--cwd', type=Path, required=True)
+    parser.add_argument('--file', type=Path, required=True)
+    parser.add_argument('--logs', type=Path, required=True)
+    args = parser.parse_args(argv)
+    checkout = args.cwd.resolve()
+    request = read_json(args.file)
+    checks = request['checks']
+    if not isinstance(checks, list) or not checks:
+        raise ValueError('Specify at least one verification check.')
+    profile = request['profile']
+    names = set()
+    for check in checks:
+        cmd = check['argv']
+        if not isinstance(cmd, list) or not cmd or not all(isinstance(v, str) and v for v in cmd):
+            raise ValueError('Check commands require argv arrays.')
+        if not check.get('reason'):
+            raise ValueError('Check requires a reason.')
+        names.add(check['project'])
+    args.logs.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as private:
+        env = dict(os.environ)
+        if profile is not None:
+            environment.validate(profile)
+            missing = names - profile['projects'].keys()
+            if missing:
+                raise ValueError(f'Unknown projects: {sorted(missing)}')
+            report = environment.prepare(profile, Project(**request['project']), checkout,
+                                         Path(private), args.logs, env, selected_projects=names)
+            if any(rec['status'] != 'ready' for rec in report['projects'].values()):
+                raise ValueError(f'Environment setup failed: {report}')
+        for i, check in enumerate(checks):
+            cwd = checkout
+            command = check['argv']
+            if profile is None:
+                cwd = (checkout / check['project']).resolve()
+                if not cwd.is_relative_to(checkout) or not check.get('source'):
+                    raise ValueError('Unprofiled checks require a checkout directory and documentation source.')
+            else:
+                command = ['pr-review-check', check['project'], *command]
+            out, err = (args.logs / f'check-{i}.{ext}' for ext in ('out', 'err'))
+            result = run(command, cwd=cwd, env=env, timeout=300, stdout_path=out, stderr_path=err,
+                         max_output_bytes=4 * 1024 * 1024, stage='repair-check')
+            record = dict(check, directory=str(cwd if profile is None else checkout / profile['projects'][check['project']]['directory']),
+                          exit_status=result.returncode, diagnostic=result.reason, stdout=str(out), stderr=str(err))
+            write_json(args.logs / f'check-{i}.json', record)
+            print(json.dumps(record))
+            if result.reason or result.returncode in (126, 127):
+                return 1
+            if result.returncode:
+                return 3
+    return 0
+
+
 def cli(argv):
+    if argv[:1] == ['run-checks']:
+        try:
+            return run_checks(argv[1:])
+        except (ApiError, OSError, ValueError, KeyError, TypeError) as exc:
+            import sys
+            print(str(exc), file=sys.stderr)
+            return 1
     parser = argparse.ArgumentParser(prog='pr-review environment')
     parser.add_argument('action', choices=['show','generate','save','apply'])
     for flag in ('session','batch','cwd','model','effort','forge','file'):

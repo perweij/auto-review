@@ -48,6 +48,30 @@ class VerificationEnvironmentTest(unittest.TestCase):
         self.assertEqual(result.strip(), str(self.quality))
         self.assertFalse(list(self.quality.iterdir()))
 
+    def test_run_selected_checks_across_candidate_projects(self):
+        from pr_review.environment_commands import run_checks
+        self.profile['projects'].update(root=dict(directory='.'), unused=dict(directory='absent'))
+        checks = [dict(project='quality', argv=['-c', 'import os; assert os.getcwd().endswith("tools/quality")'],
+                       reason='quality cwd'), dict(project='root', argv=[sys.executable, '-c',
+                       'from pathlib import Path; assert Path("tools/quality").is_dir()'], reason='root cwd')]
+        request = self.root / 'request.json'
+        logs = self.root / 'logs'
+        request.write_text(json.dumps(dict(project=self.project.saved(), profile=self.profile, checks=checks)))
+        self.assertEqual(run_checks(['--cwd', str(self.checkout), '--file', str(request), '--logs', str(logs)]), 0)
+        self.assertEqual(set(json.loads((logs / 'report.json').read_text())['projects']), {'quality', 'root'})
+        self.assertEqual(json.loads((logs / 'check-1.json').read_text())['exit_status'], 0)
+
+    def test_run_checks_reports_unavailable_required_project(self):
+        from pr_review.environment_commands import cli
+        self.spec['readiness'] = [['-c', 'raise SystemExit(1)']]
+        request = self.root / 'request.json'
+        logs = self.root / 'logs'
+        request.write_text(json.dumps(dict(project=self.project.saved(), profile=self.profile,
+                                           checks=[dict(project='quality', argv=['-V'], reason='test')])))
+        self.assertEqual(cli(['run-checks', '--cwd', str(self.checkout), '--file', str(request),
+                              '--logs', str(logs)]), 1)
+        self.assertFalse((logs / 'check-0.json').exists())
+
     def test_setup_failure_retains_reason_and_disables_project(self):
         self.spec['readiness'] = [['-c', 'raise RuntimeError("dependency missing")']]
         self.profile['projects']['z'] = dict(directory='.')
