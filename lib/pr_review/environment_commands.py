@@ -254,7 +254,7 @@ def run_checks(argv):
             else:
                 command = ['pr-review-check', check['project'], *command]
             out, err = (args.logs / f'check-{i}.{ext}' for ext in ('out', 'err'))
-            result = run(command, cwd=cwd, env=env, timeout=300, stdout_path=out, stderr_path=err,
+            result = run(command, cwd=cwd, env=env, timeout=30 * 60, stdout_path=out, stderr_path=err,
                          max_output_bytes=4 * 1024 * 1024, stage='repair-check')
             record = dict(check, directory=str(cwd if profile is None else checkout / profile['projects'][check['project']]['directory']),
                           exit_status=result.returncode, diagnostic=result.reason, stdout=str(out), stderr=str(err))
