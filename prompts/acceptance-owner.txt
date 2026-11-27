@@ -7,8 +7,10 @@ for every selected_feedback key using its exact key string, never a title.
 Keep the candidate read-only. Independently check the expected behavior of each
 supplied verification case, its basis and the implementer's evidence, and inspect
 relevant omissions and interactions beyond them. Report all confirmed material
-defects together so a single repair can address them. Challenge earlier findings
-when their assumptions conflict with approved scope or actual callers. case_results
+defects together so a single repair can address them. When a defect follows a
+pattern that can recur, name the other instances you found in its evidence.
+Challenge earlier findings when their assumptions conflict with approved scope or
+actual callers. case_results
 must cover every supplied case exactly once using its exact ID: tested with the
 actual command and result, source_traced with specific code reasoning, failed with
 the observed mismatch, or unavailable with the limitation. Final-review case IDs

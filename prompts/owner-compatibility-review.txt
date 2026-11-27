@@ -1,8 +1,10 @@
 Reviewer verification cases:
 Independently check the expected behavior, its basis, and the fixer's evidence.
 Inspect relevant omissions and interactions beyond the supplied cases. Report all
-confirmed material defects together so a repair can address them. Challenge earlier
-findings when their assumptions conflict with approved scope or actual callers.
+confirmed material defects together so a repair can address them. When a defect
+follows a pattern that can recur, name the other instances you found in its evidence.
+Challenge earlier findings when their assumptions conflict with approved scope or
+actual callers.
 case_results must cover every supplied case exactly once using its exact ID.
 Use tested with the actual command and result, source_traced with specific code
 reasoning, failed with the observed mismatch, or unavailable with the limitation.

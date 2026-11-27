@@ -4,6 +4,10 @@ up to eight additions per call in verification_cases when justified. An empty
 proposal retains the supplied cases. The accumulated contract may exceed eight. During final combined repair, preserve the namespaced cases
 and return an empty proposal list. Report conflicts with approved scope explicitly.
 Reproduce reported failures where feasible and repair their shared cause.
+When a defect follows a pattern that can recur, such as one computation applied to
+several similar modules, inputs or callers, search the changed code and its callers
+for the other instances. Repair each instance with the same defect, or record in
+checks why it differs.
 Inspect nearby tests, fixtures, and earlier changes in this batch. If an existing
 test catches the failure, run it. Before adding permanent coverage, identify the
 failure existing assertions would miss. Extend an existing test when the case
