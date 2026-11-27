@@ -71,6 +71,17 @@ class ContractTest(unittest.TestCase):
         with self.assertRaises(ApiError):
             contracts.implementation(task,{**report,'verification_cases':[{**case(),'expected':'changed'}]},'tree')
 
+    def test_task_recovery_preserves_cases_and_requires_evidence_for_plan_additions(self):
+        original, added = case(), case('new', 'change')
+        task = {'verification_cases': [original]}
+        plan = {'tasks': [{'verification_cases': [{**original, 'scenario': 'Reworded'}, added]}]}
+        task['verification_cases'] = contracts.recovery_cases(task, plan)
+        self.assertEqual([original, added], task['verification_cases'])
+        with self.assertRaises(ApiError):
+            contracts.implementation(task, result([original]), 'tree')
+        report = contracts.implementation(task, result([original, added]), 'tree')
+        self.assertTrue(contracts.matches(report, task['verification_cases'], 'tree'))
+
     def test_legacy_proofs_remain_readable_without_fabricated_evidence(self):
         report = {'complete':True,'blocking':[]}
         self.assertTrue(contracts.matches(report,[],'tree'))

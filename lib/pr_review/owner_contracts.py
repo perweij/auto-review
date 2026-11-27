@@ -33,6 +33,20 @@ def task_cases(task):
     return copy.deepcopy(task.get('verification_cases', []))
 
 
+def recovery_cases(task, plan):
+    """Preserve the task's original requirements and append new planned cases."""
+    original = task_cases(task)
+    existing = {case['id'] for case in original}
+    additions = {}
+    for step in plan['tasks']:
+        for case in cases(step.get('verification_cases', [])):
+            if case['id'] in existing:
+                continue
+            if additions.setdefault(case['id'], case) != case:
+                raise ApiError('invalid_plan', 'Recovery plan gives conflicting definitions for ' + case['id'])
+    return original + list(additions.values())
+
+
 def combined(tasks):
     return [{**case, 'id': task['id'] + '/' + case['id']} for task in tasks
             if task['status'] == 'complete' for case in task_cases(task)]

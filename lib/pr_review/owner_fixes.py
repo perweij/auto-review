@@ -167,10 +167,11 @@ def repair_stop_reason(batch, task, review, tree):
     return 'The last repair showed no verified progress on the remaining defects.'
 
 
-def recover_case_overflow(batch, snapshot, last):
-    """Resume independent review of a completed repair rejected by the old cumulative cap."""
+def recover_completed_repair(batch, snapshot, last):
+    """Resume independent review of a completed repair whose case contract can now be validated."""
     active = [t for t in batch['tasks'] if t['status'] in ('repairing', 'fixing')]
-    if (batch.get('error') not in ('Supply at most eight focused verification cases per task.',
+    if (batch.get('error') not in ('Case evidence must cover each required case exactly once.',
+                                   'Supply at most eight focused verification cases per task.',
                                    'Inspect retained changes, then adopt and reverify; task skips must cover every interrupted task. A failed combined repair requires adoption.')
             or len(active) != 1 or active[0]['status'] != 'repairing' or last.get('role') != 'fix'
             or last.get('status') != 'complete' or last.get('after') != batch['checkpoint']
@@ -189,10 +190,19 @@ def recover_case_overflow(batch, snapshot, last):
         report = validate_result(copy.deepcopy(last['result']), task['items'])
         if not successful(report):
             return
+        history = task.get('recovery_attempts', [])
+        if history and len(batch['attempts']) >= 2:
+            recovery = history[-1]
+            planner = batch['attempts'][-2]
+            if (planner.get('role') == 'plan' and planner.get('status') == 'complete'
+                    and recovery['tree'] == last['before']['tree'] and not recovery['pending']
+                    and planner.get('result') == recovery['plan']):
+                candidate['verification_cases'] = owner_contracts.recovery_cases(task, recovery['plan'])
+        planned_additions = owner_contracts.task_cases(candidate) != owner_contracts.task_cases(task)
         owner_contracts.implementation(candidate, report, snapshot['tree'])
     except ApiError:
         return
-    if not (len(owner_contracts.task_cases(task)) <= owner_contracts.MAX_CASES
+    if not planned_additions and not (len(owner_contracts.task_cases(task)) <= owner_contracts.MAX_CASES
             < len(owner_contracts.task_cases(candidate))):
         return
     task.update(verification_cases=candidate['verification_cases'], case_contract_version=1,
@@ -303,6 +313,10 @@ def recovery_plan(session, state, batch, target, data, report):
 
 def dispatch_repair(session, state, batch, target, data):
     if data.get('recovery_plan'):
+        if target is not batch:
+            required = owner_contracts.recovery_cases(target, data['recovery_plan'])
+            target['verification_cases'] = required
+            data['verification_cases'] = required
         batch.pop('recovery_planning', None)
         target['recovery_attempts'][-1]['pending'] = False
         session.save(state)
@@ -722,7 +736,7 @@ def _execute(session, state, request):
                     # Older versions did not persist a combined-repair marker.
                     last = batch['attempts'][-1] if batch['attempts'] else {}
                     if not orphaned and not controls and not batch.get('integrity_failure'):
-                        recover_case_overflow(batch, snapshot, last)
+                        recover_completed_repair(batch, snapshot, last)
                     interrupted = {t['id'] for t in batch['tasks'] if t['status'] in ('fixing', 'repairing')}
                     if (last.get('role') == 'fix' and last.get('status') in ('failed', 'interrupted') and not last.get('adopted_at')
                             and batch['tasks'] and all(t['status'] in ('complete', 'skipped') for t in batch['tasks'])):
