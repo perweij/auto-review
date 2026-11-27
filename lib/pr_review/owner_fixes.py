@@ -119,8 +119,15 @@ def repairable(value):
 MAX_TASK_REPAIRS = 2
 # Alternative plans after the repair allowance. Reviewers describe each new
 # blocker in fresh prose, so the signature check alone never ends a loop that
-# keeps finding new states of the same behavior. Adopt, replan, or skip resets it.
+# keeps finding new states of the same behavior. After the budget the target
+# converges on its verification cases instead of pausing (see converge()).
+# Adopt, replan, or skip resets it.
 MAX_RECOVERY_PLANS = 3
+# Repairs while converging; only required cases that keep failing reach the human.
+MAX_CONVERGING_REPAIRS = 3
+CONVERGENCE = ('The alternative-plan budget is used. Repair the failing required verification cases and '
+               'regressions of established behavior. Propose no new verification cases. Reviewers record other '
+               'findings as observations.')
 # validate_plan rejects a combined recovery plan that omits a selected item; say so upfront.
 COMBINED_COVERAGE = (' This replans the combined repair: list every selected item in exactly one task. '
                      'Group items with no remaining defect into one task that verifies them.')
@@ -265,8 +272,49 @@ def diagnosis(report):
     return ' · '.join(dict.fromkeys([*report['blocking'], *questions, report['summary']]))
 
 
+def converging(target):
+    return len(target.get('recovery_attempts', [])) >= MAX_RECOVERY_PLANS
+
+
+def converge(target, review):
+    """After the alternative-plan budget, only the established contract blocks.
+
+    A review whose required cases all pass and whose blockers include no
+    regression passes; its blockers stay visible as observations in the report.
+    """
+    rows = review.get('repair_basis') or []
+    if (not converging(target) or not review['complete'] or not review['blocking']
+            or any(o['status'] == 'clarify' for o in review['outcomes'])
+            or any(r['status'] not in ('tested', 'source_traced') for r in review.get('case_results', []))
+            or any(row.get('kind') == 'regression' for row in rows)):
+        return review
+    deferred = list(review['blocking'])
+    emit('progress', message='Required verification passed after the alternative-plan budget; '
+                             'recording remaining findings as observations: ' + ' · '.join(deferred))
+    return {**review, 'assessment': 'passed', 'blocking': [], 'repair_basis': [],
+            'observations': list(dict.fromkeys([*review.get('observations', []), *deferred])),
+            'deferred_after_plan_budget': deferred}
+
+
+def converging_repair(target, data, report, signature):
+    """Repair failing required cases without another plan; stop only without progress."""
+    count = target.get('converging_repairs', 0)
+    if count >= MAX_CONVERGING_REPAIRS or target.get('converging_signature') == signature:
+        reason = ('the same failure repeated' if target.get('converging_signature') == signature
+                  else f'{count} converging repairs')
+        target['recovery_stop'] = f'Required verification still failing after {reason}: {diagnosis(report)}'
+        return False
+    target.update(converging_repairs=count + 1, converging_signature=signature)
+    data['convergence'] = CONVERGENCE
+    emit('progress', message=f'Converging on the verification cases (repair {count + 1} of {MAX_CONVERGING_REPAIRS}): '
+                             + diagnosis(report))
+    return True
+
+
 def reset_recovery(target):
     target.pop('recovery_stop', None)
+    target.pop('converging_repairs', None)
+    target.pop('converging_signature', None)
     target.pop('verification_blocked', None)
     target.pop('verification_retry_tree', None)
     attempts = target.pop('recovery_attempts', None)
@@ -292,10 +340,10 @@ def recovery_plan(session, state, batch, target, data, report):
         target['recovery_stop'] = f'{reason}: {diagnosis(report)}. Attempted: {approach}'
         return False
     if len(history) >= MAX_RECOVERY_PLANS:
-        approach = ' / '.join(t['rationale'] for entry in history for t in entry['plan']['tasks'])
-        target['recovery_stop'] = (f'Alternative plan limit reached ({MAX_RECOVERY_PLANS} plans): '
-                                   f'{diagnosis(report)}. Attempted: {approach}')
-        return False
+        if questions:
+            target['recovery_stop'] = 'Human decision required: ' + diagnosis(report)
+            return False
+        return converging_repair(target, data, report, signature)
     check_fresh(session, state, batch)
     emit('progress', message='Automatically replanning: ' + diagnosis(report))
     earlier = [entry for group in target.get('previous_recoveries', []) for entry in group]
@@ -429,6 +477,8 @@ def run_task(session, state, batch, task):
         review = saved_review if saved_review is not None else task_review(session, state, batch, task, data)
         saved_review = None
         owner_contracts.bind(review, owner_contracts.task_cases(task), batch["checkpoint"]["tree"])
+        if automatic(batch):
+            review = converge(task, review)
         owner_scope.remember_observations(batch, review)
         task["review"] = review
         task["after"] = batch["checkpoint"]
@@ -503,6 +553,8 @@ def final_review(session, state, batch):
         _, review = acceptance.review_owner(session, state, batch, keys, data)
         review = validate_result(review, keys)
         owner_contracts.bind(review, data["verification_cases"], batch["checkpoint"]["tree"])
+        if automatic(batch):
+            review = converge(batch, review)
         owner_scope.remember_observations(batch, review)
         batch["review"] = review
         batch['review_tree'] = batch['checkpoint']['tree']

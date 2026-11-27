@@ -571,8 +571,13 @@ a defect enters the bounded repair pass; an unavailable test environment pauses
 for verification to be retried. Resuming an unchanged rejection passes the saved
 findings to the fixer if a repair remains. With **Auto commit**, Owner retries an incomplete check on the saved candidate and
 requests an alternative plan when direct repairs run out. It records the approaches
-tried. If a failure recurs after replanning, verification remains unavailable, or
-the planner needs a decision from you, the log shows the reason. Owner keeps the
+tried. A task or the combined patch gets up to three alternative plans. After that,
+Owner converges on the established verification cases. If every required case passes
+and no blocker is a regression, the review passes and its remaining findings are kept
+as observations in the local report. Otherwise up to three further repairs target the
+failing cases, without new plans or new cases. If a failure recurs after replanning,
+required cases keep failing, verification remains unavailable, or the planner needs a
+decision from you, the log shows the reason. Owner keeps the
 blocked candidate in a Git checkpoint and continues independent tasks. Automatic
 commits and replies wait until combined verification succeeds. Inspect the diagnosis,
 address the blocker, then use `p` to replan unfinished work. Plain `r` shows the

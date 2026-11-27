@@ -88,28 +88,66 @@ class RecoveryTest(unittest.TestCase):
         self.t.request('owner-fix', batch=batch['id'])
         self.assertFalse(self.t.calls)
 
-    def test_new_blockers_each_round_stop_at_alternative_plan_limit(self):
+    def test_new_blockers_each_round_converge_on_passing_cases_after_plan_budget(self):
         # Each review reports a new state of the same behavior, so no signature repeats.
         rounds = iter(range(100))
-        budgets = []
+        budgets, fixes = [], []
         def model(session, state, batch, role, data):
             if role == 'plan':
                 if data.get('automatic_recovery'):
                     budgets.append(data['automatic_recovery']['plan_budget'])
+                    self.assertNotIn(owner_fixes.COMBINED_COVERAGE, data['automatic_recovery']['instruction'])
                 return self.split(session, state, batch, role, data)
+            if role == 'fix':
+                fixes.append(data)
             result = self.t.model(session, state, batch, role, data)
-            if role == 'review' and data['feedback'][0]['key'] == 'thread:T1':
+            if role == 'review' and not data.get('scope') and data['feedback'][0]['key'] == 'thread:T1':
                 result['blocking'] = [f'Wrong retry advice in state {next(rounds)}']
             return result
         with patch('pr_review.owner_providers.invoke', side_effect=model):
             batch = self.t.fix(auto_commit=True)['batches'][-1]
         limit = owner_fixes.MAX_RECOVERY_PLANS
         self.assertEqual([dict(this_plan=n, limit=limit) for n in range(1, limit + 1)], budgets)
+        self.assertFalse(any('convergence' in data for data in fixes))
         task = batch['tasks'][0]
-        self.assertEqual(task['status'], 'needs_attention')
+        self.assertEqual(['complete', 'complete'], [t['status'] for t in batch['tasks']])
         self.assertEqual(len(task['recovery_attempts']), limit)
-        self.assertIn('Alternative plan limit reached', batch['error'])
-        self.assertEqual(batch['tasks'][1]['status'], 'complete')
+        deferred = task['review']['deferred_after_plan_budget']
+        self.assertEqual(1, len(deferred))
+        self.assertIn(deferred[0], batch['scope_observations'])
+        self.assertEqual('ready', batch['status'])
+        self.assertNotIn('error', batch)
+
+    def test_a_required_case_that_keeps_failing_stops_after_converging_repairs(self):
+        rounds = iter(range(100))
+        case = dict(id='retry-advice', scenario='Exhaust memory on resume', expected='Resume advice',
+                    basis='Selected feedback', intent='change')
+        converging = []
+        def model(session, state, batch, role, data):
+            if role == 'plan':
+                plan = self.split(session, state, batch, role, data)
+                plan['tasks'][0]['verification_cases'] = [case]
+                return plan
+            result = self.t.model(session, state, batch, role, data)
+            first = data['feedback'][0]['key'] == 'thread:T1' and not data.get('scope')
+            if role == 'fix':
+                if data.get('convergence'):
+                    converging.append(data['convergence'])
+                result['case_results'] = [dict(id=c['id'], status='tested', evidence='Claimed')
+                                          for c in data.get('verification_cases', [])]
+            if role == 'review':
+                result['case_results'] = [dict(id=c['id'], status='failed' if first else 'tested', evidence='Observed')
+                                          for c in data.get('verification_cases', [])]
+                if first:
+                    result['blocking'] = [f'Retry advice still wrong in state {next(rounds)}']
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        self.assertEqual([owner_fixes.CONVERGENCE] * owner_fixes.MAX_CONVERGING_REPAIRS, converging)
+        task = batch['tasks'][0]
+        self.assertEqual('needs_attention', task['status'])
+        self.assertIn('Required verification still failing after 3 converging repairs', batch['error'])
+        self.assertEqual('complete', batch['tasks'][1]['status'])
 
     def test_incomplete_verification_retries_same_candidate(self):
         for stage in ('task', 'combined'):
@@ -286,6 +324,21 @@ class RecoveryTest(unittest.TestCase):
         self.assertIn('Repair loop', batch['error'])
         self.assertEqual(len(batch['recovery_attempts']), 2)
         self.assertNotIn('commit_execution', batch)
+
+    def test_new_final_blockers_converge_after_combined_plan_budget(self):
+        rounds = iter(range(100))
+        def model(*args):
+            value = self.t.model(*args)
+            if args[3] == 'plan' and args[4].get('automatic_recovery'):
+                value.update(decision='repair', basis='Cover the reported state')
+            if args[3] == 'review' and args[4].get('scope'):
+                value['blocking'] = [f'Diagnostic omits location in state {next(rounds)}']
+            return value
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        self.assertEqual(len(batch['recovery_attempts']), owner_fixes.MAX_RECOVERY_PLANS)
+        self.assertEqual(1, len(batch['review']['deferred_after_plan_budget']))
+        self.assertEqual('complete', batch['commit_execution']['status'])
 
     def test_external_edit_before_setting_aside_a_candidate_is_preserved(self):
         def model(*args):
