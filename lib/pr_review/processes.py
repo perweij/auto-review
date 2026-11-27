@@ -10,6 +10,7 @@ import signal
 import subprocess
 import time
 import tempfile
+import threading
 
 from .common import ApiError
 from .events import emit
@@ -38,6 +39,54 @@ class Cancellation:
 _cancellation = ContextVar("review_cancellation", default=None)
 
 
+class Bookkeeping:
+    """Serialises concurrent stages' Python work; a stage releases it only to wait."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._owner = None
+
+    def __enter__(self):
+        self._lock.acquire()
+        self._owner = threading.get_ident()
+        return self
+
+    def __exit__(self, *_):
+        self._owner = None
+        self._lock.release()
+
+    def held(self):
+        return self._owner == threading.get_ident()
+
+
+_shared = ContextVar("shared_bookkeeping", default=None)
+
+
+@contextmanager
+def bookkeeping(lock):
+    """Run this thread's stage under ``lock``; nested child waits release it."""
+    token = _shared.set(lock)
+    try:
+        with lock:
+            yield
+    finally:
+        _shared.reset(token)
+
+
+@contextmanager
+def released():
+    """Let concurrent stages update shared state while this one waits on a child."""
+    lock = _shared.get()
+    if lock is None or not lock.held():
+        yield
+        return
+    lock.__exit__()
+    try:
+        yield
+    finally:
+        lock.__enter__()
+
+
 @contextmanager
 def cancellation_scope():
     current = _cancellation.get()
@@ -55,6 +104,21 @@ def cancellation_scope():
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
+        _cancellation.reset(token)
+
+
+@contextmanager
+def shared_cancellation():
+    """The caller's cancellation, or a local one for threads started without a scope."""
+    current = _cancellation.get()
+    if current is not None:
+        yield current
+        return
+    current = Cancellation()
+    token = _cancellation.set(current)
+    try:
+        yield current
+    finally:
         _cancellation.reset(token)
 
 
@@ -83,7 +147,8 @@ def stop_group(child, first=signal.SIGTERM, grace=2):
             child.poll()
             if not signal_group(child.pid, 0):
                 break
-            time.sleep(0.05)
+            with released():
+                time.sleep(0.05)
     try:
         child.wait(timeout=1)
     except subprocess.TimeoutExpired:
@@ -219,7 +284,9 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                     drain_deadline = time.monotonic() + 1
                 if drain_deadline and time.monotonic() > drain_deadline:
                     break
-                for key, _ in selector.select(0.02 if not stage else 0.1):
+                with released():
+                    ready = selector.select(0.02 if not stage else 0.1)
+                for key, _ in ready:
                     name = key.data
                     if name == "stdin":
                         try:

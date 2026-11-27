@@ -76,3 +76,36 @@ class ReviewInterruptionTest(unittest.TestCase):
     def test_provider_children_disable_python_bytecode(self):
         for provider in ('claude', 'codex'):
             self.assertEqual('1', providers.environment(provider)[0]['PYTHONDONTWRITEBYTECODE'])
+
+
+class BookkeepingLockTest(unittest.TestCase):
+    def test_release_is_a_no_op_without_a_shared_lock(self):
+        from pr_review.processes import released
+        with released():
+            pass
+
+    def test_a_waiting_stage_lets_its_peer_update_shared_state(self):
+        import contextvars
+        import threading
+        from pr_review.processes import Bookkeeping, bookkeeping, released
+        lock, waiting, updated, order = Bookkeeping(), threading.Event(), threading.Event(), []
+
+        def waiter():
+            with bookkeeping(lock):
+                with released():
+                    waiting.set()
+                    self.assertTrue(updated.wait(5))
+                order.append(('waiter', lock.held()))
+
+        def peer():
+            self.assertTrue(waiting.wait(5))
+            with bookkeeping(lock):
+                order.append(('peer', lock.held()))
+            updated.set()
+
+        threads = [threading.Thread(target=contextvars.copy_context().run, args=(fn,)) for fn in (waiter, peer)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        self.assertEqual([('peer', True), ('waiter', True)], order)
