@@ -117,6 +117,10 @@ def repairable(value):
 
 
 MAX_TASK_REPAIRS = 2
+# Alternative plans after the repair allowance. Reviewers describe each new
+# blocker in fresh prose, so the signature check alone never ends a loop that
+# keeps finding new states of the same behavior. Adopt, replan, or skip resets it.
+MAX_RECOVERY_PLANS = 3
 
 
 def repair_evidence(review, tree):
@@ -284,12 +288,22 @@ def recovery_plan(session, state, batch, target, data, report):
         reason = 'Human decision required' if questions else 'Repair loop after alternative plan'
         target['recovery_stop'] = f'{reason}: {diagnosis(report)}. Attempted: {approach}'
         return False
+    if len(history) >= MAX_RECOVERY_PLANS:
+        approach = ' / '.join(t['rationale'] for entry in history for t in entry['plan']['tasks'])
+        target['recovery_stop'] = (f'Alternative plan limit reached ({MAX_RECOVERY_PLANS} plans): '
+                                   f'{diagnosis(report)}. Attempted: {approach}')
+        return False
     check_fresh(session, state, batch)
     emit('progress', message='Automatically replanning: ' + diagnosis(report))
     earlier = [entry for group in target.get('previous_recoveries', []) for entry in group]
     recovery = dict(findings={k: v for k, v in report.items() if k != 'observations'}, verification_cases=data['verification_cases'],
                     previous_approaches=history, earlier_replanned_approaches=earlier,
-                    instruction='Choose a different approach within the original contract. For repair, explain '
+                    plan_budget=dict(this_plan=len(history) + 1, limit=MAX_RECOVERY_PLANS),
+                    instruction='Choose a different approach within the original contract. If the blockers report '
+                                'new states of a behavior that earlier reviews or cases already covered, enumerate '
+                                'every condition that behavior depends on and cover the whole set in this plan, '
+                                'not only the newly reported state. In the last plan of the budget, prefer a simpler '
+                                'behavior that is correct in every state over special handling for more states. For repair, explain '
                                 'the approach and cite the source that answers any clarification. Consider simplifying '
                                 'a previous repair that introduced a new obligation. Choose clarify '
                                 'if a human decision is needed. Choose repeated_failure only if earlier attempts '

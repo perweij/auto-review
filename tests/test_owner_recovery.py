@@ -88,6 +88,29 @@ class RecoveryTest(unittest.TestCase):
         self.t.request('owner-fix', batch=batch['id'])
         self.assertFalse(self.t.calls)
 
+    def test_new_blockers_each_round_stop_at_alternative_plan_limit(self):
+        # Each review reports a new state of the same behavior, so no signature repeats.
+        rounds = iter(range(100))
+        budgets = []
+        def model(session, state, batch, role, data):
+            if role == 'plan':
+                if data.get('automatic_recovery'):
+                    budgets.append(data['automatic_recovery']['plan_budget'])
+                return self.split(session, state, batch, role, data)
+            result = self.t.model(session, state, batch, role, data)
+            if role == 'review' and data['feedback'][0]['key'] == 'thread:T1':
+                result['blocking'] = [f'Wrong retry advice in state {next(rounds)}']
+            return result
+        with patch('pr_review.owner_providers.invoke', side_effect=model):
+            batch = self.t.fix(auto_commit=True)['batches'][-1]
+        limit = owner_fixes.MAX_RECOVERY_PLANS
+        self.assertEqual([dict(this_plan=n, limit=limit) for n in range(1, limit + 1)], budgets)
+        task = batch['tasks'][0]
+        self.assertEqual(task['status'], 'needs_attention')
+        self.assertEqual(len(task['recovery_attempts']), limit)
+        self.assertIn('Alternative plan limit reached', batch['error'])
+        self.assertEqual(batch['tasks'][1]['status'], 'complete')
+
     def test_incomplete_verification_retries_same_candidate(self):
         for stage in ('task', 'combined'):
             with self.subTest(stage=stage):

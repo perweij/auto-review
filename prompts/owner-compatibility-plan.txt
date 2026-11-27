@@ -14,3 +14,9 @@ For each recovery blocker, use prior repair evidence to identify the failed
 behavior and supported formats, entry points or fixtures sharing its assumptions.
 Name the applicable sibling checks in the task rationale and verification cases.
 Ground each in the original feedback, supported callers or existing contract.
+When a blocker reports a new state of behavior that earlier cases already cover,
+list the conditions that behavior depends on, such as phase, saved state, or
+whether a diagnostic can itself fail. Cover each combination with an applicable
+expected outcome. Group combinations that share an expected outcome into one case
+with named variants. automatic_recovery.plan_budget gives this plan's number and
+the limit; no further plan follows the last one.
