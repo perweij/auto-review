@@ -264,6 +264,7 @@ class RecoveryTest(unittest.TestCase):
         with patch('pr_review.owner_providers.invoke', side_effect=model):
             batch = self.t.fix(auto_commit=True)['batches'][-1]
         self.assertEqual('ready', batch['status'])
+        self.assertTrue(all(owner_fixes.COMBINED_COVERAGE in plan['instruction'] for plan in plans))
         prior = plans[-1]['previous_approaches'][-1]['evidence']
         self.assertEqual(['Invalid v1 retry interval'], prior['blocking'])
         self.assertEqual(['Invalid legacy retry interval'], plans[-1]['findings']['blocking'])

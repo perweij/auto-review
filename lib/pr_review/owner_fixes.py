@@ -121,6 +121,9 @@ MAX_TASK_REPAIRS = 2
 # blocker in fresh prose, so the signature check alone never ends a loop that
 # keeps finding new states of the same behavior. Adopt, replan, or skip resets it.
 MAX_RECOVERY_PLANS = 3
+# validate_plan rejects a combined recovery plan that omits a selected item; say so upfront.
+COMBINED_COVERAGE = (' This replans the combined repair: list every selected item in exactly one task. '
+                     'Group items with no remaining defect into one task that verifies them.')
 
 
 def repair_evidence(review, tree):
@@ -307,7 +310,8 @@ def recovery_plan(session, state, batch, target, data, report):
                                 'the approach and cite the source that answers any clarification. Consider simplifying '
                                 'a previous repair that introduced a new obligation. Choose clarify '
                                 'if a human decision is needed. Choose repeated_failure only if earlier attempts '
-                                'show the same failing behavior without a lasting gain. Cite those attempts.')
+                                'show the same failing behavior without a lasting gain. Cite those attempts.'
+                                + (COMBINED_COVERAGE if target is batch else ''))
     batch['recovery_planning'] = target.get('id')
     session.save(state)
     plan, _ = plan_tasks(session, state, batch, [i['key'] for i in data['feedback']], recovery)
