@@ -14,7 +14,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from urllib.parse import urlsplit
 
@@ -40,75 +39,19 @@ def run(args, cwd=None, data=None, check=True, timeout=15 * 60):
 
 
 def list_models():
-    """Print the available MODEL:EFFORT choices from the local Codex app server."""
-    choices = {}
-    command = ["codex", "app-server", "--listen", "stdio://"]
-    with tempfile.TemporaryDirectory() as cwd, subprocess.Popen(
-        command, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    ) as server:
-        def send(message):
-            server.stdin.write(json.dumps(message).encode() + b"\n")
-            server.stdin.flush()
-
-        def request(ident, method, params):
-            send({"method": method, "id": ident, "params": params})
-            while True:
-                line = server.stdout.readline(4 * 1024 * 1024)
-                if not line.endswith(b"\n"):
-                    raise ValueError(f"Incomplete Codex {method} reply. Check CLI version and login.")
-                reply = json.loads(line)
-                if isinstance(reply, dict) and reply.get("id") == ident:
-                    if "error" in reply or not isinstance(reply.get("result"), dict):
-                        raise ValueError(f"Codex {method} failed: {reply.get('error', 'invalid result')}")
-                    return reply["result"]
-
-        timed_out = threading.Event()
-
-        def expire():
-            timed_out.set()
-            server.kill()
-
-        timer = threading.Timer(MODEL_DISCOVERY_TIMEOUT, expire)
-        timer.start()
-        try:
-            request(1, "initialize", {"clientInfo": {"name": "codex-tool", "version": "1"},
-                                      "capabilities": {}})
-            send({"method": "initialized", "params": {}})
-            params = {"limit": 100, "includeHidden": False}
-            cursors = set()
-            while True:
-                page = request(2 + len(cursors), "model/list", params)
-                if not isinstance(page.get("data"), list):
-                    raise ValueError("Invalid Codex model list")
-                for model in page["data"]:
-                    if not isinstance(model, dict) or model.get("hidden") or model.get("disabled"):
-                        continue
-                    name = model.get("model")
-                    levels = model.get("supportedReasoningEfforts")
-                    if not isinstance(name, str) or not name or not isinstance(levels, list):
-                        continue
-                    for level in levels:
-                        effort = level.get("reasoningEffort") if isinstance(level, dict) else None
-                        if isinstance(effort, str) and effort:
-                            choices.setdefault(name, {})[effort] = None
-                cursor = page.get("nextCursor")
-                if not cursor:
-                    break
-                if not isinstance(cursor, str) or cursor in cursors:
-                    raise ValueError("Invalid or repeated Codex model list cursor")
-                cursors.add(cursor)
-                params["cursor"] = cursor
-        finally:
-            timer.cancel()
-            timer.join()
-            server.kill()
-            if timed_out.is_set():
-                raise ValueError(f"Codex model discovery timed out after {MODEL_DISCOVERY_TIMEOUT} seconds")
-    if not choices:
-        raise ValueError("Codex returned no available models with reasoning effort metadata")
-    for name, efforts in choices.items():
-        for effort in efforts:
-            print(f"{name}:{effort}")
+    """Print the available MODEL:EFFORT choices from the local Codex CLI."""
+    # Share pr-review's metadata-only discovery from this installation.
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+    from pr_review.common import ApiError
+    from pr_review.models import discover
+    try:
+        catalog = discover({"provider": "codex"}, timeout=MODEL_DISCOVERY_TIMEOUT)
+    except ApiError as error:
+        raise Refusal(str(error)) from error
+    for model in catalog["models"]:
+        for effort in model["efforts"]:
+            print(f"{model['value']}:{effort}")
 
 
 def reviewers(values):

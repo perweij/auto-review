@@ -73,12 +73,12 @@ def connection(provider, timeout=30):
             child.stdout.close()
 
 
-def discover(request):
+def discover(request, *, timeout=30):
     provider = request.get("provider")
     if provider not in ("claude", "codex"):
         raise ApiError("invalid_request", "Model provider must be claude or codex.")
     raw = []
-    with connection(provider) as (send, receive):
+    with connection(provider, timeout) as (send, receive):
         if provider == "codex":
             send({"id": 1, "method": "initialize", "params": {
                 "clientInfo": {"name": "auto-review", "version": "0.1"}, "capabilities": {}}})
