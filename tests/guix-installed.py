@@ -68,6 +68,20 @@ def check_backend(program):
         issue_link = host / 'fix-issue'
         issue_link.symlink_to(program.parent / 'fix-issue')
         assert '--approve' in invoke([str(issue_link), '--help'])
+        for name, option in (('sync-pr', '--reviewer'), ('codex-tool', 'list-models')):
+            tool_link = host / name
+            tool_link.symlink_to(program.parent / name)
+            assert option in invoke([str(tool_link), '--help'])
+        # sync-pr reruns checks through the pr-review of its own installation,
+        # with the packaged Git and GitHub CLI ahead of host tools.
+        sync = json.loads(invoke([sys.executable, '-c',
+            'import json, runpy, shutil, sys; cli = runpy.run_path(sys.argv[1]); '
+            'print(json.dumps({"cli": cli["environment_cli"](), '
+            '"tools": {n: shutil.which(n) for n in ("git", "gh", "codex")}}))', str(host / 'sync-pr')]))
+        assert sync['cli'] == str(program), sync
+        for name in ('git', 'gh'):
+            assert sync['tools'][name].startswith('/gnu/store/'), sync
+        assert sync['tools']['codex'] == str(host / 'codex'), sync
         assert '--auto-commit' in invoke([str(link), 'owner', '--help'])
         result = json.loads(invoke([str(link), 'api'],
                                   data='{"protocol":1,"command":"capabilities"}\n'))

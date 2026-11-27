@@ -94,7 +94,7 @@
                 (error "auto-review entry-point patch mismatch"
                        interpreter-patches environment-patches))
               (invoke/quiet program "--help")))
-             '("pr-review" "fix-issue")))))
+             '("pr-review" "fix-issue" "sync-pr" "codex-tool")))))
       ;; These are private runtime inputs, not extra commands in the user's
       ;; profile.  Host model CLIs, credentials, signing and editor stay inherited.
       (inputs (append (list python git github-cli openssh certs)
