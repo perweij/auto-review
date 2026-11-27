@@ -124,7 +124,10 @@ def operation(owner=None):
                           exit_code=record.get('exit_code', 0))
         except BaseException as exc:
             record.update(status='cancelled' if isinstance(exc, Cancelled) else 'failed',
-                          exit_code=exc.details.get('exit_code', 1) if isinstance(exc, ApiError) else 1)
+                          exit_code=exc.details.get('exit_code', 1) if isinstance(exc, ApiError) else 1,
+                          # Readers of the log or record otherwise see no reason for the stop.
+                          error=dict(code=exc.code if isinstance(exc, ApiError) else type(exc).__name__,
+                                     message=str(exc) or type(exc).__name__))
             if isinstance(exc, ApiError):
                 exc.details.update(log_path=str(log), operation_id=identity)
             raise
@@ -141,6 +144,13 @@ def operation(owner=None):
                         usage.render(usage.summary(current_usage.root))
                 except (ApiError, OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
                     pass  # Reporting cannot mask an operation's result or cleanup.
+            if record.get('error'):
+                # Last in the log, after the usage summary, so a tail shows why it stopped.
+                text = record['error']['code'] + ': ' + record['error']['message']
+                try:
+                    output.write(''.join('[error] ' + line + '\n' for line in text.splitlines()))
+                except OSError:
+                    pass
             atomic_json(file, record)
 
 

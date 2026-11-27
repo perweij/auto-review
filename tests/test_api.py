@@ -855,9 +855,28 @@ class OperationTest(unittest.TestCase):
         log = Path(error.details['log_path'])
         self.assertIn('Checking authentication', log.read_text())
         self.assertEqual(log.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(read_json(log.with_suffix('.json'))['status'], 'failed')
+        self.assertEqual(log.read_text().splitlines()[-1],
+                         '[error] operation_failed: GitHub authentication failed; run gh auth login')
+        record = read_json(log.with_suffix('.json'))
+        self.assertEqual(record['status'], 'failed')
+        self.assertEqual(record['error'], {'code': 'operation_failed',
+                                           'message': 'GitHub authentication failed; run gh auth login'})
         started = next(c for c in emit.call_args_list if c.args[0] == 'started')
         self.assertEqual(started.kwargs['operation_id'], error.details['operation_id'])
+
+    def test_unexpected_failure_reason_is_the_last_log_lines(self):
+        from pr_review import operations
+        with patch.object(operations, "emit"), self.assertRaises(KeyError):
+            with operations.operation():
+                raise KeyError('tasks')
+        log = next((self.root / 'pr-review/operations').glob('*.log'))
+        self.assertEqual(log.read_text().splitlines()[-1], "[error] KeyError: 'tasks'")
+        self.assertEqual(read_json(log.with_suffix('.json'))['error']['code'], 'KeyError')
+        with patch.object(operations, "emit"), self.assertRaises(ApiError):
+            with operations.operation():
+                raise ApiError('paused', 'p1-t1 · first stop\np1-t2 · second stop')
+        log = max((self.root / 'pr-review/operations').glob('*.log'), key=lambda p: p.stat().st_mtime_ns)
+        self.assertEqual(log.read_text().splitlines()[-2:], ['[error] paused: p1-t1 · first stop', '[error] p1-t2 · second stop'])
 
     def test_captured_provider_text_does_not_become_progress(self):
         from pr_review import operations
@@ -869,6 +888,8 @@ class OperationTest(unittest.TestCase):
         self.assertEqual(result.stderr, 'Diagnostic')
         log = next((self.root / 'pr-review/operations').glob('*.log'))
         self.assertEqual(read_json(log.with_suffix('.json'))['exit_code'], 0)
+        self.assertNotIn('error', read_json(log.with_suffix('.json')))
+        self.assertNotIn('[error]', log.read_text())
         self.assertNotIn('Private draft', log.read_text())
         self.assertFalse(any('Private draft' in str(c) for c in emit.call_args_list))
 
