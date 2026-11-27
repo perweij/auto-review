@@ -199,6 +199,15 @@ def context_prompt(instructions, context, directory):
     return prompt, root
 
 
+def finding_progress(items, keys):
+    """Show the active findings' positions in the original batch selection."""
+    active = set(keys)
+    positions = [str(i) for i, key in enumerate(items, 1) if key in active]
+    if not positions:
+        return ''
+    return f"[{','.join(positions)}/{len(items)}]"
+
+
 def invoke(session, state, batch, role, context):
     before = owner_git.checkpoint(session, state, role + " before")
     if before["tree"] != batch["checkpoint"]["tree"]:
@@ -331,7 +340,8 @@ def invoke(session, state, batch, role, context):
                 session.save(state)
             result = run(args, cwd=cwd, env=env, input_bytes=prompt.encode(),
                          timeout=Runtime.environment().model_timeout, stdout_path=directory / "events.jsonl",
-                         stderr_path=directory / "stderr.log", model_events=True, stage="owner-" + role, usage_call=usage.choice('owner/' + role, choice))
+                         stderr_path=directory / "stderr.log", model_events=True, stage="owner-" + role,
+                         progress_label=finding_progress(batch.get("items", []), keys), usage_call=usage.choice('owner/' + role, choice))
             if role == 'review' and batch.get('environment_profile'):
                 store.verify_checkout('check', 'after')
         after = owner_git.checkpoint(session, state, role + " after")

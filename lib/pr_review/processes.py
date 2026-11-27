@@ -112,7 +112,7 @@ class Result:
 
 def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=None,
         stderr_path=None, model_events=False, stage="", on_line=None, pass_fds=(), usage_call=None,
-        max_output_bytes=None, capture_files=False):
+        max_output_bytes=None, capture_files=False, progress_label=""):
     """Run without a shell; log raw bytes while interpreting complete records."""
     if capture_files and (stdout_path is not None or stderr_path is not None or model_events or on_line or usage_call):
         raise ValueError('File capture is only for non-streaming metadata commands.')
@@ -265,7 +265,8 @@ def run(argv, *, cwd=None, env=None, input_bytes=b"", timeout=None, stdout_path=
                                 line_received(name, pending[name])
                                 pending[name].clear()
                 if stage and current - heartbeat >= (10 if issue_resources_active() else 5):
-                    emit("progress", message=f"[{stage}] Process running: {int(current-started)}s elapsed; {max(0, int(current-activity))}s since last output (stdout/stderr)")
+                    prefix = f"[{stage}] {progress_label}".rstrip()
+                    emit("progress", message=f"{prefix} Process running: {int(current-started)}s elapsed; {max(0, int(current-activity))}s since last output (stdout/stderr)")
                     if current - activity >= 60 and not silence_warned:
                         emit("progress", message="Warning: No output for 60s; progress is unconfirmed. Ctrl-C stops this stage and retains completed reviews.")
                         silence_warned = True
