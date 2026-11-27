@@ -72,6 +72,38 @@ class VerificationEnvironmentTest(unittest.TestCase):
                               '--logs', str(logs)]), 1)
         self.assertFalse((logs / 'check-0.json').exists())
 
+    def container_bin(self, *tools):
+        bindir = self.root / 'container-tools'
+        bindir.mkdir()
+        for tool in tools:
+            script = bindir / tool
+            script.write_text(f'#!/bin/sh\nprintf "{tool}|%s|%s|%s\\n" "$HOME" "$XDG_RUNTIME_DIR" "$*"\n')
+            script.chmod(0o755)
+        self.env.update(PATH=str(bindir), HOME='/home/controller test', XDG_RUNTIME_DIR='/run/user/4242')
+        self.spec.pop('prefix')
+
+    def launch(self, *argv):
+        return subprocess.run(['pr-review-check', 'quality', *argv], env=self.env, capture_output=True,
+                              text=True).stdout.strip()
+
+    def test_podman_provides_docker_with_controller_container_state(self):
+        self.container_bin('podman')
+        report = self.prepare()
+        self.assertEqual(report['container_cli']['docker'], 'podman')
+        self.assertEqual(self.launch('docker', 'run', '--rm', 'image'),
+                         'podman|/home/controller test|/run/user/4242|run --rm image')
+        self.assertEqual(json.loads((self.root / 'logs/report.json').read_text())['container_cli'],
+                         report['container_cli'])
+
+    def test_installed_docker_or_missing_podman_leaves_path_unchanged(self):
+        self.container_bin('docker', 'podman')
+        self.assertNotIn('container_cli', self.prepare())
+        # A real Docker CLI keeps the disposable HOME; only the Podman shim sees the controller's.
+        self.assertEqual(self.launch('docker', 'ps'), f'docker|{self.root / "private/home"}||ps')
+        path, record = environment.container_cli(str(self.root / 'absent'), self.env, self.root / 'unused')
+        self.assertEqual((path, record), (str(self.root / 'absent'), None))
+        self.assertFalse((self.root / 'unused').exists())
+
     def test_setup_failure_retains_reason_and_disables_project(self):
         self.spec['readiness'] = [['-c', 'raise RuntimeError("dependency missing")']]
         self.profile['projects']['z'] = dict(directory='.')

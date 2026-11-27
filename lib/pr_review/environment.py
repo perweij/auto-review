@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import sys
 import time
 
@@ -117,6 +119,29 @@ os.execvpe(args[0], args, project['env'])
 """
 
 
+CONTAINER_SHIM = """#!/bin/sh
+# Docker-compatible CLI for verification commands, backed by the controller's Podman.
+# Rootless Podman keeps images and runtime state under the controller's HOME and
+# XDG_RUNTIME_DIR, which the disposable check environment replaces.
+{assignments}exec {podman} "$@"
+"""
+
+
+def container_cli(path, controller_env, directory):
+    """Provide `docker` through Podman when only Podman is installed. Return the PATH and a record."""
+    podman = shutil.which('podman', path=path)
+    if shutil.which('docker', path=path) or not podman:
+        return path, None
+    keep = {key: controller_env[key] for key in ('HOME', 'XDG_RUNTIME_DIR') if controller_env.get(key)}
+    directory.mkdir()
+    shim = directory / 'docker'
+    shim.write_text(CONTAINER_SHIM.format(
+        assignments=''.join(f'{key}={shlex.quote(value)} ' for key, value in keep.items()),
+        podman=shlex.quote(podman)))
+    shim.chmod(0o700)
+    return str(directory) + os.pathsep + path, dict(docker='podman', podman=podman, shim=str(shim))
+
+
 def uv_project(spec):
     """Install dependencies from this project's reviewed manifest and lockfile."""
     options = spec['uv_sync']
@@ -143,7 +168,10 @@ def prepare(profile, project, checkout, private, logs, stage_env, *, remaining=N
     ready = {}
     home = private / 'home'
     home.mkdir()
-    base = dict(HOME=str(home), PATH=_safe_path(stage_env['PATH']), TMPDIR=str(private),
+    path, containers = container_cli(_safe_path(stage_env['PATH']), stage_env, private / 'container-bin')
+    if containers:
+        report['container_cli'] = containers
+    base = dict(HOME=str(home), PATH=path, TMPDIR=str(private),
                 LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1', GIT_CONFIG_NOSYSTEM='1',
                 GIT_CONFIG_GLOBAL='/dev/null', GIT_TERMINAL_PROMPT='0')
     timeout = profile.get('timeout', 600)

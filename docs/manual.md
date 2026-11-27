@@ -1976,7 +1976,13 @@ retain their explicit checks. To migrate a locked uv recipe replace its
 A failed project leaves independent projects available within the shared budget.
 
 Reviewers run `pr-review-check quality pytest tests/test_source_collection.py`
-in the prepared checkout. Setup and readiness share a 600-second allowance
+in the prepared checkout. If the controller has `podman` but no `docker` on its
+`PATH`, prepared projects get a private `docker` command that runs Podman with
+the controller's `HOME` and `XDG_RUNTIME_DIR`. Rootless Podman keeps its images
+and runtime state there, so test fixtures that call `docker run`, `docker port`
+or `docker network` work in the disposable check environment. `report.json`
+records the substitution under `container_cli`. An installed `docker` is used
+unchanged. Setup and readiness share a 600-second allowance
 (configurable with `timeout` up to 1800 seconds) and a 16 MiB log limit.
 Preparation failures are recorded under the attempt's environment logs and
 provided to review as evidence. Required checks that could not run must be
