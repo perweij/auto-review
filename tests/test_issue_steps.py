@@ -91,6 +91,9 @@ class IssueStepsTest(unittest.TestCase):
             tasks = ([task('whole', self.key)] if self.legacy else
                      [task('pipeline', self.key)] if completed else
                      [task('config', self.key), task('pipeline', self.key, ['config'])])
+            if 'automatic_recovery' in context:
+                # A recovery plan states its decision; a failed final review now replans.
+                return {'decision': 'repair', 'basis': 'Retry the remaining scope', 'tasks': tasks}
             return {'tasks': tasks}
         name = context.get('task', {}).get('rationale')
         incomplete = (role == 'fix' and (self.legacy or name == self.blocked_task)

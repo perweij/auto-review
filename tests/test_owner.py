@@ -27,6 +27,12 @@ REAL_INVOKE = owner_providers.invoke
 REAL_PREFLIGHT = owner_providers.preflight
 
 
+
+def scope_basis(blockers, key):
+    """Repair authority that lets a saved rejection dispatch a repair on resume."""
+    return [dict(blocker=b, kind='feedback', reference=key, source='Selected feedback',
+                 scenario='Exercise the reported case', impact=b) for b in blockers]
+
 class OwnerTest(unittest.TestCase):
     def setUp(self):
         telemetry = patch('pr_review.usage_quota.read', return_value={'status': 'unavailable', 'meters': []})
@@ -1793,6 +1799,7 @@ class OwnerTest(unittest.TestCase):
         previous = copy.deepcopy(review)
         review['outcomes'][0]['status'] = 'fixed'
         review['blocking'] = ['new defect']
+        review['repair_basis'] = scope_basis(review['blocking'], task['items'][0])
         old, new = task['before'], task['after']
         batch['attempts'] = [
             dict(role='review', status='complete', before=old, after=old, result=previous),
@@ -1838,7 +1845,8 @@ class OwnerTest(unittest.TestCase):
         state = session.load()
         task = state['batches'][-1]['tasks'][0]
         before = copy.deepcopy(task['before'])
-        task['review'].update(assessment='changes_requested', complete=True)
+        task['review'].update(assessment='changes_requested', complete=True,
+                              repair_basis=scope_basis(task['review']['blocking'], task['items'][0]))
         session.save(state)
         view = self.request('owner-fix', batch=batch['id'])
         self.assertEqual(view['batches'][-1]['status'], 'ready')
@@ -1853,7 +1861,8 @@ class OwnerTest(unittest.TestCase):
             value = original(*args)
             if args[3] == 'review':
                 value.pop('complete')
-                value.update(assessment='changes_requested', blocking=['Regression remains.'])
+                value.update(assessment='changes_requested', blocking=['Regression remains.'],
+                             repair_basis=scope_basis(['Regression remains.'], args[4]['feedback'][0]['key']))
             return value
         with patch('pr_review.owner_providers.invoke', side_effect=rejected):
             batch = self.fix()['batches'][-1]
