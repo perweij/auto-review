@@ -559,7 +559,8 @@ class OwnerAdapter(AcceptanceAdapter):
         implementer = [{'task': t['id'], 'rationale': t.get('rationale'), 'expected': t.get('expected'),
                         'implementation': {k: t.get('implementation', {}).get(k) for k in ('summary', 'checks', 'outcomes')}}
                        for t in self.data.get('completed_tasks', [])]
-        return {'verification_cases': self.cases(), 'implementer_reports': implementer, 'earlier_findings': earlier}
+        return {'verification_cases': self.cases(), 'implementer_reports': implementer, 'earlier_findings': earlier,
+                'earlier_rounds': earlier_rounds(self.batch)}
 
     def volatile_context(self):
         return self.data.get('previous_incomplete_review')
@@ -568,19 +569,26 @@ class OwnerAdapter(AcceptanceAdapter):
         return 'acceptance-owner.txt'
 
     def synthesis_schema(self, run):
-        return owner_scope.extend_schema(super().synthesis_schema(run))
+        schema = owner_scope.extend_schema(super().synthesis_schema(run))
+        schema['properties']['escalations'] = {'type': 'array', 'items': owner_providers.obj({
+            'finding_id': owner_providers.TEXT, 'earlier_round': {'type': 'integer'},
+            'earlier_finding_id': owner_providers.TEXT, 'new_evidence': owner_providers.TEXT})}
+        schema['required'].append('escalations')
+        return schema
 
     def validate(self, run, value, *, new):
         if not isinstance(value, dict):
             raise ApiError('invalid_result', 'Expected an Owner review object.')
         original = dict(value)
         rows = original.pop('repair_basis', None)
+        escalations = original.pop('escalations', None)
         result = super().validate(run, original, new=new)
         blockers = blocking_findings(original)
         if any(f['validity'] == 'UNVERIFIED' for f in blockers):
             raise ApiError('invalid_result', 'A repair requires confirmed or source-traced behavior.')
         owner_scope.validate(rows, [f['id'] for f in blockers],
                              owner_scope.contract(self.batch), self.keys())
+        validate_escalations(escalations, blockers, earlier_rounds(self.batch))
         return result
 
 
@@ -649,9 +657,52 @@ def review_issue(session, state, batch, specification):
     return result, project_issue(value)
 
 
+def earlier_rounds(batch):
+    """Each earlier final review's findings and their classification, oldest first."""
+    tree = batch['checkpoint']['tree']
+    return [r for r in copy.deepcopy(batch.get('final_review_rounds', [])) if r['tree'] != tree]
+
+
+def validate_escalations(rows, blockers, rounds):
+    """A concern an earlier round judged nonblocking blocks only with new evidence."""
+    def invalid(message):
+        raise ApiError('invalid_result', 'Invalid escalations: ' + message)
+    if not isinstance(rows, list):
+        invalid('expected a list, empty when no earlier nonblocking concern now blocks.')
+    current = {f['id'] for f in blockers}
+    earlier = {(r['round'], f['id']): f for r in rounds for f in r['findings']}
+    seen = set()
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {'finding_id', 'earlier_round', 'earlier_finding_id', 'new_evidence'}
+                or type(row['earlier_round']) is not int
+                or any(not isinstance(row[k], str) or not row[k].strip() for k in ('finding_id', 'earlier_finding_id', 'new_evidence'))):
+            invalid('each entry needs finding_id, earlier_round, earlier_finding_id and new_evidence.')
+        prior = earlier.get((row['earlier_round'], row['earlier_finding_id']))
+        if row['finding_id'] not in current or row['finding_id'] in seen:
+            invalid(f"{row['finding_id']} is not a current blocking finding, or is repeated.")
+        if prior is None or prior['blocking']:
+            invalid(f"round {row['earlier_round']} has no nonblocking finding {row['earlier_finding_id']}.")
+        if row['new_evidence'].strip() == prior['evidence'].strip():
+            invalid('new_evidence repeats the earlier evidence.')
+        seen.add(row['finding_id'])
+
+
+def record_final_round(batch, value):
+    """Keep this round's classification for later rounds; a resumed round replaces itself."""
+    rounds = [r for r in batch.get('final_review_rounds', []) if r['tree'] != batch['checkpoint']['tree']]
+    rounds.append({'round': max((r['round'] for r in rounds), default=0) + 1, 'tree': batch['checkpoint']['tree'], 'assessment': value['assessment'],
+                   'findings': [{'id': f['id'], 'title': f['title'], 'severity': f.get('severity'),
+                                 'blocking': bool(f.get('blocking')), 'evidence': f['evidence'][:1000]}
+                                for f in value['findings']],
+                   'escalations': copy.deepcopy(value.get('escalations', []))})
+    batch['final_review_rounds'] = rounds
+
+
 def review_owner(session, state, batch, keys, data):
     """Final verification of the combined Owner fixes, projected to an Owner review."""
     result = execute(session, state, batch, OwnerAdapter(session, state, batch, keys, data), role='final_review')
+    record_final_round(batch, result.value)
+    session.save(state)
     projected = project_owner(result.value, list(keys))
     projected['repair_basis'] = result.value['repair_basis']
     projected['observations'] = [finding_text(f) for f in result.value['findings'] if not f['blocking']]

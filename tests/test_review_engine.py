@@ -933,6 +933,67 @@ class ParallelSlotsTest(EngineFixture):
         self.assertEqual({'reviewer-1', 'reviewer-2', 'synthesis'}, self.reran(self.review))
 
 
+class FinalRoundHistoryTest(EngineFixture):
+    """Owner final verification keeps each round's classification for the next round."""
+
+    def owner_review(self, **extra):
+        if extra:
+            value = json.loads(self.result_file.read_text())
+            self.result_file.write_text(json.dumps({**value, **extra}))
+        self.state = self.session.load()
+        self.batch = next(b for b in self.state['batches'] if b['id'] == self.batch['id'])
+        self.data['feedback'] = self.session.items(self.state, KEYS)
+        result = acceptance.review_owner(self.session, self.state, self.batch, KEYS, self.data)
+        self.state = self.session.load()
+        self.batch = next(b for b in self.state['batches'] if b['id'] == self.batch['id'])
+        return result
+
+    def next_candidate(self, content):
+        (self.worktree / 'source.txt').write_text(content)
+        state = self.session.load()
+        batch = next(b for b in state['batches'] if b['id'] == self.batch['id'])
+        batch['checkpoint'] = owner_git.checkpoint(self.session, state, 'repair')
+        self.session.save(state)
+
+    def test_rounds_record_classification_and_reach_the_next_synthesis(self):
+        self.verdict('changes_requested', findings=[finding('F1', blocking=True), finding('F2', severity='Low')])
+        self.owner_review()
+        [first] = self.batch['final_review_rounds']
+        self.assertEqual([('F1', True), ('F2', False)], [(f['id'], f['blocking']) for f in first['findings']])
+        self.next_candidate('feature\nrepaired\n')
+        self.verdict()
+        self.owner_review()
+        self.assertEqual([1, 2], [r['round'] for r in self.batch['final_review_rounds']])
+        supplied = read_json(self.workspace() / 'context/earlier_rounds.json')
+        self.assertEqual([first], supplied)
+
+    def test_an_earlier_nonblocking_concern_blocks_only_with_declared_new_evidence(self):
+        self.verdict('changes_requested', findings=[finding('F1', blocking=True), finding('F2', severity='Low')])
+        self.owner_review()
+        self.next_candidate('feature\nrepaired\n')
+        self.verdict('changes_requested', findings=[finding('F1', blocking=True)])
+        escalation = dict(finding_id='F1', earlier_round=1, earlier_finding_id='F2',
+                          new_evidence='The repair now drops the page number from the diagnostic.')
+        _, projected = self.owner_review(escalations=[escalation])
+        self.assertTrue(projected['blocking'])
+        self.assertEqual([escalation], self.batch['final_review_rounds'][-1]['escalations'])
+
+    def test_escalation_references_are_validated(self):
+        rounds = [{'round': 1, 'tree': 't1', 'findings': [
+            {'id': 'F1', 'blocking': True, 'evidence': 'old blocker'},
+            {'id': 'F2', 'blocking': False, 'evidence': 'old observation'}]}]
+        blockers = [finding('F9', blocking=True)]
+        def row(**changes):
+            return {'finding_id': 'F9', 'earlier_round': 1, 'earlier_finding_id': 'F2', 'new_evidence': 'New impact', **changes}
+        acceptance.validate_escalations([], blockers, rounds)
+        acceptance.validate_escalations([row()], blockers, rounds)
+        for rows in (None, [row(earlier_finding_id='F1')], [row(earlier_round=2)], [row(finding_id='F8')],
+                     [row(new_evidence='old observation')], [row(), row()], [{**row(), 'extra': 1}]):
+            with self.subTest(rows=rows), self.assertRaises(ApiError) as caught:
+                acceptance.validate_escalations(rows, blockers, rounds)
+            self.assertIn('Invalid escalations', str(caught.exception))
+
+
 class ValidatorTest(unittest.TestCase):
     def test_running_validator_keeps_its_schema_when_checkout_changes(self):
         expected = acceptance.output_schema(KEYS, exact_outcomes=False, sources={'reviewer-1'})

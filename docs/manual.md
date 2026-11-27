@@ -684,7 +684,10 @@ the engine's final verification. An Owner task can receive two automatic repairs
 The second requires a changed source tree and independent review evidence of progress:
 fewer distinct blockers, additional original feedback addressed while retaining previous
 successes, or a previously failed or unavailable case now verified. Merely rewriting
-a blocker does not count. The combined patch gets one direct repair before automatic replanning. A repair changes the tree, which is a new candidate. Incomplete checks,
+a blocker does not count. The combined patch gets one direct repair before automatic replanning.
+Each final review receives every earlier final round's findings with their severity
+and blocking status. A concern an earlier round judged nonblocking can block only
+when the synthesis declares new evidence for it, which the validator checks. A repair changes the tree, which is a new candidate. Incomplete checks,
 clarification, or remaining blocking findings pause a manual batch. Owner checks use
 the focused 60-second-per-check/five-minute cumulative instruction limits.
 

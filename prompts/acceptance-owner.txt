@@ -10,8 +10,14 @@ relevant omissions and interactions beyond them. Report all confirmed material
 defects together so a single repair can address them. When a defect follows a
 pattern that can recur, name the other instances you found in its evidence.
 Challenge earlier findings when their assumptions conflict with approved scope or
-actual callers. case_results
-must cover every supplied case exactly once using its exact ID: tested with the
+actual callers. earlier_rounds lists every earlier final review's findings with
+their severity and blocking status. Keep the severity and blocking status of a
+concern consistent with those rounds. A concern an earlier round reported as
+nonblocking, or a variant of it, may block only with new evidence of material
+impact, such as a regression introduced by a later repair. List each such finding
+in escalations with the earlier round, its finding ID and the new evidence;
+otherwise keep it nonblocking. Use an empty escalations list when none apply.
+case_results must cover every supplied case exactly once using its exact ID: tested with the
 actual command and result, source_traced with specific code reasoning, failed with
 the observed mismatch, or unavailable with the limitation. Final-review case IDs
 include their task prefixes. Treat implementer questions and incomplete reports as
