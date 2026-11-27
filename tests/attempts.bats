@@ -29,9 +29,9 @@ review_hashes() {
     [ ! -L "$previous/.pending-review" ]
     [ "$(review_hashes "$previous")" = "$hashes" ]
     [ "$(cat "$candidate/publication/review-body.md")" = 'My carefully edited review' ]
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run_review --claude-1-model replacement; assert_success
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
 }
 
 @test "synthesis and matching failures never install a replacement and resume checkpoints" {
@@ -82,19 +82,19 @@ review_hashes() {
     session=$(session_directory)
     run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     candidate=$(run_directory)
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     # Simulate stopping immediately before the atomic pointer switch.
     rm "$session/.current-review"
     ln -s "$candidate" "$session/.pending-review"
     run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     [ "$(realpath -e "$session/.current-review")" = "$candidate" ]
     [ ! -L "$session/.pending-review" ]
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
     # Simulate stopping just after switching, but before removing pending.
     ln -s "$candidate" "$session/.pending-review"
     run_review --codex-1-model replacement --codex-2-model replacement; assert_success
     [ ! -L "$session/.pending-review" ]
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
 }
 
 @test "failed synthesis-only refresh preserves the completed review and independent checkpoints" {
@@ -116,9 +116,9 @@ review_hashes() {
     [ "$(realpath -e "$previous/.current-review")" = "$candidate" ]
     [ "$(grep -c '^claude$' "$FIXTURE/stages")" = 1 ]
     [ "$(grep -c '^codex$' "$FIXTURE/stages")" = 1 ]
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
 }
 
 @test "failed discussion rematch keeps old drafts and resumes only matching" {

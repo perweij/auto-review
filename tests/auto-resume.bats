@@ -10,7 +10,7 @@ load helpers/fixture
     unset MOCK_FAIL_STAGE
     run_review; assert_success
     [[ $output == *"Automatically resuming PR #7 from $saved"* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
     [ "$(sha256sum "$saved/reviews/reviewer-1.md" "$saved/reviews/reviewer-2.md")" = "$reports" ]
     [ "$(find "$FIXTURE/state" -name manifest.json | wc -l)" = 1 ]
 }
@@ -28,7 +28,7 @@ load helpers/fixture
     echo '{broken' > "${saved%/*}/broken/manifest.json"
     run_review; assert_success
     [[ $output == *"Automatically resuming PR #7 from $saved"* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "multiple matching runs require explicit selection without changing either run" {
@@ -73,7 +73,7 @@ load helpers/fixture
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force
     run_review; assert_success
     [[ $output == *'Updating this review'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "automatic resume resolves from a secondary caller worktree" {
@@ -83,5 +83,5 @@ load helpers/fixture
     cd "$FIXTURE/secondary"
     run_review; assert_success
     [[ $output == *"Automatically resuming PR #7 from $saved"* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }

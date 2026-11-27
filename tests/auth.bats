@@ -69,7 +69,7 @@ load helpers/fixture
     export MOCK_PROBE_FAIL=codex MOCK_PROBE_EXIT=0
     run_review --resume "$(run_directory)"; assert_failure
     [ "$(cat "$FIXTURE/probes")" = $'claude\ncodex\nclaude\ncodex' ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
     manifest_is '.phases.codex_auth_probe.status=="failed" and .phases.synthesis.status=="completed"'
 }
 

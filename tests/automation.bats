@@ -136,12 +136,14 @@ anchored_findings() {
 }
 
 @test "automatic cancellation returns JSON and preserves resumable analysis" {
-    export MOCK_SLEEP_STAGE=codex MOCK_SLEEP_SECONDS=20
+    # Sequential slots make reviewer-1 complete before Codex is interrupted.
+    export PR_REVIEW_SEQUENTIAL_REVIEWERS=1 MOCK_SLEEP_STAGE=codex MOCK_SLEEP_SECONDS=20
     run python3 "$PROJECT_ROOT/tests/helpers/interrupt_runner.py" "$CLI" 7 --auto-publish --json
     [ "$status" = 130 ]
     result=$(tail -n 1 "$FIXTURE/interrupt-output")
     jq -e '.outcome=="interrupted" and .exit_code==130 and .session' <<< "$result"
     manifest_is '.status=="failed" and .phases["reviewer-1"].status=="completed"'
+    unset PR_REVIEW_SEQUENTIAL_REVIEWERS
 }
 
 @test "automatic trust failure is saved and recoverable with an exact snapshot token" {

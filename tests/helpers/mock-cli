@@ -18,9 +18,13 @@ fi
 args=$(jq -cn --args '$ARGS.positional' -- "$@")
 call=$(jq -nc --arg tool "$tool" --argjson args "$args" '{tool:$tool,args:$args}')
 mock_bridge() {
-    local response
+    # Parallel reviewer slots share one request/response channel; take turns.
+    local response lock
+    exec {lock}>> "$FIXTURE/mock-bridge.lock"
+    flock "$lock"
     printf '%s\n' "$1" > "$FIXTURE/mock-bridge-request"
     IFS= read -r response < "$FIXTURE/mock-bridge-response"
+    exec {lock}>&-
     [[ $response == ok ]] || { printf '%s\n' "$response" >&2; return 1; }
 }
 if [[ $HOME == */isolated-review-*/home ]]; then

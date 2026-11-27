@@ -164,7 +164,7 @@ load helpers/fixture
 @test "validity conflict reruns synthesis but preserves both independent reviews" {
     export MOCK_MATCH_CONFLICT=once
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
     jq -e '.findings[0].validity=="REJECTED" and .blocking_findings==0' "$(run_directory)/reviews/synthesis.json"
 }
 

@@ -343,6 +343,7 @@ environment settings supplement those flags and are not part of generated JSON.
 | `PR_REVIEW_MAX_EVENT_BYTES` | Maximum provider JSON record size in bytes; default 67108864 (64 MiB). Increase for larger valid results. Stderr is logged without this record limit. |
 | `PR_REVIEW_AUTH_TIMEOUT` | Positive integer seconds for each live probe and local authentication check; default 60 |
 | `PR_REVIEW_CODEX_PROBE_MODEL` | Codex live authentication probe model; default `gpt-6-luna` |
+| `PR_REVIEW_SEQUENTIAL_REVIEWERS` | `1` runs two independent reviewer slots one after the other instead of in parallel, for example on a low-memory host or while diagnosing a slot |
 | `PR_REVIEW_COMMIT_TIMEOUT` | Positive integer seconds per automatic owner commit; default 120 |
 
 ## Live authentication checks
@@ -702,6 +703,13 @@ present, the approved issue plan. The existing Owner and issue guards stay the
 authority for acceptance (`owner_contracts.current`, `owner_commit.prepare`,
 `owner_auto_commit.execute` and `owner_publication.automatic_proof`); the engine
 only supplies the reviewer and synthesis pipeline.
+
+Two reviewer slots run at the same time. Each still reviews the same pinned
+inputs in its own private snapshot, and synthesis starts only after both finish.
+If one slot fails, the other runs to completion, so a resume reruns only the
+failed slot. Cancellation stops both slots and marks each running slot
+interrupted. Progress lines carry the slot name, for example `[reviewer-1]`.
+Set `PR_REVIEW_SEQUENTIAL_REVIEWERS=1` to run them one after the other.
 
 **The candidate.** An Owner or issue candidate is an uncommitted tree that the Owner
 checkpoint identifies. To reuse the commit-based review machinery, a deterministic

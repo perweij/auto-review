@@ -13,7 +13,7 @@ setup() {
     export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$FIXTURE/gitconfig"
     export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
     unset GH_REPO GH_HOST VISUAL EDITOR PR_REVIEW_MODEL_TIMEOUT PR_REVIEW_CLAUDE_BUDGET PR_REVIEW_CLAUDE_PERMISSION_MODE
-    unset PR_REVIEW_AUTH_TIMEOUT PR_REVIEW_CODEX_PROBE_MODEL
+    unset PR_REVIEW_AUTH_TIMEOUT PR_REVIEW_CODEX_PROBE_MODEL PR_REVIEW_SEQUENTIAL_REVIEWERS
     git init -q --bare "$FIXTURE/remote.git"
     git init -q -b main "$FIXTURE/checkout"
     cd "$FIXTURE/checkout" || return 1
@@ -43,6 +43,12 @@ run_directory() {
     if [[ -L $session/.pending-review ]]; then realpath -e "$session/.pending-review"
     elif [[ -L $session/.current-review ]]; then realpath -e "$session/.current-review"
     else printf '%s\n' "$session"; fi
+}
+# Reviewer slots run in parallel, so their order within each consecutive run is
+# not fixed. List each run's reviewer stages as claude, then codex.
+stage_log() {
+    awk 'function flush() { for (; c > 0; c--) print "claude"; for (; x > 0; x--) print "codex" }
+         $0 == "claude" { c++; next } $0 == "codex" { x++; next } { flush(); print } END { flush() }' "$FIXTURE/stages"
 }
 manifest_is() { jq -e "$1" "$(run_directory)/manifest.json" >/dev/null; }
 tty_review() { run python3 "$PROJECT_ROOT/tests/helpers/interactive_runner.py" "$1" "$CLI" 7 "${@:2}"; }

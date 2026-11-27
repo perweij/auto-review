@@ -16,7 +16,7 @@ invalidate_claude() {
     unset MOCK_FAIL_STAGE
     run_review; assert_success
     [[ $output == *'Restarting reviewer slots: reviewer-1'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nclaude\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\nclaude\nsynthesis\ncontributions' ]
     archive=$(jq -r '.review_history[0].archive' "$(run_directory)/manifest.json")
     [ "$(cat "$(run_directory)/reviews/reviewer-2.md")" = "$prior" ]
     [ -s "$archive/reviews/reviewer-1.md" ]
@@ -24,7 +24,7 @@ invalidate_claude() {
     manifest_is '.slot_restart==null and .phases.synthesis.status=="completed"'
     run_review; assert_success
     manifest_is '.review_history|length==1'
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nclaude\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\nclaude\nsynthesis\ncontributions' ]
 }
 
 @test "changing only Codex retains Claude but invalidates synthesis and matching" {
@@ -34,7 +34,7 @@ invalidate_claude() {
     run_review --codex-1-model other-codex --codex-2-model other-codex; assert_success
     [[ $output == *'Restarting reviewer slots: reviewer-2'* && $output == *'Reusing completed Reviewer-1 review'* ]]
     [ "$(sha256sum "$saved/reviews/reviewer-1.md")" = "$claude_hash" ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\ncodex\nsynthesis\ncontributions' ]
     archive=$(jq -r '.review_history[0].archive' "$(run_directory)/manifest.json")
     [ ! -e "$archive/reviews/reviewer-1.md" ]
     [ -s "$archive/reviews/reviewer-2.md" ]
@@ -50,7 +50,7 @@ invalidate_claude() {
     archive=$(jq -r '.review_history[0].archive' "$(run_directory)/manifest.json")
     [ "$(cat "$archive/reviews/reviewer-1.md")" = 'damaged report' ]
     [ "$(cat "$saved/publication/review-body.md")" = 'Human edited body' ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
 }
 
 @test "resume finishes a partially moved restart before running independent reviewers" {
@@ -68,7 +68,7 @@ invalidate_claude() {
     [ -s "$archive/reviews/reviewer-1.md" ]
     [ -s "$archive/reviews/synthesis.json" ]
     manifest_is '.slot_restart==null and (.review_history|length)==1 and .phases["reviewer-1"].status=="completed"'
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
 }
 
 @test "restart retains published history and gives replacement findings a fresh ledger" {
@@ -110,7 +110,7 @@ invalidate_claude() {
     saved=$(run_directory)
     actions=$(sha256sum "$saved/publication/drafts.json")
     run_review --processing codex-2; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\ncontributions' ]
     [ "$(sha256sum "$saved/publication/drafts.json")" = "$actions" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
     manifest_is '.configuration.processing_provider=="codex" and .publication.published_actions==0'

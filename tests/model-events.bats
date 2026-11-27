@@ -3,14 +3,15 @@
 load helpers/fixture
 
 @test "Ctrl-C stops isolated model descendants even when they ignore signals" {
-    export MOCK_SLEEP_STAGE=codex MOCK_SLEEP_SECONDS=30 MOCK_IGNORE_SIGNALS=1
+    # Sequential slots make reviewer-1 complete before Codex is interrupted.
+    export PR_REVIEW_SEQUENTIAL_REVIEWERS=1 MOCK_SLEEP_STAGE=codex MOCK_SLEEP_SECONDS=30 MOCK_IGNORE_SIGNALS=1
     run python3 "$PROJECT_ROOT/tests/helpers/interrupt_runner.py" "$CLI" 7 --no-publish
     [ "$status" = 130 ]
     manifest_is '.phases["reviewer-2"].status=="interrupted" and .phases["reviewer-2"].exit_status==130'
     [ -s "$(run_directory)/reviews/reviewer-1.md" ]
-    unset MOCK_SLEEP_STAGE MOCK_SLEEP_SECONDS MOCK_IGNORE_SIGNALS
+    unset PR_REVIEW_SEQUENTIAL_REVIEWERS MOCK_SLEEP_STAGE MOCK_SLEEP_SECONDS MOCK_IGNORE_SIGNALS
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "Codex repository error stops a hung process and retains the independent review" {
@@ -20,10 +21,10 @@ load helpers/fixture
     [[ $output == *'Codex rejected the working directory as a Git repository'* ]]
     manifest_is '.phases["reviewer-2"].status=="failed" and .phases["reviewer-2"].failure_reason=="git_repository_unavailable" and .phases["reviewer-2"].exit_status!=0'
     [ -s "$(run_directory)/reviews/reviewer-1.md" ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex' ]
+    [ "$(stage_log)" = $'claude\ncodex' ]
     unset MOCK_CODEX_EVENT MOCK_CODEX_EVENT_HANG
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "terminal Codex event fails even if the CLI exits zero with a report" {
@@ -63,7 +64,7 @@ load helpers/fixture
         all(.[]; .[index("--output-format")+1]=="json" and index("--verbose")==null and index("--include-partial-messages")==null)'
     run_review; assert_success
     [[ $output == *'Reusing completed synthesis'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }
 
 

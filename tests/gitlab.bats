@@ -22,7 +22,7 @@ prepare_gitlab() {
     run "$CLI" 7 --resume "$(session_directory)"
     assert_success
     [[ $output == *'Checkout: '* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
     jq -se 'all(.[]; .tool != "gh")' "$FIXTURE/calls.jsonl"
     [ ! -e "$FIXTURE/post-count" ]
 }
@@ -88,14 +88,14 @@ call_gitlab_api() {
     run "$CLI" 7 --forge gitlab
     assert_success
     saved=$(session_directory)
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run "$CLI" publish-report "$saved"
     assert_success
     [[ $output == *'#note_1'* ]]
     run call_gitlab_api "$(jq -nc --arg session "$saved" '{protocol:1,command:"review-publish-report",session:$session}')"
     assert_success
     [ "$(jq length "$FIXTURE/gitlab-notes.json")" = 1 ]
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
     jq -e '.[0].body | ascii_downcase | contains("https://gitlab.com/group/sub/repo/-/merge_requests/7")' "$FIXTURE/gitlab-notes.json"
     jq -se 'all(.[]; .tool != "gh")' "$FIXTURE/calls.jsonl"
 }

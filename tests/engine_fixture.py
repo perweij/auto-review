@@ -27,6 +27,9 @@ KEYS = ['thread:T1', 'thread:T2']
 # A reviewer. The body records the checkout and explicitly supplied context.
 SLOT_SCRIPT = r'''
 stage=$1; out=${2:-}
+if [ -n "${SLOT_TIMES:-}" ]; then echo "start $stage $(date +%s.%N)" >> "$SLOT_TIMES"; fi
+case " ${SLEEP_STAGES:-} " in *" $stage "*) sleep "${SLEEP_SECONDS:-1}" ;; esac
+if [ -n "${SLOT_TIMES:-}" ]; then echo "end $stage $(date +%s.%N)" >> "$SLOT_TIMES"; fi
 case " ${FAIL_STAGES:-} " in *" $stage "*) exit 7 ;; esac
 case " ${EDIT_STAGES:-} " in *" $stage "*) echo hacked >> source.txt ;; esac
 ctx=$(cat ../context/selected_feedback.json 2>/dev/null | tr -d '"\\\n' | head -c 40)

@@ -25,7 +25,7 @@ assert_focused_independent_reviews() {
         $args[$args|index("--append-system-prompt")+1]==($policy|rtrimstr("\n"))' "$saved/logs/commands.json"
     run_review; assert_success
     [[ $output == *'Reusing completed synthesis'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "full-suite opt-in changes synthesis only and preserves completed drafts through failure" {
@@ -48,7 +48,7 @@ assert_focused_independent_reviews() {
     run_review --synthesis-tests full; assert_success
     [ "$(realpath -e "$previous/.current-review")" = "$candidate" ]
     [ "$(sha256sum "$previous/reviews/synthesis.json" "$previous/publication/review-body.md")" = "$hashes" ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nsynthesis\nsynthesis\ncontributions' ]
 }
 
 @test "Codex synthesis full-suite permission does not reach either independent reviewer" {

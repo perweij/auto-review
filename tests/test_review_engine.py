@@ -875,6 +875,64 @@ class FailureTest(EngineFixture):
             self.assertNoAcceptance()
 
 
+class ParallelSlotsTest(EngineFixture):
+    """Reviewer slots run at the same time, with the same evidence and recovery as before."""
+
+    def slot_times(self, **environment):
+        times = self.root / 'slot-times.log'
+        times.unlink(missing_ok=True)
+        with patch.dict(os.environ, {'SLOT_TIMES': str(times), 'SLEEP_STAGES': 'reviewer-1 reviewer-2',
+                                     'SLEEP_SECONDS': '1', **environment}):
+            self.assertEqual('completed', self.review().status)
+        spans = {}
+        for line in times.read_text().splitlines():
+            event, stage, at = line.split()
+            spans.setdefault(stage, {})[event] = float(at)
+        return spans
+
+    def test_slots_overlap_and_keep_complete_records(self):
+        spans = self.slot_times()
+        first, second = spans['reviewer-1'], spans['reviewer-2']
+        self.assertLess(first['start'], second['end'])
+        self.assertLess(second['start'], first['end'])
+        phases = self.manifest()['phases']
+        self.assertEqual(('completed', 'completed'), (phases['reviewer-1']['status'], phases['reviewer-2']['status']))
+        # Each slot updates its command entry after workspace preparation; neither entry is lost.
+        entries = [c for c in self.commands() if c['stage'] in ('reviewer-1', 'reviewer-2')]
+        self.assertEqual(['reviewer-1', 'reviewer-2'], sorted(c['stage'] for c in entries))
+        self.assertTrue(all(c.get('isolation') == 'private-snapshot-container-v1' for c in entries))
+
+    def test_sequential_override_runs_one_slot_after_the_other(self):
+        spans = self.slot_times(PR_REVIEW_SEQUENTIAL_REVIEWERS='1')
+        self.assertLessEqual(spans['reviewer-1']['end'], spans['reviewer-2']['start'])
+
+    def test_a_failed_slot_lets_its_peer_finish_and_resume_reruns_only_the_failure(self):
+        with patch.dict(os.environ, {'FAIL_STAGES': 'reviewer-1', 'SLEEP_STAGES': 'reviewer-2', 'SLEEP_SECONDS': '1'}), \
+                self.assertRaises(ApiError):
+            self.review()
+        phases = self.manifest()['phases']
+        self.assertEqual(('failed', 'completed'), (phases['reviewer-1']['status'], phases['reviewer-2']['status']))
+        self.assertNotIn('synthesis', phases)
+        self.assertNoAcceptance()
+        self.assertEqual({'reviewer-1', 'synthesis'}, self.reran(self.review))
+
+    def test_cancellation_stops_both_running_slots_and_resume_reruns_both(self):
+        from pr_review.processes import cancellation_scope
+        import threading
+        import time
+        started = time.monotonic()
+        # The scope re-raises its cancellation on exit, so expect it outside the scope.
+        with patch.dict(os.environ, {'SLEEP_STAGES': 'reviewer-1 reviewer-2', 'SLEEP_SECONDS': '30'}), \
+                self.assertRaises(Cancelled), cancellation_scope() as cancellation:
+            threading.Timer(1.5, cancellation.request).start()
+            self.review()
+        self.assertLess(time.monotonic() - started, 20)
+        phases = self.manifest()['phases']
+        self.assertEqual(('interrupted', 'interrupted'), (phases['reviewer-1']['status'], phases['reviewer-2']['status']))
+        self.assertNoAcceptance()
+        self.assertEqual({'reviewer-1', 'reviewer-2', 'synthesis'}, self.reran(self.review))
+
+
 class ValidatorTest(unittest.TestCase):
     def test_running_validator_keeps_its_schema_when_checkout_changes(self):
         expected = acceptance.output_schema(KEYS, exact_outcomes=False, sources={'reviewer-1'})

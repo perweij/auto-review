@@ -10,7 +10,7 @@ excerpts before sharing them.
 
 Use a source checkout as described in the [README](README.md#install).
 The production backend requires Linux and Python 3.9+ and has no pip dependencies.
-Backend checks additionally require Git, Bash, Bats 1.5+, ShellCheck, and jq.
+Backend checks additionally require Git, Bash, Bats 1.5+, ShellCheck, jq, and `flock` (util-linux).
 The deterministic suite mocks GitHub and model CLIs; credentials are not required.
 
 Frontend checks require Emacs 29.1+, Magit 4.6+, Transient 0.13+, and Forge on the

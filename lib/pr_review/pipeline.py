@@ -176,6 +176,10 @@ def independent(run, stage):
     review_engine.independent(run, stage)
 
 
+def independent_slots(run, slots):
+    review_engine.independent_slots(run, slots)
+
+
 def write_report(run, value):
     snapshot = run.manifest['snapshot']
     body = value['report_md'] + f"\n\n\n## Orchestrator coverage notes\n\nReviewed head `{snapshot['head']}`, merge-base `{snapshot['merge_base']}`.\n\nCI covers Actions runs and legacy statuses only. Third-party GitHub App check runs are not visible. Empty results do not mean CI passed.\n"

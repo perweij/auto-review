@@ -24,13 +24,13 @@ api_mutate() {
     jq -se --arg saved "$saved" 'last.result.sessions | length==1 and
         .[0].session==$saved and .[0].pr==7 and .[0].repository=="github.com/org/repo"' <<< "$output"
     generation=$(jq -sr 'last.result.sessions[0].generation' <<< "$output")
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run api '{"command":"read"}' "$saved"; assert_success
     jq -e --arg generation "$generation" '.result.generation==$generation and (.result.comments|length)>0' <<< "$output"
     run api '{"command":"run"}' "$saved"; assert_success
     jq -se --arg saved "$saved" --arg generation "$generation" 'last.result |
         .session==$saved and .generation==$generation and .new_review_ready==true' <<< "$output"
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
 }
 
 @test "incomplete first API run reports paused state and resumes without repeating reviews" {
@@ -42,7 +42,7 @@ api_mutate() {
     unset MOCK_GRAPHQL_FAIL
     run api '{"command":"run"}' "$saved"; assert_success
     jq -se 'last.result.new_review_ready==true' <<< "$output"
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "paused API replacement reports current generation until discussion and matching complete" {
@@ -71,7 +71,7 @@ api_mutate() {
 @test "API adopts legacy drafts without model calls and posts separate inline comments" {
     run_review; assert_success
     saved=$(session_directory)
-    before=$(cat "$FIXTURE/stages")
+    before=$(stage_log)
     api_mutate placement '{"comment":"p1","placement":{"kind":"inline","path":"source.txt","side":"RIGHT","line":2}}' > /dev/null
     api_mutate edit '{"comment":"p1","body":"Exact human text"}' > /dev/null
     api_mutate stage '{"comment":"p1"}' > /dev/null
@@ -84,7 +84,7 @@ api_mutate() {
     jq -e '.result.complete and .result.review.comments[0].status=="published"' <<< "$output"
     jq -e '.comments|length==1' "$FIXTURE/api-payload.json"
     jq -e '.comments[0].body|startswith("Exact human text\n\n<!--")' "$FIXTURE/api-payload.json"
-    [ "$before" = "$(cat "$FIXTURE/stages")" ]
+    [ "$before" = "$(stage_log)" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
 }
 
@@ -103,7 +103,7 @@ api_mutate() {
     jq -e '.result.complete and all(.result.review.comments[]; .status=="published")' <<< "$output"
     [ "$(cat "$FIXTURE/reply-count")" = 1 ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "rematching after published replies and inline comments establishes a stable new baseline" {
@@ -125,9 +125,9 @@ api_mutate() {
     run_review; assert_success
     candidate=$(run_directory)
     [ "$candidate" != "$saved" ]
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
     [ "$(run_directory)" = "$candidate" ]
     manifest_is '.publication.published_actions==0'
     [ "$(sha256sum "$saved/publication/drafts.json")" = "$history_hash" ]
@@ -186,10 +186,10 @@ api_mutate() {
     jq '.batches[0].actions[0].status="ambiguous"' "$saved/publication/drafts.json" > "$FIXTURE/ambiguous.tmp"
     cp "$saved/publication/drafts.json" "$FIXTURE/original-drafts.json"
     mv "$FIXTURE/ambiguous.tmp" "$saved/publication/drafts.json"
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run_review; assert_failure
     [[ $output == *'Resolve uncertain publication'* ]]
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
     cp "$FIXTURE/original-drafts.json" "$saved/publication/drafts.json"
     unset MOCK_FAIL_STAGE
     printf '%s\n' '[{"id":"F1","title":"A different finding","validity":"CONFIRMED","evidence":"source.txt:2 changed behavior","blocking":false,"body_md":"New issue, despite reusing F1."}]' > "$FIXTURE/findings.json"
@@ -206,7 +206,7 @@ api_mutate() {
     jq -e 'any(.items[].comments[]; .body|contains("Carefully edited and posted wording"))' "$discussion"
     [ "$(sha256sum "$saved/publication/drafts.json")" = "$hashes" ]
     [ "$(cat "$FIXTURE/post-count")" = 1 ]
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     run_review; assert_success
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
 }

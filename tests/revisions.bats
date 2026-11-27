@@ -34,7 +34,7 @@ advance_head() {
     jq -e '.proposals[0].selected==false and .proposals[0].revision==null' "$saved/publication/contributions.json"
     [ ! -f "$saved/publication/previous-edits.md" ]
     [ ! -f "$saved/reviews/revision.json" ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\ncodex\nsynthesis\ncontributions' ]
     [ ! -e "$FIXTURE/post-count" ]
 }
 
@@ -52,11 +52,11 @@ SH
     jq 'map(.body_md="Fresh finding body")' "$FIXTURE/latest-findings.json" > "$FIXTURE/findings.json"
     run_review; assert_success
     draft_is '.comments[0].body=="Fresh finding body" and .comments[0].status=="unstaged"'
-    stages=$(cat "$FIXTURE/stages")
+    stages=$(stage_log)
     tty_drafts "history|show $generation|i p1|current|recover $generation p1|q"; assert_success
     [[ $output == *'Human-written text'* ]]
     draft_is '.comments|length==2 and .[1].body=="Human-written text for the old commit.\n" and .[1].status=="unstaged" and .[1].placement.kind=="unplaced"'
-    [ "$(cat "$FIXTURE/stages")" = "$stages" ]
+    [ "$(stage_log)" = "$stages" ]
     [ ! -e "$FIXTURE/post-count" ]
 }
 
@@ -94,7 +94,7 @@ SH
     manifest_is '.phases.revision==null and .status=="complete"'
     archive=$(jq -r '.review_history[-1].archive' "$saved/manifest.json")
     [ "$(cat "$archive/logs/revision-result.json")" = 'Earlier invalid comparison response' ]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
     [ ! -e "$FIXTURE/post-count" ]
 }
 

@@ -386,8 +386,7 @@ def execute(request, *, confirm_trust=None):
                             if independent:
                                 pipeline.adopt_legacy_slots(run, slots)
                                 pipeline.prepare_slots(run, slots)
-                                for slot in slots:
-                                    pipeline.independent(run, slot['id'])
+                                pipeline.independent_slots(run, slots)
                             pipeline.synthesis(run)
                             ready = pipeline.contributions(run)
                             if ready and configuration['suggested_changes']:

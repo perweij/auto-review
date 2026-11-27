@@ -12,17 +12,20 @@ A ``run`` is any object with the attributes the engine reads: ``path``,
 ``model(stage, argv, input_bytes)``. ``Review`` is the PR run; ``CandidateReview``
 (see ``review_workspace``) is the artifact store of Owner and issue stages.
 """
+import contextvars
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import tempfile
+import threading
 
 from . import usage
 from .common import ApiError, now, read_json
 from . import cache, providers
-from .processes import Cancelled, run as default_runner
+from .processes import Bookkeeping, Cancelled, bookkeeping, shared_cancellation, run as default_runner
 from .sessions import say
 from .storage import atomic_bytes, hash_file, write_json
 
@@ -144,13 +147,17 @@ def record_interruption(run, exc):
     active = getattr(run, 'active', None)
     if not active:
         return
-    record = run.manifest['phases'].get(active)
+    mark_stopped(run, active, exc)
+    run.active = None
+
+
+def mark_stopped(run, stage, exc):
+    record = run.manifest['phases'].get(stage)
     if record is not None:
         if isinstance(exc, Cancelled):
             record.update(status='interrupted', exit_status=exc.details['exit_code'], finished_at=now())
         else:
             record.update(status='failed', exit_status=record.get('exit_status', 1), finished_at=now())
-    run.active = None
 
 
 # ---- slot preparation and invalidation -------------------------------------------------
@@ -332,6 +339,58 @@ def independent(run, stage):
         session_trace.complete(trace_handle, {'status': 'evidence_available', 'summary': output.read_text()[:1200]}, output)
 
 
+def independent_slots(run, slots):
+    """Run reviewer slots at the same time; each reviews the same pinned inputs alone.
+
+    One lock serialises the slots' bookkeeping (manifest, session, trace and usage
+    records). A slot releases it only while it waits on a child process. After a
+    failure the peer still finishes, so resume reruns only the failed slot.
+    """
+    stages = [slot['id'] for slot in slots]
+    if len(stages) < 2 or os.environ.get('PR_REVIEW_SEQUENTIAL_REVIEWERS') == '1':
+        for stage in stages:
+            independent(run, stage)
+        return
+    lock = Bookkeeping()
+    failures = {}
+
+    def work(stage):
+        with bookkeeping(lock):
+            try:
+                independent(run, stage)
+            except BaseException as exc:
+                failures[stage] = exc
+                if run.manifest['phases'].get(stage, {}).get('status') == 'running':
+                    mark_stopped(run, stage, exc)
+                    run.save()
+
+    say('Running ' + ' and '.join(stages) + ' in parallel')
+    with shared_cancellation() as cancellation:
+        threads = [threading.Thread(target=contextvars.copy_context().run, args=(work, stage),
+                                    name='review-' + stage, daemon=True) for stage in stages]
+        for thread in threads:
+            thread.start()
+        interrupted = None
+        for thread in threads:
+            while thread.is_alive():
+                # A short join keeps signal handlers running; they request cancellation
+                # that each slot observes while waiting on its provider.
+                try:
+                    thread.join(0.2)
+                except BaseException as exc:
+                    # Stop both slots and their process groups before propagating.
+                    interrupted = interrupted or exc
+                    cancellation.request()
+    run.active = None
+    run.save()
+    if interrupted is not None:
+        raise interrupted
+    cancelled = next((failures[s] for s in stages if isinstance(failures.get(s), Cancelled)), None)
+    first = cancelled or next((failures[s] for s in stages if s in failures), None)
+    if first is not None:
+        raise first
+
+
 # ---- synthesis ---------------------------------------------------------------------------------
 def retain(run, value, assessment):
     """Keep a result that is valid but not reusable under its own per-attempt name.
@@ -445,8 +504,7 @@ def review(run):
         if requires_independent(run.settings, run.manifest):
             slots = run.settings['reviewer_slots']
             prepare_slots(run, slots, adapter.downstream)
-            for slot in slots:
-                independent(run, slot['id'])
+            independent_slots(run, slots)
         return synthesis(run)
     except BaseException as exc:
         record_interruption(run, exc)
@@ -502,6 +560,24 @@ def model_failure(run, stage, provider, rc, output, stderr, probe=False):
     raise ApiError('model_failed', 'Live authentication preflight failed; review setup stopped' if probe else f'{stage} failed; inspect captured logs and resume to retry')
 
 
+def record_command(run, entry, **update):
+    """Add ``entry`` to the command log, or update it in place when ``update`` is given.
+
+    Re-read the log each time: a parallel slot can append its own entry while this
+    stage waits on workspace preparation.
+    """
+    path = run.path / 'logs/commands.json'
+    commands = read_json(path, [])
+    index = next((i for i in reversed(range(len(commands))) if commands[i] == entry), None) if update else None
+    entry = {**entry, **update}
+    if index is None:
+        commands.append(entry)
+    else:
+        commands[index] = entry
+    write_json(path, commands)
+    return entry
+
+
 def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
     """Run one provider stage under its adapter's snapshot and isolation rules."""
     adapter = adapter_of(run)
@@ -527,9 +603,7 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
     run.active = stage
     run.save()
     cwd = adapter.stage_cwd(run, stage, slot)
-    commands = read_json(run.path / 'logs/commands.json', [])
-    commands.append(dict(stage=stage, time=now(), cwd=str(cwd), argv=argv))
-    write_json(run.path / 'logs/commands.json', commands)
+    command_entry = record_command(run, dict(stage=stage, time=now(), cwd=str(cwd), argv=argv))
     from . import environment
     profile = environment.stage_profile(run, stage)
     temporary = None
@@ -548,9 +622,8 @@ def execute_stage(run, stage, argv, input_bytes=b'', *, runner=default_runner):
             cwd = workspace.checkout
             run.manifest['removed_environment'][provider] = sorted(set(removed) | (before_names - set(env)))
             run.save()
-            commands[-1].update(cwd=str(cwd), source_worktree=str(run.worktree),
-                                isolation='private-snapshot-container-v1', workspace_argv=actual_argv)
-            write_json(run.path / 'logs/commands.json', commands)
+            command_entry = record_command(run, command_entry, cwd=str(cwd), source_worktree=str(run.worktree),
+                                           isolation='private-snapshot-container-v1', workspace_argv=actual_argv)
         if profile:
             if workspace:
                 workspace.verify()

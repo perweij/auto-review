@@ -6,7 +6,7 @@ load helpers/fixture
 @test "end-to-end local snapshot, independent stages, exact flags and no publication" {
     run_review
     assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
     [ "$(sort -u "$FIXTURE/reviewed-heads")" = "$HEAD_SHA" ]
     [ ! -e "$FIXTURE/post-count" ]
     manifest_is '.status == "complete" and .phases.synthesis.status == "completed"'
@@ -76,7 +76,7 @@ load helpers/fixture
     run_review; assert_success
     run_review; assert_success
     [[ $output == *'Automatically resuming PR #7'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
     [ "$(git branch --show-current)" = main ]
 }
 
@@ -88,17 +88,23 @@ load helpers/fixture
     [ ! -f "$(run_directory)/reviews/synthesis.json" ]
 }
 
-@test "Claude failure prevents Codex and synthesis" {
+@test "Claude failure prevents synthesis while the parallel Codex review completes" {
     export MOCK_FAIL_STAGE=claude
     run_review; assert_failure
-    [ "$(cat "$FIXTURE/stages")" = claude ]
-    manifest_is '.phases["reviewer-1"].status == "failed"'
+    [ "$(stage_log)" = $'claude\ncodex' ]
+    manifest_is '.phases["reviewer-1"].status == "failed" and .phases["reviewer-2"].status == "completed"'
+    [ ! -f "$(run_directory)/reviews/synthesis.json" ]
+    unset MOCK_FAIL_STAGE
+    run_review --resume "$(run_directory)"; assert_success
+    # Only Claude reruns; the completed Codex review is reused.
+    [ "$(stage_log)" = $'claude\nclaude\ncodex\nsynthesis\ncontributions' ]
 }
 
 @test "Claude result error is a failure despite process exit zero" {
     export MOCK_CLAUDE_ERROR=1
     run_review; assert_failure
-    [ "$(cat "$FIXTURE/stages")" = claude ]
+    [ "$(stage_log)" = $'claude\ncodex' ]
+    manifest_is '.phases["reviewer-1"].status == "failed" and (.phases | has("synthesis") | not)'
 }
 
 @test "synthesis failure resumes completed independent phases" {
@@ -106,7 +112,7 @@ load helpers/fixture
     run_review; assert_failure
     unset MOCK_FAIL_STAGE
     run_review --resume "$(run_directory)"; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
     manifest_is '.phases.synthesis.status == "completed"'
 }
 
@@ -122,7 +128,7 @@ load helpers/fixture
     [ ! -s "$(run_directory)/logs/synthesis.stderr.log" ]
     unset MOCK_STDOUT_ERROR_STAGE
     run_review --resume "$(run_directory)"; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
 }
 
 @test "expired Claude OAuth is diagnosed despite success subtype and empty stderr" {
@@ -134,7 +140,7 @@ load helpers/fixture
     manifest_is '.phases.synthesis.failure_reason=="oauth_session_expired" and .phases.synthesis.status=="failed"'
     unset MOCK_STDOUT_OAUTH_STAGE
     run_review --resume "$(run_directory)"; assert_success
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\nsynthesis\ncontributions' ]
 }
 
 @test "invalid structured synthesis is retained and resumable" {
@@ -150,8 +156,9 @@ load helpers/fixture
     export MOCK_MUTATE_STAGE=claude
     run_review; assert_failure
     [[ $output == *'changed its isolated snapshot'* ]]
-    [ "$(cat "$FIXTURE/stages")" = claude ]
-    manifest_is '.phases["reviewer-1"].status == "failed"'
+    # Codex reviews its own private snapshot; only synthesis and publication follow both.
+    [ "$(stage_log)" = $'claude\ncodex' ]
+    manifest_is '.phases["reviewer-1"].status == "failed" and (.phases | has("synthesis") | not)'
 }
 
 @test "index and HEAD mutations are detected" {
@@ -177,8 +184,8 @@ load helpers/fixture
 @test "changing private snapshot refs blocks subsequent stages" {
     export MOCK_REF_STAGE=claude
     run_review; assert_failure
-    manifest_is '.phases["reviewer-1"].status == "failed"'
-    [ "$(cat "$FIXTURE/stages")" = claude ]
+    manifest_is '.phases["reviewer-1"].status == "failed" and (.phases | has("synthesis") | not)'
+    [ "$(stage_log)" = $'claude\ncodex' ]
 }
 
 @test "unrecorded untracked files prevent resume reuse" {
@@ -295,7 +302,7 @@ load helpers/fixture
     echo 'Human edited body' > "$(run_directory)/publication/review-body.md"
     run_review; assert_success
     [[ $output == *'Automatically resuming PR #7'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions' ]
     grep -q 'Human edited body' "$(run_directory)/publication/review-body.md"
 }
 
@@ -303,7 +310,7 @@ load helpers/fixture
     run_review; assert_success
     run_review --resume "$(run_directory)" --claude-1-model different; assert_success
     [[ $output == *'Restarting reviewer slots: reviewer-1'* ]]
-    [ "$(cat "$FIXTURE/stages")" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
+    [ "$(stage_log)" = $'claude\ncodex\nsynthesis\ncontributions\nclaude\nsynthesis\ncontributions' ]
     git push -q "$FIXTURE/remote.git" "$BASE:refs/pull/7/head" --force
     run_review --resume "$(run_directory)"; assert_success
     [[ $output == *'Updating this review'* ]]
