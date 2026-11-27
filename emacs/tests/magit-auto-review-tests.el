@@ -838,6 +838,7 @@
           (vector (aref (alist-get 'reviewer_slots settings) 0)
                   '((id . "reviewer-2") (provider . "codex") (model . "gpt-6-luna") (effort . "medium")))
           (alist-get 'reviewers settings) ["claude" "codex"]
+          (alist-get '_named settings) '((reviewers . ["claude-1" "codex-1"]))
           (alist-get 'reviewers (alist-get '_compatibility settings)) ["claude" "codex"]
           (alist-get 'synthesis_tests settings) "full")
     settings))
@@ -893,7 +894,9 @@
        (should (equal (alist-get 'processing_provider request) "codex"))
        (should (equal (alist-get 'synthesis_tests request) "full"))
        (should-not transient--prefix)
-       (should (stringp (magit-auto-review--encode request)))
+       (let ((decoded (magit-auto-review--json (magit-auto-review--encode request))))
+         (should (equal (alist-get 'reviewers (alist-get '_named decoded))
+                        '("claude-1" "codex-1"))))
        (let ((magit-auto-review-codex-model "changed-default"))
          (magit-auto-review--launch-review magit-auto-review--run-settings "snapshot")
          (should (equal (alist-get 'codex_model request) "gpt-6-luna"))

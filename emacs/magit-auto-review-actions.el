@@ -211,8 +211,9 @@
             (magit-auto-review--launch-followup request))
         (unless magit-auto-review--run-settings
           (setq magit-auto-review--run-settings
-                (alist-get 'settings (magit-auto-review--call
-                                      `((command . "settings") (session . ,magit-auto-review--session))))))
+                (magit-auto-review--normalize-setup-arrays
+                 (alist-get 'settings (magit-auto-review--call
+                                       `((command . "settings") (session . ,magit-auto-review--session)))))))
         (magit-auto-review--launch-review magit-auto-review--run-settings (alist-get 'snapshot data))))))
 
 (defun magit-auto-review-cancel-operation ()

@@ -227,7 +227,7 @@
    (setq magit-auto-review--setup-settings
          '((reviewer_slots . (((id . "reviewer-1") (provider . "codex") (model . "saved") (effort . "high"))))
            (reviewers . ("codex")) (_compatibility . ((reviewers . ("codex"))))))
-   (magit-auto-review--normalize-setup-arrays)
+   (magit-auto-review--normalize-setup-arrays magit-auto-review--setup-settings)
    (let ((encoded (magit-auto-review--json
                    (magit-auto-review--encode (append '((command . "run")) magit-auto-review--setup-settings)))))
      (should (equal '("codex") (alist-get 'reviewers encoded)))

@@ -139,19 +139,21 @@ When nil, a sole reviewer is used, or Codex for a pair."
           magit-auto-review--setup-owner (current-buffer))
     (when (alist-get 'session resolved)
       (setq magit-auto-review--session (alist-get 'session resolved)))
-    (magit-auto-review--normalize-setup-arrays))
+    (magit-auto-review--normalize-setup-arrays magit-auto-review--setup-settings))
   (add-hook 'kill-buffer-hook #'magit-auto-review--setup-stop nil t)
   (magit-auto-review-refresh-choices)
   (transient-setup (or (plist-get magit-auto-review--choice-adapter :menu) 'magit-auto-review-setup-menu)))
 
-(defun magit-auto-review--normalize-setup-arrays ()
-  "Encode settings arrays explicitly after every settings response."
-  (setf (alist-get 'reviewer_slots magit-auto-review--setup-settings)
-        (vconcat (alist-get 'reviewer_slots magit-auto-review--setup-settings)))
-  (dolist (settings (list magit-auto-review--setup-settings
-                          (alist-get '_compatibility magit-auto-review--setup-settings)))
-    (when (assq 'reviewers settings)
-      (setf (alist-get 'reviewers settings) (vconcat (alist-get 'reviewers settings))))))
+(defun magit-auto-review--normalize-setup-arrays (settings)
+  "Restore JSON array types in decoded SETTINGS and return them."
+  (when (assq 'reviewer_slots settings)
+    (setf (alist-get 'reviewer_slots settings)
+          (vconcat (alist-get 'reviewer_slots settings))))
+  (dolist (object (list settings (alist-get '_named settings)
+                        (alist-get '_compatibility settings)))
+    (when (assq 'reviewers object)
+      (setf (alist-get 'reviewers object) (vconcat (alist-get 'reviewers object)))))
+  settings)
 
 (defun magit-auto-review--setup-providers ()
   "Return providers used by reviewer slots and processing."
@@ -404,7 +406,7 @@ When nil, a sole reviewer is used, or Codex for a pair."
                      (magit-auto-review--call
                       (append (magit-auto-review--identity) `((command . "settings") (,preset . t) (defaults . ,defaults))
                               overrides))))
-    (magit-auto-review--normalize-setup-arrays)
+    (magit-auto-review--normalize-setup-arrays magit-auto-review--setup-settings)
     (magit-auto-review-refresh-choices)))
 
 (defun magit-auto-review-setup-economical ()
