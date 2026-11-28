@@ -1592,7 +1592,9 @@ With prefix INSPECT, open status only.  Existing commit messages are retained."
                                   (format "Publish %d replies to %s and resolve threads %s?"
                                           (length replies) (magit-auto-review--forge-label)
                                           (magit-auto-review-owner--thread-list threads))
-                                  '((?r "publish and resolve") (?p "publish only") (?q "cancel"))))
+                                  ;; Keep the lowercase keys separate from the labels so
+                                  ;; read-multiple-choice displays their actual case.
+                                  '((?r "Resolve on publication") (?p "Publish only") (?q "Cancel"))))
                           (when (yes-or-no-p (format "Publish these %d replies to %s? "
                                                      (length replies) (magit-auto-review--forge-label))) ?p))))
            (when (memq choice '(?r ?p))
