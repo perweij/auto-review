@@ -35,6 +35,10 @@
   (let ((section (cl-find-if (lambda (s) (and (eq (oref s type) type) (equal (oref s value) value)))
                               magit-auto-review-owner--sections)))
     (should section)
+    (let ((parent (oref section parent)))
+      (while parent
+        (when (oref parent hidden) (magit-section-show parent))
+        (setq parent (oref parent parent))))
     (goto-char (oref section start))
     section))
 
@@ -281,7 +285,7 @@
               (comments . (((author . "me") (body . "My review feedback")))))))
      (magit-auto-review-owner--accept view)
      (should (string-match-p "Your GitHub comments (1)" (buffer-string)))
-     (should-not (string-match-p "NEW" (buffer-string)))
+     (should-not (string-search "NEW · " (buffer-string)))
      (owner-test-goto 'owner-group "own")
      (cl-letf (((symbol-function 'magit-auto-review-owner--start) (lambda (r &optional _cb) (setq request r))))
        (magit-auto-review-owner-fix))
@@ -304,6 +308,17 @@
      (should-not (string-match-p "<!-- pr-review" (buffer-string)))
      (let ((section (owner-test-goto 'owner-feedback "review:9")))
        (should (equal (oref (magit-auto-review-owner--at 'owner-group) value) "history"))))))
+
+(ert-deftest owner/nested-group-headings-have-a-distinct-face ()
+  (owner-test-buffer
+   (dolist (group '("replies" "history"))
+     (owner-test-goto 'owner-group group)
+     (should (eq (get-text-property (point) 'font-lock-face) 'magit-auto-review-owner-heading)))
+   (dolist (entry '((owner-reply-group "unstaged") (owner-reply-group "staged")
+                    (owner-reply-group "published") (owner-history-group "completed")
+                    (owner-history-group "handled")))
+     (apply #'owner-test-goto entry)
+     (should (eq (get-text-property (point) 'font-lock-face) 'magit-auto-review-owner-subheading)))))
 
 (ert-deftest owner/faces-and-group-selection-distinguish-resolved-feedback ()
   (owner-test-buffer
@@ -332,6 +347,39 @@
      (should (looking-at "Handled ·"))
      (should (eq (get-text-property (point) 'font-lock-face) 'magit-auto-review-owner-item)))))
 
+(ert-deftest owner/own-comments-stage-only-existing-drafts ()
+  (owner-test-buffer
+   (let* ((view (owner-test-view))
+          (published '((id . "sent") (body . "Published reply") (status . "published") (source . "done")
+                       (commits . ("abc")) (target . ((kind . "reply")))))
+          sent)
+     (setf (alist-get 'batches view) nil
+           (alist-get 'feedback view)
+           '(((key . "own") (own_only . t) (triage . "available") (actionable . t))
+             ((key . "done") (is_resolved . t)))
+           (alist-get 'replies view) (list published))
+     (magit-auto-review-owner--accept view)
+     (let ((text (owner-test-visible-text)))
+       (should (string-search "All saved replies are published." text))
+       (should (cl-every (lambda (section) (oref section hidden)) magit-auto-review-owner--sections))
+       (should-not (string-search "f fix" text))
+       (should-not (string-search "Fix replies published" text)))
+     (magit-section-show (owner-test-goto 'owner-group "metadata"))
+     (should (string-search "1 thread resolved" (owner-test-visible-text)))
+     (owner-test-goto 'owner-feedback "own")
+     (should-error (magit-auto-review-owner-stage) :type 'user-error)
+     (setf (alist-get 'replies view)
+           (list published '((id . "mine") (body . "Draft") (status . "unstaged") (source . "own"))
+                 '((id . "other") (body . "Other draft") (status . "unstaged") (source . "done"))))
+     (magit-auto-review-owner--accept view)
+     (magit-section-show (owner-test-goto 'owner-group "own"))
+     (should (string-search "s stages draft replies" (owner-test-visible-text)))
+     (owner-test-goto 'owner-group "own")
+     (cl-letf (((symbol-function 'magit-auto-review-owner--mutate)
+                (lambda (_operation field) (setq sent (cdr field)))))
+       (magit-auto-review-owner-stage))
+     (should (equal sent ["mine"])))))
+
 (ert-deftest owner/next-step-follows-reply-publication-state ()
   (owner-test-buffer
    (let* ((view (owner-test-view)) (batch (car (alist-get 'batches view)))
@@ -342,7 +390,7 @@
            (alist-get 'associations batch) '(("thread:T1" . ((commits . ("abc")))))
            (alist-get 'replies view) (list reply))
      (let ((magit-auto-review-owner--view view))
-       (should (string-match-p "G checks the push" (magit-auto-review-owner--next-step batch)))
+       (should (string-match-p "C-u m opens Magit" (magit-auto-review-owner--next-step batch)))
        (should (string-match-p "automatic commits complete" (magit-auto-review-owner--auto-summary batch)))
        (setf (alist-get 'status reply) "unstaged")
        (should (string-match-p "stage those you want with s" (magit-auto-review-owner--next-step batch)))
@@ -352,7 +400,7 @@
                (alist-get 'status staged-reply) "staged")
          (dolist (replies (list (list staged-reply reply) (list reply staged-reply)))
            (setf (alist-get 'replies view) replies)
-           (should (string-match-p "G checks the push" (magit-auto-review-owner--next-step batch)))
+           (should (string-match-p "C-u m opens Magit" (magit-auto-review-owner--next-step batch)))
            (should-not (string-match-p "No a or s is needed" (magit-auto-review-owner--next-step batch)))))
        (setf (alist-get 'replies view) (list reply)
              (alist-get 'status reply) "staged")
@@ -378,10 +426,20 @@
            (alist-get 'push_target view) '((branch . "feat/inventory") (remotes . ("origin")))
            (alist-get 'replies view) (list ready waiting))
      (magit-auto-review-owner--accept view)
-     (let ((header (car (split-string (buffer-string) "Fix: "))))
-       (dolist (action '("Next: C-u m" "origin/feat/inventory" "P u" "complete series" "G checks the push"))
-         (should (string-search action header)))
-       (should-not (string-search "Next: P previews" header)))
+     (should (string-search "Next: C-u m" (owner-test-visible-text)))
+     (should-not (string-search "P u pushes" (owner-test-visible-text)))
+     (should (string-search "Session metadata" (owner-test-visible-text)))
+     (should-not (string-search "last checked:" (owner-test-visible-text)))
+     (magit-section-show (owner-test-goto 'owner-group "metadata"))
+     (magit-auto-review-owner--render)
+     (should (string-search "last checked:" (owner-test-visible-text)))
+     (setf (alist-get 'commits waiting) '("abc")
+           (alist-get 'replies view) (list ready waiting)
+           (alist-get 'worktree view) temporary-file-directory)
+     (cl-letf (((symbol-function 'magit-rev-ancestor-p)
+                (lambda (sha ref) (and (equal sha "abc") (equal ref "refs/remotes/origin/feat/inventory")))))
+       (magit-auto-review-owner--accept view)
+       (should (string-search "Next: G checks the push." (owner-test-visible-text))))
      (setf (alist-get 'actions view) '(((status . "ambiguous"))))
      (magit-auto-review-owner--accept view)
      (should (string-search "Next: O checks delivery" (owner-test-visible-text)))
@@ -402,7 +460,7 @@
      (should (string-search "r resumes" (magit-auto-review-owner--dashboard-step view batch)))
      (should (string-search "select feedback" (magit-auto-review-owner--dashboard-step view nil)))
      (setf (alist-get 'feedback view) nil)
-     (should (string-search "G fetches" (magit-auto-review-owner--dashboard-step view nil))))))
+     (should (string-search "No pending action" (magit-auto-review-owner--dashboard-step view nil))))))
 
 (ert-deftest owner/refresh-reports-confirmed-push-without-publishing ()
   (owner-test-buffer
@@ -1064,15 +1122,41 @@
      (should (equal (alist-get 'items request) ["thread:T1" "thread:T2"]))
      (should (eq (alist-get 'auto_commit request) t)))))
 
+(ert-deftest owner/dashboard-guides-commit-replies-on-open-threads ()
+  (owner-test-buffer
+   (let* ((view magit-auto-review-owner--view)
+          (item (car (alist-get 'feedback view)))
+          (batch (car (alist-get 'batches view))))
+     (setf (alist-get 'replies view) nil
+           (alist-get 'can_reply item) t
+           (alist-get 'can_resolve item) t
+           (alist-get 'attention item) :false
+           (alist-get 'own_only item) t
+           (alist-get 'triage item) "available"
+           (alist-get 'feedback view) (list item)
+           (alist-get 'associations batch) '(("thread:T1" . ((commits . ("abc")))))
+           (alist-get 'batches view) (list batch))
+     (should (string-search "a checks the pushed commits"
+                            (magit-auto-review-owner--dashboard-step view nil)))
+     (setf (alist-get 'batches view) nil)
+     (should (string-search "c drafts a reply with its commit SHA"
+                            (magit-auto-review-owner--dashboard-step view nil)))
+     (setf (alist-get 'replies view) '(((source . "thread:T1") (status . "published"))))
+     (should (string-search "x resolves that thread" (magit-auto-review-owner--dashboard-step view nil))))))
+
 (ert-deftest owner/reopening-adopts-current-view ()
   (save-window-excursion
-    (let ((view (owner-test-view)) buffer)
+    (let ((view (owner-test-view)) (fetches 0) buffer)
       (unwind-protect
-          (cl-letf (((symbol-function 'magit-auto-review--call) (lambda (_) (copy-tree view))))
+          (cl-letf (((symbol-function 'magit-auto-review--call) (lambda (_) (copy-tree view)))
+                    ((symbol-function 'magit-auto-review-owner-fetch) (lambda () (cl-incf fetches))))
             (magit-auto-review-owner-open "/tmp/" 7 "github.com/org/repo")
             (setq buffer (current-buffer))
+            (magit-section-show (owner-test-goto 'owner-group "attention"))
             (setf (alist-get 'revision view) 44)
             (magit-auto-review-owner-open "/tmp/" 7 "github.com/org/repo")
+            (should (= fetches 2))
+            (should (cl-every (lambda (section) (oref section hidden)) magit-auto-review-owner--sections))
             (should (= (alist-get 'revision magit-auto-review-owner--view) 44))
             (should (= (alist-get 'revision (magit-auto-review-owner--request "owner-mutate")) 44)))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
@@ -1326,7 +1410,9 @@
                            (thing-at-point 'line t)))
    (owner-test-goto 'owner-feedback "local:second")
    (should (string-match-p "Not run" (thing-at-point 'line t)))
-   (should (string-match-p "Latest fix: 1 of 3 feedback items" (owner-test-visible-text)))))
+   (should-not (string-search "Latest fix:" (owner-test-visible-text)))
+   (magit-section-show (owner-test-goto 'owner-group "metadata"))
+   (should (string-search "Latest fix: 1 feedback item · " (owner-test-visible-text)))))
 
 (ert-deftest owner/unverified-task-outcome-is-not-shown-as-verified ()
   (owner-test-buffer
@@ -1727,6 +1813,7 @@
              ((items . ("comment:3")) (status . "queued")))
            (alist-get 'batches view) (list previous current))
      (magit-auto-review-owner--accept view)
+     (magit-section-show (owner-test-goto 'owner-group "fixes"))
      (let ((text (owner-test-visible-text)))
        (dolist (label '("Current automatic fix round · 3 findings" "Earlier round: Operation cancelled."
                         "Stopped because: Final check requires a fixture." "r resumes"

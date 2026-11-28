@@ -58,7 +58,6 @@
   (magit-auto-review-owner-open default-directory url nil "gitlab")
   (setq origin (current-buffer) session (alist-get 'session magit-auto-review-owner--view))
   (owner-smoke-assert (equal magit-auto-review--forge "gitlab") "Owner lost forge identity")
-  (magit-auto-review-owner-fetch)
   (owner-smoke-wait)
   (setq key (alist-get 'key (cl-find (string-to-number (getenv "SMOKE_COMMENT_ID"))
                                     (alist-get 'feedback magit-auto-review-owner--view)

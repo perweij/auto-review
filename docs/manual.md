@@ -481,8 +481,8 @@ for the state model and features delegated to GitHub/Forge.
 
 Owner mode opens independently of saved reviewer runs. It keeps complete incoming
 discussions, unread/changed state, local triage, review verdicts, thread resolution,
-and outdated-code status separate. Opening uses saved discussions. Local reload
-(`g`) also checks Git commits; `G` explicitly reads GitHub without a model call.
+and outdated-code status separate. Opening Owner shows the saved discussions folded and refreshes them from the forge in the background.
+Local reload (`g`) checks Git commits. Use `G` to repeat the forge refresh.
 
 ### Importing findings
 

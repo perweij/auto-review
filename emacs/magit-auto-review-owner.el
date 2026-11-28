@@ -17,6 +17,11 @@
   "Owner group headings; inherit the theme's Magit heading color."
   :group 'magit-auto-review)
 
+(defface magit-auto-review-owner-subheading
+  '((t :inherit default :weight bold))
+  "Headings for subsections inside Owner groups."
+  :group 'magit-auto-review)
+
 (defface magit-auto-review-owner-attention
   '((t :inherit default :weight bold))
   "Owner items with work remaining, distinct from group headings."
@@ -42,6 +47,7 @@
 (defvar-local magit-auto-review-owner--editor-origin nil)
 (defvar-local magit-auto-review-owner--editor-request nil)
 (defvar-local magit-auto-review-owner--handoff nil)
+(defvar-local magit-auto-review-owner--push-seen nil)
 
 (defvar magit-auto-review-owner-mode-map
   (let ((map (make-sparse-keymap)))
@@ -85,6 +91,8 @@
   "Inspect feedback and prepare owner fixes; F is reserved for later work."
   (setq-local buffer-read-only t)
   (setq-local truncate-lines nil)
+  (add-hook 'window-buffer-change-functions #'magit-auto-review-owner--check-local-push nil t)
+  (add-hook 'window-selection-change-functions #'magit-auto-review-owner--check-local-push nil t)
   (add-hook 'kill-buffer-query-functions #'magit-auto-review-owner--can-close nil t)
   (setq-local revert-buffer-function (lambda (&rest _) (magit-auto-review-owner-refresh)))
   (magit-auto-review-owner--render))
@@ -309,20 +317,36 @@
             (cl-count "complete" (alist-get 'tasks batch) :key (lambda (task) (alist-get 'status task)) :test #'equal)
             (length (alist-get 'tasks batch)) (magit-auto-review-owner--pause-reason batch)))))
 
-(defun magit-auto-review-owner--push-step (view)
-  "Describe the push needed for staged replies in VIEW."
+(defun magit-auto-review-owner--push-visible-p (view)
+  "Does a PR tracking ref contain the commits awaiting push in VIEW?"
   (let* ((target (alist-get 'push_target view))
          (branch (alist-get 'branch target))
-         (remotes (alist-get 'remotes target)))
-    (concat "Next: C-u m opens Magit to push the complete series. Staged replies await the push.\n  "
-            (if (and branch (= (length remotes) 1))
-                (format "P u pushes to %s/%s when the Push PR header confirms that upstream."
-                        (car remotes) branch)
-              (if branch
-                  (format "Verify the remote for %s and configure %s as the upstream before pushing."
-                          (or (alist-get 'repository target) "the PR repository") branch)
-                "Verify the PR upstream and push the complete series there."))
-            "\n  Back in Owner, G checks the push; then P previews the replies.")))
+         (worktree (alist-get 'worktree view))
+         (waiting (seq-filter (lambda (r) (and (equal (alist-get 'status r) "staged")
+                                               (magit-auto-review--true-p (alist-get 'awaiting_push r))))
+                              (alist-get 'replies view))))
+    (when (and waiting branch worktree (file-directory-p worktree)
+               (cl-every (lambda (r) (alist-get 'commits r)) waiting))
+      (let ((default-directory (file-name-as-directory worktree))
+            (commits (delete-dups (mapcan (lambda (r) (copy-sequence (alist-get 'commits r))) waiting))))
+        (seq-some (lambda (remote)
+                    (let ((ref (concat "refs/remotes/" remote "/" branch)))
+                      (cl-every (lambda (sha) (magit-rev-ancestor-p sha ref)) commits)))
+                  (alist-get 'remotes target))))))
+
+(defun magit-auto-review-owner--check-local-push (window)
+  "Update the next action when WINDOW returns to Owner after a push."
+  (with-current-buffer (window-buffer window)
+    (let ((seen (magit-auto-review-owner--push-visible-p magit-auto-review-owner--view)))
+      (unless (eq seen magit-auto-review-owner--push-seen)
+        (setq magit-auto-review-owner--push-seen seen)
+        (magit-auto-review-owner--render)))))
+
+(defun magit-auto-review-owner--push-step ()
+  "Describe the next action for staged replies awaiting forge confirmation."
+  (if magit-auto-review-owner--push-seen
+      "Next: G checks the push."
+    "Next: C-u m opens Magit to push the complete series. Staged replies await the push."))
 
 (defun magit-auto-review-owner--next-step (batch)
   "Explain the next useful action for BATCH using saved state only."
@@ -342,7 +366,7 @@
       "The same feedback was verified by newer fixes. No resume is needed; this unused batch is retained for inspection.")
      ((cl-some (lambda (r) (and (equal (alist-get 'status r) "staged")
                                 (magit-auto-review--true-p (alist-get 'awaiting_push r)))) replies)
-      (magit-auto-review-owner--push-step magit-auto-review-owner--view))
+      (magit-auto-review-owner--push-step))
      ((magit-auto-review-owner--batch-history-p batch)
       (if (magit-auto-review-owner--batch-resolved-p batch)
           "Finished: replies published and threads resolved. Saved reports and commit links remain available below."
@@ -522,7 +546,7 @@
                       (alist-get 'artifacts attempt))))
     (magit-insert-section section (owner-details (cons (alist-get 'id batch) 'verification) t)
       (push section magit-auto-review-owner--sections)
-      (magit-auto-review-owner--heading "Verification and task details")
+      (magit-auto-review-owner--heading "Verification and task details" 'magit-auto-review-owner-subheading)
       (insert (format "Started: %s\nBaseline: %s\n" (alist-get 'created_at batch) (alist-get 'baseline batch)))
       (dolist (rejection (alist-get 'plan_rejections batch))
         (insert (format "Rejected plan (%s): %s\n" (alist-get 'at rejection) (alist-get 'error rejection))))
@@ -563,7 +587,7 @@
     (when (alist-get 'attempts batch)
       (magit-insert-section section (owner-details (cons (alist-get 'id batch) 'history) t)
         (push section magit-auto-review-owner--sections)
-        (magit-auto-review-owner--heading (format "Attempt history (%d; includes earlier reports)" (length (alist-get 'attempts batch))))
+        (magit-auto-review-owner--heading (format "Attempt history (%d; includes earlier reports)" (length (alist-get 'attempts batch))) 'magit-auto-review-owner-subheading)
         (dolist (attempt (alist-get 'attempts batch))
           (magit-insert-section section (owner-attempt (alist-get 'path attempt) t)
             (push section magit-auto-review-owner--sections)
@@ -688,9 +712,9 @@
     (dolist (phase '("Blocked" "Needs attention" "Paused" "In progress" "Queued"
                      "Task checks passed" "Verified" "Skipped"))
       (when-let ((members (cdr (assoc phase groups))))
-        (magit-insert-section section (owner-progress (cons (alist-get 'id batch) phase))
+        (magit-insert-section section (owner-progress (cons (alist-get 'id batch) phase) t)
           (push section magit-auto-review-owner--sections)
-          (magit-auto-review-owner--heading (format "%s (%d)" phase (length members)))
+          (magit-auto-review-owner--heading (format "%s (%d)" phase (length members)) 'magit-auto-review-owner-subheading)
           (mapc #'magit-auto-review-owner--insert-feedback members))))))
 
 (defun magit-auto-review-owner--dashboard-step (view batch)
@@ -709,7 +733,7 @@
      ((seq-some (lambda (a) (member (alist-get 'status a) '("submitting" "ambiguous"))) (alist-get 'actions view))
       "Next: O checks delivery receipts before you publish again.")
      ((seq-some (lambda (r) (magit-auto-review--true-p (alist-get 'awaiting_push r))) staged)
-      (magit-auto-review-owner--push-step view))
+      (magit-auto-review-owner--push-step))
      ((seq-some (lambda (r) (alist-get 'needs_attention r)) staged)
       "Next: inspect the flagged staged reply and its feedback before publishing.")
      (staged (format "Next: P previews %d staged %s%s." (length staged)
@@ -721,15 +745,44 @@
      ((seq-some (lambda (r) (alist-get 'needs_attention r)) unstaged)
       "Next: inspect the flagged reply under Unstaged. i acknowledges the inspected context; s stages the reply.")
      (unstaged "Next: inspect the replies under Unstaged; s stages the ones you want to publish.")
+     ((and (magit-auto-review-owner--fixing-p)
+           (seq-some
+            (lambda (fix)
+              (and (equal (alist-get 'status fix) "ready")
+                   (not (alist-get 'superseded_by fix))
+                   (seq-some
+                    (lambda (key)
+                      (let ((item (magit-auto-review-owner--feedback key)))
+                        (and (equal (alist-get 'kind item) "thread")
+                             (magit-auto-review--true-p (alist-get 'can_reply item))
+                             (not (magit-auto-review--true-p (alist-get 'is_resolved item)))
+                             (not (magit-auto-review--true-p (alist-get 'missing item)))
+                             (magit-auto-review-owner--linked-commits fix key)
+                             (not (seq-find (lambda (r) (equal (alist-get 'source r) key)) replies)))))
+                    (magit-auto-review-owner--verified-keys fix))))
+            (alist-get 'batches view)))
+      "Next: a checks the pushed commits and stages fixed-in replies. P previews them for publication and resolution.")
      ((and batch (magit-auto-review-owner--fixing-p))
       (magit-auto-review-owner--next-step batch))
-     ((seq-some (lambda (item) (or (magit-auto-review--true-p (alist-get 'attention item))
-                                   (magit-auto-review-owner--own-available-p item))) feedback)
+     ((seq-some (lambda (item) (magit-auto-review--true-p (alist-get 'attention item))) feedback)
       (if (magit-auto-review-owner--fixing-p)
-          "Next: select feedback and press C-u f for automatic fixing, or f for manual completion."
+          "Next: select feedback under Attention needed to act on it."
         "Next: inspect the feedback; c drafts a reply on a replyable item."))
-     (t (format "No pending action in the saved view. G fetches feedback from %s."
-                (magit-auto-review--forge-label))))))
+     ((seq-some (lambda (reply)
+                  (let ((item (magit-auto-review-owner--feedback (alist-get 'source reply))))
+                    (and (equal (alist-get 'status reply) "published")
+                         (equal (alist-get 'kind item) "thread")
+                         (not (magit-auto-review--true-p (alist-get 'missing item)))
+                         (not (magit-auto-review--true-p (alist-get 'is_resolved item)))
+                         (magit-auto-review--true-p (alist-get 'can_resolve item))))) replies)
+      "Next: inspect the published reply on its open thread. If the fix addresses the concern, x resolves that thread.")
+     ((seq-some (lambda (item) (and (magit-auto-review-owner--own-available-p item)
+                                    (equal (alist-get 'kind item) "thread")
+                                    (magit-auto-review--true-p (alist-get 'can_reply item)))) feedback)
+      "Next: expand your comments to inspect open threads. For a fix made outside Owner, c drafts a reply with its commit SHA.")
+     (t (if (and replies (seq-every-p (lambda (r) (equal (alist-get 'status r) "published")) replies))
+            "All saved replies are published."
+          "No pending action in the saved view.")))))
 
 (defun magit-auto-review-owner--render ()
   "Render owner state, retaining section folds and selected heading."
@@ -778,80 +831,103 @@
       (magit-auto-review-owner--heading (format "%s Owner · %s%s · %s" (magit-auto-review--change-label)
                                                (if (magit-auto-review--gitlab-p) "!" "#")
                                                (or (alist-get 'pr view) "?") (or (alist-get 'repository view) "")))
-      (insert (if (magit-auto-review-owner--fixing-p)
-                  "f fix · C-u f selected fix/commit/replies · g check commits · h finish locally · m commit/status · C-u m inspect · ? actions · M toolkit\n"
-                (format "Fixing unavailable: %s\nG fetch feedback · c compose reply · ? actions · M toolkit\n"
-                        (alist-get 'reason (alist-get 'fixing view)))))
-      (insert (format "%s last checked: %s\n" (magit-auto-review--forge-label) (or (alist-get 'checked_at view) "never; G fetches feedback")))
+      (unless (magit-auto-review-owner--fixing-p)
+        (insert (format "Fixing unavailable: %s\n" (alist-get 'reason (alist-get 'fixing view)))))
+      (insert (cond
+               ((process-live-p magit-auto-review-owner--process) "L progress · K cancel · ")
+               ((seq-some (lambda (r) (and (equal (alist-get 'status r) "staged")
+                                           (magit-auto-review--true-p (alist-get 'awaiting_push r))))
+                          (alist-get 'replies view))
+                (if magit-auto-review-owner--push-seen "" "C-u m Magit status · "))
+               ((seq-some (lambda (r) (equal (alist-get 'status r) "unstaged")) (alist-get 'replies view))
+                "e edit draft · s stage reply · ")
+               ((seq-some (lambda (r) (equal (alist-get 'status r) "staged")) (alist-get 'replies view))
+                "u unstage reply · P preview replies · ")
+               ((and (magit-auto-review-owner--fixing-p)
+                     (seq-some (lambda (i) (and (magit-auto-review--true-p (alist-get 'attention i))
+                                                (magit-auto-review--true-p (alist-get 'actionable i)))) incoming))
+                "f fix · C-u f fix/commit/replies · ")
+               (t ""))
+              "? actions · M toolkit\n")
       (insert next-step "\n")
-      (let ((published-threads
-             (delete-dups (cl-loop for r in (alist-get 'replies view)
-                                   when (and (equal (alist-get 'status r) "published") (alist-get 'commits r)
-                                             (equal (alist-get 'kind (alist-get 'target r)) "reply"))
-                                   collect (alist-get 'source r)))))
-        (when (and published-threads
-                   (cl-every (lambda (key) (magit-auto-review--true-p
-                                            (alist-get 'is_resolved (magit-auto-review-owner--feedback key))))
-                             published-threads))
-          (insert (format "Fix replies published · %d %s resolved.\n" (length published-threads)
-                          (if (= (length published-threads) 1) "thread" "threads")))))
       (when (magit-auto-review--gitlab-p)
         (dolist (action (alist-get 'actions view))
           (when (member (alist-get 'status action) '("submitting" "ambiguous"))
             (insert (format "Reply publication blocked: %s · reply %s · delivery %s. O recovers receipts; an empty lookup does not authorize resend.\n"
                             (alist-get 'id action) (alist-get 'reply action) (or (alist-get 'delivery action) "unknown"))))))
-      (dolist (line (magit-auto-review-owner--settings-lines
-                     (or (alist-get 'effective_settings view) (alist-get 'settings view))))
-        (insert line "\n"))
-      (when (alist-get 'worktree view)
-        (insert (format "Worktree: %s\nPush target: %s · %s\n" (alist-get 'worktree view)
-                        (or (alist-get 'repository (alist-get 'push_target view)) "unavailable")
-                        (alist-get 'branch (alist-get 'push_target view))))
-        (let ((remotes (alist-get 'remotes (alist-get 'push_target view))))
-          (insert (cond ((= (length remotes) 1) (format "Matching push remote: %s (inspect the destination in Magit)\n" (car remotes)))
-                        (remotes (format "Ambiguous push remotes: %s; choose in Magit\n" (string-join remotes ", ")))
-                        (t "No matching push remote recorded; configure the displayed destination in Magit\n")))))
-      (when latest
-        (if round
-            (let* ((status (alist-get 'status round))
-                   (stopped (member status '("paused" "needs_attention" "interrupted")))
-                   (replies (cl-remove-if-not (lambda (reply) (equal (alist-get 'batch reply) (alist-get 'id round)))
-                                              (alist-get 'replies view))))
-              (insert (format "Current automatic fix round · %d findings · %s\n"
-                              (length round-items) (magit-auto-review-owner--batch-label round)))
-              (when-let ((previous (car earlier)))
-                (insert "Earlier round: " (or (alist-get 'error previous)
-                                              (magit-auto-review-owner--pause-reason previous))
-                        " Its findings are included in the current round.\n"))
-              (when stopped (insert "Stopped because: " (magit-auto-review-owner--pause-reason round) "\n"))
-              (when (or stopped (magit-auto-review-owner--auto-pending-p round))
-                (let ((round-step (magit-auto-review-owner--next-step round)))
-                  (unless (equal round-step next-step) (insert round-step "\n"))))
-              (insert (format "Fix replies: %d drafted · %d staged · %d published\n"
-                              (cl-count "unstaged" replies :key (lambda (r) (alist-get 'status r)) :test #'equal)
-                              (cl-count "staged" replies :key (lambda (r) (alist-get 'status r)) :test #'equal)
-                              (cl-count "published" replies :key (lambda (r) (alist-get 'status r)) :test #'equal))))
-          (insert (format "Latest fix: %d of %d feedback items · %s%s\n"
-                          (length (alist-get 'items latest)) (length (alist-get 'feedback view))
-                          (magit-auto-review-owner--batch-label latest)
-                          (magit-auto-review-owner--batch-commit-label latest)))))
+      (magit-insert-section section (owner-group "metadata" t)
+        (push section magit-auto-review-owner--sections)
+        (magit-auto-review-owner--heading "Session metadata")
+        (insert (format "%s last checked: %s\n" (magit-auto-review--forge-label) (or (alist-get 'checked_at view) "never; G fetches feedback")))
+        (when (and latest (not round))
+          (let ((count (length (alist-get 'items latest))))
+            (insert (format "Latest fix: %d feedback %s · %s%s\n"
+                            count (if (= count 1) "item" "items")
+                            (magit-auto-review-owner--batch-label latest)
+                            (magit-auto-review-owner--batch-commit-label latest)))))
+        (let ((published-threads
+               (delete-dups (cl-loop for r in (alist-get 'replies view)
+                                     when (and (equal (alist-get 'status r) "published") (alist-get 'commits r)
+                                               (equal (alist-get 'kind (alist-get 'target r)) "reply"))
+                                     collect (alist-get 'source r)))))
+          (when (and published-threads
+                     (cl-every (lambda (key) (magit-auto-review--true-p
+                                              (alist-get 'is_resolved (magit-auto-review-owner--feedback key))))
+                               published-threads))
+            (insert (format "Fix replies published · %d %s resolved.\n" (length published-threads)
+                            (if (= (length published-threads) 1) "thread" "threads")))))
+        (dolist (line (magit-auto-review-owner--settings-lines
+                       (or (alist-get 'effective_settings view) (alist-get 'settings view))))
+          (insert line "\n"))
+        (when (alist-get 'worktree view)
+          (insert (format "Worktree: %s\nPush target: %s · %s\n" (alist-get 'worktree view)
+                          (or (alist-get 'repository (alist-get 'push_target view)) "unavailable")
+                          (alist-get 'branch (alist-get 'push_target view))))
+          (let ((remotes (alist-get 'remotes (alist-get 'push_target view))))
+            (insert (cond ((= (length remotes) 1) (format "Matching push remote: %s (inspect the destination in Magit)\n" (car remotes)))
+                          (remotes (format "Ambiguous push remotes: %s; choose in Magit\n" (string-join remotes ", ")))
+                          (t "No matching push remote recorded; configure the displayed destination in Magit\n"))))))
+      (when round
+        (let* ((status (alist-get 'status round))
+               (stopped (member status '("paused" "needs_attention" "interrupted")))
+               (replies (cl-remove-if-not (lambda (reply) (equal (alist-get 'batch reply) (alist-get 'id round)))
+                                          (alist-get 'replies view))))
+          (insert (format "Current automatic fix round · %d %s · %s\n"
+                          (length round-items) (if (= (length round-items) 1) "finding" "findings")
+                          (magit-auto-review-owner--batch-label round)))
+          (when-let ((previous (car earlier)))
+            (insert "Earlier round: " (or (alist-get 'error previous)
+                                          (magit-auto-review-owner--pause-reason previous))
+                    " Its findings are included in the current round.\n"))
+          (when stopped (insert "Stopped because: " (magit-auto-review-owner--pause-reason round) "\n"))
+          (when (or stopped (magit-auto-review-owner--auto-pending-p round))
+            (let ((round-step (magit-auto-review-owner--next-step round)))
+              (unless (equal round-step next-step) (insert round-step "\n"))))
+          (insert (format "Fix replies: %d drafted · %d staged · %d published\n"
+                          (cl-count "unstaged" replies :key (lambda (r) (alist-get 'status r)) :test #'equal)
+                          (cl-count "staged" replies :key (lambda (r) (alist-get 'status r)) :test #'equal)
+                          (cl-count "published" replies :key (lambda (r) (alist-get 'status r)) :test #'equal)))))
       (insert "\n")
       (let ((items (cl-remove-if-not (lambda (i) (magit-auto-review--true-p (alist-get 'attention i))) incoming)))
-        (magit-insert-section section (owner-group "attention")
+        (magit-insert-section section (owner-group "attention" t)
           (push section magit-auto-review-owner--sections)
           (magit-auto-review-owner--heading (format "Attention needed (%d)" (length items)))
           (mapc #'magit-auto-review-owner--insert-feedback items)
           (unless items (insert (format "No attention items in the saved snapshot. G fetches %s; o in Reviewer sends local findings here.\n" (magit-auto-review--forge-label))))))
       (let ((items (cl-remove-if-not #'magit-auto-review-owner--own-available-p incoming)))
         (when items
-          (magit-insert-section section (owner-group "own")
+          (magit-insert-section section (owner-group "own" t)
             (push section magit-auto-review-owner--sections)
             (magit-auto-review-owner--heading (format "Your %s comments (%d)" (magit-auto-review--forge-label) (length items)))
-            (insert (if (magit-auto-review-owner--fixing-p)
-                        "Select feedback and press f to fix, c to reply, or U to queue it under Attention needed.\n"
-                      "Select feedback to reply with c, or use U to queue it under Attention needed.\n"))
+            (when (seq-some (lambda (i) (or (not (magit-auto-review--gitlab-p))
+                                            (magit-auto-review--true-p (alist-get 'can_reply i)))) items)
+              (insert "For a pushed fix, select its thread and press c to draft a reply with the commit SHA. Save with C-c C-c, stage with s, then P to preview.\n"))
+            (when (magit-auto-review-owner--drafts-for-feedback (mapcar (lambda (i) (alist-get 'key i)) items))
+              (insert "s stages draft replies for the selected comments.\n"))
+            (when (seq-some (lambda (i) (magit-auto-review--true-p (alist-get 'can_resolve i))) items)
+              (insert "After publishing the reply, x resolves the selected thread.\n"))
             (mapc #'magit-auto-review-owner--insert-feedback items))))
-      (magit-insert-section section (owner-group "fixes")
+      (magit-insert-section section (owner-group "fixes" t)
         (push section magit-auto-review-owner--sections)
         (let ((active (cl-set-difference batches (append history earlier) :test #'eq)))
           (magit-auto-review-owner--heading (if round "Fix progress" (format "Fixes (%d)" (length active))))
@@ -860,13 +936,13 @@
             (insert "Round details\n"))
           (mapc #'magit-auto-review-owner--insert-batch active)
           (unless active (insert "No unfinished fixes. Completed fixes are under History.\n"))))
-      (magit-insert-section section (owner-group "replies")
+      (magit-insert-section section (owner-group "replies" t)
         (push section magit-auto-review-owner--sections)
         (magit-auto-review-owner--heading "Replies")
         (dolist (status '("unstaged" "staged" "published"))
-          (magit-insert-section section (owner-reply-group status)
+          (magit-insert-section section (owner-reply-group status t)
             (push section magit-auto-review-owner--sections)
-            (magit-auto-review-owner--heading (capitalize status))
+            (magit-auto-review-owner--heading (capitalize status) 'magit-auto-review-owner-subheading)
             (dolist (reply (cl-remove-if-not (lambda (r) (equal (alist-get 'status r) status)) (alist-get 'replies view)))
               (magit-insert-section section (owner-reply (alist-get 'id reply) t)
                 (push section magit-auto-review-owner--sections)
@@ -896,13 +972,13 @@
                    ("other" "Other feedback" ,other magit-auto-review-owner--insert-feedback)))
           (pcase-let ((`(,id ,title ,items ,insert-function) group))
             (when (or items (member id '("completed" "handled")))
-              (magit-insert-section section (owner-history-group id)
+              (magit-insert-section section (owner-history-group id t)
                 (push section magit-auto-review-owner--sections)
-                (magit-auto-review-owner--heading (format "%s (%d)" title (length items)))
+                (magit-auto-review-owner--heading (format "%s (%d)" title (length items)) 'magit-auto-review-owner-subheading)
                 (mapc insert-function items)))))))
     (dolist (section magit-auto-review-owner--sections)
       (let* ((key (cons (oref section type) (oref section value))) (saved (assoc key folds)))
-        (when saved (if (cdr saved) (magit-section-hide section) (magit-section-show section)))
+        (if (and saved (not (cdr saved))) (magit-section-show section) (magit-section-hide section))
         (when (equal key selected) (setq target section))))
     (when (and target (not (equal old-group "history")))
       (let ((parent target))
@@ -926,6 +1002,7 @@
 (defun magit-auto-review-owner--accept (view)
   "Adopt VIEW and render it."
   (setq magit-auto-review-owner--view view
+        magit-auto-review-owner--push-seen (magit-auto-review-owner--push-visible-p view)
         magit-auto-review--repository (alist-get 'repository view)
         magit-auto-review--target (alist-get 'pr view))
   (setq magit-auto-review--project (alist-get 'forge_project view)
@@ -948,8 +1025,8 @@
                                        (repository . ,repository) (forge . ,forge) (defaults . ,(magit-auto-review--default-settings))))))
     (magit-auto-review-owner--show view directory)))
 
-(defun magit-auto-review-owner--show (view directory)
-  "Display owner VIEW for DIRECTORY, retaining the existing buffer and folds."
+(defun magit-auto-review-owner--show (view directory &optional handoff)
+  "Open VIEW for DIRECTORY folded and refresh it, or focus a local HANDOFF."
   (let ((buffer (get-buffer-create (format "*%s Owner %s #%s (%s)*"
                                          (if (equal (alist-get 'forge (alist-get 'forge_project view)) "gitlab") "MR" "PR") (alist-get 'repository view)
                                          (alist-get 'pr view) (abbreviate-file-name directory)))))
@@ -957,11 +1034,17 @@
     (unless (derived-mode-p 'magit-auto-review-owner-mode)
       (magit-auto-review-owner-mode)
       (setq default-directory directory))
-    (magit-auto-review-owner--accept view)))
+    (magit-auto-review-owner--accept view)
+    (unless handoff
+      (dolist (section magit-auto-review-owner--sections)
+        (magit-section-hide section))
+      (goto-char (point-min))
+      (unless (process-live-p magit-auto-review-owner--process)
+        (magit-auto-review-owner-fetch)))))
 
 (defun magit-auto-review-owner-show-import (result directory)
   "Display handoff RESULT in DIRECTORY and focus the first imported item."
-  (magit-auto-review-owner--show (alist-get 'owner result) directory)
+  (magit-auto-review-owner--show (alist-get 'owner result) directory t)
   (let ((sections (mapcar (lambda (key)
                             (cl-find-if (lambda (s) (and (eq (oref s type) 'owner-feedback)
                                                         (equal (oref s value) key)))
@@ -994,7 +1077,7 @@
                     (when (cl-some (lambda (reply) (and (equal (alist-get 'status reply) "staged")
                                                         (magit-auto-review--true-p (alist-get 'awaiting_push reply))))
                                    (alist-get 'replies view))
-                      (concat " · " (magit-auto-review-owner--push-step view)))))
+                      (concat " · " (magit-auto-review-owner--push-step)))))
       (message "%s" header-line-format))))
 
 (defun magit-auto-review-owner--progress (message)
@@ -1080,8 +1163,7 @@
                  magit-auto-review-owner--trust-diff (alist-get 'diff (nth 3 error)))
            (when (and (equal (nth 2 error) "unpublished_commit")
                       (equal (alist-get 'command request) "owner-prepare"))
-             (setq header-line-format (concat header-line-format " " (magit-auto-review-owner--push-step
-                                                                      magit-auto-review-owner--view))))
+             (setq header-line-format (concat header-line-format " " (magit-auto-review-owner--push-step))))
            (magit-auto-review-owner--progress (concat "Owner operation stopped:" header-line-format))
            (ignore-errors (magit-auto-review-owner--accept
                            (magit-auto-review--call (magit-auto-review-owner--request "owner-read"))))
@@ -1226,8 +1308,23 @@ With AUTOMATIC, also commit and stage replies."
   (if (magit-auto-review-owner--at 'owner-reply)
       (magit-auto-review-owner--mutate "acknowledge-reply" `(replies . ,(vconcat (magit-auto-review-owner--selected 'owner-reply))))
     (magit-auto-review-owner--mutate "acknowledge" `(items . ,(vconcat (magit-auto-review-owner--selected 'owner-feedback))))))
-(defun magit-auto-review-owner-stage () "Stage selected replies." (interactive)
-  (magit-auto-review-owner--mutate "stage" `(replies . ,(vconcat (magit-auto-review-owner--selected 'owner-reply)))))
+(defun magit-auto-review-owner--drafts-for-feedback (keys)
+  "Return IDs of unstaged replies to feedback KEYS."
+  (cl-loop for reply in (alist-get 'replies magit-auto-review-owner--view)
+           when (and (member (alist-get 'source reply) keys)
+                     (equal (alist-get 'status reply) "unstaged"))
+           collect (alist-get 'id reply)))
+
+(defun magit-auto-review-owner-stage ()
+  "Stage selected replies or draft replies to selected own comments."
+  (interactive)
+  (let ((ids (if (equal (and-let* ((group (magit-auto-review-owner--at 'owner-group)))
+                          (oref group value)) "own")
+                 (magit-auto-review-owner--drafts-for-feedback
+                  (magit-auto-review-owner--selected 'owner-feedback))
+               (magit-auto-review-owner--selected 'owner-reply))))
+    (unless ids (user-error "No draft replies to the selected comments"))
+    (magit-auto-review-owner--mutate "stage" `(replies . ,(vconcat ids)))))
 (defun magit-auto-review-owner-unstage () "Unstage selected replies." (interactive)
   (magit-auto-review-owner--mutate "unstage" `(replies . ,(vconcat (magit-auto-review-owner--selected 'owner-reply)))))
 
@@ -1643,7 +1740,7 @@ reviewer slots must be a vector so settings saves keep final_review intact."
         (offer (and items (not ready)) "V" "Verify existing code" #'magit-auto-review-owner-verify)
         (offer (and items (cl-some (lambda (i) (not (member (alist-get 'triage i) '("handled" "deferred")))) items))
                "k" "Defer feedback" #'magit-auto-review-owner-defer)
-        (offer (and items (cl-some (lambda (i) (member (alist-get 'triage i) '("handled" "deferred"))) items))
+        (offer (and items (cl-some (lambda (i) (member (alist-get 'triage i) '("handled" "deferred" "available"))) items))
                "U" "Return feedback to Attention" #'magit-auto-review-owner-restore)
         (offer (and (= (length items) 1) (not (member (alist-get 'kind (car items)) '("local_review" "issue_plan")))
                     (or (not (magit-auto-review--gitlab-p)) (magit-auto-review--true-p (alist-get 'can_reply (car items)))))
@@ -1673,7 +1770,10 @@ reviewer slots must be a vector so settings saves keep final_review intact."
                "a" "Link the fix commit" #'magit-auto-review-owner-associate)
         (offer (and (= (length replies) 1) (not (equal (alist-get 'status (car replies)) "published")))
                "e" "Edit reply" #'magit-auto-review-owner-edit)
-        (offer (and replies (cl-every (lambda (r) (equal (alist-get 'status r) "unstaged")) replies))
+        (offer (or (and replies (cl-every (lambda (r) (equal (alist-get 'status r) "unstaged")) replies))
+                   (and (equal (and-let* ((group (magit-auto-review-owner--at 'owner-group)))
+                                 (oref group value)) "own")
+                        (magit-auto-review-owner--drafts-for-feedback keys)))
                "s" "Stage replies" #'magit-auto-review-owner-stage)
         (offer (and replies (cl-every (lambda (r) (equal (alist-get 'status r) "staged")) replies))
                "u" "Unstage replies" #'magit-auto-review-owner-unstage)
