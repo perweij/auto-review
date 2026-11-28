@@ -56,7 +56,11 @@ placeholders in command arguments. Environment keys must be uppercase shell iden
 controller and credential variables (including PATH, HOME, TMPDIR, PYTHONPATH and all XDG_* variables).
 For independent locked uv projects use directory and uv_sync instead of setup, prefix and environment.
 uv_sync is an object: groups may be "all" or a list of group names, extras a list of extra names.
-Match the project's test or CI install selections, including dependencies used during test collection.
+Read the CI workflows and test setup docs. Match the extras and groups used for verification,
+including optional imports whose absence silently skips replay or integration tests.
+If CI prepares pinned public data files after syncing dependencies, include the documented fetch
+as a readiness argv array. It runs in the synced project before tests, with the same private home.
+Preserve the revision and file selection. Omit CI cache actions and the uv run --no-sync prefix.
 The controller installs from each reviewed checkout's own lockfile. Omit redundant package-import probes.
 Enumerate tracked lockfiles, including nested ones, and inspect their manifests and tests. Prefer
 focused development dependencies. Avoid making optional integration services a prerequisite for unit tests.

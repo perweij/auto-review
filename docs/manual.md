@@ -1986,7 +1986,11 @@ reviewed revision supplies both `pyproject.toml` and `uv.lock`. Use
 `"uv_sync": {}` for default groups, `"groups": "all"` for all groups,
 and `"extras": ["name"]` for extras needed by the tests. Match the project's
 CI install options. A successful sync prepares the environment; explicit
-`readiness` commands may check additional prerequisites. Older custom recipes
+`readiness` commands run after sync through `uv run --no-sync`. They can
+also prepare test data. For example, if CI fetches a tokenizer, put the
+documented `hf download` command, pinned revision and filenames in a
+readiness argument array. The download and the tests share a private home
+for that stage. A failed download marks that project unavailable. Older custom recipes
 retain their explicit checks. To migrate a locked uv recipe replace its
 `setup`, `environment`, `prefix`, and redundant import checks with `uv_sync`.
 A failed project leaves independent projects available within the shared budget.
